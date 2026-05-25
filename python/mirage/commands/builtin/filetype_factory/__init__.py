@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.s3.file.file import file
+from mirage.commands.builtin.filetype_factory.factory import \
+    make_filetype_commands
 
-COMMANDS = [file]
+__all__ = ["make_filetype_commands"]

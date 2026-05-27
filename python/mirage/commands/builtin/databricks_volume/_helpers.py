@@ -15,12 +15,14 @@
 from functools import partial
 from typing import Callable
 
+from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.wrap import (call_read_bytes,
                                                 call_read_stream)
 from mirage.core.databricks_volume.read import read_bytes as _read_bytes
+from mirage.core.databricks_volume.stat import stat as _stat
 from mirage.core.databricks_volume.stream import read_stream as _read_stream
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
 
 
 def path_prefix(paths: list[PathSpec],
@@ -30,6 +32,31 @@ def path_prefix(paths: list[PathSpec],
     if fallback is not None:
         return fallback.prefix
     return ""
+
+
+async def is_directory(accessor: DatabricksVolumeAccessor,
+                       path: PathSpec,
+                       index: IndexCacheStore | None = None) -> bool:
+    try:
+        file_stat = await _stat(accessor, path, index)
+    except FileNotFoundError:
+        return False
+    return file_stat.type == FileType.DIRECTORY
+
+
+async def path_exists(accessor: DatabricksVolumeAccessor,
+                      path: PathSpec,
+                      index: IndexCacheStore | None = None) -> bool:
+    try:
+        await _stat(accessor, path, index)
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def child_path(parent: PathSpec, name: str) -> PathSpec:
+    base = parent.original.rstrip("/")
+    return PathSpec.from_str_path(f"{base}/{name}", parent.prefix)
 
 
 def read_bytes_with_index(index: IndexCacheStore | None,

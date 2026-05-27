@@ -14,6 +14,7 @@
 
 from mirage.commands.builtin.databricks_volume.awk import awk
 from mirage.commands.builtin.databricks_volume.cat import cat
+from mirage.commands.builtin.databricks_volume.cp import cp
 from mirage.commands.builtin.databricks_volume.cut import cut
 from mirage.commands.builtin.databricks_volume.diff import diff
 from mirage.commands.builtin.databricks_volume.find import find
@@ -21,6 +22,8 @@ from mirage.commands.builtin.databricks_volume.grep import grep
 from mirage.commands.builtin.databricks_volume.head import head
 from mirage.commands.builtin.databricks_volume.jq import jq
 from mirage.commands.builtin.databricks_volume.ls import ls
+from mirage.commands.builtin.databricks_volume.mkdir import mkdir
+from mirage.commands.builtin.databricks_volume.mv import mv
 from mirage.commands.builtin.databricks_volume.nl import nl
 from mirage.commands.builtin.databricks_volume.rg import rg
 from mirage.commands.builtin.databricks_volume.rm import rm
@@ -37,6 +40,7 @@ from mirage.commands.builtin.databricks_volume.wc import wc
 COMMANDS = [
     awk,
     cat,
+    cp,
     cut,
     diff,
     find,
@@ -44,6 +48,8 @@ COMMANDS = [
     head,
     jq,
     ls,
+    mkdir,
+    mv,
     nl,
     rm,
     rg,

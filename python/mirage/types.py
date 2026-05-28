@@ -126,6 +126,7 @@ class ResourceName(str, Enum):
     HF_DATASETS = "hf_datasets"
     HF_MODELS = "hf_models"
     HF_SPACES = "hf_spaces"
+    NEXTCLOUD = "nextcloud"
 
 
 @dataclass(frozen=True)

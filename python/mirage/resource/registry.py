@@ -107,6 +107,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "databricks_volume":
     ResourceEntry("mirage.resource.databricks_volume:DatabricksVolumeResource",
                   "mirage.resource.databricks_volume:DatabricksVolumeConfig"),
+    "nextcloud":
+    ResourceEntry("mirage.resource.nextcloud:NextcloudResource",
+                  "mirage.resource.nextcloud:NextcloudConfig"),
 }
 
 

@@ -15,6 +15,16 @@ class NotFoundError(Exception):
     status_code = 404
 
 
+class ToThreadRecorder:
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def __call__(self, fn, *args, **kwargs):
+        self.calls.append((fn, args, kwargs))
+        return fn(*args, **kwargs)
+
+
 class FakeDownload:
 
     def __init__(self, data: bytes) -> None:

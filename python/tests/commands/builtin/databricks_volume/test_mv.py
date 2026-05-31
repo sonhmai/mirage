@@ -85,3 +85,32 @@ async def test_ops_rename(write_ws, dbx_files):
 
     assert dbx_files.downloads[f"{ROOT}/renamed.txt"] == b"data"
     assert f"{ROOT}/src.txt" not in dbx_files.downloads
+
+
+@pytest.mark.asyncio
+async def test_mv_onto_same_path_errors_and_preserves_file(
+        write_ws, dbx_files):
+    io = await write_ws.execute("mv /dbx/src.txt /dbx/src.txt")
+
+    assert io.exit_code != 0
+    assert b"are the same file" in io.stderr
+    assert dbx_files.downloads[f"{ROOT}/src.txt"] == b"data"
+    assert f"{ROOT}/src.txt" not in dbx_files.delete_calls
+
+
+@pytest.mark.asyncio
+async def test_mv_into_dir_where_file_already_lives_errors_and_preserves_file(
+        write_ws, dbx_files):
+    io = await write_ws.execute("mv /dbx/src.txt /dbx/")
+
+    assert io.exit_code != 0
+    assert b"are the same file" in io.stderr
+    assert dbx_files.downloads[f"{ROOT}/src.txt"] == b"data"
+
+
+@pytest.mark.asyncio
+async def test_ops_rename_onto_same_path_is_noop(write_ws, dbx_files):
+    await write_ws.ops.rename("/dbx/src.txt", "/dbx/src.txt")
+
+    assert dbx_files.downloads[f"{ROOT}/src.txt"] == b"data"
+    assert f"{ROOT}/src.txt" not in dbx_files.delete_calls

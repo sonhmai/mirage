@@ -64,6 +64,27 @@ async def test_rename_missing_source_fails(accessor, files, remote_root,
 
 
 @pytest.mark.asyncio
+async def test_rename_same_path_is_noop(accessor, files, remote_root, index):
+    _seed_directory(files, remote_root)
+    _seed_file(files, f"{remote_root}/src.txt", b"data")
+
+    await rename(accessor, _path("/dbx/src.txt"), _path("/dbx/src.txt"), index)
+
+    assert files.downloads[f"{remote_root}/src.txt"] == b"data"
+    assert f"{remote_root}/src.txt" not in files.delete_calls
+
+
+@pytest.mark.asyncio
+async def test_rename_same_missing_path_fails(accessor, files, remote_root,
+                                              index):
+    _seed_directory(files, remote_root)
+
+    with pytest.raises(FileNotFoundError):
+        await rename(accessor, _path("/dbx/missing.txt"),
+                     _path("/dbx/missing.txt"), index)
+
+
+@pytest.mark.asyncio
 async def test_rename_directory_moves_tree(accessor, files, remote_root,
                                            index):
     _seed_directory(files, remote_root)

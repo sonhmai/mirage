@@ -84,13 +84,22 @@ async def copy(
     src = ensure_path_spec(src)
     dst = ensure_path_spec(dst)
     src_stat = await stat(accessor, src, index)
+    # Same-path guard runs after stat (and the non-recursive directory check)
+    # so a missing source or `cp` of a directory still raises.
+    same_path = backend_path(accessor.config,
+                             src) == backend_path(accessor.config, dst)
     if src_stat.type == FileType.DIRECTORY:
         if not recursive:
             raise IsADirectoryError(src.strip_prefix)
+        if same_path:
+            return
         remote_src = backend_path(accessor.config, src)
         remote_dst = backend_path(accessor.config, dst)
         await asyncio.to_thread(_copy_tree_sync, accessor, remote_src,
                                 remote_dst)
+        return
+    if same_path:
+        # Copying a file onto itself would re-upload it; skip.
         return
     data = await read_bytes(accessor, src, index)
     await write_bytes(accessor, dst, data, index)

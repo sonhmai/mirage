@@ -73,3 +73,13 @@ async def test_cp_read_only_mount_rejected(read_ws, dbx_files):
     assert io.exit_code != 0
     assert b"read-only" in io.stderr
     assert f"{ROOT}/dst.txt" not in dbx_files.downloads
+
+
+@pytest.mark.asyncio
+async def test_cp_onto_same_path_errors_and_preserves_file(
+        write_ws, dbx_files):
+    io = await write_ws.execute("cp /dbx/src.txt /dbx/src.txt")
+
+    assert io.exit_code != 0
+    assert b"are the same file" in io.stderr
+    assert dbx_files.downloads[f"{ROOT}/src.txt"] == b"hello"

@@ -83,6 +83,36 @@ async def test_copy_directory_without_recursive_fails(accessor, files,
 
 
 @pytest.mark.asyncio
+async def test_copy_same_path_is_noop(accessor, files, remote_root, index):
+    _seed_directory(files, remote_root)
+    _seed_file(files, f"{remote_root}/src.txt", b"hello")
+
+    await copy(accessor, _path("/dbx/src.txt"), _path("/dbx/src.txt"), index)
+
+    assert files.downloads[f"{remote_root}/src.txt"] == b"hello"
+
+
+@pytest.mark.asyncio
+async def test_copy_same_missing_path_fails(accessor, files, remote_root,
+                                            index):
+    _seed_directory(files, remote_root)
+
+    with pytest.raises(FileNotFoundError):
+        await copy(accessor, _path("/dbx/missing.txt"),
+                   _path("/dbx/missing.txt"), index)
+
+
+@pytest.mark.asyncio
+async def test_copy_same_dir_without_recursive_fails(accessor, files,
+                                                     remote_root, index):
+    _seed_directory(files, remote_root)
+    _seed_directory(files, f"{remote_root}/d")
+
+    with pytest.raises(IsADirectoryError):
+        await copy(accessor, _path("/dbx/d"), _path("/dbx/d"), index)
+
+
+@pytest.mark.asyncio
 async def test_copy_recursive_tree(accessor, files, remote_root, index):
     _seed_directory(files, remote_root)
     _seed_directory(files, f"{remote_root}/d")

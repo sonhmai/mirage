@@ -16,6 +16,7 @@ from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.databricks_volume._helpers import ensure_path_spec
 from mirage.core.databricks_volume.copy import copy
+from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.rm import rm_recursive
 from mirage.core.databricks_volume.stat import stat
 from mirage.core.databricks_volume.unlink import unlink
@@ -33,6 +34,12 @@ async def rename(
     src = ensure_path_spec(src)
     dst = ensure_path_spec(dst)
     src_stat = await stat(accessor, src, index)
+    if backend_path(accessor.config,
+                    src) == backend_path(accessor.config, dst):
+        # rename(2) onto the same path is a no-op; copy + unlink here would
+        # upload the file onto itself then delete it, destroying the data.
+        # Guard runs after stat so a missing source still raises.
+        return
     if src_stat.type == FileType.DIRECTORY:
         await copy(accessor, src, dst, index, recursive=True)
         await rm_recursive(accessor, src, index)

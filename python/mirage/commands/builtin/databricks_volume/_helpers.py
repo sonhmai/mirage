@@ -19,6 +19,7 @@ from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.wrap import (call_read_bytes,
                                                 call_read_stream)
+from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read_bytes as _read_bytes
 from mirage.core.databricks_volume.stat import stat as _stat
 from mirage.core.databricks_volume.stream import read_stream as _read_stream
@@ -57,6 +58,11 @@ async def path_exists(accessor: DatabricksVolumeAccessor,
 def child_path(parent: PathSpec, name: str) -> PathSpec:
     base = parent.original.rstrip("/")
     return PathSpec.from_str_path(f"{base}/{name}", parent.prefix)
+
+
+def same_backend_file(accessor: DatabricksVolumeAccessor, a: PathSpec,
+                      b: PathSpec) -> bool:
+    return backend_path(accessor.config, a) == backend_path(accessor.config, b)
 
 
 def read_bytes_with_index(index: IndexCacheStore | None,

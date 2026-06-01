@@ -24,6 +24,7 @@ from mirage.core.databricks_volume.stat import stat
 from mirage.core.databricks_volume.stream import read_stream
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -48,17 +49,22 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        path = paths[0]
-        await stat(accessor, path, index)
-        source = read_stream(accessor, path, index)
-        cachable = CachableAsyncIterator(source)
-        key = path.strip_prefix
+        reads: dict[str, CachableAsyncIterator] = {}
+        for p in paths:
+            await stat(accessor, p, index)
+            reads[p.strip_prefix] = CachableAsyncIterator(
+                read_stream(accessor, p, index))
+        # Single file: return the cachable directly so the cache stores
+        # the same object the consumer reads (identity is required for
+        # consumed chunks to land in its buffer). Several: chain them.
+        if len(reads) == 1:
+            source: ByteSource = next(iter(reads.values()))
+        else:
+            source = async_chain(*reads.values())
+        io = IOResult(reads=reads, cache=list(reads))
         if n:
-            return _number_lines_stream(cachable), IOResult(
-                reads={key: cachable},
-                cache=[key],
-            )
-        return cachable, IOResult(reads={key: cachable}, cache=[key])
+            return _number_lines_stream(source), io
+        return source, io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
         return _number_lines_stream(source), IOResult()

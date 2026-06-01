@@ -268,8 +268,10 @@ async def test_file_report_through_redirect_chain(ws):
         assert (await io.stdout_str()).strip().splitlines() == [
             "=== /s3/data/example.json ===",
             "/s3/data/example.json: json",
+            "",
             "=== /s3/data/example.jsonl ===",
             "/s3/data/example.jsonl: json",
+            "",
             "=== /s3/reports/summary.txt ===",
             "/s3/reports/summary.txt: text",
         ]

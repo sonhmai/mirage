@@ -1,6 +1,7 @@
 from mirage.commands.builtin.aggregators import wc_aggregate
 from mirage.commands.builtin.generic.wc import WCCounts, format_wc
 from mirage.commands.builtin.generic.wc import wc as generic_wc
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.dify.glob import resolve_glob
@@ -43,4 +44,4 @@ async def wc(
         output.append(
             format_wc(totals, args_l=args_l, w=w, c=c, m=m, L=L,
                       label="total"))
-    return "\n".join(output).encode(), IOResult(reads=reads, cache=list(reads))
+    return format_records(output), IOResult(reads=reads, cache=list(reads))

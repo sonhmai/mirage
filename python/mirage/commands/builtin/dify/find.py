@@ -3,6 +3,7 @@ from functools import partial
 
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.dify.find import find as find_core
@@ -47,7 +48,7 @@ async def _normalize_find_output(
     root = search_path.prefix.rstrip("/") or "/"
     lines = data.decode().splitlines()
     normalized = [root if line == root + "/" else line for line in lines]
-    return "\n".join(normalized).encode()
+    return format_records(normalized)
 
 
 @command("find", resource="dify", spec=SPECS["find"])

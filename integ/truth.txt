@@ -488,7 +488,7 @@ world
       2 b
       1 c
 === find_pipe_wc ===
-18
+19
 === jq_pipe_wc ===
 3
 === cat_tr_sort ===

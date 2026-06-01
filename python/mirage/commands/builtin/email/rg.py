@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.grep_helper import compile_pattern, grep_lines
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -101,7 +102,7 @@ async def rg(
                 all_results.append(f"{vfs_path}:{line}")
         if not any_match:
             return b"", IOResult(exit_code=1)
-        return "\n".join(all_results).encode(), IOResult()
+        return format_records(all_results), IOResult()
 
     raw = await _read_stdin_async(stdin)
     if raw is None:
@@ -120,4 +121,4 @@ async def rg(
         return b"", IOResult(exit_code=1)
     if c:
         return str(len(matched)).encode(), IOResult()
-    return "\n".join(matched).encode(), IOResult()
+    return format_records(matched), IOResult()

@@ -15,6 +15,7 @@
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.formatting import _human_size
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.nextcloud.du import du as du_impl
@@ -58,14 +59,14 @@ async def du(
         output = _format_size(total, h) + "\t" + p0.original
         if c:
             output += "\n" + _format_size(total, h) + "\ttotal"
-        return output.encode(), IOResult()
+        return format_records(output.splitlines()), IOResult()
     all_entries = await du_all_impl(accessor, path)
     if not all_entries:
         total = await du_impl(accessor, path)
         output = _format_size(total, h) + "\t" + p0.original
         if c:
             output += "\n" + _format_size(total, h) + "\ttotal"
-        return output.encode(), IOResult()
+        return format_records(output.splitlines()), IOResult()
     if not a:
         dir_entries: list[tuple[str, int]] = []
         for p, sz in all_entries:
@@ -81,9 +82,9 @@ async def du(
         output = _format_size(total, h) + "\t" + p0.original
         if c:
             output += "\n" + _format_size(total, h) + "\ttotal"
-        return output.encode(), IOResult()
+        return format_records(output.splitlines()), IOResult()
     lines = [_format_size(sz, h) + "\t" + p for p, sz in all_entries]
     if c:
         grand = sum(sz for _, sz in all_entries)
         lines.append(_format_size(grand, h) + "\ttotal")
-    return "\n".join(lines).encode(), IOResult()
+    return format_records(lines), IOResult()

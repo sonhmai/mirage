@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.grep_helper import compile_pattern, grep_lines
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -171,7 +172,7 @@ async def rg(
                 all_results.append(f"{bp}:{line}")
         if not any_match:
             return b"", IOResult(exit_code=1)
-        return "\n".join(all_results).encode(), IOResult()
+        return format_records(all_results), IOResult()
 
     raw = await _read_stdin_async(stdin)
     if raw is None:
@@ -193,4 +194,4 @@ async def rg(
     result_lines: list[str] = []
     for line in matched:
         result_lines.append(line)
-    return "\n".join(result_lines).encode(), IOResult()
+    return format_records(result_lines), IOResult()

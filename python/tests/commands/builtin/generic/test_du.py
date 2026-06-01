@@ -43,7 +43,7 @@ async def test_du_single_file_default():
     out = await du([_spec("/f.txt")],
                    compute_total=compute_total,
                    compute_all=compute_all)
-    assert out == "5\t/f.txt"
+    assert out == "5\t/f.txt\n"
 
 
 @pytest.mark.asyncio
@@ -54,7 +54,7 @@ async def test_du_directory_collapses_to_root_when_not_a():
     out = await du([_spec("/dir")],
                    compute_total=compute_total,
                    compute_all=compute_all)
-    assert out == "5\t/dir"
+    assert out == "5\t/dir\n"
 
 
 @pytest.mark.asyncio
@@ -78,7 +78,7 @@ async def test_du_s_summary_single_line():
                    compute_total=compute_total,
                    compute_all=compute_all,
                    s=True)
-    assert out == "5\t/dir"
+    assert out == "5\t/dir\n"
 
 
 @pytest.mark.asyncio
@@ -93,7 +93,7 @@ async def test_du_max_depth_zero_in_a_mode_drops_everything_below():
                    compute_all=compute_all,
                    a=True,
                    max_depth=0)
-    assert out == "5\t/dir"
+    assert out == "5\t/dir\n"
 
 
 @pytest.mark.asyncio
@@ -140,7 +140,7 @@ async def test_du_multi_path_independent_outputs():
     out = await du([_spec("/a.txt"), _spec("/b.txt")],
                    compute_total=compute_total,
                    compute_all=compute_all)
-    assert out == "3\t/a.txt\n7\t/b.txt"
+    assert out == "3\t/a.txt\n7\t/b.txt\n"
 
 
 @pytest.mark.asyncio
@@ -176,7 +176,7 @@ async def test_du_empty_target_returns_zero_with_path():
     out = await du([_spec("/nothing")],
                    compute_total=compute_total,
                    compute_all=compute_all)
-    assert out == "0\t/nothing"
+    assert out == "0\t/nothing\n"
 
 
 def test_depth_helper_root_is_zero():

@@ -16,6 +16,7 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.gdrive._provision import metadata_provision
 from mirage.commands.builtin.utils.formatting import _human_size
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
@@ -89,9 +90,9 @@ async def du(
         output = _format_size(total, h) + "\t" + p0.original
         if c:
             output += "\n" + _format_size(total, h) + "\ttotal"
-        return output.encode(), IOResult()
+        return format_records(output.splitlines()), IOResult()
     lines: list[str] = []
     lines.append(_format_size(total, h) + "\t" + p0.original)
     if c:
         lines.append(_format_size(total, h) + "\ttotal")
-    return "\n".join(lines).encode(), IOResult()
+    return format_records(lines), IOResult()

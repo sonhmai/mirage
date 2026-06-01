@@ -83,7 +83,7 @@ async def _grep_stream(
                     yield m.group().encode() + b"\n"
                 if max_count and match_count >= max_count:
                     if count_only:
-                        yield str(match_count).encode()
+                        yield str(match_count).encode() + b"\n"
                     return
         else:
             match_count += 1
@@ -94,10 +94,10 @@ async def _grep_stream(
                     yield raw_line + b"\n"
             if max_count and match_count >= max_count:
                 if count_only:
-                    yield str(match_count).encode()
+                    yield str(match_count).encode() + b"\n"
                 return
     if count_only:
-        yield str(match_count).encode()
+        yield str(match_count).encode() + b"\n"
 
 
 async def grep(

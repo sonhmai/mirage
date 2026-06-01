@@ -190,7 +190,7 @@ async def rg(
     if not matched:
         return b"", IOResult(exit_code=1)
     if c:
-        return str(len(matched)).encode(), IOResult()
+        return str(len(matched)).encode() + b"\n", IOResult()
     result_lines: list[str] = []
     for line in matched:
         result_lines.append(line)

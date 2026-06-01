@@ -51,7 +51,7 @@ async def _du_one(
 
     lines = [_format_size(sz, h) + "\t" + p for p, sz in entries]
     display_total = sum(sz for _, sz in entries)
-    return format_record_text(lines).rstrip("\n"), display_total
+    return "\n".join(lines), display_total
 
 
 async def du(

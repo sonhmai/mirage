@@ -14,6 +14,7 @@
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.databricks_volume.glob import resolve_glob
@@ -67,5 +68,5 @@ async def rm(
             removed[path.strip_prefix] = b""
         if v:
             verbose_parts.append(f"removed '{path.original}'")
-    output = "\n".join(verbose_parts).encode() if v else None
+    output = format_optional_records(verbose_parts) if v else None
     return output, IOResult(writes=removed)

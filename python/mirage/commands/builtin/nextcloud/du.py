@@ -56,17 +56,17 @@ async def du(
     path = p0
     if s:
         total = await du_impl(accessor, path)
-        output = _format_size(total, h) + "\t" + p0.original
+        lines = [_format_size(total, h) + "\t" + p0.original]
         if c:
-            output += "\n" + _format_size(total, h) + "\ttotal"
-        return format_records(output.splitlines()), IOResult()
+            lines.append(_format_size(total, h) + "\ttotal")
+        return format_records(lines), IOResult()
     all_entries = await du_all_impl(accessor, path)
     if not all_entries:
         total = await du_impl(accessor, path)
-        output = _format_size(total, h) + "\t" + p0.original
+        lines = [_format_size(total, h) + "\t" + p0.original]
         if c:
-            output += "\n" + _format_size(total, h) + "\ttotal"
-        return format_records(output.splitlines()), IOResult()
+            lines.append(_format_size(total, h) + "\ttotal")
+        return format_records(lines), IOResult()
     if not a:
         dir_entries: list[tuple[str, int]] = []
         for p, sz in all_entries:
@@ -79,10 +79,10 @@ async def du(
                        if _depth(p, p0.original) <= md]
     if not all_entries:
         total = await du_impl(accessor, path)
-        output = _format_size(total, h) + "\t" + p0.original
+        lines = [_format_size(total, h) + "\t" + p0.original]
         if c:
-            output += "\n" + _format_size(total, h) + "\ttotal"
-        return format_records(output.splitlines()), IOResult()
+            lines.append(_format_size(total, h) + "\ttotal")
+        return format_records(lines), IOResult()
     lines = [_format_size(sz, h) + "\t" + p for p, sz in all_entries]
     if c:
         grand = sum(sz for _, sz in all_entries)

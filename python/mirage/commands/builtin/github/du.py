@@ -67,10 +67,10 @@ async def du(
             if entry.size is not None:
                 total += entry.size
     if s:
-        output = _format_size(total, h) + "\t" + path
+        lines = [_format_size(total, h) + "\t" + path]
         if c:
-            output += "\n" + _format_size(total, h) + "\ttotal"
-        return format_records(output.splitlines()), IOResult()
+            lines.append(_format_size(total, h) + "\ttotal")
+        return format_records(lines), IOResult()
     lines: list[str] = []
     lines.append(_format_size(total, h) + "\t" + path)
     if c:

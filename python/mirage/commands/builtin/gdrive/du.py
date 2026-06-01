@@ -87,10 +87,10 @@ async def du(
     p0 = paths[0]
     total = await _du_walk(accessor, p0, index)
     if s:
-        output = _format_size(total, h) + "\t" + p0.original
+        lines = [_format_size(total, h) + "\t" + p0.original]
         if c:
-            output += "\n" + _format_size(total, h) + "\ttotal"
-        return format_records(output.splitlines()), IOResult()
+            lines.append(_format_size(total, h) + "\ttotal")
+        return format_records(lines), IOResult()
     lines: list[str] = []
     lines.append(_format_size(total, h) + "\t" + p0.original)
     if c:

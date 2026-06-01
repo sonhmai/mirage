@@ -15,6 +15,7 @@
 from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.hf_buckets.glob import resolve_glob
@@ -59,5 +60,5 @@ async def rm(
         removed[path.strip_prefix] = b""
         if v:
             verbose_parts.append(f"removed '{path.original}'")
-    output = "\n".join(verbose_parts).encode() if v else None
+    output = format_optional_records(verbose_parts) if v else None
     return output, IOResult(writes=removed)

@@ -100,7 +100,7 @@ async def rg(
             lines = format_grep_results(rows, scope, file_prefix, pattern_str)
             if not lines:
                 return b"", IOResult(exit_code=1)
-            return ("\n".join(lines) + "\n").encode(), IOResult()
+            return format_records(lines), IOResult()
 
         paths = await resolve_glob(accessor, paths, index)
         blob_paths: list[str] = []

@@ -18,6 +18,7 @@ from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.notion._provision import file_read_provision
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.notion.glob import resolve_glob
@@ -95,7 +96,7 @@ async def grep(
             lines = format_grep_results(results, file_prefix)
             if not lines:
                 return b"", IOResult(exit_code=1)
-            return ("\n".join(lines) + "\n").encode(), IOResult()
+            return format_records(lines), IOResult()
 
     resolved = await resolve_glob(accessor, paths, index) if paths else []
     return await generic_grep(

@@ -131,7 +131,7 @@ async def grep(
             if err is None:
                 if not native_lines:
                     return b"", IOResult(exit_code=1)
-                return ("\n".join(native_lines) + "\n").encode(), IOResult()
+                return format_records(native_lines), IOResult()
             logger.warning(
                 "slack search push-down failed (%s); "
                 "falling back to per-file scan", err)

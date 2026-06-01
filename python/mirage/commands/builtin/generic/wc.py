@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from mirage.commands.builtin.utils.output import format_records
 from mirage.types import PathSpec
 from mirage.utils.stream import ensure_stream
 
@@ -176,4 +177,4 @@ async def format_multi(
                       label="total"))
     if not outputs:
         return b""
-    return ("\n".join(outputs) + "\n").encode()
+    return format_records(outputs)

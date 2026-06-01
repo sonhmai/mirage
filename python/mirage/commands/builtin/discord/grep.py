@@ -22,7 +22,8 @@ from mirage.commands.builtin.discord._provision import file_read_provision
 from mirage.commands.builtin.grep_helper import (compile_pattern,
                                                  grep_files_only, grep_lines,
                                                  grep_stream)
-from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.builtin.utils.output import (format_optional_records,
+                                                  format_records)
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 call_stat)
@@ -168,7 +169,7 @@ async def grep(
             joined: list[str] = list(pushdown_warnings)
             for w in extra:
                 joined.extend(w)
-            return ("\n".join(joined) + "\n").encode() if joined else None
+            return format_optional_records(joined)
 
         if args_l:
             warnings: list[str] = []

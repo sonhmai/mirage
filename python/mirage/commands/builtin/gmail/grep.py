@@ -110,7 +110,7 @@ async def grep(
             lines = format_grep_results(rows, scope, file_prefix, pattern)
             if not lines:
                 return b"", IOResult(exit_code=1)
-            return ("\n".join(lines) + "\n").encode(), IOResult()
+            return format_records(lines), IOResult()
 
         paths = await resolve_glob(accessor, paths, index)
         file_prefix = paths[0].prefix if paths else ""

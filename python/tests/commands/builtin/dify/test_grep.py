@@ -89,7 +89,8 @@ async def test_grep_supports_standard_flags(monkeypatch, dify_accessor,
                                  "alpha",
                                  args_l=True,
                                  index=dify_index)
-    assert await materialize(files_stdout) == guide_path.original.encode()
+    assert await materialize(files_stdout
+                             ) == guide_path.original.encode() + b"\n"
 
     fixed_stdout, _ = await grep(dify_accessor, [guide_path],
                                  "alpha beta",

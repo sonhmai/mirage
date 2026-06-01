@@ -63,4 +63,4 @@ async def test_workspace_executes_dify_ls(monkeypatch):
     result = await workspace.execute("ls /knowledge")
 
     assert result.exit_code == 0
-    assert await result.stdout_str() == "guides"
+    assert await result.stdout_str() == "guides\n"

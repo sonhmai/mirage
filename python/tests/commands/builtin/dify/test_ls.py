@@ -49,7 +49,7 @@ async def test_ls_lists_virtual_tree(monkeypatch, dify_accessor, dify_index,
 
     stdout, _ = await ls(dify_accessor, [knowledge_root], index=dify_index)
 
-    assert await materialize(stdout) == b"README.md\nguides"
+    assert await materialize(stdout) == b"README.md\nguides\n"
 
 
 @pytest.mark.asyncio
@@ -61,13 +61,13 @@ async def test_ls_uses_cwd_and_supports_list_dir(monkeypatch, dify_accessor,
     cwd_stdout, cwd_io = await ls(dify_accessor, [],
                                   index=dify_index,
                                   cwd=guides_path)
-    assert await materialize(cwd_stdout) == b"quickstart.md"
+    assert await materialize(cwd_stdout) == b"quickstart.md\n"
     assert cwd_io.exit_code == 0
 
     dir_stdout, dir_io = await ls(dify_accessor, [guides_path],
                                   d=True,
                                   index=dify_index)
-    assert await materialize(dir_stdout) == b"guides"
+    assert await materialize(dir_stdout) == b"guides\n"
     assert dir_io.exit_code == 0
 
 
@@ -84,5 +84,5 @@ async def test_ls_resolves_glob_patterns(monkeypatch, dify_accessor,
 
     stdout, io = await ls(dify_accessor, [path], d=True, index=dify_index)
 
-    assert await materialize(stdout) == b"README.md"
+    assert await materialize(stdout) == b"README.md\n"
     assert io.exit_code == 0

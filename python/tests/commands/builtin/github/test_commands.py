@@ -109,7 +109,7 @@ async def test_wc_full(github_env):
     )
     data = await materialize(stdout)
     text = data.decode()
-    parts = text.split("\t")
+    parts = text.rstrip("\n").split("\t")
     assert len(parts) == 4
     line_count, word_count, byte_count = int(parts[0]), int(parts[1]), int(
         parts[2])

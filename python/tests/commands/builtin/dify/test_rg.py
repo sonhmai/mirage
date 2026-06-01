@@ -64,4 +64,4 @@ async def test_rg_supports_line_numbers_and_files_only(monkeypatch,
                                index=dify_index)
     assert await materialize(files_stdout) == (
         b"/knowledge/guides/api.md\n"
-        b"/knowledge/guides/quickstart.md")
+        b"/knowledge/guides/quickstart.md\n")

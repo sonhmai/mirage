@@ -28,7 +28,7 @@ async def test_tree_renders_nested_dify_tree(monkeypatch, dify_accessor,
         "\u2514\u2500\u2500 guides\n"
         "    \u251c\u2500\u2500 deep\n"
         "    \u2502   \u2514\u2500\u2500 note.md\n"
-        "    \u2514\u2500\u2500 quickstart.md")
+        "    \u2514\u2500\u2500 quickstart.md\n")
     assert io.exit_code == 0
 
 
@@ -45,4 +45,4 @@ async def test_tree_uses_cwd_and_depth(monkeypatch, dify_accessor, dify_index,
     assert (await materialize(stdout)).decode() == (
         "\u251c\u2500\u2500 deep\n"
         "\u2502   \u2514\u2500\u2500 note.md\n"
-        "\u2514\u2500\u2500 quickstart.md")
+        "\u2514\u2500\u2500 quickstart.md\n")

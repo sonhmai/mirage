@@ -32,7 +32,7 @@ async def test_find_matches_name_pattern(monkeypatch, dify_accessor,
                            "quick*.md",
                            index=dify_index)
 
-    assert await materialize(stdout) == b"/knowledge/guides/quickstart.md"
+    assert await materialize(stdout) == b"/knowledge/guides/quickstart.md\n"
 
 
 @pytest.mark.asyncio
@@ -45,13 +45,14 @@ async def test_find_handles_file_missing_and_maxdepth(monkeypatch,
 
     file_stdout, file_io = await find(dify_accessor, [guide_path],
                                       index=dify_index)
-    assert await materialize(file_stdout) == b"/knowledge/guides/quickstart.md"
+    assert await materialize(file_stdout
+                             ) == b"/knowledge/guides/quickstart.md\n"
     assert file_io.exit_code == 0
 
     maxdepth_stdout, maxdepth_io = await find(dify_accessor, [knowledge_root],
                                               maxdepth="0",
                                               index=dify_index)
-    assert await materialize(maxdepth_stdout) == b"/knowledge"
+    assert await materialize(maxdepth_stdout) == b"/knowledge\n"
     assert maxdepth_io.exit_code == 0
 
     missing = PathSpec.from_str_path("/knowledge/missing.md", "/knowledge/")
@@ -73,7 +74,7 @@ async def test_find_uses_cwd_when_path_missing(monkeypatch, dify_accessor,
                             cwd=guides_path,
                             index=dify_index)
 
-    assert await materialize(stdout) == b"/knowledge/guides/quickstart.md"
+    assert await materialize(stdout) == b"/knowledge/guides/quickstart.md\n"
     assert io.exit_code == 0
 
 
@@ -89,5 +90,5 @@ async def test_find_resolves_glob_patterns(monkeypatch, dify_accessor,
 
     stdout, io = await find(dify_accessor, [path], index=dify_index)
 
-    assert await materialize(stdout) == b"/knowledge/guides/quickstart.md"
+    assert await materialize(stdout) == b"/knowledge/guides/quickstart.md\n"
     assert io.exit_code == 0

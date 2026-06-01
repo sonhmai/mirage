@@ -36,7 +36,7 @@ async def test_stat_prints_dify_metadata(monkeypatch, dify_accessor,
 
     assert await materialize(stdout) == (
         b"name=quickstart.md size=17 modified=2024-05-21T10:00:00Z "
-        b"type=text")
+        b"type=text\n")
     assert io.exit_code == 0
 
 
@@ -50,4 +50,4 @@ async def test_stat_supports_format(monkeypatch, dify_accessor, dify_index,
                            c="%n %s %F",
                            index=dify_index)
 
-    assert await materialize(stdout) == b"quickstart.md 17 regular file"
+    assert await materialize(stdout) == b"quickstart.md 17 regular file\n"

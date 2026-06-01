@@ -306,5 +306,6 @@ async def test_grep_then_jq_with_and_or_list(ws):
             "cat /tmp/search_report.txt")
         assert (await io.stdout_str()).strip().splitlines() == [
             "/s3/data/example.jsonl",
+            "",
             '"Strukto"',
         ]

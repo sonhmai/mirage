@@ -135,7 +135,7 @@ def _paths(*originals: str) -> list[PathSpec]:
 @pytest.mark.asyncio
 async def test_ls_lists_entries_and_hides_dotfiles():
     out = await _collect(await ls_mod.ls(_ACCESSOR, _paths("/db")))
-    names = set(out.decode().split("\n"))
+    names = set(out.decode().splitlines())
     assert names == {
         "notes.md", "data.json", "sub", "log.jsonl", "empty.jsonl"
     }
@@ -236,7 +236,7 @@ async def test_find_type_file():
     out = await _collect(await find_mod.find(_ACCESSOR,
                                              _paths("/db"),
                                              type="f"))
-    found = set(out.decode().split("\n"))
+    found = set(out.decode().splitlines())
     assert "/db/notes.md" in found
     assert "/db/sub/page.md" in found
     assert "/db" not in found
@@ -247,7 +247,7 @@ async def test_find_name_glob():
     out = await _collect(await find_mod.find(_ACCESSOR,
                                              _paths("/db"),
                                              name="*.md"))
-    found = set(out.decode().split("\n"))
+    found = set(out.decode().splitlines())
     assert found == {"/db/notes.md", "/db/sub/page.md"}
 
 

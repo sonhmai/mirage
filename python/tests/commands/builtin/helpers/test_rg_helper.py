@@ -195,7 +195,7 @@ class TestCountOnly:
     async def test_count_only_zero(self, backend):
         await _write(backend, "/tmp/a.txt", "bar\nbaz")
         result = await rg(backend, "/tmp/a.txt", "foo", count_only=True)
-        assert result == ["0"]
+        assert result == []
 
 
 class TestFilesOnly:

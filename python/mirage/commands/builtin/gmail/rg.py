@@ -16,9 +16,8 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.grep_helper import compile_pattern, grep_lines
+from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gmail.glob import resolve_glob
@@ -26,32 +25,9 @@ from mirage.core.gmail.read import read as gmail_read
 from mirage.core.gmail.readdir import readdir as _readdir
 from mirage.core.gmail.scope import detect_scope
 from mirage.core.gmail.search import format_grep_results, search_messages
+from mirage.core.gmail.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _collect_files(
-    accessor: GmailAccessor,
-    path: PathSpec,
-    index: IndexCacheStore | None,
-) -> list[str]:
-    if path.endswith(".json") or path.endswith(".jsonl"):
-        return [path]
-    try:
-        children = await _readdir(accessor, path, index)
-    except FileNotFoundError:
-        return []
-    files: list[str] = []
-    for child in children:
-        if child.endswith(".gmail.json"):
-            files.append(child)
-        else:
-            child_spec = PathSpec(original=child,
-                                  directory=child,
-                                  resolved=False,
-                                  prefix=path.prefix)
-            files.extend(await _collect_files(accessor, child_spec, index))
-    return files
 
 
 @command("rg", resource="gmail", spec=SPECS["rg"])
@@ -83,8 +59,8 @@ async def rg(
         raise ValueError("rg: usage: rg [flags] pattern [path]")
     pattern_str = texts[0]
     max_count = int(m) if m is not None else None
-    pat = compile_pattern(pattern_str, i, F, w)
-    index = index
+    after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
+    before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
 
     if paths:
         scope = detect_scope(paths[0])
@@ -103,71 +79,29 @@ async def rg(
             return format_records(lines), IOResult()
 
         paths = await resolve_glob(accessor, paths, index)
-        blob_paths: list[str] = []
-        file_prefix = paths[0].prefix if paths else ""
-        for path_item in paths:
-            blob_paths.extend(await _collect_files(accessor, path_item, index))
-        blob_paths = sorted(set(blob_paths))
-        all_results: list[str] = []
-        any_match = False
-        for bp in blob_paths:
-            if not hidden and any(
-                    part.startswith(".") for part in bp.split("/")):
-                continue
-            try:
-                bp_spec = PathSpec(original=bp,
-                                   directory=bp,
-                                   resolved=True,
-                                   prefix=file_prefix)
-                data = await gmail_read(accessor, bp_spec, index)
-            except (FileNotFoundError, IsADirectoryError, RuntimeError):
-                continue
-            text = data.decode(errors="replace")
-            if not text:
-                continue
-            lines = text.splitlines()
-            matched = grep_lines(bp,
-                                 lines,
-                                 pat,
-                                 invert=v,
-                                 line_numbers=n,
-                                 count_only=c,
-                                 files_only=args_l,
-                                 only_matching=o,
-                                 max_count=max_count)
-            if not matched:
-                continue
-            any_match = True
-            if args_l:
-                all_results.append(bp)
-                continue
-            if c:
-                all_results.append(f"{bp}:{len(matched)}")
-                continue
-            for line in matched:
-                all_results.append(f"{bp}:{line}")
-        if not any_match:
-            return b"", IOResult(exit_code=1)
-        return format_records(all_results), IOResult()
 
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("rg: usage: rg [flags] pattern path")
-    lines = raw.decode(errors="replace").splitlines()
-    matched = grep_lines("<stdin>",
-                         lines,
-                         pat,
-                         invert=v,
-                         line_numbers=n,
-                         count_only=c,
-                         files_only=args_l,
-                         only_matching=o,
-                         max_count=max_count)
-    if not matched:
-        return b"", IOResult(exit_code=1)
-    if c:
-        return str(len(matched)).encode() + b"\n", IOResult()
-    result_lines: list[str] = []
-    for line in matched:
-        result_lines.append(line)
-    return format_records(result_lines), IOResult()
+    return await generic_rg(
+        paths,
+        pattern=pattern_str,
+        readdir=_readdir,
+        stat=_stat,
+        read_bytes=gmail_read,
+        read_stream=None,
+        accessor=accessor,
+        stdin=stdin,
+        ignore_case=i,
+        invert=v,
+        line_numbers=n,
+        count_only=c,
+        files_only=args_l,
+        whole_word=w,
+        fixed_string=F,
+        only_matching=o,
+        max_count=max_count,
+        context_before=before_ctx,
+        context_after=after_ctx,
+        hidden=hidden,
+        file_type=type,
+        glob_pattern=glob,
+        index=index,
+    )

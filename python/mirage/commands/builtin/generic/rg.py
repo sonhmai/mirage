@@ -2,8 +2,10 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from functools import partial
 
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.grep_helper import (compile_pattern, grep_lines,
-                                                 grep_stream)
+from mirage.commands.builtin.grep_helper import (compile_pattern,
+                                                 grep_count_has_matches,
+                                                 grep_lines, grep_stream,
+                                                 nonzero_count_stream)
 from mirage.commands.builtin.rg_helper import rg_full
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.output import (format_optional_records,
@@ -120,7 +122,7 @@ async def rg(
                                   count_only, files_only, only_matching,
                                   max_count)
                 if count_only:
-                    if hits:
+                    if grep_count_has_matches(hits):
                         all_results.append(f"{p.original}:{hits[0]}")
                 elif files_only:
                     all_results.extend(hits)
@@ -144,6 +146,8 @@ async def rg(
             max_count=max_count,
             count_only=count_only,
         )
+        if count_only:
+            stream = nonzero_count_stream(stream)
         io = IOResult()
         return exit_on_empty(stream, io), io
 
@@ -158,6 +162,8 @@ async def rg(
         max_count=max_count,
         count_only=count_only,
     )
+    if count_only:
+        stream = nonzero_count_stream(stream)
     io = IOResult()
     return exit_on_empty(stream, io), io
 

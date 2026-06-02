@@ -372,4 +372,20 @@ async def test_rg_count_stdin_terminates_newline(github_env):
     )
     data = await materialize(stdout)
     assert io.exit_code == 0
-    assert data and data.endswith(b"\n")
+    assert data == b"2\n"
+
+
+@pytest.mark.asyncio
+async def test_rg_count_stdin_zero_exits_1(github_env):
+    accessor, index = github_env
+    stdout, io = await rg(
+        accessor,
+        [],
+        "foo",
+        stdin=b"bar\nbaz\n",
+        c=True,
+        index=index,
+    )
+    data = await materialize(stdout)
+    assert data == b""
+    assert io.exit_code == 1

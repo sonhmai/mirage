@@ -19,6 +19,7 @@ from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.email._provision import file_read_provision
 from mirage.commands.builtin.grep_helper import (compile_pattern,
+                                                 grep_count_has_matches,
                                                  grep_files_only, grep_lines,
                                                  grep_stream)
 from mirage.commands.builtin.utils.output import (format_optional_records,
@@ -249,18 +250,22 @@ async def _grep_server_side(
                              files_only=args_l,
                              only_matching=o,
                              max_count=max_count)
+        if c:
+            all_results.append(f"{vfs_path}:{matched[0]}")
+            if grep_count_has_matches(matched):
+                any_match = True
+            continue
         if not matched:
             continue
         any_match = True
         if args_l:
             all_results.append(vfs_path)
             continue
-        if c:
-            all_results.append(f"{vfs_path}:{len(matched)}")
-            continue
         for line in matched:
             all_results.append(f"{vfs_path}:{line}")
 
     if not any_match:
+        if all_results:
+            return format_records(all_results), IOResult(exit_code=1)
         return b"", IOResult(exit_code=1)
     return format_records(all_results), IOResult()

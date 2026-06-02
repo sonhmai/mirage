@@ -17,14 +17,19 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.grep_helper import compile_pattern, grep_lines
+from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.grep_helper import (compile_pattern,
+                                                 grep_count_has_matches,
+                                                 grep_lines)
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.email._client import fetch_message
+from mirage.core.email.read import read as email_read
+from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.scope import extract_folder
 from mirage.core.email.search import _build_vfs_path, search_messages
+from mirage.core.email.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -59,6 +64,8 @@ async def rg(
     pattern_str = texts[0]
     max_count = int(m) if m is not None else None
     pat = compile_pattern(pattern_str, i, F, w)
+    after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
+    before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
 
     if paths:
         folder = extract_folder(paths)
@@ -89,14 +96,17 @@ async def rg(
                                  files_only=args_l,
                                  only_matching=o,
                                  max_count=max_count)
+            if c:
+                if not grep_count_has_matches(matched):
+                    continue
+                any_match = True
+                all_results.append(f"{vfs_path}:{matched[0]}")
+                continue
             if not matched:
                 continue
             any_match = True
             if args_l:
                 all_results.append(vfs_path)
-                continue
-            if c:
-                all_results.append(f"{vfs_path}:{len(matched)}")
                 continue
             for line in matched:
                 all_results.append(f"{vfs_path}:{line}")
@@ -104,21 +114,28 @@ async def rg(
             return b"", IOResult(exit_code=1)
         return format_records(all_results), IOResult()
 
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("rg: usage: rg [flags] pattern path")
-    lines = raw.decode(errors="replace").splitlines()
-    matched = grep_lines("<stdin>",
-                         lines,
-                         pat,
-                         invert=v,
-                         line_numbers=n,
-                         count_only=c,
-                         files_only=args_l,
-                         only_matching=o,
-                         max_count=max_count)
-    if not matched:
-        return b"", IOResult(exit_code=1)
-    if c:
-        return str(len(matched)).encode() + b"\n", IOResult()
-    return format_records(matched), IOResult()
+    return await generic_rg(
+        [],
+        pattern=pattern_str,
+        readdir=_readdir,
+        stat=_stat,
+        read_bytes=email_read,
+        read_stream=None,
+        accessor=accessor,
+        stdin=stdin,
+        ignore_case=i,
+        invert=v,
+        line_numbers=n,
+        count_only=c,
+        files_only=args_l,
+        whole_word=w,
+        fixed_string=F,
+        only_matching=o,
+        max_count=max_count,
+        context_before=before_ctx,
+        context_after=after_ctx,
+        hidden=hidden,
+        file_type=type,
+        glob_pattern=glob,
+        index=index,
+    )

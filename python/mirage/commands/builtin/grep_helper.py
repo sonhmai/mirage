@@ -113,6 +113,25 @@ def grep_lines(
     return results
 
 
+def grep_count_value(results: list[str]) -> int:
+    if not results:
+        return 0
+    return int(results[0])
+
+
+def grep_count_has_matches(results: list[str]) -> bool:
+    return grep_count_value(results) > 0
+
+
+async def nonzero_count_stream(
+    source: AsyncIterator[bytes],
+) -> AsyncIterator[bytes]:
+    async for chunk in source:
+        count = int(chunk.decode(errors="replace").strip() or "0")
+        if count > 0:
+            yield chunk
+
+
 async def grep_stream(
     source: AsyncIterator[bytes],
     pat: re.Pattern[str],

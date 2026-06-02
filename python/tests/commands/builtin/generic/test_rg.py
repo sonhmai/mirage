@@ -93,6 +93,40 @@ async def test_rg_stdin_basic():
 
 
 @pytest.mark.asyncio
+async def test_rg_count_stdin_uses_match_count():
+    readdir, stat, rb, rs = _make_backend({})
+    output, io = await rg(
+        [],
+        pattern="foo",
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+        stdin=b"foo foo\nfoo bar\nbaz\n",
+        count_only=True,
+    )
+    assert (await _drain_async(output)) == b"2\n"
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_rg_count_stdin_zero_exits_1_without_output():
+    readdir, stat, rb, rs = _make_backend({})
+    output, io = await rg(
+        [],
+        pattern="foo",
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+        stdin=b"bar\nbaz\n",
+        count_only=True,
+    )
+    assert await _drain_async(output) == b""
+    assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
 async def test_rg_file_basic():
     readdir, stat, rb, rs = _make_backend({
         "/a.txt":
@@ -146,6 +180,27 @@ async def test_rg_dir_auto_recursive():
     decoded = (await _drain_async(output)).decode()
     assert "apple" in decoded
     assert "apricot" in decoded
+
+
+@pytest.mark.asyncio
+async def test_rg_count_dir_skips_zero_count_files():
+    readdir, stat, rb, rs = _make_backend({
+        "/dir/a.txt": b"foo\nbar\nfoo\n",
+        "/dir/b.txt": b"bar\nbaz\n",
+    })
+    output, io = await rg(
+        [_spec("/dir")],
+        pattern="foo",
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+        count_only=True,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert "/dir/a.txt:2" in decoded
+    assert "/dir/b.txt" not in decoded
+    assert io.exit_code == 0
 
 
 @pytest.mark.asyncio

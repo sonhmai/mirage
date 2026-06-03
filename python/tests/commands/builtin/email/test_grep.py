@@ -1,18 +1,24 @@
+import importlib
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.io.stream import materialize
+from mirage.types import PathSpec
+
 sys.modules.setdefault(
     "aioimaplib",
     SimpleNamespace(IMAP4=object, IMAP4_SSL=object),
 )
-sys.modules.setdefault("aiosmtplib", SimpleNamespace(SMTP=object))
+sys.modules.setdefault(
+    "aiosmtplib",
+    SimpleNamespace(SMTP=object, send=AsyncMock()),
+)
 
-from mirage.commands.builtin.email.grep import _grep_server_side
-from mirage.io.stream import materialize
-from mirage.types import PathSpec
+_grep_server_side = importlib.import_module(
+    "mirage.commands.builtin.email.grep")._grep_server_side
 
 
 @pytest.mark.asyncio
@@ -37,7 +43,6 @@ async def test_grep_server_side_count_uses_real_count():
             ],
             c=True,
         )
-    assert await materialize(stdout) == (
-        b"/email/INBOX/msg1.email.json:2\n"
-        b"/email/INBOX/msg2.email.json:0\n")
+    assert await materialize(stdout) == (b"/email/INBOX/msg1.email.json:2\n"
+                                         b"/email/INBOX/msg2.email.json:0\n")
     assert io.exit_code == 0

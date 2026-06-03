@@ -22,7 +22,6 @@ from mirage.commands.builtin.langfuse.grep import (_filter_traces,
                                                    _format_dataset_results,
                                                    _format_prompt_results,
                                                    _format_session_results)
-from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.langfuse._client import (fetch_datasets, fetch_prompts,

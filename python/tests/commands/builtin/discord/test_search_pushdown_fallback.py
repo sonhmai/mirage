@@ -18,6 +18,7 @@ import pytest
 
 from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.rg import rg
+from mirage.io.types import IOResult
 from mirage.types import PathSpec
 
 
@@ -79,8 +80,8 @@ async def test_rg_emits_warning_on_rate_limit():
             "mirage.commands.builtin.discord.rg.resolve_glob",
             new=AsyncMock(return_value=paths),
     ), patch(
-            "mirage.commands.builtin.discord.rg._collect_files",
-            new=AsyncMock(return_value=[]),
+            "mirage.commands.builtin.discord.rg.generic_rg",
+            new=AsyncMock(return_value=(b"", IOResult(exit_code=1))),
     ):
         _out, io = await rg(accessor, paths, "hi", index=_fake_index())
     stderr = (io.stderr or b"").decode()

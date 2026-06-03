@@ -114,18 +114,41 @@ def grep_lines(
 
 
 def grep_count_value(results: list[str]) -> int:
+    """Return the numeric value from count-only grep results.
+
+    Args:
+        results (list[str]): `grep_lines(..., count_only=True)` output.
+
+    Returns:
+        int: The parsed match count, or zero when the result is empty.
+    """
     if not results:
         return 0
     return int(results[0])
 
 
 def grep_count_has_matches(results: list[str]) -> bool:
+    """Return whether count-only grep results contain any matches.
+
+    Args:
+        results (list[str]): `grep_lines(..., count_only=True)` output.
+
+    Returns:
+        bool: True when the parsed count is greater than zero.
+    """
     return grep_count_value(results) > 0
 
 
 async def nonzero_count_stream(
-    source: AsyncIterator[bytes],
-) -> AsyncIterator[bytes]:
+        source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    """Drop zero-count chunks for `rg -c` fallback streams.
+
+    Args:
+        source (AsyncIterator[bytes]): Count-only grep stream.
+
+    Yields:
+        bytes: Count chunks whose parsed value is greater than zero.
+    """
     async for chunk in source:
         count = int(chunk.decode(errors="replace").strip() or "0")
         if count > 0:

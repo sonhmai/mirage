@@ -43,6 +43,42 @@ async def grep(
     scope_check: Callable[..., Awaitable[str | None]] | None = None,
     index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
+    """Run grep-style fallback search over backend paths or stdin.
+
+    Args:
+        paths (list[PathSpec]): Backend paths to search. Empty paths consume
+            stdin.
+        pattern (str): Pattern text from CLI arguments.
+        readdir (Callable[..., Awaitable[list[str]]]): Directory reader.
+        stat (Callable[[PathSpec], Awaitable[FileStat]]): Backend stat reader.
+        read_bytes (Callable[..., Awaitable[bytes]]): Whole-file reader.
+        read_stream (Callable[..., AsyncIterator[bytes]] | None): Optional
+            stream reader.
+        accessor (object): Backend accessor passed through wrapper helpers.
+        stdin (AsyncIterator[bytes] | bytes | None): Input used when paths is
+            empty.
+        pattern_via_e (bool): True when the pattern came from `-e`.
+        ignore_case (bool): `-i`, case-insensitive matching.
+        invert (bool): `-v`, select non-matching lines.
+        line_numbers (bool): `-n`, prefix line numbers.
+        count_only (bool): `-c`, output match counts.
+        files_only (bool): `-l`, output only matching file paths.
+        whole_word (bool): `-w`, match whole words.
+        fixed_string (bool): `-F`, treat pattern as a literal string.
+        only_matching (bool): `-o`, output only matched text.
+        quiet (bool): `-q`, suppress stdout and use exit status only.
+        recursive (bool): `-r`, descend into directories.
+        max_count (int | None): `-m`, stop after this many matching lines.
+        after_context (int): `-A`, trailing context lines.
+        before_context (int): `-B`, leading context lines.
+        scope_check (Callable[..., Awaitable[str | None]] | None): Optional
+            backend warning hook.
+        index (IndexCacheStore | None): Optional cache index for wrapped
+            backend calls.
+
+    Returns:
+        tuple[ByteSource | None, IOResult]: Output stream and exit metadata.
+    """
     if paths:
         mount_prefix = paths[0].prefix
         rd = partial(call_readdir,

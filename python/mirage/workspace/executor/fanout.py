@@ -14,6 +14,7 @@
 
 import fnmatch
 
+from mirage.commands.safeguard import resolve_across_mounts
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -262,6 +263,8 @@ async def _fan_out_traversal(
                 final_io_exit = 1
 
     merged_io.exit_code = final_io_exit
+    merged_io.safeguard = resolve_across_mounts(cmd_name,
+                                                [primary_mount, *descendants])
     exec_node = ExecutionNode(command=cmd_str,
                               exit_code=final_io_exit,
                               stderr=merged_io.stderr)

@@ -12,10 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum, StrEnum
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
+
+
+class Aggr:
+    """Declares how one CommandSafeguard field aggregates across guards.
+
+    Attach to a field via Annotated[..., Aggr(rule)]; ``rule`` takes the
+    list of that field's values across the stacked safeguards and returns
+    the aggregated value. CommandSafeguard.aggr reads these rules so each
+    field's aggregation behavior lives next to the field.
+
+    Args:
+        reduce (Callable[[list], object]): the per-field aggregation rule.
+    """
+
+    def __init__(self, reduce: Callable[[list], object]) -> None:
+        self.reduce = reduce
+
+
+def _min_positive(values: Iterable[float | int | None]) -> float | int | None:
+    positives = [v for v in values if v is not None and v > 0]
+    return min(positives) if positives else None
 
 
 class FindType(str, Enum):
@@ -77,10 +100,43 @@ class OnExceed(str, Enum):
     TRUNCATE = "truncate"
 
 
+def _prefer_error(values: Iterable["OnExceed"]) -> "OnExceed":
+    return (OnExceed.ERROR if any(v is OnExceed.ERROR
+                                  for v in values) else OnExceed.TRUNCATE)
+
+
 class CommandSafeguard(BaseModel):
-    max_bytes: NonNegativeInt | None = None
-    max_lines: NonNegativeInt | None = None
-    on_exceed: OnExceed = OnExceed.TRUNCATE
+    max_bytes: Annotated[NonNegativeInt | None, Aggr(_min_positive)] = None
+    max_lines: Annotated[NonNegativeInt | None, Aggr(_min_positive)] = None
+    timeout_seconds: Annotated[float | None, Aggr(_min_positive)] = None
+    on_exceed: Annotated[OnExceed, Aggr(_prefer_error)] = OnExceed.TRUNCATE
+
+    @classmethod
+    def aggr(
+        cls,
+        safeguards: "Iterable[CommandSafeguard | None]",
+    ) -> "CommandSafeguard | None":
+        """Aggregate several safeguards using each field's declared rule.
+
+        Every field carries an Aggr(rule) in its annotation; this applies
+        that rule to the field's values across the present guards. Returns
+        None when nothing is configured. Used wherever guards stack
+        (cross-mount fan-out, layered configs).
+
+        Args:
+            safeguards (Iterable[CommandSafeguard | None]): guards to merge.
+        """
+        present = [s for s in safeguards if s is not None]
+        if not present:
+            return None
+        kwargs = {}
+        for name, field in cls.model_fields.items():
+            rule = next((m for m in field.metadata if isinstance(m, Aggr)),
+                        None)
+            values = [getattr(s, name) for s in present]
+            kwargs[name] = rule.reduce(
+                values) if rule is not None else values[0]
+        return cls(**kwargs)
 
 
 class VFSWriteOp(str, Enum):

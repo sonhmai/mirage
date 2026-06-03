@@ -15,6 +15,8 @@
 import asyncio
 from typing import Any
 
+from mirage.commands.builtin.utils.safeguard import run_with_timeout
+from mirage.commands.safeguard import resolve_safeguard
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.shell.types import NodeType as NT
@@ -109,11 +111,14 @@ async def execute_command(
             saved_env_overrides[k] = session.env.get(k)
         session.env[k] = v
 
+    resolved = resolve_safeguard(name) if name else None
+    timeout = (resolved.timeout_seconds if resolved is not None else None)
+
     try:
-        return await _dispatch_command_body(recurse, dispatch, registry,
-                                            execute_fn, node, parts, name,
-                                            session, stdin, call_stack,
-                                            job_table, history, cancel)
+        body = _dispatch_command_body(recurse, dispatch, registry, execute_fn,
+                                      node, parts, name, session, stdin,
+                                      call_stack, job_table, history, cancel)
+        return await run_with_timeout(body, timeout, name or "?")
     finally:
         for k, prev in saved_env_overrides.items():
             if prev is None:

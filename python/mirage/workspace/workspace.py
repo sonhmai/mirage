@@ -25,6 +25,9 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import IndexConfig
 from mirage.commands.builtin.general import HISTORY_COMMANDS
+from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
+                                                     run_with_timeout)
+from mirage.commands.safeguard import resolve_safeguard
 
 try:
     from mirage.cache.file.redis import RedisFileCacheStore
@@ -33,6 +36,7 @@ except ImportError:
 from mirage.io import IOResult
 from mirage.observe.context import start_recording, stop_recording
 from mirage.observe.observer import Observer
+from mirage.observe.record import OpRecord
 from mirage.ops import Ops
 from mirage.ops.open import make_open
 from mirage.ops.os_patch import make_os_module
@@ -125,15 +129,20 @@ class Workspace:
         self._dispatcher = Dispatcher(self._registry, self._cache, consistency)
 
         for prefix, value in resources.items():
+            mount_safeguards: dict = {}
             if isinstance(value, tuple) and len(value) >= 2:
                 prov = value[0]
                 mount_mode = value[1]
+                if len(value) >= 3 and value[2]:
+                    mount_safeguards = dict(value[2])
             else:
                 prov = value
                 mount_mode = mode
             if index is not None:
                 prov.set_index(index)
-            self._registry.mount(prefix, prov, mount_mode)
+            mount_obj = self._registry.mount(prefix, prov, mount_mode)
+            if mount_safeguards:
+                mount_obj.command_safeguards.update(mount_safeguards)
 
         self._fuse = FuseManager()
         self._native = native
@@ -625,8 +634,19 @@ class Workspace:
                     "native=True requires FUSE. Install macFUSE (macOS) "
                     "or libfuse (Linux). Falling back to virtual mode.")
             else:
+                native_name = command.strip().split()[0] if command.strip(
+                ) else None
+                resolved = (resolve_safeguard(native_name)
+                            if native_name else None)
+                native_timeout = (resolved.timeout_seconds
+                                  if resolved is not None else None)
+                if native_timeout is not None and native_timeout <= 0:
+                    native_timeout = None
                 stdout, stderr, code = await native_exec(
-                    command, cwd=self._fuse.mountpoint)
+                    command,
+                    cwd=self._fuse.mountpoint,
+                    timeout=native_timeout,
+                    name=native_name)
                 return IOResult(exit_code=code, stderr=stderr, stdout=stdout)
 
         session = self._session_mgr.get(session_id)
@@ -643,6 +663,7 @@ class Workspace:
         self._current_agent_id = agent_id
         io = IOResult()
         exec_node = ExecutionNode(command=command, exit_code=0)
+        records: list[OpRecord] = []
 
         exec_recursion = partial(self._exec_recursion, cancel)
 
@@ -660,9 +681,16 @@ class Workspace:
                                           exit_code=2)
                 return io
             if provision:
-                return await provision_node(self._registry, self.dispatch,
-                                            exec_recursion, ast,
-                                            effective_session)
+                prov_name = command.strip().split()[0] if command.strip(
+                ) else None
+                prov_resolved = (resolve_safeguard(prov_name)
+                                 if prov_name else None)
+                prov_timeout = (prov_resolved.timeout_seconds
+                                if prov_resolved is not None else None)
+                return await run_with_timeout(
+                    provision_node(self._registry, self.dispatch,
+                                   exec_recursion, ast, effective_session),
+                    prov_timeout, prov_name)
             records = start_recording()
             io, exec_node = await run_command_tree(
                 self.dispatch,
@@ -681,6 +709,21 @@ class Workspace:
             self._ops.records.extend(records)
             exec_node.records = records
             await self.apply_io(io)
+            return io
+        except CommandTimeoutError as exc:
+            stop_recording()
+            logger.debug("command %r timed out after %ss", exc.command,
+                         exc.seconds)
+            if cancel is not None:
+                cancel.set()
+            msg = (str(exc) + "\n").encode()
+            io = IOResult(exit_code=124, stderr=msg)
+            self._ops.records.extend(records)
+            exec_node = ExecutionNode(command=command,
+                                      stderr=msg,
+                                      exit_code=124,
+                                      records=records)
+            session.last_exit_code = 124
             return io
         except (MirageAbortError, ContentDriftError):
             raise

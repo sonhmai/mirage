@@ -14,6 +14,8 @@
 
 from collections.abc import Callable
 
+from mirage.commands.builtin.utils.safeguard import maybe_with_timeout
+from mirage.commands.safeguard import resolve_across_mounts, resolve_safeguard
 from mirage.commands.spec import OperandKind, parse_command, parse_to_kwargs
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
@@ -258,8 +260,19 @@ async def handle_command(
                                   stderr=msg.encode())
 
     if is_cross_mount(cmd_name, path_scopes, registry):
-        return await handle_cross_mount(cmd_name, path_scopes, text_only,
-                                        dispatch, cmd_str)
+        stdout, io, exec_node = await handle_cross_mount(
+            cmd_name, path_scopes, text_only, dispatch, cmd_str)
+        if io.safeguard is None:
+            mounts = []
+            for s in path_scopes:
+                try:
+                    mounts.append(registry.mount_for(s.original))
+                except ValueError:
+                    pass
+            io.safeguard = (resolve_across_mounts(cmd_name, mounts)
+                            if mounts else resolve_safeguard(cmd_name))
+        stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
+        return stdout, io, exec_node
 
     # Reject unsupported cross-mount commands
     if len(path_scopes) >= 2:
@@ -346,6 +359,9 @@ async def handle_command(
         io.writes = {prefix + k: v for k, v in io.writes.items()}
         io.cache = [prefix + p for p in io.cache]
     stdout, io = wrap_cachable_streams(stdout, io)
+
+    stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
+    io.stderr = maybe_with_timeout(io.stderr, io.safeguard, cmd_name)
 
     stderr_bytes = await materialize(io.stderr)
     exec_node = ExecutionNode(command=cmd_str,

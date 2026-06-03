@@ -437,6 +437,16 @@ SAFEGUARD_CASES: list[tuple[str, str]] = [
     ("safeguard_cat_pipe_head_30", "cat /data/big.txt | head -n 30"),
 ]
 
+TIMEOUT_CASES: list[tuple[str, str]] = [
+    ("timeout_sleep_fires", "sleep 2"),
+    ("timeout_pipeline_first_wins", "sleep 2 | echo done"),
+]
+
+EXIT_CODE_CASES: list[tuple[str, str]] = [
+    ("lazy_exit_grep_match", "grep hello /data/a.txt"),
+    ("lazy_exit_grep_no_match", "grep zzz /data/a.txt"),
+]
+
 
 def _set_cat_safeguard(ws: Workspace, max_lines: int) -> None:
     sg = CommandSafeguard(max_lines=max_lines)
@@ -469,6 +479,35 @@ async def run_cases(ws, reload_resources: dict | None = None) -> None:
         print(out, end="" if out.endswith("\n") else "\n")
         if err:
             print(err, end="" if err.endswith("\n") else "\n")
+
+    from mirage.commands import safeguard as _sg
+    _prev_sleep = _sg.DEFAULT_COMMAND_SAFEGUARDS.get("sleep")
+    _sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
+        timeout_seconds=0.1)
+    try:
+        for name, cmd in TIMEOUT_CASES:
+            result = await ws.execute(cmd)
+            out = await result.stdout_str()
+            err = await result.stderr_str()
+            print(f"=== {name} ===")
+            print(f"exit={result.exit_code}")
+            if out:
+                print(out, end="" if out.endswith("\n") else "\n")
+            if err:
+                print(err, end="" if err.endswith("\n") else "\n")
+    finally:
+        if _prev_sleep is None:
+            _sg.DEFAULT_COMMAND_SAFEGUARDS.pop("sleep", None)
+        else:
+            _sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = _prev_sleep
+
+    for name, cmd in EXIT_CODE_CASES:
+        result = await ws.execute(cmd)
+        out = await result.stdout_str()
+        print(f"=== {name} ===")
+        print(f"exit={result.exit_code}")
+        if out:
+            print(out, end="" if out.endswith("\n") else "\n")
 
     fd, tar = tempfile.mkstemp(suffix=".tar")
     os.close(fd)

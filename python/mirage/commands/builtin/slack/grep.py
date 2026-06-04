@@ -105,7 +105,8 @@ async def grep(
         if not scope.use_native:
             scope = coalesce_scopes(paths) or scope
 
-        if scope.use_native and search_available(accessor.config):
+        if (scope.use_native and getattr(scope, "target", None) != "files"
+                and search_available(accessor.config)):
             file_prefix = paths[0].prefix or ""
             query = build_query(pattern, scope)
             target = getattr(scope, "target", None)

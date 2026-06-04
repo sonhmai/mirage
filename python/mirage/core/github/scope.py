@@ -14,7 +14,57 @@
 
 import fnmatch
 
+from mirage.cache.index import IndexEntry
 from mirage.core.github.tree_entry import TreeEntry
+from mirage.types import PathSpec
+
+
+def scope_relative_key(path: PathSpec | str) -> str:
+    """Strip the mount prefix from a path to get its repo-relative key.
+
+    Args:
+        path (PathSpec | str): Scope path, possibly mount-prefixed.
+
+    Returns:
+        str: Repo-relative key with a leading slash; ``/`` for the root.
+    """
+    prefix = path.prefix if isinstance(path, PathSpec) else ""
+    key = path.original if isinstance(path, PathSpec) else str(path)
+    if prefix and key.startswith(prefix):
+        key = key[len(prefix):] or "/"
+    return key
+
+
+def is_repo_root(key: str) -> bool:
+    """Return whether a repo-relative key points at the repository root.
+
+    Args:
+        key (str): Repo-relative key from :func:`scope_relative_key`.
+
+    Returns:
+        bool: True for ``""`` or ``"/"``.
+    """
+    return key in ("", "/")
+
+
+def count_scope_files(entries: dict[str, IndexEntry], key: str) -> int:
+    """Count indexed files under a repo-relative scope key.
+
+    Args:
+        entries (dict[str, IndexEntry]): Index entries keyed by repo-relative
+            path with a leading slash.
+        key (str): Repo-relative scope key from :func:`scope_relative_key`.
+
+    Returns:
+        int: Number of file entries at or below the scope.
+    """
+    if is_repo_root(key):
+        return sum(1 for e in entries.values() if e.resource_type == "file")
+    norm = "/" + key.strip("/")
+    prefix = norm + "/"
+    return sum(
+        1 for p, e in entries.items()
+        if e.resource_type == "file" and (p == norm or p.startswith(prefix)))
 
 
 def should_use_search(

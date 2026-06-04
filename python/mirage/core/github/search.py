@@ -12,11 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from dataclasses import dataclass
 
 from mirage.core.github._client import github_get
 from mirage.core.github.config import GitHubConfig
+from mirage.core.github.scope import scope_relative_key
 from mirage.types import PathSpec
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -51,15 +55,23 @@ async def narrow_paths(
 ) -> list[PathSpec]:
     """Use GitHub code search to narrow paths for grep/rg.
 
-    Returns narrowed PathSpecs (one per matching file). Empty list means
-    search returned no results.
+    Args:
+        config (GitHubConfig): GitHub API config.
+        owner (str): Repository owner.
+        repo (str): Repository name.
+        pattern (str): Literal search pattern.
+        paths (list[PathSpec]): Scope paths, possibly mount-prefixed.
+
+    Returns:
+        list[PathSpec]: One PathSpec per matching file, repo-relative with a
+        leading slash and the original mount prefix. Empty when search
+        returned nothing.
     """
+    mount_prefix = (paths[0].prefix
+                    if paths and isinstance(paths[0], PathSpec) else "")
     narrowed: list[str] = []
     for p in paths:
-        p_prefix = p.prefix if isinstance(p, PathSpec) else ""
-        path_filter = p.original if isinstance(p, PathSpec) else p
-        if p_prefix and path_filter.startswith(p_prefix):
-            path_filter = path_filter[len(p_prefix):] or "/"
+        path_filter = scope_relative_key(p).strip("/")
         try:
             results = await search_code(
                 config,
@@ -68,7 +80,15 @@ async def narrow_paths(
                 query=pattern,
                 path_filter=path_filter or None,
             )
-            narrowed.extend(r.path for r in results)
-        except Exception:
-            pass
-    return [PathSpec(original=n, directory="") for n in narrowed]
+        except Exception as exc:
+            logger.warning(
+                "github code search failed (%s); "
+                "falling back to per-file scan", exc)
+            continue
+        narrowed.extend(r.path for r in results)
+    return [
+        PathSpec(original="/" + n.lstrip("/"),
+                 directory="",
+                 prefix=mount_prefix,
+                 resolved=True) for n in narrowed
+    ]

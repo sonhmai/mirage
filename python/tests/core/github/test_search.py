@@ -17,7 +17,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.core.github.config import GitHubConfig
-from mirage.core.github.search import SearchResult, search_code
+from mirage.core.github.search import SearchResult, narrow_paths, search_code
+from mirage.types import PathSpec
 
 
 @pytest.fixture
@@ -65,3 +66,47 @@ async def test_search_code_with_path_filter(mock_get, config):
         config.token,
         "/search/code",
         params={"q": "import os repo:acme/proj path:src/"})
+
+
+@pytest.mark.asyncio
+@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
+async def test_narrow_paths_strips_leading_slash_in_filter(
+        mock_search, config):
+    mock_search.return_value = [SearchResult(path="src/main.py", sha="aaa")]
+    paths = [PathSpec(original="/src", directory="/src", prefix="")]
+    await narrow_paths(config, "acme", "proj", "import", paths)
+    _, kwargs = mock_search.await_args
+    assert kwargs["path_filter"] == "src"
+
+
+@pytest.mark.asyncio
+@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
+async def test_narrow_paths_root_uses_no_filter(mock_search, config):
+    mock_search.return_value = [SearchResult(path="src/main.py", sha="aaa")]
+    paths = [PathSpec(original="/", directory="/", prefix="")]
+    await narrow_paths(config, "acme", "proj", "import", paths)
+    _, kwargs = mock_search.await_args
+    assert kwargs["path_filter"] is None
+
+
+@pytest.mark.asyncio
+@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
+async def test_narrow_paths_normalizes_results_with_leading_slash(
+        mock_search, config):
+    mock_search.return_value = [
+        SearchResult(path="src/main.py", sha="aaa"),
+        SearchResult(path="src/utils.py", sha="bbb"),
+    ]
+    paths = [PathSpec(original="/gh", directory="/gh", prefix="/gh")]
+    out = await narrow_paths(config, "acme", "proj", "import", paths)
+    assert [p.original for p in out] == ["/src/main.py", "/src/utils.py"]
+    assert all(p.prefix == "/gh" for p in out)
+
+
+@pytest.mark.asyncio
+@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
+async def test_narrow_paths_logs_and_continues_on_error(mock_search, config):
+    mock_search.side_effect = RuntimeError("boom")
+    paths = [PathSpec(original="/src", directory="/src", prefix="")]
+    out = await narrow_paths(config, "acme", "proj", "import", paths)
+    assert out == []

@@ -16,12 +16,18 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.grep_helper import classify_pattern
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.github.constants import SCOPE_ERROR, SCOPE_WARN
 from mirage.core.github.glob import resolve_glob
 from mirage.core.github.read import read as github_read
 from mirage.core.github.readdir import readdir as _readdir
+from mirage.core.github.scope import (count_scope_files, is_repo_root,
+                                      scope_relative_key, should_use_search)
+from mirage.core.github.search import narrow_paths
 from mirage.core.github.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -61,7 +67,27 @@ async def rg(
     if paths and index is None:
         return b"", IOResult(exit_code=1)
     if paths:
-        paths = await resolve_glob(accessor, paths, index)
+        key = scope_relative_key(paths[0])
+        file_count = count_scope_files(index._entries, key)
+        pt = classify_pattern(pattern_str, F)
+        use_search = (should_use_search(
+            is_regex=(pt == PatternType.REGEX),
+            recursive=True,
+            on_default_branch=(accessor.ref == accessor.default_branch),
+        ) and is_repo_root(key) and file_count > SCOPE_WARN)
+        if use_search:
+            narrowed = await narrow_paths(accessor.config, accessor.owner,
+                                          accessor.repo, pattern_str, paths)
+            if narrowed:
+                paths = narrowed
+                file_count = len(narrowed)
+            else:
+                paths = await resolve_glob(accessor, paths, index)
+        else:
+            paths = await resolve_glob(accessor, paths, index)
+        if file_count > SCOPE_ERROR:
+            msg = f"rg: {file_count} files in scope, narrow the path\n"
+            return b"", IOResult(exit_code=1, stderr=msg.encode())
 
     return await generic_rg(
         paths,

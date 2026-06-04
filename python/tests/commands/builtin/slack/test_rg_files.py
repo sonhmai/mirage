@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.commands.builtin.slack.rg import rg
+from mirage.io.stream import materialize
 from mirage.resource.slack.config import SlackConfig
 from mirage.types import PathSpec
 
@@ -60,14 +61,15 @@ async def test_rg_messages_only_when_chat_jsonl(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_rg_files_only_when_files_dir(accessor, index):
-    files_payload = b'{"files":{"matches":[]}}'
+async def test_rg_files_dir_redirects_to_generic_scan(accessor, index):
     with (
             patch("mirage.commands.builtin.slack.rg.search_messages",
                   new_callable=AsyncMock) as mock_msgs,
             patch("mirage.commands.builtin.slack.rg.search_files",
+                  new_callable=AsyncMock) as mock_files,
+            patch("mirage.commands.builtin.slack.rg.generic_rg",
                   new_callable=AsyncMock,
-                  return_value=files_payload) as mock_files,
+                  return_value=(b"", None)) as mock_generic,
     ):
         await rg(
             accessor,
@@ -82,7 +84,8 @@ async def test_rg_files_only_when_files_dir(accessor, index):
             index=index,
         )
     assert mock_msgs.await_count == 0
-    assert mock_files.await_count == 1
+    assert mock_files.await_count == 0
+    assert mock_generic.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -141,17 +144,26 @@ async def test_grep_messages_only_when_chat_jsonl(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_grep_files_only_when_files_dir(accessor, index):
-    files_payload = b'{"files":{"matches":[]}}'
+async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
+    blob = PathSpec(
+        original="/channels/general__C001/2026-04-10/files/report.txt",
+        directory="/channels/general__C001/2026-04-10/files/report.txt",
+        prefix="",
+    )
     with (
             patch("mirage.commands.builtin.slack.grep.search_messages",
                   new_callable=AsyncMock) as mock_msgs,
             patch("mirage.commands.builtin.slack.grep.search_files",
+                  new_callable=AsyncMock) as mock_files,
+            patch("mirage.commands.builtin.slack.grep.resolve_glob",
                   new_callable=AsyncMock,
-                  return_value=files_payload) as mock_files,
+                  return_value=[blob]),
+            patch("mirage.commands.builtin.slack.grep.slack_read",
+                  new_callable=AsyncMock,
+                  return_value=b"foo line\nbar\n") as mock_read,
     ):
         from mirage.commands.builtin.slack.grep import grep
-        await grep(
+        out, io = await grep(
             accessor,
             [
                 PathSpec(
@@ -164,4 +176,6 @@ async def test_grep_files_only_when_files_dir(accessor, index):
             index=index,
         )
     assert mock_msgs.await_count == 0
-    assert mock_files.await_count == 1
+    assert mock_files.await_count == 0
+    assert mock_read.await_count >= 1
+    assert b"foo line" in await materialize(out)

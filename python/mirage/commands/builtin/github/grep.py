@@ -27,10 +27,12 @@ from mirage.commands.builtin.utils.output import (format_optional_records,
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.github.constants import SCOPE_ERROR, SCOPE_WARN
 from mirage.core.github.glob import resolve_glob
 from mirage.core.github.read import read as github_read
 from mirage.core.github.readdir import readdir as _readdir
-from mirage.core.github.scope import should_use_search
+from mirage.core.github.scope import (count_scope_files, is_repo_root,
+                                      scope_relative_key, should_use_search)
 from mirage.core.github.search import narrow_paths
 from mirage.core.github.stat import stat as _stat
 from mirage.io.stream import exit_on_empty, quiet_match
@@ -160,19 +162,27 @@ async def grep(
         st = partial(_st, accessor, index, mount_prefix)
         rb = partial(_rb, accessor, index, mount_prefix)
 
+        key = scope_relative_key(paths[0])
+        file_count = count_scope_files(index._entries, key)
         pt = classify_pattern(pattern, F)
-        use_search = should_use_search(
+        use_search = (should_use_search(
             is_regex=(pt == PatternType.REGEX),
             recursive=(r or R),
             on_default_branch=(accessor.ref == accessor.default_branch),
-        )
+        ) and is_repo_root(key) and file_count > SCOPE_WARN)
         if use_search:
             narrowed = await narrow_paths(accessor.config, accessor.owner,
                                           accessor.repo, pattern, paths)
-            paths = (narrowed if narrowed else await resolve_glob(
-                accessor, paths, index))
+            if narrowed:
+                paths = narrowed
+                file_count = len(narrowed)
+            else:
+                paths = await resolve_glob(accessor, paths, index)
         else:
             paths = await resolve_glob(accessor, paths, index)
+        if file_count > SCOPE_ERROR:
+            msg = f"grep: {file_count} files in scope, narrow the path\n"
+            return b"", IOResult(exit_code=1, stderr=msg.encode())
 
         multi = len(paths) > 1 or r or R
 

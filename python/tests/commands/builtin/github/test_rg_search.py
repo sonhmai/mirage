@@ -38,7 +38,9 @@ def _root() -> PathSpec:
 
 
 def _subdir() -> PathSpec:
-    return PathSpec(original="/src", directory="/src", prefix="",
+    return PathSpec(original="/src",
+                    directory="/src",
+                    prefix="",
                     resolved=False)
 
 
@@ -47,9 +49,13 @@ async def test_rg_root_large_tree_uses_search(mock_github_api, github_env,
                                               monkeypatch):
     accessor, index = github_env
     narrowed = [
-        PathSpec(original="/src/main.py", directory="", prefix="",
+        PathSpec(original="/src/main.py",
+                 directory="",
+                 prefix="",
                  resolved=True),
-        PathSpec(original="/src/utils.py", directory="", prefix="",
+        PathSpec(original="/src/utils.py",
+                 directory="",
+                 prefix="",
                  resolved=True),
     ]
     spy = AsyncMock(return_value=narrowed)

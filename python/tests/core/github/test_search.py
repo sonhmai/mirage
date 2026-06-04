@@ -99,7 +99,7 @@ async def test_narrow_paths_normalizes_results_with_leading_slash(
     ]
     paths = [PathSpec(original="/gh", directory="/gh", prefix="/gh")]
     out = await narrow_paths(config, "acme", "proj", "import", paths)
-    assert [p.original for p in out] == ["/src/main.py", "/src/utils.py"]
+    assert [p.original for p in out] == ["/gh/src/main.py", "/gh/src/utils.py"]
     assert all(p.prefix == "/gh" for p in out)
 
 

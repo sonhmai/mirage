@@ -87,7 +87,7 @@ async def narrow_paths(
             continue
         narrowed.extend(r.path for r in results)
     return [
-        PathSpec(original="/" + n.lstrip("/"),
+        PathSpec(original=mount_prefix + "/" + n.lstrip("/"),
                  directory="",
                  prefix=mount_prefix,
                  resolved=True) for n in narrowed

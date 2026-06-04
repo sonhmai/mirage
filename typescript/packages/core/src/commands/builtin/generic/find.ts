@@ -122,6 +122,6 @@ export async function findGeneric(
     }
   }
   matches.sort()
-  const out: ByteSource = ENC.encode(matches.join('\n'))
+  const out: ByteSource = ENC.encode(matches.length ? matches.join('\n') + '\n' : '')
   return [out, new IOResult()]
 }

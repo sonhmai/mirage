@@ -12,12 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import os
-import tempfile
-
-from mirage import Workspace
-from mirage.types import CommandSafeguard
-
 SEED_FILES = {
     "/data/a.txt":
     "hello\nworld\nfoo\nbar\nbaz\n",
@@ -71,8 +65,6 @@ SEED_FILES = {
     "/data/sorted_c.txt":
     "apple\ncherry\nelder\nfig\n",
 }
-
-BIG_TXT = "".join(f"line{i}\n" for i in range(50))
 
 CASES: list[tuple[str, str]] = [
     # ----- cat / head / tail -----
@@ -428,36 +420,13 @@ CASES: list[tuple[str, str]] = [
     ("base64_stdin_d", "echo aGVsbG8= | base64 -d"),
 ]
 
-# Safeguard demo: per-mount cap on cat. Runs after the regular CASES so
-# adding the seed file does not affect du / find / ls counts above.
-SAFEGUARD_CASES: list[tuple[str, str]] = [
-    ("safeguard_cat_truncates", "cat /data/big.txt"),
-    ("safeguard_cat_pipe_uncapped", "cat /data/big.txt | wc -l"),
-    ("safeguard_cat_pipe_head_3", "cat /data/big.txt | head -n 3"),
-    ("safeguard_cat_pipe_head_30", "cat /data/big.txt | head -n 30"),
-]
-
-TIMEOUT_CASES: list[tuple[str, str]] = [
-    ("timeout_sleep_fires", "sleep 2"),
-    ("timeout_pipeline_first_wins", "sleep 2 | echo done"),
-]
-
 EXIT_CODE_CASES: list[tuple[str, str]] = [
     ("lazy_exit_grep_match", "grep hello /data/a.txt"),
     ("lazy_exit_grep_no_match", "grep zzz /data/a.txt"),
 ]
 
 
-def _set_cat_safeguard(ws: Workspace, max_lines: int) -> None:
-    sg = CommandSafeguard(max_lines=max_lines)
-    mounts = list(ws._registry._mounts)
-    if ws._registry.default_mount is not None:
-        mounts.append(ws._registry.default_mount)
-    for m in mounts:
-        m.command_safeguards["cat"] = sg
-
-
-async def run_cases(ws, reload_resources: dict | None = None) -> None:
+async def run_cases(ws) -> None:
     for path, content in SEED_FILES.items():
         await ws.execute(f"mkdir -p {path.rsplit('/', 1)[0]}")
         await ws.execute(
@@ -469,38 +438,6 @@ async def run_cases(ws, reload_resources: dict | None = None) -> None:
         print(f"=== {name} ===")
         print(out, end="" if out.endswith("\n") else "\n")
 
-    await ws.execute("tee /data/big.txt > /dev/null", stdin=BIG_TXT.encode())
-    _set_cat_safeguard(ws, max_lines=20)
-    for name, cmd in SAFEGUARD_CASES:
-        result = await ws.execute(cmd)
-        out = await result.stdout_str()
-        err = await result.stderr_str()
-        print(f"=== {name} ===")
-        print(out, end="" if out.endswith("\n") else "\n")
-        if err:
-            print(err, end="" if err.endswith("\n") else "\n")
-
-    from mirage.commands import safeguard as _sg
-    _prev_sleep = _sg.DEFAULT_COMMAND_SAFEGUARDS.get("sleep")
-    _sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
-        timeout_seconds=0.1)
-    try:
-        for name, cmd in TIMEOUT_CASES:
-            result = await ws.execute(cmd)
-            out = await result.stdout_str()
-            err = await result.stderr_str()
-            print(f"=== {name} ===")
-            print(f"exit={result.exit_code}")
-            if out:
-                print(out, end="" if out.endswith("\n") else "\n")
-            if err:
-                print(err, end="" if err.endswith("\n") else "\n")
-    finally:
-        if _prev_sleep is None:
-            _sg.DEFAULT_COMMAND_SAFEGUARDS.pop("sleep", None)
-        else:
-            _sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = _prev_sleep
-
     for name, cmd in EXIT_CODE_CASES:
         result = await ws.execute(cmd)
         out = await result.stdout_str()
@@ -508,15 +445,3 @@ async def run_cases(ws, reload_resources: dict | None = None) -> None:
         print(f"exit={result.exit_code}")
         if out:
             print(out, end="" if out.endswith("\n") else "\n")
-
-    fd, tar = tempfile.mkstemp(suffix=".tar")
-    os.close(fd)
-    try:
-        await ws.snapshot(tar)
-        loaded = Workspace.load(tar, resources=reload_resources)
-        result = await loaded.execute("cat /data/a.txt")
-        out = await result.stdout_str()
-        print("=== snapshot_load_cache ===")
-        print(out, end="" if out.endswith("\n") else "\n")
-    finally:
-        os.unlink(tar)

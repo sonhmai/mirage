@@ -7,9 +7,11 @@
     "ram": "tsx ram.ts",
     "disk": "tsx disk.ts",
     "redis": "tsx redis.ts",
+    "opfs": "tsx opfs.ts",
     "s3": "tsx s3.ts"
   },
   "dependencies": {
+    "@struktoai/mirage-browser": "workspace:*",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*"
   },

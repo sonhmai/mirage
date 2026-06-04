@@ -76,6 +76,10 @@ jobs:
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-node build
 
+      - name: Build mirage-browser
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-browser build
+
       - name: Create MinIO bucket
         run: |
           curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
@@ -94,6 +98,12 @@ jobs:
         run: |
           pnpm exec tsx disk.ts > /tmp/ts-disk.out
           diff truth.txt /tmp/ts-disk.out
+
+      - name: Run OPFS backend and diff against truth
+        working-directory: integ
+        run: |
+          pnpm exec tsx opfs.ts > /tmp/ts-opfs.out
+          diff truth.txt /tmp/ts-opfs.out
 
       - name: Run Redis backend and diff against truth
         working-directory: integ

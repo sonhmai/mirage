@@ -153,6 +153,8 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ['wc_l_multi', 'wc -l /data/a.txt /data/b.txt'],
   ['cat_multi3', 'cat /data/a.txt /data/b.txt /data/dup.txt'],
   ['md5_multi3', 'md5 /data/a.txt /data/b.txt /data/dup.txt'],
+  ['du_multi', 'du /data/a.txt /data/b.txt'],
+  ['file_multi', 'file /data/a.txt /data/user.json'],
 
   ['grep_pipe_wc', 'grep world /data/a.txt | wc -l'],
   ['sort_uniq', 'sort /data/dup.txt | uniq'],
@@ -338,6 +340,11 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ['base64_stdin_d', 'echo aGVsbG8= | base64 -d'],
 ]
 
+export const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
+  ['lazy_exit_grep_match', 'grep hello /data/a.txt'],
+  ['lazy_exit_grep_no_match', 'grep zzz /data/a.txt'],
+]
+
 const ENC = new TextEncoder()
 
 export async function runCases(ws: Workspace): Promise<void> {
@@ -356,5 +363,13 @@ export async function runCases(ws: Workspace): Promise<void> {
     }
     process.stdout.write(`=== ${name} ===\n`)
     process.stdout.write(out.endsWith('\n') ? out : out + '\n')
+  }
+
+  for (const [name, cmd] of EXIT_CODE_CASES) {
+    const result = await ws.execute(cmd)
+    const out = new TextDecoder().decode(result.stdout)
+    process.stdout.write(`=== ${name} ===\n`)
+    process.stdout.write(`exit=${result.exitCode}\n`)
+    if (out) process.stdout.write(out.endsWith('\n') ? out : out + '\n')
   }
 }

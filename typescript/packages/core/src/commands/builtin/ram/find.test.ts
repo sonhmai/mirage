@@ -50,7 +50,7 @@ async function runFind(
         ? out
         : await materialize(out as AsyncIterable<Uint8Array>)
   const text = DEC.decode(buf)
-  const lines = text === '' ? [] : text.split('\n')
+  const lines = text === '' ? [] : text.replace(/\n$/, '').split('\n')
   return { lines, exitCode: ioResult.exitCode }
 }
 

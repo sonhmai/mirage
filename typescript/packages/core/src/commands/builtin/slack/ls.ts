@@ -16,93 +16,11 @@ import type { SlackAccessor } from '../../../accessor/slack.ts'
 import { resolveSlackGlob } from '../../../core/slack/glob.ts'
 import { readdir as slackReaddir } from '../../../core/slack/readdir.ts'
 import { stat as slackStat } from '../../../core/slack/stat.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import type { FileStat } from '../../../types.ts'
-import { FileType, PathSpec, ResourceName } from '../../../types.ts'
+import { PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { humanSize } from '../utils/formatting.ts'
+import { lsGeneric } from '../generic/ls.ts'
 import { metadataProvision } from './_provision.ts'
-
-const ENC = new TextEncoder()
-
-async function lsEntries(
-  accessor: SlackAccessor,
-  path: PathSpec,
-  allFiles: boolean,
-  sortBy: 'name' | 'size',
-  reverse: boolean,
-  recursive: boolean,
-  listDir: boolean,
-  warnings: string[],
-  indexCache: CommandOpts['index'],
-): Promise<FileStat[]> {
-  if (listDir) {
-    const s = await slackStat(accessor, path, indexCache ?? undefined)
-    return [s]
-  }
-  let entries: string[]
-  try {
-    entries = await slackReaddir(accessor, path, indexCache ?? undefined)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    warnings.push(`ls: cannot access '${path.original}': ${msg}`)
-    return []
-  }
-  const stats: FileStat[] = []
-  for (const entry of entries) {
-    try {
-      const eSpec = new PathSpec({
-        original: entry,
-        directory: entry,
-        resolved: false,
-        prefix: path.prefix,
-      })
-      const s = await slackStat(accessor, eSpec, indexCache ?? undefined)
-      if (!allFiles && s.name.startsWith('.')) continue
-      stats.push(s)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      warnings.push(`ls: cannot access '${entry}': ${msg}`)
-    }
-  }
-  if (sortBy === 'size') {
-    stats.sort((a, b) => (a.size ?? 0) - (b.size ?? 0))
-    if (!reverse) stats.reverse()
-  } else {
-    stats.sort((a, b) => a.name.localeCompare(b.name))
-    if (reverse) stats.reverse()
-  }
-  if (recursive) {
-    const subEntries: FileStat[] = []
-    for (const s of stats) {
-      subEntries.push(s)
-      if (s.type === FileType.DIRECTORY) {
-        const entryPath = path.child(s.name)
-        const entrySpec = new PathSpec({
-          original: entryPath,
-          directory: entryPath,
-          resolved: false,
-          prefix: path.prefix,
-        })
-        const sub = await lsEntries(
-          accessor,
-          entrySpec,
-          allFiles,
-          sortBy,
-          reverse,
-          recursive,
-          false,
-          warnings,
-          indexCache,
-        )
-        subEntries.push(...sub)
-      }
-    }
-    return subEntries
-  }
-  return stats
-}
 
 async function lsCommand(
   accessor: SlackAccessor,
@@ -110,65 +28,24 @@ async function lsCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const long = opts.flags.args_l === true && opts.flags.args_1 !== true
-  const allFiles = opts.flags.a === true || opts.flags.A === true
-  const human = opts.flags.h === true
-  const reverse = opts.flags.r === true
-  const recursive = opts.flags.R === true
-  const listDir = opts.flags.d === true
-  const classify = opts.flags.F === true
-  const sortBy: 'name' | 'size' = opts.flags.S === true ? 'size' : 'name'
   let workingPaths: PathSpec[] = paths
   if (workingPaths.length === 0) {
-    const cwd = opts.cwd
     workingPaths = [
       new PathSpec({
-        original: cwd,
-        directory: cwd,
+        original: opts.cwd,
+        directory: opts.cwd,
         resolved: false,
         prefix: opts.mountPrefix ?? '',
       }),
     ]
   }
-  workingPaths = await resolveSlackGlob(accessor, workingPaths, opts.index ?? undefined)
-  const warnings: string[] = []
-  const results: string[] = []
-  for (const p of workingPaths) {
-    let entries: FileStat[]
-    try {
-      entries = await lsEntries(
-        accessor,
-        p,
-        allFiles,
-        sortBy,
-        reverse,
-        recursive,
-        listDir,
-        warnings,
-        opts.index,
-      )
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      warnings.push(`ls: cannot access '${p.original}': ${msg}`)
-      continue
-    }
-    if (long) {
-      for (const e of entries) {
-        const sizeStr = human ? humanSize(e.size ?? 0) : String(e.size ?? 0)
-        results.push(`${e.type ?? '-'}\t${sizeStr}\t${e.modified ?? ''}\t${e.name}`)
-      }
-    } else {
-      for (const e of entries) {
-        const isDir = classify && e.type === FileType.DIRECTORY
-        const name = isDir ? e.name + '/' : e.name
-        results.push(name)
-      }
-    }
-  }
-  const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : null
-  const exitCode = warnings.length > 0 && results.length === 0 ? 1 : 0
-  const out: ByteSource = ENC.encode(results.join('\n'))
-  return [out, new IOResult({ stderr, exitCode })]
+  const resolved = await resolveSlackGlob(accessor, workingPaths, opts.index ?? undefined)
+  return lsGeneric(
+    resolved,
+    opts,
+    (p) => slackReaddir(accessor, p, opts.index ?? undefined),
+    (p) => slackStat(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const SLACK_LS = command({

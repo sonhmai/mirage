@@ -97,6 +97,44 @@ describe('Workspace command safeguard', () => {
     expect(err).toContain('truncated')
   })
 
+  it('commandSafeguards constructor option caps below default', async () => {
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    ram.store.files.set('/big.txt', ENC.encode('line0\nline1\nline2\nline3\nline4\n'))
+    const ws = new Workspace(
+      { '/': ram },
+      {
+        mode: MountMode.WRITE,
+        ops: registry,
+        shellParser: parser,
+        commandSafeguards: { '/': { cat: new CommandSafeguard({ maxLines: 3 }) } },
+      },
+    )
+    const { code, out, err } = await runCmd(ws, 'cat /big.txt')
+    expect(code).toBe(0)
+    expect(out).toBe('line0\nline1\nline2\n')
+    expect(err).toContain('truncated')
+  })
+
+  it('commandSafeguards constructor option rejects an unknown prefix', () => {
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    expect(
+      () =>
+        new Workspace(
+          { '/': ram },
+          {
+            mode: MountMode.WRITE,
+            ops: registry,
+            shellParser: parser,
+            commandSafeguards: { '/missing': { cat: new CommandSafeguard({ maxLines: 3 }) } },
+          },
+        ),
+    ).toThrow(/unknown mount prefix/)
+  })
+
   it('onExceed=ERROR drops stdout + exits 1', async () => {
     const ws = buildWs(5)
     overrideSafeguard(ws, 'cat', new CommandSafeguard({ maxLines: 3, onExceed: OnExceed.ERROR }))

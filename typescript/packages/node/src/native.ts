@@ -21,6 +21,7 @@ export interface NativeExecOptions {
   env?: Record<string, string>
   timeoutMs?: number | null
   signal?: AbortSignal
+  name?: string
 }
 
 export type NativeExecResult = ExecuteResult
@@ -87,9 +88,13 @@ export function nativeExec(command: string, options: NativeExecOptions): Promise
       }
       if (killed) {
         // Align with Python mirage.workspace.native.native_exec: on timeout
-        // the caller doesn't get the partial stdout that was collected before
-        // the SIGKILL — just an empty buffer and the "timeout\n" stderr marker.
-        resolve(new ExecuteResult(new Uint8Array(), new TextEncoder().encode('timeout\n'), 124))
+        // the caller doesn't get the partial stdout collected before the
+        // SIGKILL — just an empty buffer and the "<name>: timed out after Ns"
+        // stderr marker.
+        const label = options.name ?? command
+        const secs = timeoutMs !== null ? timeoutMs / 1000 : 0
+        const msg = `${label}: timed out after ${String(secs)}s\n`
+        resolve(new ExecuteResult(new Uint8Array(), new TextEncoder().encode(msg), 124))
         return
       }
       resolve(new ExecuteResult(concatChunks(stdoutChunks), concatChunks(stderrChunks), code ?? 0))

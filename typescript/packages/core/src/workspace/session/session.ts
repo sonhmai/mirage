@@ -34,6 +34,7 @@ export interface SessionInit {
    * mounts (cache root, observer, /dev) regardless of this allowlist.
    */
   allowedMounts?: ReadonlySet<string> | null
+  pipelineTimeoutSeconds?: number | null
 }
 
 export class Session {
@@ -50,6 +51,7 @@ export class Session {
   stdinBuffer: AsyncLineIterator | null = null
   localVars: Map<string, string | null> | null = null
   readonly allowedMounts: ReadonlySet<string> | null
+  pipelineTimeoutSeconds: number | null
 
   constructor(init: SessionInit) {
     this.sessionId = init.sessionId
@@ -63,6 +65,7 @@ export class Session {
     this.readonlyVars = init.readonlyVars ?? new Set()
     this.arrays = init.arrays ?? {}
     this.allowedMounts = init.allowedMounts ?? null
+    this.pipelineTimeoutSeconds = init.pipelineTimeoutSeconds ?? null
   }
 
   /**
@@ -88,6 +91,7 @@ export class Session {
         overrides.arrays ??
         Object.fromEntries(Object.entries(this.arrays).map(([k, v]) => [k, [...v]])),
       allowedMounts: overrides.allowedMounts ?? this.allowedMounts,
+      pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
     })
   }
 

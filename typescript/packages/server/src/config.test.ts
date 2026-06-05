@@ -90,4 +90,35 @@ describe('configToWorkspaceArgs', () => {
     const args = await configToWorkspaceArgs(cfg)
     expect(args.options.cache).toBeInstanceOf(RedisFileCacheStore)
   })
+
+  it('parses per-mount commandSafeguards into the resource tuple', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: {
+        '/': {
+          resource: 'ram',
+          commandSafeguards: {
+            cat: { maxLines: 10, timeoutSeconds: 5, onExceed: 'error' },
+          },
+        },
+      },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    const safeguards = args.resources['/']?.[2]
+    expect(safeguards?.cat?.maxLines).toBe(10)
+    expect(safeguards?.cat?.timeoutSeconds).toBe(5)
+    expect(safeguards?.cat?.onExceed).toBe('error')
+  })
+
+  it('defaults to no commandSafeguards when omitted', async () => {
+    const cfg = loadWorkspaceConfig({ mounts: { '/': { resource: 'ram' } } })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.resources['/']?.[2]).toEqual({})
+  })
+
+  it('rejects an invalid onExceed value', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram', commandSafeguards: { cat: { onExceed: 'boom' } } } },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/invalid onExceed/)
+  })
 })

@@ -14,6 +14,8 @@
 
 export const VERSION = '0.0.0'
 export {
+  CommandSafeguard,
+  type CommandSafeguardInit,
   ConsistencyPolicy,
   DEFAULT_AGENT_ID,
   DEFAULT_SESSION_ID,
@@ -22,6 +24,7 @@ export {
   type FileStatInit,
   FileType,
   MountMode,
+  OnExceed,
   PathSpec,
   type PathSpecInit,
   ResourceName,
@@ -73,6 +76,12 @@ export {
 export { RAM_OPS } from './ops/ram/index.ts'
 export { extractWriteData } from './ops/write_args.ts'
 export { RAM_COMMANDS } from './commands/builtin/ram/index.ts'
+export {
+  DEFAULT_COMMAND_SAFEGUARDS,
+  FALLBACK_SAFEGUARD,
+  resolveAcrossMounts,
+  resolveSafeguard,
+} from './commands/safeguard.ts'
 export { GENERAL_COMMANDS } from './commands/builtin/general/index.ts'
 export { RAM_AWK } from './commands/builtin/ram/awk.ts'
 export { RAM_BASE64 } from './commands/builtin/ram/base64_cmd.ts'

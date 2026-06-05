@@ -14,7 +14,7 @@
 
 import { resolvePath } from '../../../commands/spec/parser.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts';
+import type { PathSpec } from '../../../types.ts'
 import { FileType } from '../../../types.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'

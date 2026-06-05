@@ -15,7 +15,7 @@
 import { mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import type { MountMode } from '@struktoai/mirage-node'
+import type { CommandSafeguard, MountMode } from '@struktoai/mirage-node'
 import { Workspace, type Resource } from '@struktoai/mirage-node'
 import type { WorkspaceRegistry } from '../registry.ts'
 import { buildOverrideResources, cloneWorkspaceWithOverride, type OverrideShape } from '../clone.ts'
@@ -81,13 +81,16 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       }
       const resourceMap: Record<string, Resource> = {}
       const modeOverrides: Record<string, MountMode> = {}
-      for (const [prefix, [resource, mode]] of Object.entries(args.resources)) {
+      const commandSafeguards: Record<string, Record<string, CommandSafeguard>> = {}
+      for (const [prefix, [resource, mode, safeguards]] of Object.entries(args.resources)) {
         resourceMap[prefix] = resource
         modeOverrides[prefix] = mode
+        if (Object.keys(safeguards).length > 0) commandSafeguards[prefix] = safeguards
       }
       const ws = new Workspace(resourceMap, {
         mode: args.options.mode,
         modeOverrides,
+        ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
         ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
         ...(args.options.index !== undefined ? { index: args.options.index } : {}),
       })

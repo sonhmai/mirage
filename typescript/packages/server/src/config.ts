@@ -16,7 +16,9 @@ import { readFileSync } from 'node:fs'
 import { parse as parseYaml } from 'yaml'
 import {
   buildResource,
+  CommandSafeguard,
   MountMode,
+  OnExceed,
   RAMFileCacheStore,
   RedisFileCacheStore,
   type FileCache,
@@ -32,6 +34,30 @@ function coerceMountMode(value: string | undefined, fallback: MountMode): MountM
   const lower = value.toLowerCase()
   if (!VALID_MODES.has(lower)) throw new Error(`invalid mount mode: ${value}`)
   return lower as MountMode
+}
+
+const VALID_ON_EXCEED = new Set<string>([OnExceed.ERROR, OnExceed.TRUNCATE])
+
+function coerceOnExceed(value: string): OnExceed {
+  if (!VALID_ON_EXCEED.has(value.toLowerCase())) {
+    throw new Error(`invalid onExceed: ${value}`)
+  }
+  return value.toLowerCase() as OnExceed
+}
+
+function parseSafeguards(
+  raw: Record<string, RawSafeguardBlock> | undefined,
+): Record<string, CommandSafeguard> {
+  const out: Record<string, CommandSafeguard> = {}
+  for (const [cmd, block] of Object.entries(raw ?? {})) {
+    out[cmd] = new CommandSafeguard({
+      ...(block.maxBytes !== undefined ? { maxBytes: block.maxBytes } : {}),
+      ...(block.maxLines !== undefined ? { maxLines: block.maxLines } : {}),
+      ...(block.timeoutSeconds !== undefined ? { timeoutSeconds: block.timeoutSeconds } : {}),
+      ...(block.onExceed !== undefined ? { onExceed: coerceOnExceed(block.onExceed) } : {}),
+    })
+  }
+  return out
 }
 
 const VAR_RE = /\$\{([A-Z_][A-Z0-9_]*)\}/g
@@ -70,10 +96,18 @@ export function interpolateEnv<T>(value: T, env: Record<string, string>): T {
   return out as T
 }
 
+export interface RawSafeguardBlock {
+  maxBytes?: number | null
+  maxLines?: number | null
+  timeoutSeconds?: number | null
+  onExceed?: string
+}
+
 export interface MountBlock {
   resource: string
   mode?: string
   config?: Record<string, unknown>
+  commandSafeguards?: Record<string, RawSafeguardBlock>
 }
 
 export interface RamCacheBlock {
@@ -152,7 +186,7 @@ export function loadWorkspaceConfig(
 }
 
 export interface WorkspaceArgs {
-  resources: Record<string, [Resource, MountMode]>
+  resources: Record<string, [Resource, MountMode, Record<string, CommandSafeguard>]>
   options: {
     mode: MountMode
     sessionId: string
@@ -198,11 +232,11 @@ function buildIndex(
 
 export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
   const wsMode = coerceMountMode(cfg.mode, MountMode.WRITE)
-  const resources: Record<string, [Resource, MountMode]> = {}
+  const resources: Record<string, [Resource, MountMode, Record<string, CommandSafeguard>]> = {}
   for (const [prefix, block] of Object.entries(cfg.mounts)) {
     const r = await buildResource(block.resource, block.config ?? {})
     const m = coerceMountMode(block.mode, wsMode)
-    resources[prefix] = [r, m]
+    resources[prefix] = [r, m, parseSafeguards(block.commandSafeguards)]
   }
   const cache = buildCache(cfg.cache)
   const index = buildIndex(cfg.index)

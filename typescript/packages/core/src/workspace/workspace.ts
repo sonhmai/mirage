@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { NOOPAccessor } from '../accessor/base.ts'
-import { applyIo } from '../cache/file/io.ts'
 import { CacheEntry } from '../cache/file/entry.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import type { IndexConfig } from '../cache/index/config.ts'
@@ -29,13 +28,8 @@ import type { Resource } from '../resource/base.ts'
 import { RAMResource, type RAMResourceState } from '../resource/ram/ram.ts'
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
 import { GENERAL_COMMANDS, HISTORY_COMMANDS } from '../commands/builtin/general/index.ts'
-import {
-  applySafeguard,
-  CommandTimeoutError,
-  runWithTimeout,
-} from '../commands/builtin/utils/safeguard.ts'
+import { CommandTimeoutError, runWithTimeout } from '../commands/builtin/utils/safeguard.ts'
 import { resolveSafeguard } from '../commands/safeguard.ts'
-import { applyBarrier, BarrierPolicy } from '../shell/barrier.ts'
 import { JobTable } from '../shell/job_table.ts'
 import { findSyntaxError, type ShellParser } from '../shell/parse.ts'
 import {
@@ -54,7 +48,14 @@ import {
 } from '../snapshot/state.ts'
 import { captureFingerprints, checkDrift, liveOnlyMountPrefixes } from './snapshot/drift.ts'
 import { FORMAT_VERSION } from './snapshot/utils.ts'
-import { DEFAULT_AGENT_ID, DriftPolicy, FileType, MountMode, type PathSpec } from '../types.ts'
+import {
+  type CommandSafeguard,
+  DEFAULT_AGENT_ID,
+  DriftPolicy,
+  FileType,
+  MountMode,
+  type PathSpec,
+} from '../types.ts'
 import type { TSNodeLike } from './expand/variable.ts'
 import type { ExecuteFn } from './expand/node.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
@@ -67,8 +68,9 @@ import type { BridgeDispatchFn, MirageEntry } from './executor/python/mirage_bri
 import { PyodideRuntime } from './executor/python/runtime.ts'
 import type { PythonReplRunResult } from './executor/python/types.ts'
 import { makeAbortError } from './abort.ts'
-import { executeNode } from './node/execute_node.ts'
+import { Dispatcher } from './dispatcher.ts'
 import { provisionNode } from './node/provision_node.ts'
+import { runCommandTree } from './node/run_tree.ts'
 import { buildFilePrompt } from './file_prompt.ts'
 import { SessionManager } from './session/manager.ts'
 import type { Session } from './session/session.ts'
@@ -123,21 +125,12 @@ function recordFromSnapshot(s: ExecutionRecordSnapshot): ExecutionRecord {
   })
 }
 
-const DISPATCH_READ_OPS = new Set(['read', 'read_bytes'])
-const DISPATCH_WRITE_OPS = new Set([
-  'write',
-  'write_bytes',
-  'append',
-  'unlink',
-  'create',
-  'truncate',
-])
-
 const VALID_MODES: readonly string[] = [MountMode.READ, MountMode.WRITE, MountMode.EXEC]
 
 export interface WorkspaceOptions {
   mode?: MountMode
   modeOverrides?: Record<string, MountMode>
+  commandSafeguards?: Record<string, Record<string, CommandSafeguard>>
   /**
    * Behaviour for the post-load drift check on fingerprinted reads. Only
    * consulted by {@link Workspace.load} / {@link Workspace.fromState};
@@ -236,6 +229,7 @@ export class Workspace {
   readonly jobTable = new JobTable()
   private readonly agentId: string
   readonly cache: FileCache & Resource
+  private readonly dispatcher: Dispatcher
   readonly history: ExecutionHistory = new ExecutionHistory()
   readonly observer: Observer
   readonly records: OpRecord[] = []
@@ -292,6 +286,9 @@ export class Workspace {
     })
     this.closers.push(() => this.pythonRuntime.close())
     this.cache = options.cache ?? new RAMFileCacheStore({ limit: options.cacheLimit ?? '512MB' })
+    this.dispatcher = new Dispatcher(this.registry, this.cache, this.opsRegistry, (p) =>
+      this.resolve(p),
+    )
     const defaultMount = this.registry.setDefaultMount(this.cache)
     for (const resource of [...Object.values(withObserver), this.cache]) {
       const resourceOps = resource.ops?.()
@@ -314,6 +311,15 @@ export class Workspace {
       }
       for (const cmd of HISTORY_COMMANDS) {
         mount.registerGeneral(cmd)
+      }
+    }
+    for (const [prefix, safeguards] of Object.entries(options.commandSafeguards ?? {})) {
+      const mount = this.registry.mountForPrefix(prefix)
+      if (mount === null) {
+        throw new Error(`commandSafeguards references unknown mount prefix: ${prefix}`)
+      }
+      for (const [cmd, sg] of Object.entries(safeguards)) {
+        mount.commandSafeguards.set(cmd, sg)
       }
     }
     this.fs = new WorkspaceFS((path) => this.resolve(path), this.opsRegistry)
@@ -677,18 +683,7 @@ export class Workspace {
    * to no known mount.
    */
   async invalidateAfterWriteByPath(path: string): Promise<void> {
-    const mount = this.registry.mountFor(path)
-    if (mount === null) return
-    if (mount.resource.isRemote === true) {
-      await this.cache.remove(path)
-    }
-    const idx = mount.resource.index
-    if (idx !== undefined) {
-      const slash = path.lastIndexOf('/')
-      const parent = slash <= 0 ? '/' : path.slice(0, slash)
-      await idx.invalidateDir(parent)
-      await idx.invalidateDir(parent + '/')
-    }
+    await this.dispatcher.invalidateAfterWriteByPath(path)
   }
 
   async provision(command: string): Promise<ProvisionResult> {
@@ -736,7 +731,6 @@ export class Workspace {
     const stdin = options.stdin ?? null
     if (options.provision === true) return this.provision(command)
     const parser = await this.getShellParser()
-    const opsRegistry = this.opsRegistry
     const root = parser.parse(command)
     const offending = findSyntaxError(root)
     if (offending !== null) {
@@ -750,41 +744,7 @@ export class Workspace {
     }
     const rootNode = root as unknown as TSNodeLike
 
-    const cache = this.cache
-    const dispatch: DispatchFn = async (opName, path, args, kwargs) => {
-      const [resource, scope, mode] = await this.resolve(path.original)
-      const cacheable = resource.isRemote === true
-      if (cacheable && DISPATCH_READ_OPS.has(opName)) {
-        const cached = await cache.get(path.original)
-        if (cached !== null) {
-          return [cached, new IOResult({ reads: { [path.original]: cached } })]
-        }
-      }
-      if (mode === MountMode.READ && opsRegistry.find(opName, resource.kind)?.write === true) {
-        throw new Error(`mount at '${path.original}' is read-only`)
-      }
-      const fullKwargs: OpKwargs =
-        kwargs?.index === undefined && resource.index !== undefined
-          ? { ...(kwargs ?? {}), index: resource.index }
-          : (kwargs ?? {})
-      const mount = this.registry.mountFor(path.original)
-      const result = await runWithRevisions(
-        mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
-        async () =>
-          opsRegistry.call(
-            opName,
-            resource.kind,
-            resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-            scope,
-            args ?? [],
-            fullKwargs,
-          ),
-      )
-      if (DISPATCH_WRITE_OPS.has(opName)) {
-        await this.invalidateAfterWriteByPath(path.original)
-      }
-      return [result, new IOResult()]
-    }
+    const dispatch: DispatchFn = this.dispatcher.dispatch
 
     const executeFn: ExecuteFn = async (cmd) => {
       const innerOpts: ExecuteOptions & { provision?: false } = {}
@@ -834,7 +794,7 @@ export class Workspace {
     try {
       execResult = await runWithRecording(() =>
         runWithSession(effectiveSession, () =>
-          executeNode(deps, rootNode, effectiveSession, stdin, null),
+          runCommandTree(deps, rootNode, effectiveSession, stdin),
         ),
       )
     } catch (err) {
@@ -845,26 +805,9 @@ export class Workspace {
       }
       throw err
     }
-    const [[stdout, io], opRecords] = execResult
-    let materialized = await applyBarrier(stdout, io, BarrierPolicy.VALUE)
-    io.syncExitCode()
-    if (io.safeguard !== null && materialized !== null) {
-      const [trimmed, sgIo] = await applySafeguard(materialized, io.safeguard)
-      materialized = trimmed
-      if (sgIo.stderr !== null) {
-        const existing = await materialize(io.stderr)
-        const added = await materialize(sgIo.stderr)
-        const merged = new Uint8Array(existing.byteLength + added.byteLength)
-        merged.set(existing, 0)
-        merged.set(added, existing.byteLength)
-        io.stderr = merged
-      }
-      if (sgIo.exitCode !== 0) {
-        io.exitCode = sgIo.exitCode
-      }
-    }
+    const [[materialized, io], opRecords] = execResult
     targetSession.lastExitCode = io.exitCode
-    await applyIo(this.cache, io)
+    await this.dispatcher.applyIo(io)
     const stdoutBytes = materialized === null ? new Uint8Array() : await materialize(materialized)
     const stderrBytes = await materialize(io.stderr)
 

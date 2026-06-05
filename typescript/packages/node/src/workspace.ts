@@ -20,6 +20,7 @@ import {
   type ExecuteOptions,
   type ProvisionResult,
   type Resource,
+  resolveSafeguard,
   type ShellParser,
   Workspace as CoreWorkspace,
   type WorkspaceOptions,
@@ -117,8 +118,17 @@ export class Workspace extends CoreWorkspace {
             'See https://mirage.dev/typescript/limitations for details.',
         )
       } else {
+        const trimmed = command.trim()
+        const nativeName = trimmed !== '' ? trimmed.split(/\s+/)[0] : undefined
+        const resolved = nativeName !== undefined ? resolveSafeguard(nativeName) : null
+        const nativeTimeout =
+          resolved !== null && resolved.timeoutSeconds !== null && resolved.timeoutSeconds > 0
+            ? resolved.timeoutSeconds
+            : null
         const opts: NativeExecOptions = { cwd: mp }
         if (options.signal !== undefined) opts.signal = options.signal
+        if (nativeTimeout !== null) opts.timeoutMs = nativeTimeout * 1000
+        if (nativeName !== undefined) opts.name = nativeName
         const { stdout, stderr, exitCode } = await nativeExec(command, opts)
         return new ExecuteResult(stdout, stderr, exitCode)
       }

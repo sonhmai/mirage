@@ -74,14 +74,15 @@ describe('nativeExec', () => {
     })
   })
 
-  it('returns exit 124 + "timeout\\n" stderr when timeout fires', async () => {
+  it('returns exit 124 + Python-format timeout stderr when timeout fires', async () => {
     await withTmpdir(async (dir) => {
       const { stderr, exitCode } = await nativeExec('sleep 5', {
         cwd: dir,
         timeoutMs: 100,
+        name: 'sleep',
       })
       expect(exitCode).toBe(124)
-      expect(DEC.decode(stderr)).toBe('timeout\n')
+      expect(DEC.decode(stderr)).toBe('sleep: timed out after 0.1s\n')
     })
   })
 

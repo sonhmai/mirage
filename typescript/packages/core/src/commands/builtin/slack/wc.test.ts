@@ -75,8 +75,9 @@ describe('slack wc', () => {
       { index: idx, transport },
     )
     const parts = out.split('\t')
-    expect(parts).toHaveLength(3)
+    expect(parts).toHaveLength(4)
     expect(parts[0]).toBe('3')
+    expect(parts[3]).toBe('/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl')
   })
 
   it('supports -l flag (line count)', async () => {
@@ -106,6 +107,6 @@ describe('slack wc', () => {
       { args_l: true },
       { index: idx, transport },
     )
-    expect(out).toBe('2')
+    expect(out).toBe('2\t/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl')
   })
 })

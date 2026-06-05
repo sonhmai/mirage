@@ -13,76 +13,32 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SlackAccessor } from '../../../accessor/slack.ts'
+import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { resolveSlackGlob } from '../../../core/slack/glob.ts'
 import { read as slackRead } from '../../../core/slack/read.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { wcGeneric } from '../generic/wc.ts'
 import { fileReadProvision } from './_provision.ts'
 
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
-
-function countChar(text: string, ch: string): number {
-  let n = 0
-  for (const c of text) if (c === ch) n += 1
-  return n
-}
-
-function maxLineLength(text: string): number {
-  let max = 0
-  let current = 0
-  for (const c of text) {
-    if (c === '\n') {
-      if (current > max) max = current
-      current = 0
-    } else {
-      current += 1
-    }
-  }
-  if (current > max) max = current
-  return max
+async function* slackStream(
+  accessor: SlackAccessor,
+  p: PathSpec,
+  index: IndexCacheStore | undefined,
+): AsyncIterable<Uint8Array> {
+  yield await slackRead(accessor, p, index)
 }
 
 async function wcCommand(
   accessor: SlackAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const f = opts.flags
-  const lFlag = f.args_l === true
-  const wFlag = f.w === true
-  const cFlag = f.c === true
-  const mFlag = f.m === true
-  const LFlag = f.L === true
-  let data: Uint8Array | null
-  if (paths.length > 0) {
-    const resolved = await resolveSlackGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    data = await slackRead(accessor, first, opts.index ?? undefined)
-  } else {
-    data = await readStdinAsync(opts.stdin)
-    if (data === null) {
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('wc: missing operand\n') })]
-    }
-  }
-  const text = DEC.decode(data)
-  const lineCount = countChar(text, '\n')
-  const wordCount = text.split(/\s+/).filter((s) => s !== '').length
-  const byteCount = data.byteLength
-  let payload: string
-  if (LFlag) payload = String(maxLineLength(text))
-  else if (lFlag) payload = String(lineCount)
-  else if (wFlag) payload = String(wordCount)
-  else if (mFlag) payload = String(text.length)
-  else if (cFlag) payload = String(byteCount)
-  else payload = `${String(lineCount)}\t${String(wordCount)}\t${String(byteCount)}`
-  const out: ByteSource = ENC.encode(payload)
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveSlackGlob(accessor, paths, opts.index ?? undefined) : []
+  return wcGeneric(resolved, texts, opts, (p) => slackStream(accessor, p, opts.index ?? undefined))
 }
 
 export const SLACK_WC = command({

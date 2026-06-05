@@ -78,7 +78,7 @@ export async function find(
         if (options.iname !== null && options.iname !== undefined) {
           if (!fnmatch(entryName.toLowerCase(), options.iname.toLowerCase())) continue
         }
-        const fullPath = '/' + stripKeyPrefix(key, accessor.config)
+        const fullPath = ('/' + stripKeyPrefix(key, accessor.config)).replace(/\/+$/, '') || '/'
         if (options.pathPattern !== null && options.pathPattern !== undefined) {
           if (!fnmatch(fullPath, options.pathPattern)) continue
         }
@@ -87,12 +87,14 @@ export async function find(
         }
         if (options.type === 'f' && key.endsWith('/')) continue
         if (options.type === 'd' && !key.endsWith('/')) continue
-        const size = obj.Size ?? 0
-        if (options.minSize !== null && options.minSize !== undefined && size < options.minSize) {
-          continue
-        }
-        if (options.maxSize !== null && options.maxSize !== undefined && size > options.maxSize) {
-          continue
+        if (!key.endsWith('/')) {
+          const size = obj.Size ?? 0
+          if (options.minSize !== null && options.minSize !== undefined && size < options.minSize) {
+            continue
+          }
+          if (options.maxSize !== null && options.maxSize !== undefined && size > options.maxSize) {
+            continue
+          }
         }
         results.push(fullPath)
       }

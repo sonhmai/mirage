@@ -164,15 +164,15 @@
                 "icon": "database",
                 "pages": [
                   "home/setup/mongodb",
-                  "home/setup/postgres"
+                  "home/setup/postgres",
+                  "home/setup/chroma"
                 ]
               },
               {
                 "group": "Knowledge",
                 "icon": "/images/dify-logo.svg",
                 "pages": [
-                  "home/setup/dify",
-                  "home/setup/chroma"
+                  "home/setup/dify"
                 ]
               },
               {
@@ -306,15 +306,15 @@
                 "icon": "database",
                 "pages": [
                   "python/resource/mongodb",
-                  "python/resource/postgres"
+                  "python/resource/postgres",
+                  "python/resource/chroma"
                 ]
               },
               {
                 "group": "Knowledge",
                 "icon": "/images/dify-logo.svg",
                 "pages": [
-                  "python/resource/dify",
-                  "python/resource/chroma"
+                  "python/resource/dify"
                 ]
               },
               {

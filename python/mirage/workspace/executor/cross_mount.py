@@ -16,7 +16,7 @@ import re
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
 from mirage.workspace.types import ExecutionNode
 
 _CROSS_COMMANDS = frozenset({"cp", "mv", "diff", "cmp"})
@@ -40,15 +40,57 @@ async def handle_cross_mount(
     cmd_name: str,
     scopes: list[PathSpec],
     text_args: list[str],
+    flag_kwargs: dict,
     dispatch,
     cmd_str: str,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Handle commands that span multiple mounts."""
+    """Execute a supported command whose path operands span mounts.
+
+    Routes cross-mount commands through workspace operations because no single
+    resource command handler owns all operands. Read commands consume each path
+    from its mounted resource; comparison commands read one operand from each
+    mount; copy and move dispatch reads and writes across mount boundaries.
+
+    For ``cp`` and ``mv``, every path except the final path is a source and the
+    final path is the destination. An existing destination directory maps each
+    source to ``destination/basename``; multiple sources require that directory
+    form. Source data is read before mutation so validation or read failures do
+    not partially modify targets.
+
+    Examples:
+        ``cp /ram/a.txt /disk/a.txt`` produces scopes
+        ``[/ram/a.txt, /disk/a.txt]``.
+        ``cp -n /ram/a.txt /disk/dir`` additionally receives
+        ``flag_kwargs={"n": True}``.
+        ``mv /ram/a.txt /s3/b.txt /disk/dir`` treats the first two scopes as
+        sources and the final scope as the destination directory.
+        ``cat /ram/a.txt /s3/b.txt`` reads each scope from its own mount.
+        ``diff /ram/a.txt /disk/a.txt`` compares bytes read from both mounts.
+
+    Args:
+        cmd_name (str): Command name, such as ``cp``, ``mv``, or ``cat``.
+        scopes (list[PathSpec]): Path operands in command-line order, for
+        example ``[/ram/a.txt, /s3/b.txt, /disk/dir]``.
+        text_args (list[str]): Original argument tokens with path operands
+        represented as strings, for example
+        ``["-i", "error", "/ram/a.log", "/s3/b.log"]``.
+        flag_kwargs (dict): Flags parsed from the shared command spec, for
+        example ``{"n": True, "v": True}`` for ``cp -vn``.
+        dispatch (Callable): Workspace operation dispatcher used as
+        ``await dispatch("read", scope)`` or
+        ``await dispatch("write", scope, data=data)``.
+        cmd_str (str): Original command text for the execution record, for
+        example ``"mv /ram/a.txt /disk/dir"``.
+
+    Returns:
+        tuple[ByteSource | None, IOResult, ExecutionNode]: Command output,
+        I/O metadata, and execution record.
+    """
     try:
         if cmd_name == "cp":
-            return await _cross_cp(scopes, dispatch, cmd_str)
+            return await _cross_cp(scopes, flag_kwargs, dispatch, cmd_str)
         if cmd_name == "mv":
-            return await _cross_mv(scopes, dispatch, cmd_str)
+            return await _cross_mv(scopes, flag_kwargs, dispatch, cmd_str)
         if cmd_name == "diff":
             return await _cross_diff(scopes, dispatch, cmd_str)
         if cmd_name == "cmp":
@@ -56,7 +98,7 @@ async def handle_cross_mount(
         if cmd_name in _MULTI_READ_COMMANDS:
             return await _cross_multi_read(cmd_name, scopes, text_args,
                                            dispatch, cmd_str)
-    except (FileNotFoundError, PermissionError) as exc:
+    except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
         err = f"{cmd_name}: {exc}\n".encode()
         return None, IOResult(exit_code=1,
                               stderr=err), ExecutionNode(command=cmd_str,
@@ -69,18 +111,70 @@ async def handle_cross_mount(
                                                      exit_code=1)
 
 
-async def _cross_cp(scopes, dispatch, cmd_str):
-    src, dst = scopes[0], scopes[1]
-    data, _ = await dispatch("read", src)
-    await dispatch("write", dst, data=data)
+def _child_path(parent: PathSpec, source: PathSpec) -> PathSpec:
+    name = source.original.rstrip("/").rsplit("/", 1)[-1]
+    return PathSpec.from_str_path(parent.child(name), parent.prefix)
+
+
+async def _cross_targets(scopes, dispatch):
+    # Resolve the complete source-to-target mapping before any mutation.
+    *sources, dst = scopes
+    try:
+        dst_stat, _ = await dispatch("stat", dst)
+        dst_is_dir = dst_stat.type == FileType.DIRECTORY
+    except FileNotFoundError:
+        dst_is_dir = False
+    if len(sources) > 1 and not dst_is_dir:
+        raise NotADirectoryError(f"target '{dst.original}' is not a directory")
+    targets = ([_child_path(dst, src)
+                for src in sources] if dst_is_dir else [dst])
+    return sources, targets
+
+
+async def _read_cross_sources(sources, dispatch):
+    # Pre-read all sources so a later read failure cannot leave partial writes.
+    source_data = []
+    for src in sources:
+        data, _ = await dispatch("read", src)
+        source_data.append(data)
+    return source_data
+
+
+async def _cross_target_exists(target: PathSpec, dispatch) -> bool:
+    try:
+        await dispatch("stat", target)
+    except FileNotFoundError:
+        return False
+    return True
+
+
+async def _cross_cp(scopes, flag_kwargs, dispatch, cmd_str):
+    sources, targets = await _cross_targets(scopes, dispatch)
+    source_data = await _read_cross_sources(sources, dispatch)
+    no_clobber = flag_kwargs.get("n") is True
+    for target, data in zip(targets, source_data):
+        # Check immediately before writing: earlier sources may share this
+        # basename and create the target during the same command.
+        if no_clobber and await _cross_target_exists(target, dispatch):
+            continue
+        await dispatch("write", target, data=data)
     return None, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
 
 
-async def _cross_mv(scopes, dispatch, cmd_str):
-    src, dst = scopes[0], scopes[1]
-    data, _ = await dispatch("read", src)
-    await dispatch("write", dst, data=data)
-    await dispatch("unlink", src)
+async def _cross_mv(scopes, flag_kwargs, dispatch, cmd_str):
+    sources, targets = await _cross_targets(scopes, dispatch)
+    source_data = await _read_cross_sources(sources, dispatch)
+    no_clobber = flag_kwargs.get("n") is True
+    moved_sources = []
+    for src, target, data in zip(sources, targets, source_data):
+        # A skipped no-clobber target must also preserve its source.
+        if no_clobber and await _cross_target_exists(target, dispatch):
+            continue
+        await dispatch("write", target, data=data)
+        moved_sources.append(src)
+    # Delete only sources whose destination write completed.
+    for src in moved_sources:
+        await dispatch("unlink", src)
     return None, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
 
 

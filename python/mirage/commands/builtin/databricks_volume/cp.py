@@ -45,6 +45,9 @@ async def cp(
     recursive = r or R or a
     *sources, dst = paths
     dst_is_dir = await is_directory(accessor, dst, index)
+    # POSIX multi-source form requires the final operand to be a directory.
+    if len(sources) > 1 and not dst_is_dir:
+        raise NotADirectoryError(f"target '{dst.original}' is not a directory")
     writes: dict[str, bytes] = {}
     lines: list[str] = []
     errors: list[str] = []

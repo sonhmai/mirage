@@ -114,3 +114,20 @@ async def test_ops_rename_onto_same_path_is_noop(write_ws, dbx_files):
 
     assert dbx_files.downloads[f"{ROOT}/src.txt"] == b"data"
     assert f"{ROOT}/src.txt" not in dbx_files.delete_calls
+
+
+@pytest.mark.asyncio
+async def test_mv_multiple_sources_require_directory(write_ws, dbx_files):
+    seed_file(dbx_files, f"{ROOT}/a.txt", b"AAA")
+    seed_file(dbx_files, f"{ROOT}/b.txt", b"BBB")
+    seed_file(dbx_files, f"{ROOT}/target.txt", b"target")
+
+    io = await write_ws.execute("mv /dbx/a.txt /dbx/b.txt /dbx/target.txt")
+
+    assert io.exit_code != 0
+    assert b"not a directory" in io.stderr
+    assert dbx_files.downloads[f"{ROOT}/a.txt"] == b"AAA"
+    assert dbx_files.downloads[f"{ROOT}/b.txt"] == b"BBB"
+    assert dbx_files.downloads[f"{ROOT}/target.txt"] == b"target"
+    assert f"{ROOT}/a.txt" not in dbx_files.delete_calls
+    assert f"{ROOT}/b.txt" not in dbx_files.delete_calls

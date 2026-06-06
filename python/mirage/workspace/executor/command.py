@@ -16,7 +16,8 @@ from collections.abc import Callable
 
 from mirage.commands.builtin.utils.safeguard import maybe_with_timeout
 from mirage.commands.safeguard import resolve_across_mounts, resolve_safeguard
-from mirage.commands.spec import OperandKind, parse_command, parse_to_kwargs
+from mirage.commands.spec import (SPECS, OperandKind, parse_command,
+                                  parse_to_kwargs)
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
@@ -260,8 +261,15 @@ async def handle_command(
                                   stderr=msg.encode())
 
     if is_cross_mount(cmd_name, path_scopes, registry):
+        flag_kwargs = {}
+        # Cross-mount execution bypasses a resource command handler. Parse
+        # against the shared spec so flags do not depend on the source mount.
+        command_spec = SPECS.get(cmd_name)
+        if command_spec is not None:
+            parsed = parse_command(command_spec, raw_argv, cwd=session.cwd)
+            flag_kwargs = parse_to_kwargs(parsed)
         stdout, io, exec_node = await handle_cross_mount(
-            cmd_name, path_scopes, text_only, dispatch, cmd_str)
+            cmd_name, path_scopes, text_only, flag_kwargs, dispatch, cmd_str)
         if io.safeguard is None:
             mounts = []
             for s in path_scopes:

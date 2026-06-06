@@ -83,3 +83,18 @@ async def test_cp_onto_same_path_errors_and_preserves_file(
     assert io.exit_code != 0
     assert b"are the same file" in io.stderr
     assert dbx_files.downloads[f"{ROOT}/src.txt"] == b"hello"
+
+
+@pytest.mark.asyncio
+async def test_cp_multiple_sources_require_directory(write_ws, dbx_files):
+    seed_file(dbx_files, f"{ROOT}/a.txt", b"AAA")
+    seed_file(dbx_files, f"{ROOT}/b.txt", b"BBB")
+    seed_file(dbx_files, f"{ROOT}/target.txt", b"target")
+
+    io = await write_ws.execute("cp /dbx/a.txt /dbx/b.txt /dbx/target.txt")
+
+    assert io.exit_code != 0
+    assert b"not a directory" in io.stderr
+    assert dbx_files.downloads[f"{ROOT}/a.txt"] == b"AAA"
+    assert dbx_files.downloads[f"{ROOT}/b.txt"] == b"BBB"
+    assert dbx_files.downloads[f"{ROOT}/target.txt"] == b"target"

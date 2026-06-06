@@ -1512,6 +1512,159 @@ def test_cross_mount_mv():
     assert io.exit_code == 1
 
 
+def test_cross_mount_cp_into_directory():
+    ws = _ws()
+    _exec(ws, "echo source > /ram/source.txt")
+    _exec(ws, "mkdir /disk/target")
+
+    io = _exec(ws, "cp /ram/source.txt /disk/target")
+
+    assert io.exit_code == 0
+    assert _stdout(_exec(ws, "cat /disk/target/source.txt")) == b"source\n"
+    assert _stdout(_exec(ws, "cat /ram/source.txt")) == b"source\n"
+
+
+def test_cross_mount_mv_into_directory():
+    ws = _ws()
+    _exec(ws, "echo source > /ram/source.txt")
+    _exec(ws, "mkdir /disk/target")
+
+    io = _exec(ws, "mv /ram/source.txt /disk/target")
+
+    assert io.exit_code == 0
+    assert _stdout(_exec(ws, "cat /disk/target/source.txt")) == b"source\n"
+    assert _exec(ws, "cat /ram/source.txt").exit_code != 0
+
+
+def test_cross_mount_cp_no_clobber_into_directory():
+    ws = _ws()
+    _exec(ws, "echo source > /ram/source.txt")
+    _exec(ws, "mkdir /disk/target")
+    _exec(ws, "echo existing > /disk/target/source.txt")
+
+    io = _exec(ws, "cp -vn /ram/source.txt /disk/target")
+
+    assert io.exit_code == 0
+    assert _stdout(_exec(ws, "cat /disk/target/source.txt")) == b"existing\n"
+    assert _stdout(_exec(ws, "cat /ram/source.txt")) == b"source\n"
+
+
+def test_cross_mount_mv_no_clobber_into_directory():
+    ws = _ws()
+    _exec(ws, "echo source > /ram/source.txt")
+    _exec(ws, "mkdir /disk/target")
+    _exec(ws, "echo existing > /disk/target/source.txt")
+
+    io = _exec(ws, "mv -vn /ram/source.txt /disk/target")
+
+    assert io.exit_code == 0
+    assert _stdout(_exec(ws, "cat /disk/target/source.txt")) == b"existing\n"
+    assert _stdout(_exec(ws, "cat /ram/source.txt")) == b"source\n"
+
+
+def test_cross_mount_cp_no_clobber_duplicate_basenames():
+    ws = _ws()
+    _exec(ws, "echo first > /ram/shared.txt")
+    _exec(ws, "echo second > /s3/shared.txt")
+    _exec(ws, "mkdir /disk/target")
+
+    io = _exec(ws, "cp -n /ram/shared.txt /s3/shared.txt /disk/target")
+
+    assert io.exit_code == 0
+    assert _stdout(_exec(ws, "cat /disk/target/shared.txt")) == b"first\n"
+    assert _stdout(_exec(ws, "cat /ram/shared.txt")) == b"first\n"
+    assert _stdout(_exec(ws, "cat /s3/shared.txt")) == b"second\n"
+
+
+def test_cross_mount_no_clobber_uses_shared_command_spec():
+    ws = _ws()
+    source_mount = ws._registry.mount_for("/ram/source.txt")
+    source_mount._cmds.pop(("cp", None))
+    source_mount._cmd_specs.pop("cp")
+    _exec(ws, "echo source > /ram/source.txt")
+    _exec(ws, "echo existing > /disk/target.txt")
+
+    io = _exec(ws, "cp -n /ram/source.txt /disk/target.txt")
+
+    assert io.exit_code == 0
+    assert _stdout(_exec(ws, "cat /disk/target.txt")) == b"existing\n"
+    assert _stdout(_exec(ws, "cat /ram/source.txt")) == b"source\n"
+
+
+def test_cross_mount_mv_no_clobber_duplicate_basenames():
+    ws = _ws()
+    _exec(ws, "echo first > /ram/shared.txt")
+    _exec(ws, "echo second > /s3/shared.txt")
+    _exec(ws, "mkdir /disk/target")
+
+    io = _exec(ws, "mv -n /ram/shared.txt /s3/shared.txt /disk/target")
+
+    assert io.exit_code == 0
+    assert _stdout(_exec(ws, "cat /disk/target/shared.txt")) == b"first\n"
+    assert _exec(ws, "cat /ram/shared.txt").exit_code != 0
+    assert _stdout(_exec(ws, "cat /s3/shared.txt")) == b"second\n"
+
+
+def test_cross_mount_cp_multiple_sources_require_directory():
+    ws = _ws()
+    _exec(ws, "echo first > /ram/a.txt")
+    _exec(ws, "echo second > /ram/b.txt")
+    _exec(ws, "echo target > /disk/target.txt")
+
+    io = _exec(ws, "cp /ram/a.txt /ram/b.txt /disk/target.txt")
+
+    assert io.exit_code != 0
+    assert b"not a directory" in io.stderr
+    assert _stdout(_exec(ws, "cat /ram/a.txt")) == b"first\n"
+    assert _stdout(_exec(ws, "cat /ram/b.txt")) == b"second\n"
+    assert _stdout(_exec(ws, "cat /disk/target.txt")) == b"target\n"
+
+
+def test_cross_mount_mv_multiple_sources_require_directory():
+    ws = _ws()
+    _exec(ws, "echo first > /ram/a.txt")
+    _exec(ws, "echo second > /ram/b.txt")
+    _exec(ws, "echo target > /disk/target.txt")
+
+    io = _exec(ws, "mv /ram/a.txt /ram/b.txt /disk/target.txt")
+
+    assert io.exit_code != 0
+    assert b"not a directory" in io.stderr
+    assert _stdout(_exec(ws, "cat /ram/a.txt")) == b"first\n"
+    assert _stdout(_exec(ws, "cat /ram/b.txt")) == b"second\n"
+    assert _stdout(_exec(ws, "cat /disk/target.txt")) == b"target\n"
+
+
+def test_cross_mount_cp_multiple_sources_into_directory():
+    ws = _ws()
+    _exec(ws, "echo first > /ram/a.txt")
+    _exec(ws, "echo second > /ram/b.txt")
+    _exec(ws, "mkdir /disk/target")
+
+    io = _exec(ws, "cp /ram/a.txt /ram/b.txt /disk/target")
+
+    assert io.exit_code == 0
+    assert _stdout(_exec(ws, "cat /disk/target/a.txt")) == b"first\n"
+    assert _stdout(_exec(ws, "cat /disk/target/b.txt")) == b"second\n"
+    assert _stdout(_exec(ws, "cat /ram/a.txt")) == b"first\n"
+    assert _stdout(_exec(ws, "cat /ram/b.txt")) == b"second\n"
+
+
+def test_cross_mount_mv_multiple_sources_into_directory():
+    ws = _ws()
+    _exec(ws, "echo first > /ram/a.txt")
+    _exec(ws, "echo second > /ram/b.txt")
+    _exec(ws, "mkdir /disk/target")
+
+    io = _exec(ws, "mv /ram/a.txt /ram/b.txt /disk/target")
+
+    assert io.exit_code == 0
+    assert _stdout(_exec(ws, "cat /disk/target/a.txt")) == b"first\n"
+    assert _stdout(_exec(ws, "cat /disk/target/b.txt")) == b"second\n"
+    assert _exec(ws, "cat /ram/a.txt").exit_code != 0
+    assert _exec(ws, "cat /ram/b.txt").exit_code != 0
+
+
 def test_cross_mount_diff_same():
     ws = _ws()
     _exec(ws, "echo same > /disk/a.txt")

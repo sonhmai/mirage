@@ -50,7 +50,7 @@ describe('grep', () => {
     const { text } = await runGrep(resource, 'hello', [PathSpec.fromStrPath('/tmp/a.txt')], {
       args_l: true,
     })
-    expect(text).toBe('/tmp/a.txt')
+    expect(text).toBe('/tmp/a.txt\n')
   })
 
   it('no match returns exitCode 1', async () => {
@@ -78,7 +78,7 @@ describe('grep', () => {
       i: true,
       args_l: true,
     })
-    expect(text).toBe('/tmp/a.txt')
+    expect(text).toBe('/tmp/a.txt\n')
   })
 
   it('-v invert match', async () => {
@@ -88,7 +88,7 @@ describe('grep', () => {
       v: true,
       args_l: true,
     })
-    expect(text).toBe('/tmp/a.txt')
+    expect(text).toBe('/tmp/a.txt\n')
   })
 
   it('-c count only', async () => {

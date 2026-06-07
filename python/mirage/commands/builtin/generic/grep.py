@@ -134,6 +134,13 @@ async def grep(
         if recursive:
             pat = compile_pattern(pattern, ignore_case, fixed_string,
                                   whole_word)
+            # OPTIMIZATION (see #207): this buffers every match into all_results and
+            # returns it materialized, so `grep -r PATTERN dir | head -n 3`
+            # still scans the whole tree before head sees a line. For plain
+            # line output (not -c/-l, which must aggregate) this could instead
+            # yield prefixed matches lazily per file as an async generator
+            # wrapped in exit_on_empty, letting an early-exiting consumer
+            # (head, grep -m, grep -q) abort the walk after enough matches.
             all_results: list[str] = []
             warnings = []
             if scope_warning_str:

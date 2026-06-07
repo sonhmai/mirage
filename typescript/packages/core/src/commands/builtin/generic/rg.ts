@@ -151,12 +151,12 @@ export async function rgGeneric(
       },
       warnings,
     )
-    const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : undefined
+    const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
     if (results.length === 0) {
       const io = new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) })
       return [new Uint8Array(0), io]
     }
-    const out: ByteSource = ENC.encode(results.join('\n'))
+    const out: ByteSource = ENC.encode(results.join('\n') + '\n')
     const io = new IOResult(stderr !== undefined ? { stderr } : {})
     return [out, io]
   }
@@ -194,12 +194,12 @@ export async function rgGeneric(
       },
       warnings,
     )
-    const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : undefined
+    const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
     if (results.length === 0) {
       const io = new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) })
       return [new Uint8Array(0), io]
     }
-    const out: ByteSource = ENC.encode(results.join('\n'))
+    const out: ByteSource = ENC.encode(results.join('\n') + '\n')
     const io = new IOResult(stderr !== undefined ? { stderr } : {})
     return [out, io]
   }

@@ -95,6 +95,12 @@ export async function grepGeneric(
   const recursive = opts.flags.r === true || opts.flags.R === true
 
   if (recursive && paths.length > 0) {
+    // OPTIMIZATION (see #207): this buffers every match into allResults and returns it
+    // materialized, so `grep -r PATTERN dir | head -n 3` still scans the whole
+    // tree before head sees a line. For plain line output (not -c/-l, which
+    // must aggregate) this could instead yield prefixed matches lazily per file
+    // as an async iterable wrapped in exitOnEmpty, letting an early-exiting
+    // consumer (head, grep -m, grep -q) abort the walk after enough matches.
     const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord)
     const expanded: PathSpec[] = []
     for (const p of paths) {
@@ -132,7 +138,7 @@ export async function grepGeneric(
       }
     }
     if (allResults.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-    const out: ByteSource = ENC.encode(allResults.join('\n'))
+    const out: ByteSource = ENC.encode(allResults.join('\n') + '\n')
     return [out, new IOResult()]
   }
 
@@ -164,7 +170,7 @@ export async function grepGeneric(
       const data = splitLinesNoTrailing(DEC.decode(await materialize(stream(first))))
       const hits = grepLines(first.original, data, pat, f)
       if (hits.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      return [ENC.encode(hits.join('\n')), new IOResult()]
+      return [ENC.encode(hits.join('\n') + '\n'), new IOResult()]
     }
     const source = stream(first)
     const matched = grepStream(source, pat, f)

@@ -13,42 +13,30 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
-import { headStream } from '../head_helper.ts'
 import { resolveGlob } from '../../../core/github/glob.ts'
 import { stream as githubStream } from '../../../core/github/read.ts'
-import { IOResult } from '../../../io/types.ts'
+import { stat as githubStat } from '../../../core/github/stat.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { resolveSource } from '../utils/stream.ts'
-import { headTailProvision } from './provision.ts'
-
-const ENC = new TextEncoder()
+import { headGeneric } from '../generic/head.ts'
+import { fileReadProvision } from './provision.ts'
 
 async function headCommand(
   accessor: GitHubAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const nRaw = typeof opts.flags.n === 'string' ? opts.flags.n : null
-  const cRaw = typeof opts.flags.c === 'string' ? opts.flags.c : null
-  const lines = nRaw !== null ? Number.parseInt(nRaw, 10) : 10
-  const bytesMode = cRaw !== null ? Number.parseInt(cRaw, 10) : null
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    const source = githubStream(accessor, first, opts.index ?? undefined)
-    return [headStream(source, lines, bytesMode), new IOResult()]
-  }
-  try {
-    const source = resolveSource(opts.stdin, 'head: missing operand')
-    return [headStream(source, lines, bytesMode), new IOResult()]
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
-  }
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return headGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => githubStat(accessor, p, opts.index ?? undefined),
+    (p) => githubStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const GITHUB_HEAD = command({
@@ -56,5 +44,5 @@ export const GITHUB_HEAD = command({
   resource: ResourceName.GITHUB,
   spec: specOf('head'),
   fn: headCommand,
-  provision: headTailProvision,
+  provision: fileReadProvision,
 })

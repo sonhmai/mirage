@@ -13,65 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
+import { resolveGlob } from '../../../core/gdrive/glob.ts'
 import { stat as gdriveStat } from '../../../core/gdrive/stat.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { PathSpec, ResourceName } from '../../../types.ts'
+import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-
-const ENC = new TextEncoder()
-
-function normalize(p: string): string {
-  const isAbs = p.startsWith('/')
-  const segments = p.split('/').filter((s) => s !== '' && s !== '.')
-  const out: string[] = []
-  for (const s of segments) {
-    if (s === '..') {
-      if (out.length > 0) out.pop()
-      else if (!isAbs) out.push('..')
-    } else {
-      out.push(s)
-    }
-  }
-  const joined = out.join('/')
-  return isAbs ? '/' + joined : joined === '' ? '.' : joined
-}
-
-async function exists(
-  accessor: GDriveAccessor,
-  path: string,
-  index: CommandOpts['index'],
-  prefix: string,
-): Promise<boolean> {
-  try {
-    const spec = new PathSpec({ original: path, directory: path, prefix })
-    await gdriveStat(accessor, spec, index ?? undefined)
-    return true
-  } catch {
-    return false
-  }
-}
+import { realpathGeneric } from '../generic/realpath.ts'
 
 async function realpathCommand(
   accessor: GDriveAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const prefix = opts.mountPrefix ?? ''
-  const e = opts.flags.e === true
-  const lines: string[] = []
-  for (const p of paths) {
-    const full = prefix !== '' ? prefix + p.original : p.original
-    const resolved = normalize(full)
-    if (e && !(await exists(accessor, resolved, opts.index, prefix))) {
-      const msg = `realpath: '${p.original}': No such file or directory\n`
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(msg) })]
-    }
-    lines.push(resolved)
-  }
-  const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return realpathGeneric(resolved, texts, opts, (p) =>
+    gdriveStat(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const GDRIVE_REALPATH = command({

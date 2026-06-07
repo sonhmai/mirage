@@ -64,7 +64,7 @@ function sortStats(
   const sorted = [...stats].sort((a, b) => {
     if (sortBy === 'time') return (b.modified ?? '').localeCompare(a.modified ?? '')
     if (sortBy === 'size') return (b.size ?? 0) - (a.size ?? 0)
-    return a.name.localeCompare(b.name)
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
   })
   if (reverse) sorted.reverse()
   return sorted

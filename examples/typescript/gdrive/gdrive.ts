@@ -85,21 +85,49 @@ async function main(): Promise<void> {
     const firstDoc = docFiles[0]
     if (firstDoc !== undefined && firstDoc !== '') {
       const jq = await run(ws, `cat "${firstDoc}" | jq ".title"`)
-      console.log(`=== cat ${firstDoc} | jq .title ===`)
-      console.log(`  ${jq.out.trim()}`)
+      printOut(`cat ${firstDoc} | jq .title`, jq.out, jq.err)
+
+      const head = await run(ws, `head -n 3 "${firstDoc}"`)
+      printOut(`head -n 3 ${firstDoc}`, head.out, head.err)
+
+      const wc = await run(ws, `wc "${firstDoc}"`)
+      printOut(`wc ${firstDoc}`, wc.out, wc.err)
+
+      const basename = await run(ws, `basename "${firstDoc}"`)
+      printOut(`basename ${firstDoc}`, basename.out, basename.err)
+
+      const dirname = await run(ws, `dirname "${firstDoc}"`)
+      printOut(`dirname ${firstDoc}`, dirname.out, dirname.err)
+
+      const tail = await run(ws, `tail -n 3 "${firstDoc}"`)
+      printOut(`tail -n 3 ${firstDoc}`, tail.out, tail.err)
+
+      const nl = await run(ws, `nl "${firstDoc}"`)
+      printOut(`nl ${firstDoc}`, nl.out, nl.err, 300)
+
+      const grep = await run(ws, `grep title "${firstDoc}"`)
+      printOut(`grep title ${firstDoc}`, grep.out, grep.err, 300)
+
+      const rg = await run(ws, `rg title "${firstDoc}"`)
+      printOut(`rg title ${firstDoc}`, rg.out, rg.err, 300)
+
+      const realpath = await run(ws, `realpath "${firstDoc}"`)
+      printOut(`realpath ${firstDoc}`, realpath.out, realpath.err)
     }
 
-    console.log('\n=== gws-docs-documents-create (registered under gdrive too) ===')
+    console.log('\n=== gws-docs-documents-create ===')
     const create = await run(
       ws,
-      "gws-docs-documents-create --json '{\"title\": \"MIRAGE Drive Cross-Resource Demo\"}'",
+      "gws-docs-documents-create --json '{\"title\": \"Test from MIRAGE gdrive\"}'",
     )
-    if (create.code === 0) {
-      const doc = JSON.parse(create.out) as { documentId?: string }
-      console.log(`Created via gdrive: ${doc.documentId ?? '(no id)'}`)
-    } else {
-      printOut('create', create.out, create.err)
-    }
+    printOut('gws-docs-documents-create', create.out, create.err, 300)
+
+    console.log('\n=== gws-sheets-spreadsheets-create ===')
+    const createSheet = await run(
+      ws,
+      "gws-sheets-spreadsheets-create --json '{\"properties\": {\"title\": \"Test Sheet from gdrive\"}}'",
+    )
+    printOut('gws-sheets-spreadsheets-create', createSheet.out, createSheet.err, 300)
   } finally {
     await ws.close()
   }

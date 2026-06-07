@@ -14,69 +14,22 @@
 
 import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
 import { resolveGlob } from '../../../core/gdrive/glob.ts'
-import { read as gdriveRead } from '../../../core/gdrive/read.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { stream as gdriveStream } from '../../../core/gdrive/read.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { wcGeneric } from '../generic/wc.ts'
 import { fileReadProvision } from './provision.ts'
-
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
-
-function countLines(text: string): number {
-  let n = 0
-  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) n += 1
-  return n
-}
-
-function countWords(text: string): number {
-  const trimmed = text.trim()
-  if (trimmed === '') return 0
-  return trimmed.split(/\s+/).length
-}
-
-function maxLineLen(text: string): number {
-  let max = 0
-  for (const line of text.split('\n')) if (line.length > max) max = line.length
-  return max
-}
 
 async function wcCommand(
   accessor: GDriveAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  let data: Uint8Array | null = null
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    data = await gdriveRead(accessor, first, opts.index ?? undefined)
-  } else {
-    data = await readStdinAsync(opts.stdin)
-    if (data === null) {
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('wc: missing operand\n') })]
-    }
-  }
-  const text = DEC.decode(data)
-  const lineCount = countLines(text)
-  const wordCount = countWords(text)
-  const byteCount = data.byteLength
-  if (opts.flags.L === true) {
-    const out: ByteSource = ENC.encode(String(maxLineLen(text)))
-    return [out, new IOResult()]
-  }
-  if (opts.flags.args_l === true) return [ENC.encode(String(lineCount)), new IOResult()]
-  if (opts.flags.w === true) return [ENC.encode(String(wordCount)), new IOResult()]
-  if (opts.flags.m === true) return [ENC.encode(String(text.length)), new IOResult()]
-  if (opts.flags.c === true) return [ENC.encode(String(byteCount)), new IOResult()]
-  const out: ByteSource = ENC.encode(
-    `${String(lineCount)}\t${String(wordCount)}\t${String(byteCount)}`,
-  )
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return wcGeneric(resolved, texts, opts, (p) => gdriveStream(accessor, p, opts.index ?? undefined))
 }
 
 export const GDRIVE_WC = command({

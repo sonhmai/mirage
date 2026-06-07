@@ -78,7 +78,8 @@ async def read(
         for j in jobs:
             anns = await list_annotations(accessor.config, str(j["id"]))
             for a in anns:
-                lines.append(json.dumps(a, ensure_ascii=False))
+                lines.append(
+                    json.dumps(a, ensure_ascii=False, separators=(",", ":")))
         if lines:
             return ("\n".join(lines) + "\n").encode()
         return b""

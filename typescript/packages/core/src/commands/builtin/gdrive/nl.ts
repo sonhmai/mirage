@@ -14,27 +14,12 @@
 
 import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
 import { resolveGlob } from '../../../core/gdrive/glob.ts'
-import { read as gdriveRead } from '../../../core/gdrive/read.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { stream as gdriveStream } from '../../../core/gdrive/read.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { readStdinAsync } from '../utils/stream.ts'
-
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
-
-function shouldNumber(line: string, mode: string, pattern: RegExp | null): boolean {
-  if (mode === 'n') return false
-  if (mode === 'a') return true
-  if (mode === 'p' && pattern !== null) return pattern.test(line)
-  return line.trim() !== ''
-}
-
-function pad(n: number, width: number): string {
-  const s = String(n)
-  return s.length >= width ? s : ' '.repeat(width - s.length) + s
-}
+import { nlGeneric } from '../generic/nl.ts'
+import { fileReadProvision } from './provision.ts'
 
 async function nlCommand(
   accessor: GDriveAccessor,
@@ -42,43 +27,9 @@ async function nlCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const bRaw = typeof opts.flags.b === 'string' ? opts.flags.b : 't'
-  let mode = bRaw
-  let pattern: RegExp | null = null
-  if (bRaw.startsWith('p')) {
-    mode = 'p'
-    pattern = new RegExp(bRaw.slice(1))
-  }
-  const start = typeof opts.flags.v === 'string' ? Number.parseInt(opts.flags.v, 10) : 1
-  const increment = typeof opts.flags.i === 'string' ? Number.parseInt(opts.flags.i, 10) : 1
-  const width = typeof opts.flags.w === 'string' ? Number.parseInt(opts.flags.w, 10) : 6
-  const separator = typeof opts.flags.s === 'string' ? opts.flags.s : '\t'
-
-  let raw: Uint8Array | null = null
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    raw = await gdriveRead(accessor, first, opts.index ?? undefined)
-  } else {
-    raw = await readStdinAsync(opts.stdin)
-    if (raw === null) {
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('nl: missing operand\n') })]
-    }
-  }
-
-  let num = start
-  const outLines: string[] = []
-  for (const line of DEC.decode(raw).split('\n')) {
-    if (shouldNumber(line, mode, pattern)) {
-      outLines.push(`${pad(num, width)}${separator}${line}`)
-      num += increment
-    } else {
-      outLines.push(`${' '.repeat(width)}${separator}${line}`)
-    }
-  }
-  const out: ByteSource = ENC.encode(outLines.join('\n') + '\n')
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return nlGeneric(resolved, opts, (p) => gdriveStream(accessor, p, opts.index ?? undefined))
 }
 
 export const GDRIVE_NL = command({
@@ -86,4 +37,5 @@ export const GDRIVE_NL = command({
   resource: ResourceName.GDRIVE,
   spec: specOf('nl'),
   fn: nlCommand,
+  provision: fileReadProvision,
 })

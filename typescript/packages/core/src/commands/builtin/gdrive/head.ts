@@ -14,52 +14,29 @@
 
 import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
 import { resolveGlob } from '../../../core/gdrive/glob.ts'
-import { read as gdriveRead } from '../../../core/gdrive/read.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { stream as gdriveStream } from '../../../core/gdrive/read.ts'
+import { stat as gdriveStat } from '../../../core/gdrive/stat.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { headGeneric } from '../generic/head.ts'
 import { fileReadProvision } from './provision.ts'
-
-const ENC = new TextEncoder()
-
-function headBytes(data: Uint8Array, lines: number, bytesMode: number | null): Uint8Array {
-  if (bytesMode !== null) return data.slice(0, bytesMode)
-  let count = 0
-  let end = 0
-  for (let i = 0; i < data.byteLength && count < lines; i++) {
-    if (data[i] === 0x0a) {
-      count += 1
-      end = i + 1
-    }
-  }
-  if (count < lines) return data
-  return data.slice(0, end - 1)
-}
 
 async function headCommand(
   accessor: GDriveAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const lines = typeof opts.flags.n === 'string' ? Number.parseInt(opts.flags.n, 10) : 10
-  const bytesMode = typeof opts.flags.c === 'string' ? Number.parseInt(opts.flags.c, 10) : null
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    const data = await gdriveRead(accessor, first, opts.index ?? undefined)
-    const out: ByteSource = headBytes(data, lines, bytesMode)
-    return [out, new IOResult()]
-  }
-  const raw = await readStdinAsync(opts.stdin)
-  if (raw === null) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('head: missing operand\n') })]
-  }
-  const out: ByteSource = headBytes(raw, lines, bytesMode)
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return headGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => gdriveStat(accessor, p, opts.index ?? undefined),
+    (p) => gdriveStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const GDRIVE_HEAD = command({

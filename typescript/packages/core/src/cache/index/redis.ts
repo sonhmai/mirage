@@ -139,7 +139,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     const ttlRemaining = await c.ttl(key)
     if (ttlRemaining === -2) return { status: LookupStatus.EXPIRED }
     const raw = await c.lRange(key, 0, -1)
-    return { entries: [...raw].sort() }
+    return { entries: [...raw] }
   }
 
   async setDir(
@@ -162,7 +162,6 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     const childrenKey = this.childrenKey(resourcePath)
     pipe.del(childrenKey)
     if (childKeys.length > 0) {
-      childKeys.sort()
       pipe.rPush(childrenKey, childKeys)
     }
     const ttlSeconds =

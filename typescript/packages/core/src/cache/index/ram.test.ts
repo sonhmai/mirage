@@ -56,14 +56,14 @@ describe('RAMIndexCacheStore', () => {
     expect(result.status).toBe(LookupStatus.NOT_FOUND)
   })
 
-  it('setDir then listDir returns sorted children', async () => {
+  it('setDir then listDir preserves insertion (readdir) order', async () => {
     const store = new RAMIndexCacheStore()
     await store.setDir('/dir', [
       ['b.txt', mkEntry('2', 'b.txt')],
       ['a.txt', mkEntry('1', 'a.txt')],
     ])
     const result = await store.listDir('/dir')
-    expect(result.entries).toEqual(['/dir/a.txt', '/dir/b.txt'])
+    expect(result.entries).toEqual(['/dir/b.txt', '/dir/a.txt'])
   })
 
   it('setDir populates get lookups for children', async () => {

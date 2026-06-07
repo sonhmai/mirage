@@ -123,8 +123,8 @@ describe('readdir /channels', () => {
     expect(out).toEqual(['/mnt/slack/channels/general__C1', '/mnt/slack/channels/eng__C2'])
     const listing = await idx.listDir('/mnt/slack/channels')
     expect(listing.entries).toEqual([
-      '/mnt/slack/channels/eng__C2',
       '/mnt/slack/channels/general__C1',
+      '/mnt/slack/channels/eng__C2',
     ])
     const lookup = await idx.get('/mnt/slack/channels/general__C1')
     expect(lookup.entry?.id).toBe('C1')

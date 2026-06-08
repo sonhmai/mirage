@@ -174,9 +174,7 @@ async def grep(
                     if count_only and hits:
                         all_results.append(f"{p.original}:{hits[0]}")
                     else:
-                        all_results.extend(
-                            f"{p.original}:{rl}" if len(paths) > 1 else rl
-                            for rl in hits)
+                        all_results.extend(f"{p.original}:{rl}" for rl in hits)
             stderr = format_optional_records(warnings)
             if not all_results:
                 return b"", IOResult(exit_code=1, stderr=stderr)

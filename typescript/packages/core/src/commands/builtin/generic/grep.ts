@@ -200,7 +200,7 @@ export async function grepGeneric(
           if (f.countOnly) {
             if (hits.length > 0) allResults.push(`${p.original}:${hits[0] ?? ''}`)
           } else {
-            for (const rl of hits) allResults.push(paths.length > 1 ? `${p.original}:${rl}` : rl)
+            for (const rl of hits) allResults.push(`${p.original}:${rl}`)
           }
         }
       }

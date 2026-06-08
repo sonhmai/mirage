@@ -184,6 +184,9 @@ importers:
 
   ../integ:
     dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.0.0
+        version: 3.1033.0
       '@struktoai/mirage-browser':
         specifier: workspace:*
         version: link:../typescript/packages/browser

@@ -18,7 +18,14 @@ import type { S3Accessor } from '../../accessor/s3.ts'
 import { createS3Client, isNotFoundError, loadS3Module, s3Key } from './_client.ts'
 import { fpRevFromS3Response } from './read.ts'
 
-const DEFAULT_CHUNK_SIZE = 64 * 1024
+const DEFAULT_CHUNK_SIZE = 8192
+
+function concatChunks(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(a.byteLength + b.byteLength)
+  out.set(a, 0)
+  out.set(b, a.byteLength)
+  return out
+}
 
 export async function* stream(accessor: S3Accessor, path: PathSpec): AsyncIterable<Uint8Array> {
   const virtual = path.original
@@ -59,9 +66,19 @@ export async function* stream(accessor: S3Accessor, path: PathSpec): AsyncIterab
       | undefined
     if (body === undefined) return
     if (typeof body[Symbol.asyncIterator] === 'function') {
+      let pending: Uint8Array = new Uint8Array(0)
       for await (const chunk of body) {
-        if (rec !== null) rec.bytes += chunk.byteLength
-        yield chunk
+        pending = concatChunks(pending, chunk)
+        while (pending.byteLength >= DEFAULT_CHUNK_SIZE) {
+          const piece = pending.slice(0, DEFAULT_CHUNK_SIZE)
+          if (rec !== null) rec.bytes += piece.byteLength
+          yield piece
+          pending = pending.slice(DEFAULT_CHUNK_SIZE)
+        }
+      }
+      if (pending.byteLength > 0) {
+        if (rec !== null) rec.bytes += pending.byteLength
+        yield pending
       }
     }
   } catch (err) {

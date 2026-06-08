@@ -9,9 +9,11 @@
     "redis": "tsx redis.ts",
     "opfs": "tsx opfs.ts",
     "s3": "tsx s3.ts",
+    "s3_cases": "tsx s3_cases.ts",
     "safeguard": "tsx safeguard.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
     "@struktoai/mirage-browser": "workspace:*",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*"

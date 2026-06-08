@@ -70,6 +70,10 @@ jobs:
 
       - name: Start MinIO
         run: |
+          for i in $(seq 1 5); do
+            docker pull minio/minio:latest && break
+            echo "docker pull failed (attempt $i), retrying"; sleep 10
+          done
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
             minio/minio:latest server /data
@@ -84,6 +88,9 @@ jobs:
           chmod +x /tmp/mc
           /tmp/mc alias set local http://localhost:9000 minio minio123
           /tmp/mc mb local/mirage-integ || true
+          /tmp/mc mb local/mirage-integ-s3 || true
+          /tmp/mc mb local/mirage-integ-gcs || true
+          /tmp/mc mb local/mirage-integ-minio || true
 
       - name: Run RAM backend and diff against truth
         working-directory: integ
@@ -115,8 +122,14 @@ jobs:
           pnpm exec tsx safeguard.ts > /tmp/ts-safeguard.out
           diff truth_safeguard.txt /tmp/ts-safeguard.out
 
-      - name: Run S3 (MinIO) backend and diff against truth
+      - name: Run shared command suite on S3 (MinIO) and diff against truth
         working-directory: integ
         run: |
-          pnpm exec tsx s3.ts > /tmp/ts-s3.out
+          pnpm exec tsx s3_cases.ts > /tmp/ts-s3.out
           diff truth.txt /tmp/ts-s3.out
+
+      - name: Run s3-native suite (multi-cloud/MinIO) and diff against truth
+        working-directory: integ
+        run: |
+          pnpm exec tsx s3.ts > /tmp/ts-s3-native.out
+          diff truth_s3_ts.txt /tmp/ts-s3-native.out

@@ -285,6 +285,7 @@ export { headGeneric, headProvisionGeneric } from './commands/builtin/generic/he
 export { tailGeneric } from './commands/builtin/generic/tail.ts'
 export { wcGeneric } from './commands/builtin/generic/wc.ts'
 export { readlinkGeneric } from './commands/builtin/generic/readlink.ts'
+export { fmtGeneric } from './commands/builtin/generic/fmt.ts'
 export { headStream } from './commands/builtin/head_helper.ts'
 export { basenameFn, dirnameFn, gnuBasename, gnuDirname } from './commands/builtin/path_helper.ts'
 export { detectFileType, FILE_MIME_MAP, formatFileResult } from './commands/builtin/file_helper.ts'

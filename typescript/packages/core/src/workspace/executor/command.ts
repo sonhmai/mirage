@@ -209,6 +209,14 @@ export async function handleCommand(
     )
   }
 
+  // resolveMount may redirect a warm remote read to the cache mount, which
+  // does not carry the origin mount's per-command safeguards. Resolve the
+  // safeguard from the real (pre-redirect) mount so the cap survives the hit.
+  const realMount = registry.mountFor(
+    pathScopes.length > 0 ? (pathScopes[0]?.original ?? session.cwd) : session.cwd,
+  )
+  const safeguardOverride = realMount?.commandSafeguards.get(cmdName) ?? null
+
   try {
     const [initialStdout, io] = await mount.executeCmd(cmdName, paths, texts, flagKwargs, {
       stdin,
@@ -219,6 +227,7 @@ export async function handleCommand(
       env: session.env,
       execAllowed: registry.isExecAllowed(),
       ...(pythonRuntime !== undefined ? { pythonRuntime } : {}),
+      safeguardOverride,
     })
     let stdout = initialStdout
     if (cmdName === 'ls' && io.exitCode === 0) {

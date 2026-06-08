@@ -69,13 +69,15 @@ async def find(
                 key = obj["Key"]
                 if key == pfx:
                     continue
-                relative = key[len(pfx):]
+                is_dir = key.endswith("/")
+                norm_key = key[:-1] if is_dir else key
+                relative = norm_key[len(pfx):]
                 depth = relative.count("/") + 1
                 if maxdepth is not None and depth > maxdepth:
                     continue
                 if mindepth is not None and depth < mindepth:
                     continue
-                entry_name = key.rsplit("/", 1)[-1]
+                entry_name = norm_key.rsplit("/", 1)[-1]
                 if or_names:
                     if not any(
                             fnmatch.fnmatch(entry_name, p) for p in or_names):
@@ -85,20 +87,21 @@ async def find(
                 if iname is not None and not fnmatch.fnmatch(
                         entry_name.lower(), iname.lower()):
                     continue
-                full_path = "/" + _strip_prefix(key, config)
+                full_path = "/" + _strip_prefix(norm_key, config)
                 if path_pattern is not None and not fnmatch.fnmatch(
                         full_path, path_pattern):
                     continue
                 if name_exclude and fnmatch.fnmatch(entry_name, name_exclude):
                     continue
-                if type == "file" and key.endswith("/"):
+                if type == "file" and is_dir:
                     continue
-                if type == "directory" and not key.endswith("/"):
+                if type == "directory" and not is_dir:
                     continue
-                size = obj.get("Size", 0)
-                if min_size is not None and size < min_size:
-                    continue
-                if max_size is not None and size > max_size:
-                    continue
+                if not is_dir:
+                    size = obj.get("Size", 0)
+                    if min_size is not None and size < min_size:
+                        continue
+                    if max_size is not None and size > max_size:
+                        continue
                 results.append(full_path)
     return sorted(results)

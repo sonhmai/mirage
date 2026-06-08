@@ -13,46 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Accessor } from '../../../accessor/s3.ts'
-import { read as s3Read } from '../../../core/s3/read.ts'
 import { resolveGlob } from '../../../core/s3/glob.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { stream as s3Stream } from '../../../core/s3/stream.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { readStdinAsync } from '../utils/stream.ts'
-
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
-
-function wrapText(text: string, width: number): string {
-  const words = text.split(/\s+/).filter((w) => w !== '')
-  if (words.length === 0) return ''
-  const lines: string[] = []
-  let current = ''
-  for (const w of words) {
-    if (current === '') {
-      current = w
-    } else if (current.length + 1 + w.length <= width) {
-      current = current + ' ' + w
-    } else {
-      lines.push(current)
-      current = w
-    }
-  }
-  if (current !== '') lines.push(current)
-  return lines.join('\n')
-}
-
-function fmtText(text: string, width: number): string {
-  const paragraphs = text.split('\n\n')
-  const formatted: string[] = []
-  for (const para of paragraphs) {
-    const trimmed = para.trim()
-    if (trimmed !== '') formatted.push(wrapText(trimmed, width))
-    else formatted.push('')
-  }
-  return formatted.join('\n\n') + '\n'
-}
+import { fmtGeneric } from '../generic/fmt.ts'
 
 async function fmtCommand(
   accessor: S3Accessor,
@@ -60,23 +26,9 @@ async function fmtCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const width = typeof opts.flags.w === 'string' ? Number.parseInt(opts.flags.w, 10) : 75
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const parts: string[] = []
-    for (const p of resolved) {
-      parts.push(DEC.decode(await s3Read(accessor, p)))
-    }
-    const result: ByteSource = ENC.encode(fmtText(parts.join(''), width))
-    return [result, new IOResult()]
-  }
-  const stdinData = await readStdinAsync(opts.stdin)
-  if (stdinData === null) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('fmt: missing operand\n') })]
-  }
-  const text = DEC.decode(stdinData)
-  const result: ByteSource = ENC.encode(fmtText(text, width))
-  return [result, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return fmtGeneric(resolved, opts, (p) => s3Stream(accessor, p))
 }
 
 export const S3_FMT = command({

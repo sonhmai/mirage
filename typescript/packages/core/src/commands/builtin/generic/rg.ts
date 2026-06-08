@@ -26,6 +26,12 @@ const ENC = new TextEncoder()
 type Stat = (p: PathSpec) => Promise<FileStat>
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
+type ScopeCheck = (
+  readdir: (p: string) => Promise<string[]>,
+  stat: (p: string) => Promise<FileStat>,
+  scope: PathSpec,
+  recursive: boolean,
+) => Promise<string | null>
 
 interface RgFlags {
   ignoreCase: boolean
@@ -79,6 +85,7 @@ export async function rgGeneric(
   stat: Stat,
   readdir: Readdir,
   stream: Stream,
+  scopeCheck?: ScopeCheck,
 ): Promise<CommandFnResult> {
   const [exprText] = texts
   if (exprText === undefined) {
@@ -123,8 +130,18 @@ export async function rgGeneric(
   const statFn = (p: string): Promise<FileStat> => stat(makeSpec(p, first))
   const readBytesFn = (p: string): Promise<Uint8Array> => materialize(stream(makeSpec(p, first)))
 
+  let scopeWarn: string | null = null
+  if (scopeCheck !== undefined && !first.resolved) {
+    try {
+      scopeWarn = await scopeCheck(readdirFn, statFn, first, true)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(msg) })]
+    }
+  }
+
   if (isDir && opts.filetypeFns !== null && Object.keys(opts.filetypeFns).length > 0) {
-    const warnings: string[] = []
+    const warnings: string[] = scopeWarn !== null ? [scopeWarn] : []
     const results = await rgFolderFiletype(
       readdirFn,
       statFn,
@@ -166,7 +183,7 @@ export async function rgGeneric(
     flags.fileType !== null ||
     flags.globPattern !== null
   if (needsFull) {
-    const warnings: string[] = []
+    const warnings: string[] = scopeWarn !== null ? [scopeWarn] : []
     const results = await rgFull(
       readdirFn,
       statFn,

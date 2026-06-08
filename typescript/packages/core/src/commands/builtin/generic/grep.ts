@@ -32,6 +32,12 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 type Stat = (p: PathSpec) => Promise<FileStat>
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
+type ScopeCheck = (
+  readdir: (p: string) => Promise<string[]>,
+  stat: (p: string) => Promise<FileStat>,
+  scope: PathSpec,
+  recursive: boolean,
+) => Promise<string | null>
 
 interface FlagSet {
   ignoreCase: boolean
@@ -107,6 +113,7 @@ export async function grepGeneric(
   stat: Stat,
   readdir: Readdir,
   stream: Stream,
+  scopeCheck?: ScopeCheck,
 ): Promise<CommandFnResult> {
   let pattern: string
   try {
@@ -125,8 +132,18 @@ export async function grepGeneric(
     const statFn = (p: string): Promise<FileStat> => stat(makeSpec(p, first))
     const readBytesFn = (p: string): Promise<Uint8Array> => materialize(stream(makeSpec(p, first)))
 
+    let scopeWarn: string | null = null
+    if (scopeCheck !== undefined && !first.resolved) {
+      try {
+        scopeWarn = await scopeCheck(readdirFn, statFn, first, recursive)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(msg) })]
+      }
+    }
+
     if (f.filesOnly) {
-      const warnings: string[] = []
+      const warnings: string[] = scopeWarn !== null ? [scopeWarn] : []
       const results: string[] = []
       for (const p of paths) {
         const hits = await grepFilesOnly(
@@ -161,7 +178,7 @@ export async function grepGeneric(
       // must aggregate) this could instead yield prefixed matches lazily per file
       // as an async iterable wrapped in exitOnEmpty, letting an early-exiting
       // consumer (head, grep -m, grep -q) abort the walk after enough matches.
-      const warnings: string[] = []
+      const warnings: string[] = scopeWarn !== null ? [scopeWarn] : []
       const allResults: string[] = []
       for (const p of paths) {
         const s = await statFn(p.original)

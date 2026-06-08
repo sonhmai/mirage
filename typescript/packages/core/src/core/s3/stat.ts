@@ -44,7 +44,7 @@ export async function stat(
   // to coexist — without this hint we'd return the file and commands like
   // `ls /s3/csv/` would list one entry (the file itself) instead of the
   // directory's contents.
-  const hintsDirectory = /\/+$/.test(rawPath)
+  const hintsDirectory = rawPath.endsWith('/')
 
   // Fast path: check the index cache populated by readdir(). Matches
   // Python's mirage/core/s3/stat.py fast-path. Saves a network round-trip

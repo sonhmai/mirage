@@ -62,13 +62,13 @@ describe.skipIf(skip)('RedisIndexCacheStore', () => {
     expect(r.entry?.indexTime).not.toBe('')
   })
 
-  it('setDir stores entries and listDir returns sorted children', async () => {
+  it('setDir stores entries and listDir preserves insertion (readdir) order', async () => {
     await store.setDir('/', [
       ['b', entry('id-b', 'b')],
       ['a', entry('id-a', 'a')],
     ])
     const list = await store.listDir('/')
-    expect(list.entries).toEqual(['/a', '/b'])
+    expect(list.entries).toEqual(['/b', '/a'])
   })
 
   it('listDir NOT_FOUND when unset', async () => {

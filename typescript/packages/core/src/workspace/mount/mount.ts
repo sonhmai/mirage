@@ -326,6 +326,7 @@ export class Mount {
       env?: Record<string, string>
       execAllowed?: boolean
       pythonRuntime?: PyodideRuntime
+      safeguardOverride?: CommandSafeguard | null
     } = {},
   ): Promise<[ByteSource | null, IOResult]> {
     const extension =
@@ -400,7 +401,9 @@ export class Mount {
               result[1].safeguard = resolveSafeguard(
                 cmdName,
                 cmd.safeguard,
-                this.commandSafeguards.get(cmdName) ?? null,
+                opts.safeguardOverride !== undefined
+                  ? opts.safeguardOverride
+                  : (this.commandSafeguards.get(cmdName) ?? null),
               )
               return result
             }

@@ -16,94 +16,10 @@ import type { NotionAccessor } from '../../../accessor/notion.ts'
 import { resolveNotionGlob } from '../../../core/notion/glob.ts'
 import { readdir as notionReaddir } from '../../../core/notion/readdir.ts'
 import { stat as notionStat } from '../../../core/notion/stat.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import type { FileStat } from '../../../types.ts'
-import { FileType, PathSpec, ResourceName } from '../../../types.ts'
+import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-
-const ENC = new TextEncoder()
-
-function fnmatch(name: string, pattern: string): boolean {
-  const re = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\?/g, '.')
-    .replace(/\*/g, '.*')
-  return new RegExp(`^${re}$`).test(name)
-}
-
-interface TreeOpts {
-  maxDepth: number | null
-  showHidden: boolean
-  ignorePattern: string | null
-  dirsOnly: boolean
-  matchPattern: string | null
-}
-
-async function treeRecurse(
-  accessor: NotionAccessor,
-  path: PathSpec,
-  prefix: string,
-  depth: number,
-  treeOpts: TreeOpts,
-  warnings: string[],
-  indexCache: CommandOpts['index'],
-): Promise<string[]> {
-  const lines: string[] = []
-  let entries: string[]
-  try {
-    entries = await notionReaddir(accessor, path, indexCache ?? undefined)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    warnings.push(`tree: '${path.original}': ${msg}`)
-    return lines
-  }
-  const filtered: [PathSpec, FileStat][] = []
-  for (const entry of entries) {
-    try {
-      const entrySpec = new PathSpec({
-        original: entry,
-        directory: entry,
-        resolved: false,
-        prefix: path.prefix,
-      })
-      const s = await notionStat(accessor, entrySpec, indexCache ?? undefined)
-      if (!treeOpts.showHidden && s.name.startsWith('.')) continue
-      if (treeOpts.ignorePattern !== null && fnmatch(s.name, treeOpts.ignorePattern)) continue
-      if (treeOpts.dirsOnly && s.type !== FileType.DIRECTORY) continue
-      const notDir = s.type !== FileType.DIRECTORY
-      if (treeOpts.matchPattern !== null && notDir && !fnmatch(s.name, treeOpts.matchPattern))
-        continue
-      filtered.push([entrySpec, s])
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      warnings.push(`tree: '${entry}': ${msg}`)
-    }
-  }
-  for (let i = 0; i < filtered.length; i++) {
-    const pair = filtered[i]
-    if (pair === undefined) continue
-    const [entrySpec, s] = pair
-    const isLast = i === filtered.length - 1
-    const connector = isLast ? '\u2514\u2500\u2500 ' : '\u251c\u2500\u2500 '
-    lines.push(prefix + connector + s.name)
-    if (s.type === FileType.DIRECTORY) {
-      if (treeOpts.maxDepth !== null && depth >= treeOpts.maxDepth) continue
-      const extension = isLast ? '    ' : '\u2502   '
-      const sub = await treeRecurse(
-        accessor,
-        entrySpec,
-        prefix + extension,
-        depth + 1,
-        treeOpts,
-        warnings,
-        indexCache,
-      )
-      lines.push(...sub)
-    }
-  }
-  return lines
-}
+import { treeGeneric } from '../generic/tree.ts'
 
 async function treeCommand(
   accessor: NotionAccessor,
@@ -112,27 +28,12 @@ async function treeCommand(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const resolved = await resolveNotionGlob(accessor, paths, opts.index ?? undefined)
-  const p0 =
-    resolved[0] ??
-    new PathSpec({
-      original: opts.cwd,
-      directory: opts.cwd,
-      resolved: false,
-      prefix: opts.mountPrefix ?? '',
-    })
-  const maxDepth = typeof opts.flags.L === 'string' ? Number.parseInt(opts.flags.L, 10) : null
-  const treeOpts: TreeOpts = {
-    maxDepth,
-    showHidden: opts.flags.a === true,
-    ignorePattern: typeof opts.flags.args_I === 'string' ? opts.flags.args_I : null,
-    dirsOnly: opts.flags.d === true,
-    matchPattern: typeof opts.flags.P === 'string' ? opts.flags.P : null,
-  }
-  const warnings: string[] = []
-  const results = await treeRecurse(accessor, p0, '', 0, treeOpts, warnings, opts.index)
-  const out: ByteSource = ENC.encode(results.join('\n'))
-  const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : null
-  return [out, new IOResult({ stderr })]
+  return treeGeneric(
+    resolved,
+    opts,
+    (p) => notionReaddir(accessor, p, opts.index ?? undefined),
+    (p) => notionStat(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const NOTION_TREE = command({

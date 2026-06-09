@@ -13,55 +13,39 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NotionAccessor } from '../../../accessor/notion.ts'
+import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { resolveNotionGlob } from '../../../core/notion/glob.ts'
 import { read as notionRead } from '../../../core/notion/read.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { stat as notionStat } from '../../../core/notion/stat.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { catGeneric } from '../generic/cat.ts'
 import { fileReadProvision } from './_provision.ts'
 
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
-
-function numberLines(data: Uint8Array): Uint8Array {
-  const text = DEC.decode(data)
-  const lines = text.split('\n')
-  const trailing = text.endsWith('\n')
-  const limit = trailing ? lines.length - 1 : lines.length
-  const out: string[] = []
-  for (let i = 0; i < limit; i++) {
-    out.push(`     ${String(i + 1)}\t${lines[i] ?? ''}\n`)
-  }
-  return ENC.encode(out.join(''))
+async function* notionStream(
+  accessor: NotionAccessor,
+  p: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  yield await notionRead(accessor, p, index)
 }
 
 async function catCommand(
   accessor: NotionAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const nFlag = opts.flags.n === true
-  if (paths.length > 0) {
-    const resolved = await resolveNotionGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    const data = await notionRead(accessor, first, opts.index ?? undefined)
-    const out: ByteSource = nFlag ? numberLines(data) : data
-    const io = new IOResult({
-      reads: { [first.stripPrefix]: data },
-      cache: [first.stripPrefix],
-    })
-    return [out, io]
-  }
-  const raw = await readStdinAsync(opts.stdin)
-  if (raw === null) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('cat: missing operand\n') })]
-  }
-  const out: ByteSource = nFlag ? numberLines(raw) : raw
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveNotionGlob(accessor, paths, opts.index ?? undefined) : []
+  return catGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => notionStat(accessor, p, opts.index ?? undefined),
+    (p) => notionStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const NOTION_CAT = command({

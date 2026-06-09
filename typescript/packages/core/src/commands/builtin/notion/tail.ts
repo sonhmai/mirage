@@ -13,53 +13,34 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NotionAccessor } from '../../../accessor/notion.ts'
+import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { resolveNotionGlob } from '../../../core/notion/glob.ts'
 import { read as notionRead } from '../../../core/notion/read.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { parseN, tailBytes } from '../tail_helper.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { tailGeneric } from '../generic/tail.ts'
 import { fileReadProvision } from './_provision.ts'
 
-const ENC = new TextEncoder()
-
-function tailResult(
-  raw: Uint8Array,
-  lines: number,
-  plusMode: boolean,
-  bytesMode: number | null,
-): Uint8Array {
-  if (bytesMode !== null) {
-    return bytesMode === 0 ? new Uint8Array(0) : raw.slice(-bytesMode)
-  }
-  return tailBytes(raw, lines, null, plusMode)
+async function* notionStream(
+  accessor: NotionAccessor,
+  p: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  yield await notionRead(accessor, p, index)
 }
 
 async function tailCommand(
   accessor: NotionAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const nRaw = typeof opts.flags.n === 'string' ? opts.flags.n : null
-  const cRaw = typeof opts.flags.c === 'string' ? opts.flags.c : null
-  const [lines, plusMode] = parseN(nRaw)
-  const bytesMode = cRaw !== null ? Number.parseInt(cRaw, 10) : null
-  if (paths.length > 0) {
-    const resolved = await resolveNotionGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    const raw = await notionRead(accessor, first, opts.index ?? undefined)
-    const out: ByteSource = tailResult(raw, lines, plusMode, bytesMode)
-    return [out, new IOResult()]
-  }
-  const raw = await readStdinAsync(opts.stdin)
-  if (raw === null) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tail: missing operand\n') })]
-  }
-  return [tailResult(raw, lines, plusMode, bytesMode), new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveNotionGlob(accessor, paths, opts.index ?? undefined) : []
+  return tailGeneric(resolved, texts, opts, (p) =>
+    notionStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const NOTION_TAIL = command({

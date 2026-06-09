@@ -13,58 +13,39 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LangfuseAccessor } from '../../../accessor/langfuse.ts'
+import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { resolveLangfuseGlob } from '../../../core/langfuse/glob.ts'
 import { read as langfuseRead } from '../../../core/langfuse/read.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { stat as langfuseStat } from '../../../core/langfuse/stat.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { headGeneric } from '../generic/head.ts'
 import { fileReadProvision } from './_provision.ts'
 
-const ENC = new TextEncoder()
-
-function headBytes(data: Uint8Array, lines: number, bytesMode: number | null): Uint8Array {
-  if (bytesMode !== null) {
-    return data.slice(0, bytesMode)
-  }
-  let count = 0
-  let end = data.byteLength
-  for (let i = 0; i < data.byteLength; i++) {
-    if (data[i] === 0x0a) {
-      count += 1
-      if (count >= lines) {
-        end = i
-        break
-      }
-    }
-  }
-  return data.slice(0, end)
+async function* langfuseStream(
+  accessor: LangfuseAccessor,
+  p: PathSpec,
+  index: IndexCacheStore | undefined,
+): AsyncIterable<Uint8Array> {
+  yield await langfuseRead(accessor, p, index)
 }
 
 async function headCommand(
   accessor: LangfuseAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const nRaw = typeof opts.flags.n === 'string' ? opts.flags.n : null
-  const cRaw = typeof opts.flags.c === 'string' ? opts.flags.c : null
-  const lines = nRaw !== null ? Number.parseInt(nRaw, 10) : 10
-  const bytesMode = cRaw !== null ? Number.parseInt(cRaw, 10) : null
-  if (paths.length > 0) {
-    const resolved = await resolveLangfuseGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    const data = await langfuseRead(accessor, first, opts.index ?? undefined)
-    const out: ByteSource = headBytes(data, lines, bytesMode)
-    return [out, new IOResult()]
-  }
-  const raw = await readStdinAsync(opts.stdin)
-  if (raw === null) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('head: missing operand\n') })]
-  }
-  return [headBytes(raw, lines, bytesMode), new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveLangfuseGlob(accessor, paths, opts.index ?? undefined) : []
+  return headGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => langfuseStat(accessor, p, opts.index ?? undefined),
+    (p) => langfuseStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const LANGFUSE_HEAD = command({

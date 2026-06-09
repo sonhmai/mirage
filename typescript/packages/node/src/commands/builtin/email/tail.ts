@@ -13,16 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  IOResult,
   ResourceName,
   command,
-  parseN,
-  readStdinAsync,
   specOf,
-  tailBytes,
-  type ByteSource,
+  tailGeneric,
   type CommandFnResult,
   type CommandOpts,
+  type IndexCacheStore,
   type PathSpec,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
@@ -30,30 +27,25 @@ import { resolveGlob } from '../../../core/email/glob.ts'
 import { read as emailRead } from '../../../core/email/read.ts'
 import { fileReadProvision } from './provision.ts'
 
-const ENC = new TextEncoder()
+async function* emailStream(
+  accessor: EmailAccessor,
+  p: PathSpec,
+  index: IndexCacheStore | undefined,
+): AsyncIterable<Uint8Array> {
+  yield await emailRead(accessor, p, index)
+}
 
 async function tailCommand(
   accessor: EmailAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const [lines, plusMode] = parseN(typeof opts.flags.n === 'string' ? opts.flags.n : null)
-  const bytesMode = typeof opts.flags.c === 'string' ? Number.parseInt(opts.flags.c, 10) : null
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    const raw = await emailRead(accessor, first, opts.index ?? undefined)
-    const out: ByteSource = tailBytes(raw, lines, bytesMode, plusMode)
-    return [out, new IOResult()]
-  }
-  const raw = await readStdinAsync(opts.stdin)
-  if (raw === null) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tail: missing operand\n') })]
-  }
-  const out: ByteSource = tailBytes(raw, lines, bytesMode, plusMode)
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return tailGeneric(resolved, texts, opts, (p) =>
+    emailStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const EMAIL_TAIL = command({

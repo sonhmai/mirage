@@ -13,14 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  IOResult,
   ResourceName,
   command,
-  readStdinAsync,
   specOf,
-  type ByteSource,
+  wcGeneric,
   type CommandFnResult,
   type CommandOpts,
+  type IndexCacheStore,
   type PathSpec,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
@@ -28,61 +27,23 @@ import { resolveGlob } from '../../../core/email/glob.ts'
 import { read as emailRead } from '../../../core/email/read.ts'
 import { fileReadProvision } from './provision.ts'
 
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
-
-function countLines(text: string): number {
-  let n = 0
-  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) n += 1
-  return n
-}
-
-function countWords(text: string): number {
-  const trimmed = text.trim()
-  if (trimmed === '') return 0
-  return trimmed.split(/\s+/).length
-}
-
-function maxLineLen(text: string): number {
-  let max = 0
-  for (const line of text.split('\n')) if (line.length > max) max = line.length
-  return max
+async function* emailStream(
+  accessor: EmailAccessor,
+  p: PathSpec,
+  index: IndexCacheStore | undefined,
+): AsyncIterable<Uint8Array> {
+  yield await emailRead(accessor, p, index)
 }
 
 async function wcCommand(
   accessor: EmailAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  let data: Uint8Array | null = null
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    data = await emailRead(accessor, first, opts.index ?? undefined)
-  } else {
-    data = await readStdinAsync(opts.stdin)
-    if (data === null) {
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('wc: missing operand\n') })]
-    }
-  }
-  const text = DEC.decode(data)
-  const lineCount = countLines(text)
-  const wordCount = countWords(text)
-  const byteCount = data.byteLength
-  if (opts.flags.L === true) {
-    const out: ByteSource = ENC.encode(String(maxLineLen(text)))
-    return [out, new IOResult()]
-  }
-  if (opts.flags.args_l === true) return [ENC.encode(String(lineCount)), new IOResult()]
-  if (opts.flags.w === true) return [ENC.encode(String(wordCount)), new IOResult()]
-  if (opts.flags.m === true) return [ENC.encode(String(text.length)), new IOResult()]
-  if (opts.flags.c === true) return [ENC.encode(String(byteCount)), new IOResult()]
-  const out: ByteSource = ENC.encode(
-    `${String(lineCount)}\t${String(wordCount)}\t${String(byteCount)}`,
-  )
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return wcGeneric(resolved, texts, opts, (p) => emailStream(accessor, p, opts.index ?? undefined))
 }
 
 export const EMAIL_WC = command({

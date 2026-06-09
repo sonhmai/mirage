@@ -38,6 +38,15 @@ class EmailAccessor(Accessor):
                     port=self.config.imap_port,
                 )
             await self._imap.wait_hello_from_server()
-            await self._imap.login(self.config.username,
-                                   reveal_secret(self.config.password))
+            response = await self._imap.login(
+                self.config.username, reveal_secret(self.config.password))
+            if response.result != "OK":
+                detail = " ".join(
+                    line.decode(errors="replace") if isinstance(
+                        line, (bytes, bytearray)) else str(line)
+                    for line in (response.lines or []))
+                self._imap = None
+                raise ConnectionError(
+                    f"IMAP login failed for {self.config.username} on "
+                    f"{self.config.imap_host}: {detail or response.result}")
         return self._imap

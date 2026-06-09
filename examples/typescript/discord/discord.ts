@@ -98,6 +98,30 @@ async function main(): Promise<void> {
       console.log('  (no attachments on this date)')
     }
 
+    // ── stat + cat first attachment (byte-exact CDN download) ──
+    if (filesOut !== '') {
+      const firstAtt = filesOut.split('\n')[0]!.trim()
+      const attPath = `${base}/${targetDate}/files/${firstAtt}`
+
+      console.log(`\n=== stat ${firstAtt} ===`)
+      r = await ws.execute(`stat "${attPath}"`)
+      const statOut = r.stdoutText.trim()
+      console.log(`  ${statOut.slice(0, 200)}`)
+      const sizeMatch = /size=(\d+)/.exec(statOut)
+      const expectedSize = sizeMatch !== null ? Number.parseInt(sizeMatch[1]!, 10) : null
+
+      console.log(`\n=== cat ${firstAtt} (byte-exact CDN download) ===`)
+      r = await ws.execute(`cat "${attPath}"`)
+      console.log(
+        `  bytes=${String(r.stdout.byteLength)} expected=${String(expectedSize)} exit=${String(r.exitCode)}`,
+      )
+      if (expectedSize !== null && r.stdout.byteLength !== expectedSize) {
+        throw new Error(
+          `regression: attachment cat got ${String(r.stdout.byteLength)} bytes, expected ${String(expectedSize)}`,
+        )
+      }
+    }
+
     // ── grep at FILE level ─────────────────────────
     console.log(`\n=== grep at FILE level: grep -c . ${targetDate}/chat.jsonl ===`)
     r = await ws.execute(`grep -c . "${filePath}"`)
@@ -143,6 +167,33 @@ async function main(): Promise<void> {
     r = await ws.execute(`wc -l "${filePath}"`)
     console.log(`  ${r.stdoutText.trim()}`)
 
+    // ── basename / dirname / realpath (path ops) ───────
+    console.log(`\n=== basename ${filePath} ===`)
+    r = await ws.execute(`basename "${filePath}"`)
+    const baseOut = r.stdoutText.trim()
+    console.log(`  ${baseOut}`)
+    if (baseOut !== 'chat.jsonl') throw new Error(`basename expected 'chat.jsonl', got ${baseOut}`)
+
+    const expectedDir = `${base}/${targetDate}`
+    console.log(`\n=== dirname ${filePath} ===`)
+    r = await ws.execute(`dirname "${filePath}"`)
+    const dirOut = r.stdoutText.trim()
+    console.log(`  ${dirOut}`)
+    if (dirOut !== expectedDir) throw new Error(`dirname expected ${expectedDir}, got ${dirOut}`)
+
+    console.log(`\n=== realpath ${filePath} ===`)
+    r = await ws.execute(`realpath "${filePath}"`)
+    const realOut = r.stdoutText.trim()
+    console.log(`  ${realOut}`)
+    if (realOut !== filePath) throw new Error(`realpath expected ${filePath}, got ${realOut}`)
+
+    console.log(`\n=== realpath -e ${filePath} (must exist) ===`)
+    r = await ws.execute(`realpath -e "${filePath}"`)
+    console.log(`  exit=${String(r.exitCode)} ${r.stdoutText.trim()}`)
+    if (r.exitCode !== 0) {
+      throw new Error(`regression: realpath -e failed for existing file; stderr=${r.stderrText}`)
+    }
+
     // ── tree ───────────────────────────────────────
     console.log(`\n=== tree -L 2 /discord/${guild}/ | head -n 20 ===`)
     r = await ws.execute(`tree -L 2 "/discord/${guild}/" | head -n 20`)
@@ -177,6 +228,20 @@ async function main(): Promise<void> {
     r = await ws.execute(`cat "${targetDate}/chat.jsonl" | head -n 1`)
     if (r.stdoutText.trim() !== '') {
       console.log(`  ${r.stdoutText.trim().slice(0, 120)}`)
+    }
+
+    // ── members ────────────────────────────────────────
+    console.log(`\n=== ls /discord/${guild}/members/ | head -n 5 ===`)
+    r = await ws.execute(`ls "/discord/${guild}/members/" | head -n 5`)
+    const memOut = r.stdoutText.trim()
+    if (memOut !== '') {
+      for (const line of memOut.split('\n')) console.log(`  ${line}`)
+      const firstMember = memOut.split('\n')[0]!.trim()
+      console.log(`\n=== cat /discord/${guild}/members/${firstMember} ===`)
+      r = await ws.execute(`cat "/discord/${guild}/members/${firstMember}"`)
+      console.log(`  ${r.stdoutText.trim().slice(0, 200)}`)
+    } else {
+      console.log('  (no members visible)')
     }
   } finally {
     await ws.close()

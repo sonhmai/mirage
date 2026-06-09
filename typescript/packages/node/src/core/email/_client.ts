@@ -23,7 +23,7 @@ export interface FetchedMessage extends ParsedRfc822 {
 export async function listFolders(accessor: EmailAccessor): Promise<string[]> {
   const imap = await accessor.getImap()
   const tree = await imap.list()
-  return tree.map((m) => m.path)
+  return tree.map((m) => m.pathAsListed)
 }
 
 export async function listMessageUids(

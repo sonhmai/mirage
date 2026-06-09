@@ -44,7 +44,12 @@ export class EmailAccessor extends Accessor {
       await client.connect()
       return client
     })()
-    return this.clientPromise
+    try {
+      return await this.clientPromise
+    } catch (err) {
+      this.clientPromise = null
+      throw err
+    }
   }
 
   async close(): Promise<void> {

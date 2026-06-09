@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RegisteredCommand } from '../../config.ts'
+import { DISCORD_BASENAME } from './basename.ts'
 import { DISCORD_CAT } from './cat.ts'
+import { DISCORD_DIRNAME } from './dirname.ts'
 import { DISCORD_ADD_REACTION } from './discord_add_reaction.ts'
 import { DISCORD_GET_SERVER_INFO } from './discord_get_server_info.ts'
 import { DISCORD_LIST_MEMBERS } from './discord_list_members.ts'
@@ -23,6 +25,7 @@ import { DISCORD_GREP } from './grep.ts'
 import { DISCORD_HEAD } from './head.ts'
 import { DISCORD_JQ } from './jq.ts'
 import { DISCORD_LS } from './ls.ts'
+import { DISCORD_REALPATH } from './realpath.ts'
 import { DISCORD_RG } from './rg.ts'
 import { DISCORD_STAT } from './stat.ts'
 import { DISCORD_TAIL } from './tail.ts'
@@ -41,6 +44,9 @@ export const DISCORD_COMMANDS: readonly RegisteredCommand[] = [
   ...DISCORD_RG,
   ...DISCORD_STAT,
   ...DISCORD_JQ,
+  ...DISCORD_BASENAME,
+  ...DISCORD_DIRNAME,
+  ...DISCORD_REALPATH,
   ...DISCORD_SEND_MESSAGE,
   ...DISCORD_ADD_REACTION,
   ...DISCORD_GET_SERVER_INFO,

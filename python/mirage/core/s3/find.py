@@ -42,7 +42,7 @@ async def find(
         accessor (S3Accessor): S3 accessor.
         path (PathSpec | str): Prefix path.
         name (str | None): Glob pattern to match entry name.
-        type (str | None): "file" or "directory".
+        type (str | None): "f" (file) or "d" (directory).
         min_size (int | None): Minimum object size.
         max_size (int | None): Maximum object size.
         maxdepth (int | None): Maximum directory depth.
@@ -93,9 +93,9 @@ async def find(
                     continue
                 if name_exclude and fnmatch.fnmatch(entry_name, name_exclude):
                     continue
-                if type == "file" and is_dir:
+                if type == "f" and is_dir:
                     continue
-                if type == "directory" and not is_dir:
+                if type == "d" and not is_dir:
                     continue
                 if not is_dir:
                     size = obj.get("Size", 0)

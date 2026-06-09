@@ -18,8 +18,8 @@ async def _collect(stdin: bytes, **kwargs) -> bytes:
     return b"".join(chunks)
 
 
-def test_parse_count_unset_is_zero():
-    assert _parse_count(None) == 0
+def test_parse_count_unset_is_none():
+    assert _parse_count(None) is None
 
 
 def test_parse_count_zero_string():
@@ -28,6 +28,11 @@ def test_parse_count_zero_string():
 
 def test_parse_count_positive():
     assert _parse_count("3") == 3
+
+
+def test_parse_count_negative_raises():
+    with pytest.raises(ValueError, match="invalid count"):
+        _parse_count("-1")
 
 
 @pytest.mark.asyncio
@@ -60,10 +65,18 @@ async def test_check_chars_limits_comparison():
 
 
 @pytest.mark.asyncio
-async def test_check_chars_zero_string_compares_full_line():
+async def test_check_chars_unset_compares_full_line():
+    data = b"abcAAA\nabcBBB\n"
+    out = await _collect(data)
+    assert out == b"abcAAA\nabcBBB\n"
+
+
+@pytest.mark.asyncio
+async def test_check_chars_zero_string_treats_all_lines_as_duplicates():
+    # GNU: -w 0 compares zero characters, so every line matches the first
     data = b"abcAAA\nabcBBB\n"
     out = await _collect(data, check_chars="0")
-    assert out == b"abcAAA\nabcBBB\n"
+    assert out == b"abcAAA\n"
 
 
 @pytest.mark.asyncio

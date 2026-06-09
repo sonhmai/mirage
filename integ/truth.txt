@@ -230,6 +230,7 @@ a.txt
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
 /data/sorted_a.txt
@@ -254,6 +255,7 @@ a.txt
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
 /data/sorted_a.txt
@@ -280,6 +282,7 @@ mixed.txt
 no_nl.txt
 numbers.txt
 one_byte.txt
+prefix_dup.txt
 repeats.txt
 sections.txt
 sorted_a.txt
@@ -305,6 +308,7 @@ mixed.txt
 no_nl.txt
 numbers.txt
 one_byte.txt
+prefix_dup.txt
 repeats.txt
 sections.txt
 sorted_a.txt
@@ -410,6 +414,7 @@ baz
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
 /data/sorted_a.txt
@@ -436,6 +441,7 @@ baz
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
 /data/sorted_a.txt
@@ -494,7 +500,7 @@ world
       2 b
       1 c
 === find_pipe_wc ===
-19
+20
 === jq_pipe_wc ===
 3
 === cat_tr_sort ===
@@ -581,6 +587,7 @@ world
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
 /data/sorted_a.txt
@@ -602,6 +609,7 @@ world
 /data/mixed.txt
 /data/no_nl.txt
 /data/numbers.txt
+/data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
 /data/sorted_a.txt
@@ -625,6 +633,7 @@ world
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
 /data/sorted_a.txt
@@ -675,7 +684,7 @@ age
 === pipe_jq_grep ===
 2
 === pipe_find_grep_wc ===
-1
+2
 === pipe_cat_tr_sort_uniq ===
       2 A
       2 B
@@ -818,6 +827,21 @@ z
       3 x
       2 y
       1 z
+=== uniq_f ===
+1 apple
+3 banana
+=== uniq_s ===
+1 apple
+3 banana
+=== uniq_w ===
+1 apple
+2 apple
+3 banana
+=== uniq_w0 ===
+1 apple
+=== uniq_f_c ===
+      2 1 apple
+      1 3 banana
 === grep_F ===
 
 === grep_m1 ===
@@ -861,6 +885,7 @@ baz,
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
 /data/sorted_a.txt
@@ -885,6 +910,7 @@ baz,
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
 /data/sorted_a.txt
@@ -915,6 +941,7 @@ baz,
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
 /data/sorted_a.txt
@@ -941,6 +968,7 @@ baz,
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
 /data/sorted_a.txt
@@ -991,7 +1019,7 @@ baz,
 === du_file ===
 24	/data/a.txt
 === du_dir ===
-545	/data
+570	/data
 === du_h ===
 24B	/data/a.txt
 === tree ===

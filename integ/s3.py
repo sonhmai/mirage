@@ -89,6 +89,10 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
      "jq '.departments[].teams[].name' {m}/data/example.json"),
     ("pipe_sort_uniq_wc", "cat {m}/data/example.jsonl"
      " | grep queue-operation | sort | uniq | wc -l"),
+    ("pipe_sort_uniq_w0_wc", "cat {m}/data/example.jsonl"
+     " | grep queue-operation | sort | uniq -w 0 | wc -l"),
+    ("pipe_sort_uniq_f_wc", "cat {m}/data/example.jsonl"
+     " | grep queue-operation | sort | uniq -f 1 | wc -l"),
     ("md5_json", "md5 {m}/data/example.json"),
     ("sha256_json", "sha256sum {m}/data/example.json"),
     ("ls_l_data", "ls -l {m}/data/"),

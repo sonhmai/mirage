@@ -1,5 +1,8 @@
 name: Integ (s3 + gcs + minio via moto)
 
+permissions:
+  contents: read
+
 "on":
   push:
     branches: [main]

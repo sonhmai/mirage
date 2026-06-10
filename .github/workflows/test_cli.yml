@@ -1,5 +1,8 @@
 name: CLI exit codes
 
+permissions:
+  contents: read
+
 "on":
   push:
     branches: [main]

@@ -270,15 +270,35 @@ async def test_find_name_matches_native_gdoc(accessor, index):
 async def test_find_maxdepth_limits_recursion(accessor, index):
     await _populate_warm(index)
     result, _ = await find(accessor, [_dir_spec("/")],
-                           maxdepth="0",
+                           maxdepth="1",
                            index=index)
     assert _lines(result) == ["/doc.gdoc.json", "/docs", "/file.txt"]
+
+
+@pytest.mark.asyncio
+async def test_find_maxdepth_zero_lists_nothing(accessor, index):
+    await _populate_warm(index)
+    result, _ = await find(accessor, [_dir_spec("/")],
+                           maxdepth="0",
+                           index=index)
+    assert _lines(result) == []
+
+
+@pytest.mark.asyncio
+async def test_find_mindepth_one_keeps_top_level(accessor, index):
+    await _populate_warm(index)
+    result, _ = await find(accessor, [_dir_spec("/")],
+                           mindepth="1",
+                           index=index)
+    assert _lines(result) == [
+        "/doc.gdoc.json", "/docs", "/docs/inner.txt", "/file.txt"
+    ]
 
 
 @pytest.mark.asyncio
 async def test_find_mindepth_skips_top_level(accessor, index):
     await _populate_warm(index)
     result, _ = await find(accessor, [_dir_spec("/")],
-                           mindepth="1",
+                           mindepth="2",
                            index=index)
     assert _lines(result) == ["/docs/inner.txt"]

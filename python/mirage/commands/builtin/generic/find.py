@@ -238,8 +238,10 @@ async def walk_find(
     args: FindArgs,
 ) -> list[str]:
     collected: list[tuple[str, bool]] = []
+    # GNU depth convention: the search root is depth 0, its children are
+    # depth 1, so the walk starts at 1 and -maxdepth 0 lists nothing.
     await _walk_collect(readdir, stat, is_dir_name, search_path, index,
-                        args.maxdepth, 0, collected)
+                        args.maxdepth, 1, collected)
     prefix = search_path.prefix
     search_key = search_path.strip_prefix.strip("/")
     base_depth = search_key.count("/") if search_key else -1
@@ -247,7 +249,7 @@ async def walk_find(
     for p, is_dir in sorted(collected):
         entry_name = p.rsplit("/", 1)[-1]
         key = p[len(prefix):] if prefix and p.startswith(prefix) else p
-        depth = key.strip("/").count("/") - (base_depth + 1)
+        depth = key.strip("/").count("/") - base_depth
         if args.mindepth is not None and depth < args.mindepth:
             continue
         if args.type == FindType.FILE and is_dir:

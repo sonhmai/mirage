@@ -35,15 +35,20 @@ export function du(accessor: GitHubAccessor, path: PathSpec): Promise<number> {
   return Promise.resolve(total)
 }
 
-export function duAll(accessor: GitHubAccessor, path: PathSpec): Promise<[string, number][]> {
+export function duAll(
+  accessor: GitHubAccessor,
+  path: PathSpec,
+): Promise<[[string, number][], number]> {
   const key = strip(path)
   const prefix = key === '' ? '' : `${key}/`
   const out: [string, number][] = []
+  let total = 0
   for (const [p, entry] of Object.entries(accessor.tree)) {
     if (p === key || p.startsWith(prefix)) {
       out.push([`/${p}`, entry.size ?? 0])
+      total += entry.size ?? 0
     }
   }
   out.sort((a, b) => a[0].localeCompare(b[0]))
-  return Promise.resolve(out)
+  return Promise.resolve([out, total])
 }

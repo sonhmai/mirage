@@ -188,7 +188,9 @@ async def _stat_entry(
                     prefix=prefix)
     try:
         return await stat(spec, index)
-    except (FileNotFoundError, ValueError):
+    except FileNotFoundError:
+        # Only missing entries resolve to None; API errors (rate limit, auth)
+        # propagate.
         return None
 
 
@@ -207,7 +209,9 @@ async def _walk_collect(
         return
     try:
         children = await readdir(spec, index)
-    except (FileNotFoundError, ValueError):
+    except FileNotFoundError:
+        # Only vanished dirs are skipped; API errors (rate limit, auth)
+        # propagate.
         return
     for child in children:
         hint = is_dir_name(child)

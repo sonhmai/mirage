@@ -1,11 +1,12 @@
 from dataclasses import asdict
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage.commands.builtin.generic.find import (FindArgs, apply_mount_prefix,
                                                   apply_mtime_filter,
-                                                  parse_find_args)
+                                                  parse_find_args, walk_find)
 from mirage.types import FileStat, FileType, FindType, PathSpec
 
 
@@ -190,3 +191,85 @@ def test_apply_mount_prefix_strips_leading_slash_from_entries():
 
 async def _unreached_stat(_spec: PathSpec) -> FileStat:
     raise AssertionError("stat should not be called when no mtime window set")
+
+
+def _root_spec() -> PathSpec:
+    return PathSpec(original="/", directory="/", resolved=False, prefix="")
+
+
+@pytest.mark.asyncio
+async def test_walk_find_tolerates_not_found_readdir():
+    readdir = AsyncMock(side_effect=FileNotFoundError("/"))
+    stat = AsyncMock()
+    results = await walk_find(_root_spec(),
+                              readdir=readdir,
+                              stat=stat,
+                              is_dir_name=lambda c: None,
+                              index=None,
+                              args=FindArgs())
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_walk_find_propagates_non_not_found_readdir_errors():
+    readdir = AsyncMock(side_effect=ValueError("bad page token"))
+    stat = AsyncMock()
+    with pytest.raises(ValueError, match="bad page token"):
+        await walk_find(_root_spec(),
+                        readdir=readdir,
+                        stat=stat,
+                        is_dir_name=lambda c: None,
+                        index=None,
+                        args=FindArgs())
+
+
+@pytest.mark.asyncio
+async def test_walk_find_stat_fallback_treats_not_found_as_file():
+    readdir = AsyncMock(return_value=["/mystery"])
+    stat = AsyncMock(side_effect=FileNotFoundError("/mystery"))
+    results = await walk_find(_root_spec(),
+                              readdir=readdir,
+                              stat=stat,
+                              is_dir_name=lambda c: None,
+                              index=None,
+                              args=FindArgs(type=FindType.FILE))
+    assert results == ["/mystery"]
+
+
+@pytest.mark.asyncio
+async def test_walk_find_stat_fallback_propagates_other_errors():
+    readdir = AsyncMock(return_value=["/mystery"])
+    stat = AsyncMock(side_effect=ValueError("rate limited"))
+    with pytest.raises(ValueError, match="rate limited"):
+        await walk_find(_root_spec(),
+                        readdir=readdir,
+                        stat=stat,
+                        is_dir_name=lambda c: None,
+                        index=None,
+                        args=FindArgs())
+
+
+@pytest.mark.asyncio
+async def test_walk_find_size_filter_drops_not_found_entries():
+    readdir = AsyncMock(return_value=["/a.json"])
+    stat = AsyncMock(side_effect=FileNotFoundError("/a.json"))
+    results = await walk_find(_root_spec(),
+                              readdir=readdir,
+                              stat=stat,
+                              is_dir_name=lambda c: False,
+                              index=None,
+                              args=FindArgs(min_size=1))
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_walk_find_size_filter_propagates_other_stat_errors():
+    readdir = AsyncMock(return_value=["/a.json"])
+    stat = AsyncMock(side_effect=ValueError("rate limited"))
+    with pytest.raises(ValueError, match="rate limited"):
+        await walk_find(_root_spec(),
+                        readdir=readdir,
+                        stat=stat,
+                        is_dir_name=lambda c: False,
+                        index=None,
+                        args=FindArgs(min_size=1))

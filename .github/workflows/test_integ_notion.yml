@@ -1,0 +1,93 @@
+name: Integ (notion via mock server)
+
+permissions:
+  contents: read
+
+"on":
+  push:
+    branches: [main]
+    paths:
+      - integ/notion.py
+      - integ/notion.ts
+      - integ/truth_notion.txt
+      - python/mirage/accessor/notion.py
+      - python/mirage/core/notion/**
+      - python/mirage/commands/builtin/notion/**
+      - python/mirage/resource/notion/**
+      - typescript/**
+      - .github/workflows/test_integ_notion.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - integ/notion.py
+      - integ/notion.ts
+      - integ/truth_notion.txt
+      - python/mirage/accessor/notion.py
+      - python/mirage/core/notion/**
+      - python/mirage/commands/builtin/notion/**
+      - python/mirage/resource/notion/**
+      - typescript/**
+      - .github/workflows/test_integ_notion.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integ-notion:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
+
+      - name: Run notion integ (mock server) and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/notion.py > /tmp/notion.out
+          diff integ/truth_notion.txt /tmp/notion.out
+
+  integ-notion-ts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+
+      - name: Install dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build mirage-core
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-core build
+
+      - name: Build mirage-node
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-node build
+
+      - name: Run notion integ (TS, mock server) and diff against truth
+        working-directory: integ
+        run: |
+          pnpm exec tsx notion.ts > /tmp/notion_ts.out
+          diff truth_notion.txt /tmp/notion_ts.out

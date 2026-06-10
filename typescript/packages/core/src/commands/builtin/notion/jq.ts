@@ -55,7 +55,7 @@ async function jqCommand(
       const bytes = await notionRead(accessor, p, opts.index ?? undefined)
       let data = parseJsonPath(bytes, p.original)
       if (slurp) data = Array.isArray(data) ? data : [data]
-      const result = jqEval(data, expression.trim())
+      const result = await jqEval(data, expression.trim())
       outputs.push(formatJqOutput(result, raw, compact, spread))
     }
     const out: ByteSource = concatBytes(outputs)
@@ -68,7 +68,7 @@ async function jqCommand(
   }
   let data = parseJsonAuto(bytes)
   if (slurp && !Array.isArray(data)) data = [data]
-  const result = jqEval(data, expression.trim())
+  const result = await jqEval(data, expression.trim())
   return [formatJqOutput(result, raw, compact, spread), new IOResult()]
 }
 

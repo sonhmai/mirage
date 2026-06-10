@@ -44,7 +44,7 @@ async def main():
             print(f"  {p}")
 
         if pages:
-            page_path = pages[0]
+            page_path = f"/notion/pages/{pages[0]}"
 
             print(f"\n--- os.listdir() {page_path} ---")
             contents = vos.listdir(page_path)

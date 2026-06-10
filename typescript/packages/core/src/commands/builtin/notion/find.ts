@@ -13,96 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NotionAccessor } from '../../../accessor/notion.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import { find as notionFind } from '../../../core/notion/find.ts'
 import { resolveNotionGlob } from '../../../core/notion/glob.ts'
-import { readdir as notionReaddir } from '../../../core/notion/readdir.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { PathSpec, ResourceName } from '../../../types.ts'
+import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { findGeneric } from '../generic/find.ts'
 import { metadataProvision } from './_provision.ts'
-import { stripSlash } from '../../../util/slash.ts'
-
-const ENC = new TextEncoder()
-
-function fnmatch(name: string, pattern: string): boolean {
-  const re = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\?/g, '.')
-    .replace(/\*/g, '.*')
-  return new RegExp(`^${re}$`).test(name)
-}
-
-async function walk(
-  accessor: NotionAccessor,
-  path: PathSpec,
-  index: IndexCacheStore | undefined,
-  maxDepth: number | null,
-  depth: number,
-): Promise<string[]> {
-  if (maxDepth !== null && depth > maxDepth) return []
-  let children: string[]
-  try {
-    children = await notionReaddir(accessor, path, index)
-  } catch {
-    return []
-  }
-  const results: string[] = []
-  for (const child of children) {
-    results.push(child)
-    if (!child.endsWith('.json') && !child.endsWith('.jsonl')) {
-      const childSpec = new PathSpec({
-        original: child,
-        directory: child,
-        resolved: false,
-        prefix: path.prefix,
-      })
-      const sub = await walk(accessor, childSpec, index, maxDepth, depth + 1)
-      results.push(...sub)
-    }
-  }
-  return results
-}
 
 async function findCommand(
   accessor: NotionAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const resolved = await resolveNotionGlob(accessor, paths, opts.index ?? undefined)
-  const p0 = resolved[0]
-  const searchPath = p0 !== undefined ? p0.original : '/'
-  const searchPrefix = p0 !== undefined ? p0.prefix : ''
-  const nameFlag = typeof opts.flags.name === 'string' ? opts.flags.name : null
-  const inameFlag = typeof opts.flags.iname === 'string' ? opts.flags.iname : null
-  const maxDepthFlag = typeof opts.flags.maxdepth === 'string' ? opts.flags.maxdepth : null
-  const minDepthFlag = typeof opts.flags.mindepth === 'string' ? opts.flags.mindepth : null
-  const md = maxDepthFlag !== null ? Number.parseInt(maxDepthFlag, 10) : null
-  const mdMin = minDepthFlag !== null ? Number.parseInt(minDepthFlag, 10) : null
-  const searchSpec = new PathSpec({
-    original: searchPath,
-    directory: searchPath,
-    resolved: false,
-    prefix: searchPrefix,
-  })
-  const allPaths = await walk(accessor, searchSpec, opts.index ?? undefined, md, 0)
-  const stripped = stripSlash(searchPath)
-  const baseDepth = stripped !== '' ? (stripped.match(/\//g)?.length ?? 0) : -1
-  const sorted = [...allPaths].sort()
-  const results: string[] = []
-  for (const p of sorted) {
-    const entryName = p.split('/').pop() ?? p
-    const stripPath = stripSlash(p)
-    const slashes = stripPath !== '' ? (stripPath.match(/\//g)?.length ?? 0) : 0
-    const depth = slashes - (baseDepth + 1)
-    if (mdMin !== null && depth < mdMin) continue
-    if (nameFlag !== null && !fnmatch(entryName, nameFlag)) continue
-    if (inameFlag !== null && !fnmatch(entryName.toLowerCase(), inameFlag.toLowerCase())) continue
-    results.push(p)
-  }
-  const out: ByteSource = ENC.encode(results.join('\n'))
-  return [out, new IOResult()]
+  return findGeneric(resolved, texts, opts, (root, options) =>
+    notionFind(accessor, root, options, opts.index ?? undefined),
+  )
 }
 
 export const NOTION_FIND = command({

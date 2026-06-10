@@ -37,6 +37,9 @@ async def readdir(
 
     if index is not None:
         cached = await index.list_dir(virtual_key)
+        # Cached entries are slash-less, while the cold path below marks
+        # folders with a trailing slash. Callers must not infer dir-ness
+        # from the slash alone (see find's stat fallback).
         if cached.entries is not None:
             return cached.entries
 

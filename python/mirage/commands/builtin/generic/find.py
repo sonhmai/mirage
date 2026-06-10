@@ -1,13 +1,15 @@
+import fnmatch
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.find_helper import (_extract_not_name,
                                                  _extract_or_names,
                                                  _parse_mtime, _parse_size)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileStat, FindType, PathSpec
+from mirage.types import FileStat, FileType, FindType, PathSpec
 
 
 @dataclass
@@ -158,3 +160,140 @@ async def find(
                                            mount_prefix=search_path.prefix)
     results = apply_mount_prefix(results, search_path.prefix)
     return format_records(results), IOResult()
+
+
+def _modified_ts(modified: str | None) -> float | None:
+    # Missing or unparseable timestamps exclude the entry from -mtime
+    # matching, mirroring the TS implementation's NaN handling.
+    if not modified:
+        return None
+    try:
+        dt = datetime.fromisoformat(modified)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+async def _stat_entry(
+    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    path: str,
+    prefix: str,
+    index: IndexCacheStore | None,
+) -> FileStat | None:
+    spec = PathSpec(original=path,
+                    directory=path,
+                    resolved=False,
+                    prefix=prefix)
+    try:
+        return await stat(spec, index)
+    except FileNotFoundError:
+        # Only missing entries resolve to None; API errors (rate limit, auth)
+        # propagate.
+        return None
+
+
+async def _walk_collect(
+    readdir: Callable[[PathSpec, IndexCacheStore | None],
+                      Awaitable[list[str]]],
+    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    is_dir_name: Callable[[str], bool | None],
+    spec: PathSpec,
+    index: IndexCacheStore | None,
+    maxdepth: int | None,
+    depth: int,
+    acc: list[tuple[str, bool]],
+) -> None:
+    if maxdepth is not None and depth > maxdepth:
+        return
+    try:
+        children = await readdir(spec, index)
+    except FileNotFoundError:
+        # Only vanished dirs are skipped; API errors (rate limit, auth)
+        # propagate.
+        return
+    for child in children:
+        hint = is_dir_name(child)
+        trimmed = child.rstrip("/") if child.endswith("/") else child
+        if hint is None:
+            st = await _stat_entry(stat, trimmed, spec.prefix, index)
+            is_dir = st is not None and st.type == FileType.DIRECTORY
+        else:
+            is_dir = hint
+        acc.append((trimmed, is_dir))
+        if is_dir:
+            child_spec = PathSpec(original=trimmed,
+                                  directory=trimmed,
+                                  resolved=False,
+                                  prefix=spec.prefix)
+            await _walk_collect(readdir, stat, is_dir_name, child_spec, index,
+                                maxdepth, depth + 1, acc)
+
+
+async def walk_find(
+    search_path: PathSpec,
+    *,
+    readdir: Callable[[PathSpec, IndexCacheStore | None],
+                      Awaitable[list[str]]],
+    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    is_dir_name: Callable[[str], bool | None],
+    index: IndexCacheStore | None,
+    args: FindArgs,
+) -> list[str]:
+    collected: list[tuple[str, bool]] = []
+    # GNU depth convention: the search root is depth 0, its children are
+    # depth 1, so the walk starts at 1 and -maxdepth 0 lists nothing.
+    await _walk_collect(readdir, stat, is_dir_name, search_path, index,
+                        args.maxdepth, 1, collected)
+    prefix = search_path.prefix
+    search_key = search_path.strip_prefix.strip("/")
+    base_depth = search_key.count("/") if search_key else -1
+    results: list[str] = []
+    for p, is_dir in sorted(collected):
+        entry_name = p.rsplit("/", 1)[-1]
+        key = p[len(prefix):] if prefix and p.startswith(prefix) else p
+        depth = key.strip("/").count("/") - base_depth
+        if args.mindepth is not None and depth < args.mindepth:
+            continue
+        if args.type == FindType.FILE and is_dir:
+            continue
+        if args.type == FindType.DIRECTORY and not is_dir:
+            continue
+        if args.or_names:
+            if not any(
+                    fnmatch.fnmatch(entry_name, pat) for pat in args.or_names):
+                continue
+        elif args.name and not fnmatch.fnmatch(entry_name, args.name):
+            continue
+        if args.iname and not fnmatch.fnmatch(entry_name.lower(),
+                                              args.iname.lower()):
+            continue
+        if args.path_pattern and not fnmatch.fnmatch(key, args.path_pattern):
+            continue
+        if args.name_exclude and fnmatch.fnmatch(entry_name,
+                                                 args.name_exclude):
+            continue
+        need_size = not is_dir and (args.min_size is not None
+                                    or args.max_size is not None)
+        need_mtime = args.mtime_min is not None or args.mtime_max is not None
+        if need_size or need_mtime:
+            st = await _stat_entry(stat, p, prefix, index)
+            if st is None:
+                continue
+            if need_size:
+                size = st.size or 0
+                if args.min_size is not None and size < args.min_size:
+                    continue
+                if args.max_size is not None and size > args.max_size:
+                    continue
+            if need_mtime:
+                ts = _modified_ts(st.modified)
+                if ts is None:
+                    continue
+                if args.mtime_min is not None and ts < args.mtime_min:
+                    continue
+                if args.mtime_max is not None and ts > args.mtime_max:
+                    continue
+        results.append(p)
+    return results

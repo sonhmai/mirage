@@ -95,3 +95,19 @@ Set your token in the ACME_TOKEN environment variable.
 2
 === pipe_sort_uniq_wc ===
 3
+=== poison_concat ===
+Welcome to Acme. This quickstart gets you running fast.
+Install the CLI with npm i -g acme then run acme login.
+Set your token in the ACME_TOKEN environment variable.Authentication uses bearer tokens via the Authorization header.
+Requests are rate limited to 100 calls per minute per token.
+If you exceed the limit you receive HTTP 429 and must back off.
+=== poison_first_intact ===
+Welcome to Acme. This quickstart gets you running fast.
+Install the CLI with npm i -g acme then run acme login.
+Set your token in the ACME_TOKEN environment variable.
+=== poison_second_intact ===
+Authentication uses bearer tokens via the Authorization header.
+Requests are rate limited to 100 calls per minute per token.
+If you exceed the limit you receive HTTP 429 and must back off.
+=== pipe_concat_head ===
+Welcome to Acme. This quickstart gets you running fast.

@@ -62,3 +62,12 @@ output truncated at safeguard limit (20 lines)
 # ---- streaming: early-exit single-line reads ----
 lines=1 out0='{"type":"queue-operation","operation":"enqueue",'
 lines=1 out0='{"parentUuid":null,"isSidechain":false,"userType'
+
+# ---- writes-key regression: warm dir index sees touch/rm ----
+inv_late.txt
+inv_gone_bytes=0
+
+# ---- cat cache poisoning: per-file keys after a concat cat ----
+6023
+257 /nc/data/example.json
+5766 /nc/data/example.jsonl

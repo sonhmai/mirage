@@ -197,6 +197,12 @@ CASES: list[tuple[str, str]] = [
     ("pipe_cat_wc", "cat {root}guides/auth.md | wc -l"),
     ("pipe_sort_uniq_wc", "cat {root}policies/refunds.md | sort | uniq"
      " | wc -l"),
+    # cat cache poisoning: per-file cache keys after a concat cat
+    ("poison_concat", "cat {root}guides/quickstart.md {root}guides/auth.md"),
+    ("poison_first_intact", "cat {root}guides/quickstart.md"),
+    ("poison_second_intact", "cat {root}guides/auth.md"),
+    ("pipe_concat_head",
+     "cat {root}guides/quickstart.md {root}guides/auth.md | head -n 1"),
 ]
 
 

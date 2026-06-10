@@ -1,4 +1,4 @@
-name: Integ (mongodb)
+name: Integ (database)
 
 "on":
   push:
@@ -7,26 +7,40 @@ name: Integ (mongodb)
       - integ/mongodb.py
       - integ/mongodb.ts
       - integ/truth_mongodb.txt
+      - integ/postgres.py
+      - integ/postgres.ts
+      - integ/truth_postgres.txt
       - integ/check_lines.sh
       - python/mirage/accessor/mongodb.py
       - python/mirage/core/mongodb/**
       - python/mirage/commands/builtin/mongodb/**
       - python/mirage/resource/mongodb/**
+      - python/mirage/accessor/postgres.py
+      - python/mirage/core/postgres/**
+      - python/mirage/commands/builtin/postgres/**
+      - python/mirage/resource/postgres/**
       - typescript/**
-      - .github/workflows/test_integ_mongodb.yml
+      - .github/workflows/test_integ_database.yml
   pull_request:
     branches: [main]
     paths:
       - integ/mongodb.py
       - integ/mongodb.ts
       - integ/truth_mongodb.txt
+      - integ/postgres.py
+      - integ/postgres.ts
+      - integ/truth_postgres.txt
       - integ/check_lines.sh
       - python/mirage/accessor/mongodb.py
       - python/mirage/core/mongodb/**
       - python/mirage/commands/builtin/mongodb/**
       - python/mirage/resource/mongodb/**
+      - python/mirage/accessor/postgres.py
+      - python/mirage/core/postgres/**
+      - python/mirage/commands/builtin/postgres/**
+      - python/mirage/resource/postgres/**
       - typescript/**
-      - .github/workflows/test_integ_mongodb.yml
+      - .github/workflows/test_integ_database.yml
   workflow_dispatch:
 
 concurrency:
@@ -34,7 +48,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  integ-mongodb:
+  integ-database:
     runs-on: ubuntu-latest
     services:
       mongodb:
@@ -46,8 +60,22 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mirage
+          POSTGRES_PASSWORD: mirage
+          POSTGRES_DB: mirage_integ
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
       MONGODB_URI: mongodb://localhost:27017
+      POSTGRES_DSN: postgres://mirage:mirage@localhost:5432/mirage_integ
     steps:
       - uses: actions/checkout@v6
 
@@ -72,7 +100,14 @@ jobs:
           ./python/.venv/bin/python integ/mongodb.py 2>&1 \
             | bash integ/check_lines.sh integ/truth_mongodb.txt
 
-  integ-mongodb-ts:
+      - name: Run Postgres backend and check against truth
+        shell: bash
+        run: |
+          set -o pipefail
+          ./python/.venv/bin/python integ/postgres.py 2>&1 \
+            | bash integ/check_lines.sh integ/truth_postgres.txt
+
+  integ-database-ts:
     runs-on: ubuntu-latest
     services:
       mongodb:
@@ -84,8 +119,22 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mirage
+          POSTGRES_PASSWORD: mirage
+          POSTGRES_DB: mirage_integ
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
       MONGODB_URI: mongodb://localhost:27017
+      POSTGRES_DSN: postgres://mirage:mirage@localhost:5432/mirage_integ
     steps:
       - uses: actions/checkout@v6
 
@@ -118,3 +167,11 @@ jobs:
           set -o pipefail
           pnpm exec tsx mongodb.ts 2>&1 \
             | bash check_lines.sh truth_mongodb.txt
+
+      - name: Run Postgres backend (TS) and check against truth
+        shell: bash
+        working-directory: integ
+        run: |
+          set -o pipefail
+          pnpm exec tsx postgres.ts 2>&1 \
+            | bash check_lines.sh truth_postgres.txt

@@ -17,7 +17,7 @@ import { type FileStat, FileType } from '../../types.ts'
 import { getExtension } from '../resolve.ts'
 import { grepContextLines } from './grep_context.ts'
 
-const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
+export const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
   '.parquet',
   '.orc',
   '.feather',

@@ -148,7 +148,6 @@ async function rgCommand(
       readBytesFn,
       first.original,
       exprText,
-      {},
       {
         ignoreCase: flags.ignoreCase,
         invert: flags.invert,

@@ -433,6 +433,16 @@ CASES: list[tuple[str, str]] = [
     ("mv_multi_into_dir", "mv /data/sub/a.txt /data/sub/b.txt /data/sub/deep"),
     ("mv_multi_verify_a", "cat /data/sub/deep/a.txt"),
     ("mv_multi_verify_b", "cat /data/sub/deep/b.txt"),
+
+    # ----- rg multi-path + columnar skip -----
+    ("rg_multi_setup_d1", "mkdir -p /data/rgm/d1"),
+    ("rg_multi_setup_d2", "mkdir -p /data/rgm/d2"),
+    ("rg_multi_seed1", "cp /data/a.txt /data/rgm/d1/f1.txt"),
+    ("rg_multi_seed2", "cp /data/mixed.txt /data/rgm/d2/f2.txt"),
+    ("rg_multi_dir", "rg -i hello /data/rgm/d1 /data/rgm/d2"),
+    ("rg_l_multi_file", "rg -l hello /data/rgm/d1/f1.txt /data/rgm/d2/f2.txt"),
+    ("rg_col_seed_parquet", "cp /data/a.txt /data/rgm/d1/skip.parquet"),
+    ("rg_columnar_skip", "rg world /data/rgm/d1"),
 ]
 
 EXIT_CODE_CASES: list[tuple[str, str]] = [

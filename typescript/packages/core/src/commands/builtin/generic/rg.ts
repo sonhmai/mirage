@@ -142,29 +142,34 @@ export async function rgGeneric(
 
   if (isDir && opts.filetypeFns !== null && Object.keys(opts.filetypeFns).length > 0) {
     const warnings: string[] = scopeWarn !== null ? [scopeWarn] : []
-    const results = await rgFolderFiletype(
-      readdirFn,
-      statFn,
-      readBytesFn,
-      first.original,
-      exprText,
-      {},
-      {
-        ignoreCase: flags.ignoreCase,
-        invert: flags.invert,
-        lineNumbers: flags.lineNumbers,
-        countOnly: flags.countOnly,
-        filesOnly: flags.filesOnly,
-        onlyMatching: flags.onlyMatching,
-        maxCount: flags.maxCount,
-        fixedString: flags.fixedString,
-        wholeWord: flags.wholeWord,
-        fileType: flags.fileType,
-        globPattern: flags.globPattern,
-        hidden: flags.hidden,
-      },
-      warnings,
-    )
+    const folderOpts = {
+      ignoreCase: flags.ignoreCase,
+      invert: flags.invert,
+      lineNumbers: flags.lineNumbers,
+      countOnly: flags.countOnly,
+      filesOnly: flags.filesOnly,
+      onlyMatching: flags.onlyMatching,
+      maxCount: flags.maxCount,
+      fixedString: flags.fixedString,
+      wholeWord: flags.wholeWord,
+      fileType: flags.fileType,
+      globPattern: flags.globPattern,
+      hidden: flags.hidden,
+    }
+    const results: string[] = []
+    for (const p of paths) {
+      results.push(
+        ...(await rgFolderFiletype(
+          readdirFn,
+          statFn,
+          readBytesFn,
+          p.original,
+          exprText,
+          folderOpts,
+          warnings,
+        )),
+      )
+    }
     const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
     if (results.length === 0) {
       const io = new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) })
@@ -184,30 +189,37 @@ export async function rgGeneric(
     flags.globPattern !== null
   if (needsFull) {
     const warnings: string[] = scopeWarn !== null ? [scopeWarn] : []
-    const results = await rgFull(
-      readdirFn,
-      statFn,
-      readBytesFn,
-      first.original,
-      exprText,
-      {
-        ignoreCase: flags.ignoreCase,
-        invert: flags.invert,
-        lineNumbers: flags.lineNumbers,
-        countOnly: flags.countOnly,
-        filesOnly: flags.filesOnly,
-        fixedString: flags.fixedString,
-        onlyMatching: flags.onlyMatching,
-        maxCount: flags.maxCount,
-        wholeWord: flags.wholeWord,
-        contextBefore: flags.beforeContext,
-        contextAfter: flags.afterContext,
-        fileType: flags.fileType,
-        globPattern: flags.globPattern,
-        hidden: flags.hidden,
-      },
-      warnings,
-    )
+    const fullOpts = {
+      ignoreCase: flags.ignoreCase,
+      invert: flags.invert,
+      lineNumbers: flags.lineNumbers,
+      countOnly: flags.countOnly,
+      filesOnly: flags.filesOnly,
+      fixedString: flags.fixedString,
+      onlyMatching: flags.onlyMatching,
+      maxCount: flags.maxCount,
+      wholeWord: flags.wholeWord,
+      contextBefore: flags.beforeContext,
+      contextAfter: flags.afterContext,
+      fileType: flags.fileType,
+      globPattern: flags.globPattern,
+      hidden: flags.hidden,
+    }
+    const results: string[] = []
+    for (const p of paths) {
+      results.push(
+        ...(await rgFull(
+          readdirFn,
+          statFn,
+          readBytesFn,
+          p.original,
+          exprText,
+          fullOpts,
+          warnings,
+          paths.length > 1 ? p.original : null,
+        )),
+      )
+    }
     const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
     if (results.length === 0) {
       const io = new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) })

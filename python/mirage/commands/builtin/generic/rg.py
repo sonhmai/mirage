@@ -120,28 +120,31 @@ async def rg(
             warnings_f: list[str] = []
             if scope_warning_str:
                 warnings_f.append(scope_warning_str)
-            results = await rg_full(
-                rd,
-                st,
-                rb,
-                paths[0].original,
-                pattern,
-                ignore_case=ignore_case,
-                invert=invert,
-                line_numbers=line_numbers,
-                count_only=count_only,
-                files_only=files_only,
-                fixed_string=fixed_string,
-                only_matching=only_matching,
-                max_count=max_count,
-                whole_word=whole_word,
-                context_before=context_before,
-                context_after=context_after,
-                file_type=file_type,
-                glob_pattern=glob_pattern,
-                hidden=hidden,
-                warnings=warnings_f,
-            )
+            results: list[str] = []
+            for p in paths:
+                results.extend(await rg_full(
+                    rd,
+                    st,
+                    rb,
+                    p.original,
+                    pattern,
+                    ignore_case=ignore_case,
+                    invert=invert,
+                    line_numbers=line_numbers,
+                    count_only=count_only,
+                    files_only=files_only,
+                    fixed_string=fixed_string,
+                    only_matching=only_matching,
+                    max_count=max_count,
+                    whole_word=whole_word,
+                    context_before=context_before,
+                    context_after=context_after,
+                    file_type=file_type,
+                    glob_pattern=glob_pattern,
+                    hidden=hidden,
+                    warnings=warnings_f,
+                    file_prefix=p.original if len(paths) > 1 else None,
+                ))
             stderr = format_optional_records(warnings_f)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)

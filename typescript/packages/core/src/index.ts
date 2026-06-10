@@ -309,7 +309,6 @@ export {
   type AsyncReaddirFn,
   type AsyncReadBytesFn,
   type AsyncStatFn,
-  type FiletypeFn,
   rgFolderFiletype,
   type RgFolderFiletypeOptions,
   rgFull,

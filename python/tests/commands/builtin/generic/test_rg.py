@@ -422,3 +422,42 @@ async def test_rg_single_file_threads_index():
     )
     decoded = (await _drain_async(output)).decode()
     assert "apple" in decoded
+
+
+@pytest.mark.asyncio
+async def test_rg_multiple_dirs_searches_all():
+    readdir, stat, rb, rs = _make_backend({
+        "/d1/a.txt": b"apple a\n",
+        "/d2/b.txt": b"apple b\n",
+    })
+    output, _ = await rg(
+        [_spec("/d1"), _spec("/d2")],
+        pattern="apple",
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert "/d1/a.txt:apple a" in decoded
+    assert "/d2/b.txt:apple b" in decoded
+
+
+@pytest.mark.asyncio
+async def test_rg_files_only_multiple_files():
+    readdir, stat, rb, rs = _make_backend({
+        "/t1.txt": b"apple\n",
+        "/t2.txt": b"apple\n",
+    })
+    output, _ = await rg(
+        [_spec("/t1.txt"), _spec("/t2.txt")],
+        pattern="apple",
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+        files_only=True,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert "/t1.txt" in decoded
+    assert "/t2.txt" in decoded

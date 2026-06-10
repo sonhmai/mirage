@@ -1174,6 +1174,26 @@ baz
 1
 2
 3
+=== rg_multi_setup_d1 ===
+
+=== rg_multi_setup_d2 ===
+
+=== rg_multi_seed1 ===
+
+=== rg_multi_seed2 ===
+
+=== rg_multi_dir ===
+/data/rgm/d1/f1.txt:hello
+/data/rgm/d2/f2.txt:Hello World
+/data/rgm/d2/f2.txt:HELLO world
+/data/rgm/d2/f2.txt:hello WORLD
+=== rg_l_multi_file ===
+/data/rgm/d1/f1.txt
+/data/rgm/d2/f2.txt
+=== rg_col_seed_parquet ===
+
+=== rg_columnar_skip ===
+/data/rgm/d1/f1.txt:world
 === lazy_exit_grep_match ===
 exit=0
 hello

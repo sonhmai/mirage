@@ -270,6 +270,7 @@ async def rg_full(
     glob_pattern: str | None,
     hidden: bool,
     warnings: list[str] | None,
+    file_prefix: str | None = None,
 ) -> list[str]:
     compiled = compile_pattern(pattern, ignore_case, fixed_string, whole_word)
 
@@ -309,11 +310,16 @@ async def rg_full(
             else:
                 text = line
             pfx = f"{i_ln}:{text}" if line_numbers else text
+            if file_prefix is not None:
+                pfx = f"{file_prefix}:{pfx}"
             results.append(pfx)
             if max_count is not None and count >= max_count:
                 break
         if count_only:
-            return [str(count)] if count > 0 else []
+            if count == 0:
+                return []
+            return [f"{file_prefix}:{count}"
+                    ] if file_prefix is not None else [str(count)]
         return results
 
     results = []

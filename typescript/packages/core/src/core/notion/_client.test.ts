@@ -210,6 +210,25 @@ describe('HttpNotionTransport', () => {
     expect(requests[0]?.url).toBe('http://mock/v1/blocks/b1/children?page_size=100&start_cursor=c2')
   })
 
+  it('maps API-patch-block-children to PATCH /blocks/{id}/children with the body', async () => {
+    const { transport, requests } = makeHttpTransport([{ status: 200, payload: { results: [] } }])
+    await transport.callTool('API-patch-block-children', {
+      block_id: 'b1',
+      children: [{ type: 'paragraph' }],
+    })
+    expect(requests[0]?.url).toBe('http://mock/v1/blocks/b1/children')
+    expect(requests[0]?.method).toBe('PATCH')
+    expect(requests[0]?.body).toBe('{"children":[{"type":"paragraph"}]}')
+  })
+
+  it('maps API-create-a-comment to POST /comments with the args as JSON body', async () => {
+    const { transport, requests } = makeHttpTransport([{ status: 200, payload: { id: 'c1' } }])
+    await transport.callTool('API-create-a-comment', { parent: { page_id: 'p1' } })
+    expect(requests[0]?.url).toBe('http://mock/v1/comments')
+    expect(requests[0]?.method).toBe('POST')
+    expect(requests[0]?.body).toBe('{"parent":{"page_id":"p1"}}')
+  })
+
   it('throws NotionAPIError with status and code on HTTP errors', async () => {
     const { transport } = makeHttpTransport([
       { status: 404, payload: { message: 'not found', code: 'object_not_found' } },

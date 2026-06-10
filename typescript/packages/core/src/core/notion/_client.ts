@@ -147,7 +147,7 @@ export interface HttpNotionTransportOptions {
 }
 
 interface RestCall {
-  method: 'GET' | 'POST'
+  method: 'GET' | 'POST' | 'PATCH'
   path: string
   query?: Record<string, unknown>
   body?: Record<string, unknown>
@@ -167,6 +167,13 @@ function restCallFor(name: string, args: Record<string, unknown>): RestCall {
   if (name === 'API-retrieve-block-children') {
     const { block_id, ...rest } = args
     return { method: 'GET', path: `/blocks/${String(block_id)}/children`, query: rest }
+  }
+  if (name === 'API-patch-block-children') {
+    const { block_id, ...rest } = args
+    return { method: 'PATCH', path: `/blocks/${String(block_id)}/children`, body: rest }
+  }
+  if (name === 'API-create-a-comment') {
+    return { method: 'POST', path: '/comments', body: args }
   }
   if (name === 'API-get-self') {
     return { method: 'GET', path: '/users/me' }
@@ -200,7 +207,7 @@ export class HttpNotionTransport implements NotionTransport {
         'Content-Type': 'application/json',
       },
     }
-    if (call.method === 'POST') init.body = JSON.stringify(call.body ?? {})
+    if (call.method !== 'GET') init.body = JSON.stringify(call.body ?? {})
     const res = await this.fetch(url, init)
     const data = (await res.json()) as Record<string, unknown>
     if (res.status >= 400) {

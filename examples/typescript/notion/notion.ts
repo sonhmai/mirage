@@ -88,6 +88,9 @@ async function main(): Promise<void> {
     console.log(`\n=== dirname ${pagePath}/page.json ===`)
     await run(ws, `dirname "${pagePath}/page.json"`)
 
+    console.log('\n=== notion-search --query EVO ===')
+    await run(ws, 'notion-search --query EVO')
+
     console.log(`\n=== grep Graph ${pagePath}/*.json (page glob) ===`)
     await run(ws, `grep -c Graph "${pagePath}/"*.json`)
 

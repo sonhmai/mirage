@@ -14,7 +14,16 @@
 
 import { describe, expect, it } from 'vitest'
 import type { NotionTransport } from './_client.ts'
-import { createPage, getChildBlocks, getChildPages, getPage, searchTopLevelPages } from './pages.ts'
+import {
+  appendBlocks,
+  createComment,
+  createPage,
+  getChildBlocks,
+  getChildPages,
+  getPage,
+  searchPages,
+  searchTopLevelPages,
+} from './pages.ts'
 
 class FakeTransport implements NotionTransport {
   invocations: { name: string; args: Record<string, unknown> }[] = []
@@ -186,5 +195,64 @@ describe('createPage', () => {
       },
     ])
     expect(result).toEqual(created)
+  })
+})
+
+describe('searchPages', () => {
+  it('invokes API-post-search with query, filter, and page_size, paginating to the end', async () => {
+    const transport = new FakeTransport()
+    transport.responses.push({
+      results: [{ id: 'p1' }],
+      has_more: true,
+      next_cursor: 'cursor-a',
+    })
+    transport.responses.push({ results: [{ id: 'p2' }], has_more: false, next_cursor: null })
+    const pages = await searchPages(transport, 'Roadmap', 20)
+    expect(transport.invocations[0]).toEqual({
+      name: 'API-post-search',
+      args: {
+        filter: { value: 'page', property: 'object' },
+        page_size: 20,
+        query: 'Roadmap',
+      },
+    })
+    expect(transport.invocations[1]?.args.start_cursor).toBe('cursor-a')
+    expect(pages.map((p) => p.id)).toEqual(['p1', 'p2'])
+  })
+
+  it('omits the query arg when the query is empty', async () => {
+    const transport = new FakeTransport()
+    transport.responses.push({ results: [], has_more: false })
+    await searchPages(transport, '', 100)
+    expect(transport.invocations[0]?.args).toEqual({
+      filter: { value: 'page', property: 'object' },
+      page_size: 100,
+    })
+  })
+})
+
+describe('appendBlocks', () => {
+  it('invokes API-patch-block-children with the block id merged into the body', async () => {
+    const transport = new FakeTransport()
+    const response = { results: [{ id: 'b1' }] }
+    transport.responses.push(response)
+    const children = [{ type: 'paragraph', paragraph: { rich_text: [] } }]
+    const result = await appendBlocks(transport, 'block-1', { children })
+    expect(transport.invocations).toEqual([
+      { name: 'API-patch-block-children', args: { block_id: 'block-1', children } },
+    ])
+    expect(result).toEqual(response)
+  })
+})
+
+describe('createComment', () => {
+  it('invokes API-create-a-comment with the body and returns the comment', async () => {
+    const transport = new FakeTransport()
+    const comment = { id: 'c1', object: 'comment' }
+    transport.responses.push(comment)
+    const body = { parent: { page_id: 'p1' }, rich_text: [{ text: { content: 'hi' } }] }
+    const result = await createComment(transport, body)
+    expect(transport.invocations).toEqual([{ name: 'API-create-a-comment', args: body }])
+    expect(result).toEqual(comment)
   })
 })

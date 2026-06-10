@@ -114,6 +114,31 @@ export async function getChildPages(
   return refs
 }
 
+export async function searchPages(
+  transport: NotionTransport,
+  query: string,
+  pageSize: number,
+): Promise<Json[]> {
+  const baseArgs: Json = {
+    filter: { value: 'page', property: 'object' },
+    page_size: pageSize,
+  }
+  if (query !== '') baseArgs.query = query
+  return paginateTool(transport, 'API-post-search', baseArgs)
+}
+
+export async function appendBlocks(
+  transport: NotionTransport,
+  blockId: string,
+  body: Json,
+): Promise<Json> {
+  return transport.callTool('API-patch-block-children', { ...body, block_id: blockId })
+}
+
+export async function createComment(transport: NotionTransport, body: Json): Promise<Json> {
+  return transport.callTool('API-create-a-comment', body)
+}
+
 export interface CreatePageInput {
   parent: { type: 'workspace' } | { type: 'page_id'; page_id: string }
   title: string

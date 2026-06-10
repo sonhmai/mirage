@@ -24,4 +24,6 @@ export const NOTION_PROMPT = `{prefix}
   <page-title> is sanitized; don't construct it, ls the parent dir.`
 
 export const NOTION_WRITE_PROMPT = `  Write commands:
-    notion-page-create --parent <parent-path> --title "title"`
+    notion-page-create --parent <parent-path> --title "title"
+    notion-block-append --params '{"block_id":"..."}' --json '{"children":[...]}'
+    notion-comment-add --json '{"parent":{"page_id":"..."},"rich_text":[{"text":{"content":"Comment"}}]}'`

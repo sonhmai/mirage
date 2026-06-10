@@ -21,7 +21,10 @@ import { NOTION_GREP } from './grep.ts'
 import { NOTION_HEAD } from './head.ts'
 import { NOTION_JQ } from './jq.ts'
 import { NOTION_LS } from './ls.ts'
+import { NOTION_BLOCK_APPEND } from './notion_block_append.ts'
+import { NOTION_COMMENT_ADD } from './notion_comment_add.ts'
 import { NOTION_PAGE_CREATE } from './notion_page_create.ts'
+import { NOTION_SEARCH } from './notion_search.ts'
 import { NOTION_REALPATH } from './realpath.ts'
 import { NOTION_RG } from './rg.ts'
 import { NOTION_STAT } from './stat.ts'
@@ -44,5 +47,8 @@ export const NOTION_COMMANDS: readonly RegisteredCommand[] = [
   ...NOTION_BASENAME,
   ...NOTION_DIRNAME,
   ...NOTION_REALPATH,
+  ...NOTION_SEARCH,
   ...NOTION_PAGE_CREATE,
+  ...NOTION_BLOCK_APPEND,
+  ...NOTION_COMMENT_ADD,
 ]

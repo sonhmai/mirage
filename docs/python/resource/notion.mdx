@@ -108,17 +108,22 @@ async def main():
     r = await ws.execute("tree -L 2 /notion/")
     print(await r.stdout_str())
 
+    # Search pages with the Notion search API
+    r = await ws.execute('notion-search --query "Roadmap" --limit 5')
+    print(await r.stdout_str())
+
     # Create a new page
     r = await ws.execute(
-        'notion-page-create --parent_id a1b2c3d4'
-        ' --title "New Page" --content "Hello from Mirage"'
+        'notion-page-create --json \'{"parent":{"page_id":"a1b2c3d4"},'
+        '"properties":{"title":[{"text":{"content":"New Page"}}]}}\''
     )
     print(await r.stdout_str())
 
     # Append content to an existing page
     r = await ws.execute(
-        'notion-block-append --page_id a1b2c3d4'
-        ' --content "Appended paragraph"'
+        'notion-block-append --params \'{"block_id":"a1b2c3d4"}\''
+        ' --json \'{"children":[{"type":"paragraph","paragraph":'
+        '{"rich_text":[{"text":{"content":"Appended paragraph"}}]}}]}\''
     )
     print(await r.stdout_str())
 
@@ -147,36 +152,37 @@ Resource-specific commands:
 
 ### `notion-page-create`
 
-Create a new page under a parent page.
+Create a new page under a parent page. Prints the new page normalized as JSON.
 
-| Option        | Required | Description                |
-| ------------- | -------- | -------------------------- |
-| `--parent_id` | yes      | Parent page ID             |
-| `--title`     | yes      | Page title                 |
-| `--content`   | no       | Initial paragraph content  |
+| Option   | Required | Description                                                            |
+| -------- | -------- | ---------------------------------------------------------------------- |
+| `--json` | yes      | Page body with `parent` (required) and `properties`, per the Notion API |
+
+In the TypeScript SDK this command takes `--parent <parent-path>` and
+`--title "title"` instead of a raw `--json` body.
 
 ### `notion-block-append`
 
-Append content blocks to an existing page.
+Append content blocks to an existing page. Prints the refreshed page as JSON.
 
-| Option      | Required | Description              |
-| ----------- | -------- | ------------------------ |
-| `--page_id` | yes      | Target page ID           |
-| `--content` | yes      | Text content to append   |
+| Option     | Required | Description                                       |
+| ---------- | -------- | ------------------------------------------------- |
+| `--params` | yes      | JSON object with the target `block_id` (page ID)  |
+| `--json`   | yes      | JSON object with the `children` blocks to append  |
 
 ### `notion-comment-add`
 
-Add a comment to a page.
+Add a comment to a page. Prints the created comment as JSON.
 
-| Option      | Required | Description            |
-| ----------- | -------- | ---------------------- |
-| `--page_id` | yes      | Target page ID         |
-| `--text`    | yes      | Comment text           |
+| Option   | Required | Description                                          |
+| -------- | -------- | ---------------------------------------------------- |
+| `--json` | yes      | Comment body with `parent` (required) and `rich_text` |
 
 ### `notion-search`
 
-Search for pages by title.
+Search pages with the Notion search API.
 
-| Option    | Required | Description  |
-| --------- | -------- | ------------ |
-| `--query` | yes      | Search query |
+| Option    | Required | Description                  |
+| --------- | -------- | ---------------------------- |
+| `--query` | yes      | Search query                 |
+| `--limit` | no       | Max results (default 20)     |

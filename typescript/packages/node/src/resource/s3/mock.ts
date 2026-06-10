@@ -91,7 +91,7 @@ interface PaginateResult {
 function paginateDirectory(objects: Map<string, Uint8Array>, prefix: string): PaginateResult {
   const commonPrefixes = new Set<string>()
   const contents: { Key: string; Size: number }[] = []
-  const sorted = [...objects.entries()].sort(([a], [b]) => a.localeCompare(b))
+  const sorted = [...objects.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   for (const [key, data] of sorted) {
     if (!key.startsWith(prefix)) continue
     const relative = key.slice(prefix.length)
@@ -114,7 +114,7 @@ function paginateDirectory(objects: Map<string, Uint8Array>, prefix: string): Pa
 
 function paginateFlat(objects: Map<string, Uint8Array>, prefix: string): PaginateResult {
   const contents: { Key: string; Size: number }[] = []
-  const sorted = [...objects.entries()].sort(([a], [b]) => a.localeCompare(b))
+  const sorted = [...objects.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   for (const [key, data] of sorted) {
     if (key.startsWith(prefix)) contents.push({ Key: key, Size: data.byteLength })
   }

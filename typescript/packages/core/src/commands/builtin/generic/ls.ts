@@ -62,7 +62,11 @@ function sortStats(
   reverse: boolean,
 ): FileStat[] {
   const sorted = [...stats].sort((a, b) => {
-    if (sortBy === 'time') return (b.modified ?? '').localeCompare(a.modified ?? '')
+    if (sortBy === 'time') {
+      const am = a.modified ?? ''
+      const bm = b.modified ?? ''
+      return am < bm ? 1 : am > bm ? -1 : 0
+    }
     if (sortBy === 'size') return (b.size ?? 0) - (a.size ?? 0)
     return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
   })

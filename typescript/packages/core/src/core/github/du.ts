@@ -49,6 +49,6 @@ export function duAll(
       total += entry.size ?? 0
     }
   }
-  out.sort((a, b) => a[0].localeCompare(b[0]))
+  out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
   return Promise.resolve([out, total])
 }

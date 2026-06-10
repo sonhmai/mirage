@@ -39,7 +39,7 @@ async def range_read(accessor: HfBucketsAccessor, path: PathSpec, start: int,
             data = await f.read(end - start)
     except NotFound as exc:
         raise FileNotFoundError(raw) from exc
-    record("read", raw, "hf_buckets", len(data), start_ms)
+    record("read", raw, accessor.RESOURCE_NAME, len(data), start_ms)
     return data
 
 
@@ -54,7 +54,7 @@ async def read_stream(
     raw = path.strip_prefix
     key = raw.lstrip("/")
     op = accessor.operator()
-    rec = record_stream("read", raw, "hf_buckets")
+    rec = record_stream("read", raw, accessor.RESOURCE_NAME)
     try:
         async with await op.open(key, "rb") as f:
             while True:

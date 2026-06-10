@@ -469,7 +469,9 @@ function sortFiletypeMap(m: Map<string, (string | null)[]>): Record<string, (str
       const aKey = a === null ? 0 : 1
       const bKey = b === null ? 0 : 1
       if (aKey !== bKey) return aKey - bKey
-      return (a ?? '').localeCompare(b ?? '')
+      const as = a ?? ''
+      const bs = b ?? ''
+      return as < bs ? -1 : as > bs ? 1 : 0
     })
     out[k] = list
   }

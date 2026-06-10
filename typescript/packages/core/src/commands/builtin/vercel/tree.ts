@@ -22,8 +22,7 @@ import { FileType, PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { fnmatch } from '../../../util/fnmatch.ts'
-
-const ENC = new TextEncoder()
+import { formatRecords } from '../utils/output.ts'
 
 interface TreeOpts {
   maxDepth: number | null
@@ -123,8 +122,8 @@ async function treeCommand(
   }
   const warnings: string[] = []
   const results = await treeRecurse(accessor, p0, '', 0, treeOpts, warnings, opts.index)
-  const out: ByteSource = ENC.encode(results.join('\n'))
-  const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : null
+  const out: ByteSource = formatRecords(results)
+  const stderr = warnings.length > 0 ? formatRecords(warnings) : null
   return [out, new IOResult({ stderr })]
 }
 

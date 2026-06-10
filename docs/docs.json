@@ -216,6 +216,7 @@
               "python/agents/openhands",
               "python/agents/pydantic-ai",
               "python/agents/camel",
+              "python/agents/agno",
               "python/agents/claude-code",
               "python/agents/codex"
             ]
@@ -393,6 +394,16 @@
                 ]
               },
               {
+                "group": "Hugging Face",
+                "icon": "/images/huggingface-logo.svg",
+                "pages": [
+                  "typescript/setup/hf_buckets",
+                  "typescript/setup/hf_datasets",
+                  "typescript/setup/hf_models",
+                  "typescript/setup/hf_spaces"
+                ]
+              },
+              {
                 "group": "Google Workspace",
                 "icon": "google",
                 "pages": [
@@ -408,7 +419,8 @@
                 "icon": "folder-open",
                 "pages": [
                   "typescript/dropbox",
-                  "typescript/box"
+                  "typescript/box",
+                  "typescript/setup/databricks_volume"
                 ]
               },
               {
@@ -481,7 +493,7 @@
       },
       {
         "label": "strukto-ai/mirage",
-      "icon": "github",
+        "icon": "github",
         "href": "https://github.com/strukto-ai/mirage"
       }
     ]

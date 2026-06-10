@@ -17,8 +17,7 @@ import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { formatLsLong } from '../utils/formatting.ts'
 import { rstripSlash } from '../../../util/slash.ts'
-
-const ENC = new TextEncoder()
+import { formatRecords } from '../utils/output.ts'
 
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
@@ -63,7 +62,11 @@ function sortStats(
   reverse: boolean,
 ): FileStat[] {
   const sorted = [...stats].sort((a, b) => {
-    if (sortBy === 'time') return (b.modified ?? '').localeCompare(a.modified ?? '')
+    if (sortBy === 'time') {
+      const am = a.modified ?? ''
+      const bm = b.modified ?? ''
+      return am < bm ? 1 : am > bm ? -1 : 0
+    }
     if (sortBy === 'size') return (b.size ?? 0) - (a.size ?? 0)
     return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
   })
@@ -149,10 +152,10 @@ export async function lsGeneric(
       }
     }
     appendListing(collected, long, human, classify, lines)
-    const out: ByteSource = ENC.encode(lines.join('\n'))
+    const out: ByteSource = formatRecords(lines)
     const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
     if (warnings.length > 0) {
-      const stderr = ENC.encode(warnings.join('\n'))
+      const stderr = formatRecords(warnings)
       return [out, new IOResult({ stderr, exitCode })]
     }
     return [out, new IOResult({ exitCode })]
@@ -172,10 +175,10 @@ export async function lsGeneric(
       lines.push(`${dirSpec.original}:`)
       appendListing(entries, long, human, classify, lines)
     }
-    const out: ByteSource = ENC.encode(lines.join('\n'))
+    const out: ByteSource = formatRecords(lines)
     const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
     if (warnings.length > 0) {
-      const stderr = ENC.encode(warnings.join('\n'))
+      const stderr = formatRecords(warnings)
       return [out, new IOResult({ stderr, exitCode })]
     }
     return [out, new IOResult({ exitCode })]
@@ -196,10 +199,10 @@ export async function lsGeneric(
     }
     appendListing(sortStats(stats, sortBy, reverse), long, human, classify, lines)
   }
-  const out: ByteSource = ENC.encode(lines.join('\n'))
+  const out: ByteSource = formatRecords(lines)
   const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
   if (warnings.length > 0) {
-    const stderr = ENC.encode(warnings.join('\n'))
+    const stderr = formatRecords(warnings)
     return [out, new IOResult({ stderr, exitCode })]
   }
   return [out, new IOResult({ exitCode })]

@@ -22,8 +22,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { humanSize } from '../utils/formatting.ts'
 import { metadataProvision } from './_provision.ts'
-
-const ENC = new TextEncoder()
+import { formatRecords } from '../utils/output.ts'
 
 async function lsEntries(
   accessor: PostgresAccessor,
@@ -164,9 +163,9 @@ async function lsCommand(
       }
     }
   }
-  const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : null
+  const stderr = warnings.length > 0 ? formatRecords(warnings) : null
   const exitCode = warnings.length > 0 && results.length === 0 ? 1 : 0
-  const out: ByteSource = ENC.encode(results.join('\n'))
+  const out: ByteSource = formatRecords(results)
   return [out, new IOResult({ stderr, exitCode })]
 }
 

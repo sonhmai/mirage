@@ -23,6 +23,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { compilePattern, grepLines, grepRecursive } from '../grep_helper.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -146,9 +147,9 @@ async function rgCommand(
         for (const line of matched) allResults.push(`${p.original}:${line}`)
       }
     }
-    const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : null
+    const stderr = warnings.length > 0 ? formatRecords(warnings) : null
     if (!anyMatch) return [new Uint8Array(0), new IOResult({ exitCode: 1, stderr })]
-    return [ENC.encode(allResults.join('\n')), new IOResult({ stderr })]
+    return [formatRecords(allResults), new IOResult({ stderr })]
   }
 
   const raw = await readStdinAsync(opts.stdin)
@@ -162,7 +163,7 @@ async function rgCommand(
   const matched = grepLines('<stdin>', lines, pat, f)
   if (matched.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
   if (f.countOnly) return [ENC.encode(String(matched.length)), new IOResult()]
-  return [ENC.encode(matched.join('\n')), new IOResult()]
+  return [formatRecords(matched), new IOResult()]
 }
 
 export const VERCEL_RG = command({

@@ -1,0 +1,70 @@
+---
+title: Agno
+description: Give Agno agents shell-based filesystem access to any Mirage workspace using MirageToolkit.
+icon: /images/agno-logo.svg
+---
+
+[Agno](https://github.com/agno-agi/agno) is an agent framework that groups related tools into `Toolkit` classes. Mirage ships `MirageToolkit`, a toolkit backed by a `Workspace` instead of the host machine. The agent gets five shell-style tools (`execute`, `read`, `write`, `ls`, `grep`); mount RAM, S3, GDrive, Slack, etc. and the agent uses them through the same Agno API.
+
+## Install
+
+```bash
+uv add 'mirage-ai[agno]'
+```
+
+Requires `agno>=2.4.0`: the toolkit registers async variants through Agno's `async_tools` parameter, which was added in 2.4.0.
+
+## Usage
+
+```python
+import asyncio
+
+from agno.agent import Agent
+from agno.models.openai import OpenAIChat
+
+from mirage import MountMode, RAMResource, Workspace
+from mirage.agents.agno import MirageToolkit
+
+ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+
+agent = Agent(
+    model=OpenAIChat(id="gpt-4o"),
+    tools=[MirageToolkit(ws)],
+    instructions=("You have access to a virtual filesystem via shell "
+                  "tools. Use them to explore and read files."),
+    markdown=True,
+)
+
+
+async def main() -> None:
+    await ws.execute('echo "hello from mirage" | tee /data/hello.txt')
+    await agent.aprint_response(
+        "List all files under /data and show the contents of each one.")
+
+
+asyncio.run(main())
+```
+
+## Tools
+
+Every tool is registered as a sync + async pair under one name; Agno picks the async variant in `arun`/`aprint_response` and the sync variant otherwise.
+
+| Tool | Mirage translation |
+| --- | --- |
+| `execute(command)` | `await ws.execute(command)`, full shell with pipes |
+| `read(path)` | `cat <path>` |
+| `write(path, content)` | `tee <path>` with `stdin=` |
+| `ls(path="/")` | `ls <path>` |
+| `grep(pattern, path)` | `grep -r <pattern> <path>` |
+
+## Exports
+
+| Symbol | Purpose |
+| --- | --- |
+| `MirageToolkit` | Agno `Toolkit` exposing the 5 shell tools, backed by `Workspace.execute`. |
+| `MIRAGE_SYSTEM_PROMPT` | Default system prompt describing the virtual filesystem. |
+| `build_system_prompt` | Compose the default prompt with mount info and extra instructions. |
+
+## Examples
+
+- [`examples/python/agents/agno/agno_example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/agno/agno_example.py), `Agent` with `MirageToolkit` over a RAM workspace, sync and async.

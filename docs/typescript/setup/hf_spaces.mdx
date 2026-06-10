@@ -1,0 +1,45 @@
+---
+title: HF Spaces
+icon: /images/huggingface-logo.svg
+description: Mount a Hugging Face Space repo as a Mirage filesystem in TypeScript.
+---
+
+`HfSpacesResource` mounts a [Hugging Face Space](https://huggingface.co/spaces)
+repo (app code, README, config, requirements) at a prefix such as `/s/`.
+The TypeScript backend mirrors the [Python one](/python/resource/hf_spaces) and
+returns identical results.
+
+For credential setup, see [HF Spaces Setup](/home/setup/hf_spaces).
+
+<Note>
+Node only. The backend uses the native [opendal](https://www.npmjs.com/package/opendal)
+binding, which does not run in the browser.
+</Note>
+
+## Node
+
+```bash
+pnpm add @struktoai/mirage-node
+```
+
+```ts
+import { HfSpacesResource, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const space = new HfSpacesResource({
+  repoId: 'HuggingFaceBio/carbon-demo', // "namespace/space-name"
+  token: process.env.HF_TOKEN, // optional for public spaces
+  // Optional:
+  // endpoint: 'https://huggingface.co',
+  // revision: 'main',
+})
+
+const ws = new Workspace({ '/s/': space }, { mode: MountMode.READ })
+
+console.log((await ws.execute('ls /s/')).stdoutText)
+console.log((await ws.execute("find /s/ -name '*.py'")).stdoutText)
+console.log((await ws.execute('cat /s/README.md | head -n 15')).stdoutText)
+```
+
+## Shell Commands
+
+Same set as [HF Buckets](/typescript/setup/hf_buckets#shell-commands).

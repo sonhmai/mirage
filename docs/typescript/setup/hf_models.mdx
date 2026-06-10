@@ -1,0 +1,66 @@
+---
+title: HF Models
+icon: /images/huggingface-logo.svg
+description: Mount a Hugging Face Model repo as a Mirage filesystem in TypeScript.
+---
+
+`HfModelsResource` mounts a [Hugging Face Model](https://huggingface.co/models)
+repo at a prefix such as `/m/`. You can inspect configs, tokenizers, and READMEs
+without downloading the weights, weights stream only when you actually `cat` them.
+The TypeScript backend mirrors the [Python one](/python/resource/hf_models) and
+returns identical results.
+
+For credential setup, see [HF Models Setup](/home/setup/hf_models).
+
+<Note>
+Node only. The backend uses the native [opendal](https://www.npmjs.com/package/opendal)
+binding, which does not run in the browser.
+</Note>
+
+## Node
+
+```bash
+pnpm add @struktoai/mirage-node
+```
+
+```ts
+import { HfModelsResource, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const model = new HfModelsResource({
+  repoId: 'sapientinc/HRM-Text-1B', // "namespace/model-name"
+  token: process.env.HF_TOKEN, // optional for public repos
+  // Optional:
+  // endpoint: 'https://huggingface.co',
+  // revision: 'main',
+})
+
+const ws = new Workspace({ '/m/': model }, { mode: MountMode.READ })
+
+// ls is cheap: one HTTP list call
+console.log((await ws.execute('ls -lh /m/')).stdoutText)
+
+// Read the config (small, fast)
+console.log((await ws.execute('cat /m/config.json')).stdoutText)
+
+// Stat the weights without downloading them
+console.log((await ws.execute('stat /m/model.safetensors')).stdoutText)
+```
+
+## Filesystem Layout
+
+Maps model repo files (config, tokenizer, weights, etc.) to virtual paths.
+
+For example, `sapientinc/HRM-Text-1B` mounted at `/m/` exposes:
+
+```text
+/m/
+  README.md
+  config.json
+  tokenizer.json
+  tokenizer_config.json
+  model.safetensors        ← never downloaded unless you cat it
+```
+
+## Shell Commands
+
+Same set as [HF Buckets](/typescript/setup/hf_buckets#shell-commands).

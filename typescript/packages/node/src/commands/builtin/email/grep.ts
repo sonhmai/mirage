@@ -33,6 +33,7 @@ import {
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
+  formatRecords,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { resolveGlob } from '../../../core/email/glob.ts'
@@ -187,9 +188,9 @@ async function grepCommand(
         },
         warnings,
       )
-      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : null
+      const stderr = warnings.length > 0 ? formatRecords(warnings) : null
       if (results.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1, stderr })]
-      const out: ByteSource = ENC.encode(results.join('\n'))
+      const out: ByteSource = formatRecords(results)
       return [out, new IOResult({ stderr })]
     }
 
@@ -209,7 +210,7 @@ async function grepCommand(
         }
       }
       if (allResults.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      const out: ByteSource = ENC.encode(allResults.join('\n'))
+      const out: ByteSource = formatRecords(allResults)
       return [out, new IOResult()]
     }
 

@@ -17,6 +17,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ProvisionResult } from '../../../provision/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 
@@ -76,6 +77,6 @@ export async function statGeneric(
       lines.push(`name=${s.name} size=${sizeStr} modified=${modStr} type=${typeStr}`)
     }
   }
-  const out: ByteSource = ENC.encode(lines.join('\n'))
+  const out: ByteSource = formatRecords(lines)
   return [out, new IOResult()]
 }

@@ -22,6 +22,7 @@ import {
   type CommandFnResult,
   type CommandOpts,
   rstripSlash,
+  formatRecords,
 } from '@struktoai/mirage-core'
 import { find as sshFind } from '../../../core/ssh/find.ts'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
@@ -128,7 +129,7 @@ async function findCommand(
     }
   }
   matches.sort()
-  const out: ByteSource = new TextEncoder().encode(matches.join('\n'))
+  const out: ByteSource = formatRecords(matches)
   return [out, new IOResult()]
 }
 

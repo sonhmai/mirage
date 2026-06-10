@@ -22,8 +22,8 @@ import { specOf } from '../../spec/builtins.ts'
 import { metadataProvision } from './provision.ts'
 import { stripSlash } from '../../../util/slash.ts'
 import { fnmatch } from '../../../util/fnmatch.ts'
+import { formatRecords } from '../utils/output.ts'
 
-const ENC = new TextEncoder()
 const TERMINAL_EXTS = ['.json', '.jsonl', '.log', '.zip']
 
 async function walk(
@@ -94,7 +94,7 @@ async function findCommand(
     if (inameFlag !== null && !fnmatch(entryName.toLowerCase(), inameFlag.toLowerCase())) continue
     results.push(p)
   }
-  const out: ByteSource = ENC.encode(results.join('\n'))
+  const out: ByteSource = formatRecords(results)
   return [out, new IOResult()]
 }
 

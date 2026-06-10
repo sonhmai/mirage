@@ -132,6 +132,9 @@ deepagents  = ["deepagents>=0.4.12", "mirage-ai[pdf]"]
 # --- openhands ---
 openhands   = ["openhands-sdk>=1.18.0", "openhands-tools>=1.18.0"]
 
+# --- agno ---
+agno        = ["agno>=2.4.0"]
+
 # --- camel ---
 camel       = ["camel-ai>=0.2.40,<0.3", "markitdown>=0.1.5"]
 
@@ -162,6 +165,7 @@ all = [
     "mirage-ai[pydantic-ai]",
     "mirage-ai[deepagents]",
     "mirage-ai[openhands]",
+    "mirage-ai[agno]",
     "mirage-ai[daytona]",
 ]
 lancedb = [

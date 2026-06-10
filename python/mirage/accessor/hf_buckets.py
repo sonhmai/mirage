@@ -52,6 +52,7 @@ class HfBucketsConfig(BaseModel):
 
 class HfBucketsAccessor(_HfAccessor):
     REPO_TYPE = "bucket"
+    RESOURCE_NAME = "hf_buckets"
 
     @property
     def bucket_uri(self) -> str:

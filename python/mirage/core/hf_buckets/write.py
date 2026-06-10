@@ -36,4 +36,4 @@ async def write_bytes(accessor: HfBucketsAccessor,
         await op.write(key, data)
     except NotFound as exc:
         raise FileNotFoundError(raw) from exc
-    record("write", path.original, "hf_buckets", len(data), start_ms)
+    record("write", path.original, accessor.RESOURCE_NAME, len(data), start_ms)

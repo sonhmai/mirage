@@ -15,6 +15,7 @@
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 
@@ -61,7 +62,7 @@ export async function cmpGeneric(
         outLines.push(`${String(idx + 1)} ${octal(data1[idx] ?? 0)} ${octal(data2[idx] ?? 0)}`)
       }
     }
-    const out: ByteSource = ENC.encode(outLines.join('\n'))
+    const out: ByteSource = formatRecords(outLines)
     return [out, new IOResult({ exitCode: 1 })]
   }
   const limit = Math.min(data1.byteLength, data2.byteLength)

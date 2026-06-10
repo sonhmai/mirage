@@ -328,6 +328,11 @@ export { countNewlines, parseN, tailBytes } from './commands/builtin/tail_helper
 export { AsyncLineIterator } from './io/async_line_iterator.ts'
 export { readStdinAsync, resolveSource, wrapBytes } from './commands/builtin/utils/stream.ts'
 export { formatLsLong, humanSize } from './commands/builtin/utils/formatting.ts'
+export {
+  formatOptionalRecords,
+  formatRecordText,
+  formatRecords,
+} from './commands/builtin/utils/output.ts'
 export { grepFilesOnly, grepRecursive } from './commands/builtin/grep_helper.ts'
 export { interpretEscapes } from './commands/builtin/utils/escapes.ts'
 export { deflateRaw, gunzip, gzip, inflateRaw } from './utils/compress.ts'
@@ -1178,3 +1183,44 @@ export { setHttpProxyBase } from './commands/builtin/utils/http.ts'
 
 export { lstripSlash, rstripSlash, stripSlash } from './util/slash.ts'
 export { fnmatch } from './util/fnmatch.ts'
+
+export {
+  DatabricksVolumeAccessor,
+  type DatabricksVolumeResourceLike,
+} from './accessor/databricks_volume.ts'
+export {
+  DatabricksVolumeConfigSchema,
+  normalizeDatabricksVolumeConfig,
+  redactDatabricksVolumeConfig,
+  type DatabricksVolumeConfig,
+  type DatabricksVolumeConfigRedacted,
+} from './resource/databricks_volume/config.ts'
+export { DATABRICKS_VOLUME_PROMPT } from './resource/databricks_volume/prompt.ts'
+export { DATABRICKS_VOLUME_OPS } from './ops/databricks_volume/index.ts'
+export { DATABRICKS_VOLUME_COMMANDS } from './commands/builtin/databricks_volume/index.ts'
+export {
+  DatabricksVolumeApiError,
+  isNotFound as isDatabricksVolumeNotFound,
+} from './core/databricks_volume/errors.ts'
+export { readBytes as databricksVolumeRead } from './core/databricks_volume/read.ts'
+export {
+  readStream as databricksVolumeReadStream,
+  rangeRead as databricksVolumeRangeRead,
+} from './core/databricks_volume/stream.ts'
+export { readdir as databricksVolumeReaddir } from './core/databricks_volume/readdir.ts'
+export { stat as databricksVolumeStat } from './core/databricks_volume/stat.ts'
+export { exists as databricksVolumeExists } from './core/databricks_volume/exists.ts'
+export { find as databricksVolumeFind } from './core/databricks_volume/find.ts'
+export { resolveGlob as resolveDatabricksVolumeGlob } from './core/databricks_volume/glob.ts'
+export { writeBytes as databricksVolumeWrite } from './core/databricks_volume/write.ts'
+export { create as databricksVolumeCreate } from './core/databricks_volume/create.ts'
+export { mkdir as databricksVolumeMkdir } from './core/databricks_volume/mkdir.ts'
+export { rmdir as databricksVolumeRmdir } from './core/databricks_volume/rmdir.ts'
+export { unlink as databricksVolumeUnlink } from './core/databricks_volume/unlink.ts'
+export { rmRecursive as databricksVolumeRmRecursive } from './core/databricks_volume/rm.ts'
+export { copy as databricksVolumeCopy } from './core/databricks_volume/copy.ts'
+export { rename as databricksVolumeRename } from './core/databricks_volume/rename.ts'
+export {
+  backendPath as databricksVolumeBackendPath,
+  virtualPath as databricksVolumeVirtualPath,
+} from './core/databricks_volume/path.ts'

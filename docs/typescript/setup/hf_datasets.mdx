@@ -1,0 +1,54 @@
+---
+title: HF Datasets
+icon: /images/huggingface-logo.svg
+description: Mount a Hugging Face Dataset repo as a Mirage filesystem in TypeScript.
+---
+
+`HfDatasetsResource` mounts a [Hugging Face Dataset](https://huggingface.co/datasets)
+repo at a prefix such as `/ds/`. All reads are lazy: only the bytes you actually
+`cat`/`head` get transferred. The TypeScript backend mirrors the
+[Python one](/python/resource/hf_datasets) and returns identical results.
+
+For credential setup, see [HF Datasets Setup](/home/setup/hf_datasets).
+
+<Note>
+Node only. The backend uses the native [opendal](https://www.npmjs.com/package/opendal)
+binding, which does not run in the browser.
+</Note>
+
+## Node
+
+```bash
+pnpm add @struktoai/mirage-node
+```
+
+```ts
+import { HfDatasetsResource, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const dataset = new HfDatasetsResource({
+  repoId: 'AlienKevin/SWE-ZERO-12M-trajectories', // "namespace/dataset-name"
+  token: process.env.HF_TOKEN, // optional for public datasets
+  // Optional:
+  // endpoint: 'https://huggingface.co',
+  // revision: 'main',
+  // keyPrefix: 'train/',
+})
+
+const ws = new Workspace({ '/ds/': dataset }, { mode: MountMode.READ })
+
+console.log((await ws.execute('ls -lh /ds/')).stdoutText)
+console.log((await ws.execute("find /ds/ -name '*.parquet' | wc -l")).stdoutText)
+console.log((await ws.execute('cat /ds/README.md | head -n 20')).stdoutText)
+```
+
+`HfDatasetsResource` takes `repoId` in `namespace/dataset-name` form plus an
+optional access token. Public datasets need no token.
+
+## Filesystem Layout
+
+Maps dataset repo files (README, parquet shards, etc.) to virtual paths under
+the mount prefix. Parquet shards stream lazily via byte-range reads.
+
+## Shell Commands
+
+Same set as [HF Buckets](/typescript/setup/hf_buckets#shell-commands).

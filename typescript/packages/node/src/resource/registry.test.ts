@@ -153,3 +153,42 @@ describe('node resource registry', () => {
     })
   })
 })
+
+describe('hf resources in registry', () => {
+  it('lists all four hf resources', () => {
+    const names = knownResources()
+    for (const n of ['hf_buckets', 'hf_datasets', 'hf_models', 'hf_spaces']) {
+      expect(names).toContain(n)
+    }
+  })
+
+  it('builds hf_models from Python YAML snake_case keys', async () => {
+    const r = await buildResource('hf_models', {
+      repo_id: 'ns/model',
+      token: 't',
+      key_prefix: 'sub',
+      timeout: 30,
+      revision: 'main',
+    })
+    expect(r.kind).toBe('hf_models')
+    const { config } = r as unknown as {
+      config: { repoId: string; keyPrefix?: string; timeoutMs?: number; revision?: string }
+    }
+    expect(config.repoId).toBe('ns/model')
+    expect(config.keyPrefix).toBe('sub/')
+    expect(config.timeoutMs).toBe(30000)
+    expect(config.revision).toBe('main')
+  })
+
+  it('builds hf_buckets, hf_datasets, and hf_spaces', async () => {
+    expect((await buildResource('hf_buckets', { bucket: 'ns/b' })).kind).toBe('hf_buckets')
+    expect((await buildResource('hf_datasets', { repo_id: 'ns/d' })).kind).toBe('hf_datasets')
+    expect((await buildResource('hf_spaces', { repo_id: 'ns/s' })).kind).toBe('hf_spaces')
+  })
+
+  it('rejects malformed hf repo ids', async () => {
+    await expect(buildResource('hf_models', { repo_id: 'plain' })).rejects.toThrow(
+      /namespace\/name/,
+    )
+  })
+})

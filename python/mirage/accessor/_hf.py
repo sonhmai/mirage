@@ -22,6 +22,7 @@ HF_RESOURCES = ["hf_buckets", "hf_datasets", "hf_models", "hf_spaces"]
 
 class _HfAccessor(Accessor):
     REPO_TYPE: str = ""
+    RESOURCE_NAME: str = ""
 
     def __init__(self, config) -> None:
         self.config = config

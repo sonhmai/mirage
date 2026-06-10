@@ -42,10 +42,10 @@ No external setup, these run locally or against a connection string you already 
 | Alibaba OSS | read, write | [Alibaba OSS](/home/setup/aliyun) | [<Icon icon="python" />](/python/resource/aliyun) | Aliyun Object Storage Service |
 | Scaleway | read, write | [Scaleway](/home/setup/scaleway) | [<Icon icon="python" />](/python/resource/scaleway) | Scaleway Object Storage |
 | QingStor | read, write | [QingStor](/home/setup/qingstor) | [<Icon icon="python" />](/python/resource/qingstor) | QingCloud Object Storage |
-| HF Buckets | read, write | [HF Buckets](/home/setup/hf_buckets) | [<Icon icon="python" />](/python/resource/hf_buckets) | Hugging Face Buckets |
-| HF Datasets | read, write | [HF Datasets](/home/setup/hf_datasets) | [<Icon icon="python" />](/python/resource/hf_datasets) | Hugging Face Dataset repos (lazy reads) |
-| HF Models | read, write | [HF Models](/home/setup/hf_models) | [<Icon icon="python" />](/python/resource/hf_models) | Hugging Face Model repos (weights stream on demand) |
-| HF Spaces | read, write | [HF Spaces](/home/setup/hf_spaces) | [<Icon icon="python" />](/python/resource/hf_spaces) | Hugging Face Space repos (app code, configs) |
+| HF Buckets | read, write | [HF Buckets](/home/setup/hf_buckets) | [<Icon icon="python" />](/python/resource/hf_buckets) [<Icon icon="node-js" />](/typescript/setup/hf_buckets) | Hugging Face Buckets |
+| HF Datasets | read, write | [HF Datasets](/home/setup/hf_datasets) | [<Icon icon="python" />](/python/resource/hf_datasets) [<Icon icon="node-js" />](/typescript/setup/hf_datasets) | Hugging Face Dataset repos (lazy reads) |
+| HF Models | read, write | [HF Models](/home/setup/hf_models) | [<Icon icon="python" />](/python/resource/hf_models) [<Icon icon="node-js" />](/typescript/setup/hf_models) | Hugging Face Model repos (weights stream on demand) |
+| HF Spaces | read, write | [HF Spaces](/home/setup/hf_spaces) | [<Icon icon="python" />](/python/resource/hf_spaces) [<Icon icon="node-js" />](/typescript/setup/hf_spaces) | Hugging Face Space repos (app code, configs) |
 
 ## Google Workspace
 
@@ -61,7 +61,7 @@ No external setup, these run locally or against a connection string you already 
 
 | Resource | Mount Mode | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
-| Databricks Volume | read | [Databricks Volume](/home/setup/databricks) | [<Icon icon="python" />](/python/resource/databricks_volume) | Unity Catalog volume subtree; read-only today |
+| Databricks Volume | read, write | [Databricks Volume](/home/setup/databricks) | [<Icon icon="python" />](/python/resource/databricks_volume) [<Icon icon="node-js" />](/typescript/setup/databricks_volume) | Unity Catalog volume subtree; mv/cp are non-atomic copies |
 | Dropbox | read | [Dropbox](/home/setup/dropbox) | [<Icon icon="node-js" />](/typescript/dropbox) [<Icon icon="globe" />](/typescript/dropbox) | OAuth2 + PKCE; Node and browser |
 | Box | read | [Box](/home/setup/box) | [<Icon icon="node-js" />](/typescript/box) [<Icon icon="globe" />](/typescript/box) | OAuth2 + PKCE or developer token; `.boxnote.json` / `.boxcanvas.json` / `.gdoc.json` decoded |
 | Nextcloud | read, write | [Nextcloud](/home/setup/nextcloud) | [<Icon icon="python" />](/python/resource/nextcloud) | Self-hosted Nextcloud / ownCloud / WebDAV; HTTP Basic auth with app password |

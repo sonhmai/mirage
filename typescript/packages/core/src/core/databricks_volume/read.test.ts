@@ -1,0 +1,75 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { rangeHeader, readBytes } from './read.ts'
+import { makeAccessor, notFoundResponse, routedFetch, spec } from './_test_util.ts'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+describe('rangeHeader', () => {
+  it('returns null for whole-file reads', () => {
+    expect(rangeHeader(0, null)).toBeNull()
+  })
+
+  it('builds open and closed ranges', () => {
+    expect(rangeHeader(5, null)).toBe('bytes=5-')
+    expect(rangeHeader(5, 10)).toBe('bytes=5-14')
+  })
+
+  it('rejects negative offset or size', () => {
+    expect(() => rangeHeader(-1, null)).toThrow('offset must be non-negative')
+    expect(() => rangeHeader(0, -2)).toThrow('size must be non-negative')
+  })
+})
+
+describe('readBytes', () => {
+  it('downloads whole files without a Range header', async () => {
+    const { fetch, calls } = routedFetch(() => new Response('hello', { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+    const data = await readBytes(makeAccessor(), spec('/volume/a.txt'))
+    expect(new TextDecoder().decode(data)).toBe('hello')
+    expect(calls[0]?.headers.Range).toBeUndefined()
+  })
+
+  it('sends Range for offset/size reads', async () => {
+    const { fetch, calls } = routedFetch(() => new Response('ell', { status: 206 }))
+    vi.stubGlobal('fetch', fetch)
+    const data = await readBytes(makeAccessor(), spec('/volume/a.txt'), undefined, {
+      offset: 1,
+      size: 3,
+    })
+    expect(new TextDecoder().decode(data)).toBe('ell')
+    expect(calls[0]?.headers.Range).toBe('bytes=1-3')
+  })
+
+  it('short-circuits size=0 reads without a request', async () => {
+    const { fetch, calls } = routedFetch(() => new Response('x', { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+    const data = await readBytes(makeAccessor(), spec('/volume/a.txt'), undefined, { size: 0 })
+    expect(data.byteLength).toBe(0)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('raises ENOENT for missing files', async () => {
+    const { fetch } = routedFetch(() => notFoundResponse())
+    vi.stubGlobal('fetch', fetch)
+    const err = (await readBytes(makeAccessor(), spec('/volume/gone.txt')).catch(
+      (e: unknown) => e,
+    )) as Error & { code?: string }
+    expect(err.code).toBe('ENOENT')
+  })
+})

@@ -56,6 +56,15 @@ export {
 export { isMacosMetadata } from './fuse/platform/macos.ts'
 export { S3Resource, type S3ResourceState } from './resource/s3/s3.ts'
 export {
+  DatabricksVolumeResource,
+  type DatabricksVolumeResourceState,
+} from './resource/databricks_volume/databricks_volume.ts'
+export {
+  loadDatabricksProfile,
+  parseDatabricksCfg,
+  type DatabricksProfile,
+} from './resource/databricks_volume/profile.ts'
+export {
   redactConfig as redactS3Config,
   type S3Config,
   type S3ConfigRedacted,
@@ -82,6 +91,45 @@ export {
   type SupabaseConfigRedacted,
 } from './resource/supabase/config.ts'
 export { SUPABASE_PROMPT } from './resource/supabase/prompt.ts'
+export {
+  HF_RESOURCES,
+  HfAccessor,
+  HfBucketsAccessor,
+  HfDatasetsAccessor,
+  HfModelsAccessor,
+  HfSpacesAccessor,
+} from './accessor/hf.ts'
+export { HfBucketsResource, type HfBucketsResourceState } from './resource/hf_buckets/hf_buckets.ts'
+export {
+  assertHfRepoId,
+  HF_ENDPOINT,
+  normalizeHfBucketsConfig,
+  normalizeHfRepoConfig,
+  redactHfBucketsConfig,
+  redactHfRepoConfig,
+  type HfBucketsConfig,
+  type HfBucketsConfigRedacted,
+  type HfRepoConfig,
+  type HfRepoConfigRedacted,
+} from './resource/hf_buckets/config.ts'
+export { HF_BUCKETS_PROMPT } from './resource/hf_buckets/prompt.ts'
+export {
+  HfDatasetsResource,
+  type HfDatasetsResourceState,
+} from './resource/hf_datasets/hf_datasets.ts'
+export { HF_DATASETS_PROMPT } from './resource/hf_datasets/prompt.ts'
+export { HfModelsResource, type HfModelsResourceState } from './resource/hf_models/hf_models.ts'
+export {
+  normalizeHfModelsConfig,
+  redactHfModelsConfig,
+  type HfModelsConfig,
+  type HfModelsConfigRedacted,
+} from './resource/hf_models/config.ts'
+export { HF_MODELS_PROMPT } from './resource/hf_models/prompt.ts'
+export { HfSpacesResource, type HfSpacesResourceState } from './resource/hf_spaces/hf_spaces.ts'
+export { HF_SPACES_PROMPT } from './resource/hf_spaces/prompt.ts'
+export { HF_COMMANDS } from './commands/builtin/hf/index.ts'
+export { HF_OPS } from './ops/hf/index.ts'
 export { PostgresResource, type PostgresResourceOptions } from './resource/postgres/postgres.ts'
 export { PostgresStore } from './resource/postgres/store.ts'
 export { MongoDBResource, type MongoDBResourceOptions } from './resource/mongodb/mongodb.ts'

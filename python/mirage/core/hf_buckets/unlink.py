@@ -39,4 +39,4 @@ async def unlink(accessor: HfBucketsAccessor,
         await op.delete(key)
     except NotFound as exc:
         raise FileNotFoundError(raw) from exc
-    record("unlink", path.original, "hf_buckets", 0, start_ms)
+    record("unlink", path.original, accessor.RESOURCE_NAME, 0, start_ms)

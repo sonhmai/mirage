@@ -6,6 +6,10 @@
     "has_write": true,
     "resources": [
       "disk",
+      "hf_buckets",
+      "hf_datasets",
+      "hf_models",
+      "hf_spaces",
       "ram",
       "redis",
       "s3",

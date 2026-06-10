@@ -7,6 +7,10 @@
     "resources": [
       "databricks_volume",
       "disk",
+      "hf_buckets",
+      "hf_datasets",
+      "hf_models",
+      "hf_spaces",
       "ram",
       "redis",
       "s3",

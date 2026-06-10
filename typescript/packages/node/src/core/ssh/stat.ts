@@ -17,6 +17,7 @@ import type { Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { attrsToFileStat } from './entry.ts'
 import { enoent, isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
+import { rstripSlash } from '@struktoai/mirage-core'
 
 export async function stat(accessor: SSHAccessor, p: PathSpec): Promise<FileStat> {
   const sftp = await accessor.sftp()
@@ -32,7 +33,7 @@ export async function stat(accessor: SSHAccessor, p: PathSpec): Promise<FileStat
       resolveFn(stats)
     })
   })
-  const cleaned = virtual.replace(/\/+$/, '')
+  const cleaned = rstripSlash(virtual)
   const name = cleaned.length === 0 ? '/' : (cleaned.split('/').pop() ?? '/')
   return attrsToFileStat(name, attrs)
 }

@@ -20,6 +20,7 @@ import { PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { humanSize } from '../utils/formatting.ts'
+import { rstripSlash, stripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -28,10 +29,10 @@ function formatSize(size: number, human: boolean): string {
 }
 
 function depth(entryPath: string, basePath: string): number {
-  const base = basePath.replace(/\/+$/, '')
-  const rel = entryPath.replace(/\/+$/, '').slice(base.length)
+  const base = rstripSlash(basePath)
+  const rel = rstripSlash(entryPath).slice(base.length)
   if (rel === '') return 0
-  return (rel.replace(/^\/+|\/+$/g, '').match(/\//g) ?? []).length + 1
+  return (stripSlash(rel).match(/\//g) ?? []).length + 1
 }
 
 async function duCommand(

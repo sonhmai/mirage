@@ -13,55 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Accessor } from '../../../accessor/s3.ts'
+import { stream as s3Stream } from '../../../core/s3/stream.ts'
 import { resolveGlob } from '../../../core/s3/glob.ts'
-import { read as s3Read } from '../../../core/s3/read.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { countNewlines, parseN, tailBytes } from '../tail_helper.ts'
-import { readStdinAsync } from '../utils/stream.ts'
-import { headTailProvision } from './provision.ts'
-
-const ENC = new TextEncoder()
+import { tailGeneric } from '../generic/tail.ts'
+import { fileReadProvision } from './provision.ts'
 
 async function tailCommand(
   accessor: S3Accessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const nRaw = typeof opts.flags.n === 'string' ? opts.flags.n : null
-  const cRaw = typeof opts.flags.c === 'string' ? opts.flags.c : null
-  const [lines, plusMode] = parseN(nRaw)
-  const bytesMode = cRaw !== null ? Number.parseInt(cRaw, 10) : null
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    const raw = await s3Read(accessor, first, opts.index ?? undefined)
-    let result: Uint8Array
-    let shouldCache: boolean
-    if (bytesMode !== null) {
-      result = bytesMode === 0 ? new Uint8Array(0) : raw.slice(-bytesMode)
-      shouldCache = bytesMode >= raw.byteLength
-    } else {
-      result = tailBytes(raw, lines, null, plusMode)
-      shouldCache = !plusMode && lines >= countNewlines(raw)
-    }
-    const cache: string[] = shouldCache ? [first.original] : []
-    const out: ByteSource = result
-    return [out, new IOResult({ cache })]
-  }
-  const raw = await readStdinAsync(opts.stdin)
-  if (raw === null) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tail: missing operand\n') })]
-  }
-  if (bytesMode !== null) {
-    const out: ByteSource = bytesMode === 0 ? new Uint8Array(0) : raw.slice(-bytesMode)
-    return [out, new IOResult()]
-  }
-  return [tailBytes(raw, lines, null, plusMode), new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return tailGeneric(resolved, texts, opts, (p) => s3Stream(accessor, p))
 }
 
 export const S3_TAIL = command({
@@ -69,5 +37,5 @@ export const S3_TAIL = command({
   resource: ResourceName.S3,
   spec: specOf('tail'),
   fn: tailCommand,
-  provision: headTailProvision,
+  provision: fileReadProvision,
 })

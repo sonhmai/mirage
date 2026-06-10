@@ -15,6 +15,7 @@
 import type { LangfuseAccessor } from '../../accessor/langfuse.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 const TOP_LEVEL_DIRS = new Set(['traces', 'sessions', 'prompts', 'datasets'])
 
@@ -35,7 +36,7 @@ export async function stat(
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
   }
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
 
   if (key === '') {
     return Promise.resolve(new FileStat({ name: '/', type: FileType.DIRECTORY }))

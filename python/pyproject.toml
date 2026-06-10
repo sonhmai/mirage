@@ -159,6 +159,9 @@ all = [
     "mirage-ai[openhands]",
     "mirage-ai[daytona]",
 ]
+lancedb = [
+    "lancedb>=0.33.0",
+]
 
 [tool.uv]
 conflicts = [

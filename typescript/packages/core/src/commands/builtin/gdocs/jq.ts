@@ -13,22 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDocsAccessor } from '../../../accessor/gdocs.ts'
-import {
-  concatBytes,
-  formatJqOutput,
-  jqEval,
-  parseJsonAuto,
-  parseJsonPath,
-} from '../../../core/jq/index.ts'
 import { resolveGlob } from '../../../core/gdocs/glob.ts'
-import { read as gdocsRead } from '../../../core/gdocs/read.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { stream as gdocsStream } from '../../../core/gdocs/read.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { readStdinAsync } from '../utils/stream.ts'
-
-const ENC = new TextEncoder()
+import { jqGeneric } from '../generic/jq.ts'
 
 async function jqCommand(
   accessor: GDocsAccessor,
@@ -36,39 +26,9 @@ async function jqCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  if (texts.length === 0 || texts[0] === undefined) {
-    return [
-      null,
-      new IOResult({ exitCode: 2, stderr: ENC.encode('jq: usage: jq EXPRESSION [path]\n') }),
-    ]
-  }
-  const expression = texts[0]
-  const r = opts.flags.r === true
-  const c = opts.flags.c === true
-  const s = opts.flags.s === true
-  const spread = expression.includes('[]')
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const parts: Uint8Array[] = []
-    for (const p of resolved) {
-      const raw = await gdocsRead(accessor, p, opts.index ?? undefined)
-      let data = parseJsonPath(raw, p.original)
-      if (s) data = Array.isArray(data) ? data : [data]
-      const result = await jqEval(data, expression.trim())
-      parts.push(formatJqOutput(result, r, c, spread))
-    }
-    const out: ByteSource = concatBytes(parts)
-    return [out, new IOResult()]
-  }
-  const raw = await readStdinAsync(opts.stdin)
-  if (raw === null) {
-    return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('jq: missing input\n') })]
-  }
-  let data = parseJsonAuto(raw)
-  if (s && !Array.isArray(data)) data = [data]
-  const result = await jqEval(data, expression.trim())
-  const out: ByteSource = formatJqOutput(result, r, c, spread)
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return jqGeneric(resolved, texts, opts, (p) => gdocsStream(accessor, p, opts.index ?? undefined))
 }
 
 export const GDOCS_JQ = command({

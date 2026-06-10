@@ -19,6 +19,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { rstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -52,7 +53,7 @@ async function mktempCommand(
   } else {
     name = `${template}.${randomSuffix(8)}`
   }
-  const path = `${parent.replace(/\/+$/, '')}/${name}`
+  const path = `${rstripSlash(parent)}/${name}`
   const spec = makePathSpec(path)
   if (opts.flags.d === true) {
     await s3Mkdir(accessor, spec)

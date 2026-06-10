@@ -13,48 +13,44 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  numberLines,
-  IOResult,
   ResourceName,
+  catGeneric,
   command,
-  resolveSource,
   specOf,
-  wrapBytes,
   type CommandFnResult,
   type CommandOpts,
+  type IndexCacheStore,
   type PathSpec,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { resolveGlob } from '../../../core/email/glob.ts'
 import { read as emailRead } from '../../../core/email/read.ts'
+import { stat as emailStat } from '../../../core/email/stat.ts'
 import { fileReadProvision } from './provision.ts'
 
-const ENC = new TextEncoder()
+async function* emailStream(
+  accessor: EmailAccessor,
+  p: PathSpec,
+  index: IndexCacheStore | undefined,
+): AsyncIterable<Uint8Array> {
+  yield await emailRead(accessor, p, index)
+}
 
 async function catCommand(
   accessor: EmailAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const nFlag = opts.flags.n === true
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    const data = await emailRead(accessor, first, opts.index ?? undefined)
-    const io = new IOResult({ reads: { [first.stripPrefix]: data }, cache: [first.stripPrefix] })
-    if (nFlag) return [numberLines(wrapBytes(data)), io]
-    return [data, io]
-  }
-  try {
-    const source = resolveSource(opts.stdin, 'cat: missing operand')
-    if (nFlag) return [numberLines(source), new IOResult()]
-    return [source, new IOResult()]
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
-  }
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return catGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => emailStat(accessor, p, opts.index ?? undefined),
+    (p) => emailStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const EMAIL_CAT = command({

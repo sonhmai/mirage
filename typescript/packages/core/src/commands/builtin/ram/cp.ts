@@ -12,82 +12,40 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { copy as ramCopy } from '../../../core/ram/copy.ts'
-import { stat as ramStat } from '../../../core/ram/stat.ts'
-import { find as ramFind } from '../../../core/ram/find.ts'
 import type { RAMAccessor } from '../../../accessor/ram.ts'
+import { copy as ramCopy } from '../../../core/ram/copy.ts'
+import { find as ramFind } from '../../../core/ram/find.ts'
+import { stat as ramStat } from '../../../core/ram/stat.ts'
 import { IOResult } from '../../../io/types.ts'
-import { PathSpec, ResourceName } from '../../../types.ts'
+import type { FindOptions } from '../../../resource/base.ts'
+import { type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { cpGeneric } from '../generic/cp.ts'
 
-async function exists(accessor: RAMAccessor, path: PathSpec): Promise<boolean> {
-  try {
-    await ramStat(accessor, path)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function toPathSpec(strPath: string, prefix: string): PathSpec {
-  return new PathSpec({
-    original: strPath,
-    directory: strPath,
-    resolved: false,
-    prefix,
-  })
-}
-
-async function cpCommand(
+function cpCommand(
   accessor: RAMAccessor,
   paths: PathSpec[],
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   if (paths.length < 2) {
-    return [
+    return Promise.resolve([
       null,
-      new IOResult({
-        exitCode: 1,
-        stderr: new TextEncoder().encode('cp: missing operand\n'),
-      }),
-    ]
+      new IOResult({ exitCode: 1, stderr: new TextEncoder().encode('cp: missing operand\n') }),
+    ])
   }
   const recursive = opts.flags.r === true || opts.flags.R === true || opts.flags.a === true
-  const noClobber = opts.flags.n === true
-  const verbose = opts.flags.v === true
-  const dst = paths[paths.length - 1]
-  if (dst === undefined) return [null, new IOResult()]
-  const lines: string[] = []
-
-  if (recursive) {
-    const src = paths[0]
-    if (src === undefined) return [null, new IOResult()]
-    const srcBase = src.stripPrefix.replace(/\/+$/, '')
-    const dstBase = dst.stripPrefix.replace(/\/+$/, '')
-    const entries = await ramFind(accessor, src, { type: 'f' })
-    for (const entry of entries) {
-      const rel = entry.slice(srcBase.length)
-      const dstPath = dstBase + rel
-      const dstSpec = toPathSpec(dstPath, dst.prefix)
-      if (noClobber && (await exists(accessor, dstSpec))) continue
-      const srcSpec = toPathSpec(entry, src.prefix)
-      await ramCopy(accessor, srcSpec, dstSpec)
-      if (verbose) lines.push(`${entry} -> ${dstPath}`)
-    }
-    const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
-    return [out, new IOResult()]
-  }
-
-  const sources = paths.slice(0, -1)
-  for (const src of sources) {
-    if (noClobber && (await exists(accessor, dst))) continue
-    await ramCopy(accessor, src, dst)
-    if (verbose) lines.push(`${src.original} -> ${dst.original}`)
-  }
-  const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
-  return [out, new IOResult()]
+  return cpGeneric(
+    paths,
+    (src: PathSpec, target: PathSpec) => ramCopy(accessor, src, target),
+    (src: PathSpec, options: FindOptions) => ramFind(accessor, src, options),
+    (p: PathSpec) => ramStat(accessor, p),
+    recursive,
+    opts.flags.n === true,
+    opts.flags.v === true,
+    opts.index ?? undefined,
+  )
 }
 
 export const RAM_CP = command({

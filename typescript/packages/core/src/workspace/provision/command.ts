@@ -23,6 +23,7 @@ import type { Session } from '../session/session.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import type { Resource } from '../../resource/base.ts'
 import type { CommandOpts } from '../../commands/config.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 async function checkCacheHits(
   cache: FileCache | null,
@@ -68,7 +69,7 @@ export async function handleCommandProvision(
     return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
   }
 
-  const mountPrefix = mount.prefix.replace(/\/+$/, '')
+  const mountPrefix = rstripSlash(mount.prefix)
   const scopedParts: (string | PathSpec)[] = [parts[0] ?? '']
   const resourceScopes: PathSpec[] = []
   for (let i = 1; i < parts.length; i++) {

@@ -1,0 +1,81 @@
+---
+title: LanceDB
+icon: database
+description: Mount a LanceDB table as a Mirage filesystem in TypeScript, with label folders and a semantic search command.
+---
+
+`LanceDBResource` exposes a LanceDB table as a read-only filesystem: group-by
+columns become nested folders, each row is a card plus an optional blob file, and
+semantic search is the `search` command. The TypeScript backend mirrors the
+[Python one](/python/resource/lancedb) and returns identical results.
+
+## Node
+
+```bash
+pnpm add @struktoai/mirage-node @lancedb/lancedb
+```
+
+```ts
+import { LanceDBResource, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const fashion = new LanceDBResource({
+  config: {
+    uri: '/data/fashion.lancedb', // or s3://, gs://, db:// (LanceDB Cloud)
+    table: 'fashion',
+    groupBy: ['gender', 'articleType', 'baseColour'],
+    idColumn: 'id',
+    titleColumn: 'productDisplayName',
+    blobColumn: 'image_bytes',
+    blobExt: 'jpg',
+    vectorColumn: 'vector', // presence enables the search command
+    searchLimit: 5,
+  },
+})
+
+const ws = new Workspace({ '/fashion/': fashion }, { mode: MountMode.READ })
+
+await ws.execute('ls /fashion/Men/Shoes/White')
+await ws.execute('search "red running shoes" /fashion') // ranked paths + score + card
+```
+
+## Filesystem layout
+
+```text
+/fashion/<gender>/<articleType>/<baseColour>/<id>.md   # row card
+/fashion/<gender>/<articleType>/<baseColour>/<id>.jpg  # raw blob bytes
+```
+
+Semantic search is the `search` command, not a path: it returns ranked rows as
+the canonical `<id>.md` paths above, annotated with the vector distance.
+
+## Cloud and Enterprise
+
+`db://` URIs connect to LanceDB Cloud (`apiKey` + `region`) or Enterprise
+(`apiKey` + `hostOverride`):
+
+```ts
+const fashion = new LanceDBResource({
+  config: {
+    uri: 'db://my-database',
+    apiKey: process.env.LANCEDB_API_KEY,
+    region: 'us-east-1',
+    hostOverride: 'https://my-database.us-east-1.api.lancedb.com', // Enterprise only
+    table: 'fashion',
+    groupBy: ['gender'],
+    idColumn: 'id',
+    vectorColumn: 'vector',
+  },
+})
+```
+
+## Supported commands
+
+`ls`, `cd`, `tree`, `cat`, `stat`, `find`, `wc`, and `search`. `grep`/`rg` stay
+lexical; `search "<query>" <path>` is the semantic command, returning ranked
+rows as canonical `<id>.md` paths plus a score, so results compose with `cat`,
+`wc`, and pipes. Flags: `--top-k`, `--threshold`, `--method semantic`.
+
+Search requires a table built with an embedding function on a source field, so
+`tbl.search(text)` auto-embeds the query. The Node example under
+`examples/typescript/lancedb/` builds such a table and produces the same output
+as the Python example, including identical similarity scores (0.2679).

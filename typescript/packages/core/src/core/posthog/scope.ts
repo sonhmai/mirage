@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../types.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export type PostHogLevel =
   | 'root'
@@ -41,7 +42,7 @@ export const PROJECT_FILES: readonly string[] = Object.freeze([
 
 export function detectScope(path: PathSpec | string): PostHogScope {
   const raw = path instanceof PathSpec ? path.stripPrefix : path
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(raw)
   const empty: PostHogScope = {
     level: 'root',
     projectId: null,

@@ -23,6 +23,7 @@ import {
   fetchSessions,
   fetchTraces,
 } from './_client.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 const TOP_LEVEL_DIRS = ['traces', 'sessions', 'prompts', 'datasets'] as const
 
@@ -291,7 +292,7 @@ export async function readdir(
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
   }
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   for (const part of key.split('/')) {
     if (key !== '' && part.startsWith('.')) throw enoent(p)
   }

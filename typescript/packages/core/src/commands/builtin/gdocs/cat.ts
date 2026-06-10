@@ -14,41 +14,29 @@
 
 import type { GDocsAccessor } from '../../../accessor/gdocs.ts'
 import { resolveGlob } from '../../../core/gdocs/glob.ts'
-import { read as gdocsRead } from '../../../core/gdocs/read.ts'
-import { numberLines } from '../cat_helper.ts'
-import { IOResult } from '../../../io/types.ts'
+import { stream as gdocsStream } from '../../../core/gdocs/read.ts'
+import { stat as gdocsStat } from '../../../core/gdocs/stat.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { resolveSource, wrapBytes } from '../utils/stream.ts'
+import { catGeneric } from '../generic/cat.ts'
 import { fileReadProvision } from './provision.ts'
-
-const ENC = new TextEncoder()
 
 async function catCommand(
   accessor: GDocsAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const nFlag = opts.flags.n === true
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    const data = await gdocsRead(accessor, first, opts.index ?? undefined)
-    const io = new IOResult({ reads: { [first.stripPrefix]: data }, cache: [first.stripPrefix] })
-    if (nFlag) return [numberLines(wrapBytes(data)), io]
-    return [data, io]
-  }
-  try {
-    const source = resolveSource(opts.stdin, 'cat: missing operand')
-    if (nFlag) return [numberLines(source), new IOResult()]
-    return [source, new IOResult()]
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
-  }
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return catGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => gdocsStat(accessor, p, opts.index ?? undefined),
+    (p) => gdocsStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const GDOCS_CAT = command({

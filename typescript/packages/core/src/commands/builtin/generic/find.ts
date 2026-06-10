@@ -16,6 +16,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { rstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -112,12 +113,12 @@ export async function findGeneric(
     } catch {
       continue
     }
-    const rootKey = root.stripPrefix.replace(/\/+$/, '') || '/'
+    const rootKey = rstripSlash(root.stripPrefix) || '/'
     for (const key of keys) {
       const displayPath =
         root.original === '/'
           ? key
-          : root.original.replace(/\/+$/, '') + key.slice(rootKey === '/' ? 0 : rootKey.length)
+          : rstripSlash(root.original) + key.slice(rootKey === '/' ? 0 : rootKey.length)
       matches.push(displayPath)
     }
   }

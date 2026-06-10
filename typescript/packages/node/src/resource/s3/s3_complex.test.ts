@@ -178,6 +178,6 @@ describe('S3 complex scenarios (mocked)', () => {
         'cat /tmp/search_report.txt',
     )
     const lines = decode(io.stdout).trim().split('\n')
-    expect(lines).toEqual(['/s3/data/example.jsonl', '"Strukto"'])
+    expect(lines).toEqual(['/s3/data/example.jsonl', '', '"Strukto"'])
   })
 })

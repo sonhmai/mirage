@@ -25,6 +25,7 @@ import {
   TEAM_FILES,
   detectScope,
 } from './scope.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 function notFound(p: string): Error {
   const err = new Error(p) as Error & { code?: string }
@@ -59,7 +60,7 @@ export async function readdir(
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const prefix = spec.prefix
   const scope = detectScope(spec)
-  const key = scope.resourcePath.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(scope.resourcePath)
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
 
   if (scope.level === 'invalid' || scope.level === 'user_file' || scope.level.endsWith('_file')) {

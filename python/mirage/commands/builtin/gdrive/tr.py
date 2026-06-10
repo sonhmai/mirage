@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic.tr import tr as generic_tr
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.stream import read_stream
+from mirage.core.gdrive.stream import stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -45,7 +45,7 @@ async def tr(
     return await generic_tr(
         paths,
         texts,
-        read_stream=partial(read_stream, index=index),
+        read_stream=partial(stream, index=index),
         accessor=accessor,
         stdin=stdin,
         delete=d,

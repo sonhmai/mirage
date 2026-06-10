@@ -21,6 +21,7 @@ import { type PathSpec, ResourceName } from '../../../types.ts'
 import { deflateRaw } from '../../../utils/compress.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { lstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -172,7 +173,7 @@ async function zipCommand(
     const raw = await s3Read(accessor, p, opts.index ?? undefined)
     const data = new Uint8Array(raw.byteLength)
     data.set(raw)
-    const arcname = junkPaths ? basename(p.original) : p.original.replace(/^\/+/, '')
+    const arcname = junkPaths ? basename(p.original) : lstripSlash(p.original)
     const compressed = await deflateRaw(data)
     items.push({
       name: arcname,

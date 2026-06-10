@@ -15,7 +15,7 @@
 import { ResourceName, command, grepGeneric, prefixAggregate, specOf } from '@struktoai/mirage-core'
 import { stream as diskStream } from '../../../../core/disk/stream.ts'
 import { stat as diskStat } from '../../../../core/disk/stat.ts'
-import { find as diskFind } from '../../../../core/disk/find.ts'
+import { readdir as diskReaddir } from '../../../../core/disk/readdir.ts'
 import type { DiskAccessor } from '../../../../accessor/disk.ts'
 
 export const DISK_GREP = command({
@@ -29,7 +29,7 @@ export const DISK_GREP = command({
       texts,
       opts,
       (p) => diskStat(accessor, p),
-      (root, options) => diskFind(accessor, root, options),
+      (p) => diskReaddir(accessor, p),
       (p) => diskStream(accessor, p),
     ),
   aggregate: prefixAggregate,

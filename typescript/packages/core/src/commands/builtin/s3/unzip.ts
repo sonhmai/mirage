@@ -22,6 +22,7 @@ import { PathSpec, ResourceName } from '../../../types.ts'
 import { inflateRaw } from '../../../utils/compress.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { lstripSlash, rstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -155,8 +156,8 @@ async function unzipCommand(
   const outputLines: string[] = []
   for (const e of entries) {
     if (e.name.endsWith('/')) continue
-    const entryName = e.name.replace(/^\/+/, '')
-    const outPath = dest.replace(/\/+$/, '') + '/' + entryName
+    const entryName = lstripSlash(e.name)
+    const outPath = rstripSlash(dest) + '/' + entryName
     await ensureParents(accessor, outPath, mountPrefix)
     await s3Write(accessor, makePathSpec(outPath, mountPrefix), e.data)
     const reportPath = mountPrefix !== '' ? mountPrefix + outPath : outPath

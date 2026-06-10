@@ -16,6 +16,7 @@ import type { GitHubCIAccessor } from '../../accessor/github_ci.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { readdir as coreReaddir } from './readdir.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 const VIRTUAL_DIRS = new Set(['workflows', 'runs', 'jobs', 'artifacts'])
 
@@ -70,7 +71,7 @@ export async function stat(
   void accessor
   const prefix = path.prefix
   const stripped = stripPrefix(path)
-  const key = stripped.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(stripped)
 
   if (key === '') {
     return new FileStat({ name: '/', type: FileType.DIRECTORY })

@@ -23,6 +23,7 @@ import {
   type CommandFnResult,
   type CommandOpts,
   type FileStat,
+  rstripSlash,
 } from '@struktoai/mirage-core'
 import { stat as sshStat } from '../../../../core/ssh/stat.ts'
 import { readdir as sshReaddir } from '../../../../core/ssh/readdir.ts'
@@ -109,7 +110,7 @@ async function walkRecursive(
   const subdirs = sorted.filter((s) => s.type === FileType.DIRECTORY)
   for (const sub of subdirs) {
     lines.push('')
-    const base = dir.stripPrefix.replace(/\/+$/, '')
+    const base = rstripSlash(dir.stripPrefix)
     const childPath = `${base}/${sub.name}`
     await walkRecursive(accessor, childSpec(childPath, dir.prefix), opts, true, lines, warnings)
   }

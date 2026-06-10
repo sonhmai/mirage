@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../types.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export type EntityKind = 'tables' | 'views'
 
@@ -50,7 +51,7 @@ export type PostgresScopeLevel = PostgresScope['level']
 
 export function detectScope(path: PathSpec | string): PostgresScope {
   const raw = path instanceof PathSpec ? path.stripPrefix : path
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(raw)
 
   if (key === '') {
     return { level: 'root', resourcePath: '/' }

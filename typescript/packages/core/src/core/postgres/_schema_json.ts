@@ -27,6 +27,7 @@ import {
   listViews,
   tableSizeBytes,
 } from './_client.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 export interface DatabaseTable {
   schema: string
@@ -146,7 +147,7 @@ export async function buildEntitySchemaJson(
 }
 
 export function databaseNameFromDsn(dsn: string): string {
-  const stripped = dsn.replace(/\/+$/, '')
+  const stripped = rstripSlash(dsn)
   const lastSegment = stripped.split('/').pop() ?? ''
   const beforeQuery = lastSegment.split('?')[0] ?? ''
   return beforeQuery !== '' ? beforeQuery : 'postgres'

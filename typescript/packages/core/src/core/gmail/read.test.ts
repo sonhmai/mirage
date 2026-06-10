@@ -71,6 +71,7 @@ describe('gmail read auto-bootstrap', () => {
       body_text: 'hi',
       snippet: 'hello',
       labels: ['INBOX'],
+      attachments: [],
     })
 
     const accessor = makeAccessor()

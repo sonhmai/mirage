@@ -14,57 +14,36 @@
 
 import {
   IOResult,
-  PathSpec,
   ResourceName,
   command,
   compilePattern,
   grepLines,
-  readStdinAsync,
+  rgGeneric,
   specOf,
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
+  type FileStat,
   type GrepLinesOptions,
+  type IndexCacheStore,
+  type PathSpec,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { resolveGlob } from '../../../core/email/glob.ts'
 import { read as emailRead } from '../../../core/email/read.ts'
 import { readdir as emailReaddir } from '../../../core/email/readdir.ts'
+import { stat as emailStat } from '../../../core/email/stat.ts'
 import { detectScope } from '../../../core/email/scope.ts'
 import { searchAndFormat } from '../../../core/email/search.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
-async function collectFiles(
+async function* emailStream(
   accessor: EmailAccessor,
-  path: PathSpec,
-  index: CommandOpts['index'],
-): Promise<string[]> {
-  if (path.original.endsWith('.json') || path.original.endsWith('.jsonl')) {
-    return [path.original]
-  }
-  let children: string[]
-  try {
-    children = await emailReaddir(accessor, path, index ?? undefined)
-  } catch {
-    return []
-  }
-  const files: string[] = []
-  for (const child of children) {
-    if (child.endsWith('.email.json')) {
-      files.push(child)
-    } else {
-      const childSpec = new PathSpec({
-        original: child,
-        directory: child,
-        resolved: false,
-        prefix: path.prefix,
-      })
-      files.push(...(await collectFiles(accessor, childSpec, index)))
-    }
-  }
-  return files
+  p: PathSpec,
+  index: IndexCacheStore | undefined,
+): AsyncIterable<Uint8Array> {
+  yield await emailRead(accessor, p, index)
 }
 
 async function rgCommand(
@@ -89,7 +68,6 @@ async function rgCommand(
   const fixedString = opts.flags.F === true
   const onlyMatching = opts.flags.o === true
   const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
-  const hidden = opts.flags.hidden === true
   const pat = compilePattern(pattern, ignoreCase, fixedString, wholeWord)
 
   const lineOpts: GrepLinesOptions = {
@@ -118,64 +96,16 @@ async function rgCommand(
         return [out, new IOResult()]
       }
     }
-
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const filePrefix = resolved[0]?.prefix ?? ''
-    const blobPaths: string[] = []
-    for (const p of resolved) blobPaths.push(...(await collectFiles(accessor, p, opts.index)))
-    const sortedUnique = [...new Set(blobPaths)].sort()
-    const allResults: string[] = []
-    let anyMatch = false
-    for (const bp of sortedUnique) {
-      if (!hidden && bp.split('/').some((part) => part.startsWith('.'))) continue
-      let data: Uint8Array
-      try {
-        const spec = new PathSpec({
-          original: bp,
-          directory: bp,
-          resolved: true,
-          prefix: filePrefix,
-        })
-        data = await emailRead(accessor, spec, opts.index ?? undefined)
-      } catch {
-        continue
-      }
-      const text = DEC.decode(data)
-      if (text === '') continue
-      const lines = text.split('\n')
-      if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-      const matched = grepLines(bp, lines, pat, lineOpts)
-      if (matched.length === 0) continue
-      anyMatch = true
-      if (filesOnly) {
-        allResults.push(bp)
-        continue
-      }
-      if (countOnly) {
-        allResults.push(`${bp}:${String(matched.length)}`)
-        continue
-      }
-      for (const line of matched) allResults.push(`${bp}:${line}`)
-    }
-    if (!anyMatch) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-    const out: ByteSource = ENC.encode(allResults.join('\n'))
-    return [out, new IOResult()]
   }
 
-  const raw = await readStdinAsync(opts.stdin)
-  if (raw === null) {
-    return [
-      null,
-      new IOResult({ exitCode: 2, stderr: ENC.encode('rg: usage: rg [flags] pattern path\n') }),
-    ]
-  }
-  const lines = DEC.decode(raw).split('\n')
-  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-  const matched = grepLines('<stdin>', lines, pat, lineOpts)
-  if (matched.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-  if (countOnly) return [ENC.encode(String(matched.length)), new IOResult()]
-  const out: ByteSource = ENC.encode(matched.join('\n'))
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => emailStat(accessor, p, opts.index ?? undefined)
+  const readdir = (p: PathSpec): Promise<string[]> =>
+    emailReaddir(accessor, p, opts.index ?? undefined)
+  return rgGeneric(resolved, texts, opts, stat, readdir, (p) =>
+    emailStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const EMAIL_RG = command({

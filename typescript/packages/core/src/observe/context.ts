@@ -14,6 +14,7 @@
 
 import { createAsyncContext } from '../utils/async_context.ts'
 import { OpRecord } from './record.ts'
+import { rstripSlash } from '../util/slash.ts'
 
 interface RecordingState {
   records: OpRecord[]
@@ -125,7 +126,7 @@ export function revisionFor(path: string): string | null {
 
 function applyPrefix(prefix: string, path: string): string {
   if (prefix !== '' && !path.startsWith(prefix)) {
-    return prefix.replace(/\/+$/, '') + path
+    return rstripSlash(prefix) + path
   }
   return path
 }

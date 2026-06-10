@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '@struktoai/mirage-core'
+
 export function norm(p: string): string {
-  return `/${p.replace(/^\/+|\/+$/g, '')}`
+  return `/${stripSlash(p)}`
 }
 
 export function parent(p: string): string {

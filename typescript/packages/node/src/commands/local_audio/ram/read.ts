@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RAMAccessor, PathSpec } from '@struktoai/mirage-core'
+import { stripSlash } from '@struktoai/mirage-core'
 
 function norm(p: string): string {
-  return `/${p.replace(/^\/+|\/+$/g, '')}`
+  return `/${stripSlash(p)}`
 }
 
 export function readRam(accessor: RAMAccessor, path: PathSpec): Uint8Array {

@@ -15,6 +15,7 @@
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { rstripSlash, stripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -31,10 +32,10 @@ function humanSize(n: number): string {
 }
 
 function depthOf(entryPath: string, basePath: string): number {
-  const base = basePath.replace(/\/+$/, '')
-  const rel = entryPath.replace(/\/+$/, '').slice(base.length)
+  const base = rstripSlash(basePath)
+  const rel = rstripSlash(entryPath).slice(base.length)
   if (!rel) return 0
-  return (rel.replace(/^\/+|\/+$/g, '').match(/\//g) ?? []).length + 1
+  return (stripSlash(rel).match(/\//g) ?? []).length + 1
 }
 
 export async function duGeneric(

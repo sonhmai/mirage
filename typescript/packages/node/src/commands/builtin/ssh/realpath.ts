@@ -21,12 +21,13 @@ import {
   type CommandFnResult,
   type CommandOpts,
   type PathSpec,
+  rstripSlash,
 } from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
 import { stat as sshStat } from '../../../core/ssh/stat.ts'
 
 function normalize(p: string, cwd: string): string {
-  const path = p.startsWith('/') ? p : `${cwd.replace(/\/+$/, '')}/${p}`
+  const path = p.startsWith('/') ? p : `${rstripSlash(cwd)}/${p}`
   const parts = path.split('/').filter((s) => s !== '' && s !== '.')
   const out: string[] = []
   for (const part of parts) {

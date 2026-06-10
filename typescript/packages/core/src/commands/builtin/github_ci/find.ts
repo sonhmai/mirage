@@ -20,6 +20,7 @@ import { PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { metadataProvision } from './provision.ts'
+import { stripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 const TERMINAL_EXTS = ['.json', '.jsonl', '.log', '.zip']
@@ -87,12 +88,12 @@ async function findCommand(
   const minDepth = minDepthRaw !== null ? Number.parseInt(minDepthRaw, 10) : null
 
   const allPaths = await walk(accessor, p0, opts.index, maxDepth, 0)
-  const searchKey = p0.stripPrefix.replace(/^\/+|\/+$/g, '')
+  const searchKey = stripSlash(p0.stripPrefix)
   const baseDepth = searchKey === '' ? -1 : searchKey.split('/').length - 1
   const results: string[] = []
   for (const p of [...allPaths].sort()) {
     const stripped = p.startsWith(p0.prefix) ? p.slice(p0.prefix.length) : p
-    const trimmed = stripped.replace(/^\/+|\/+$/g, '')
+    const trimmed = stripSlash(stripped)
     const depth = trimmed === '' ? -1 : trimmed.split('/').length - (baseDepth + 2)
     if (minDepth !== null && depth < minDepth) continue
     const entryName = p.split('/').pop() ?? p

@@ -20,6 +20,7 @@ import {
   type RegisteredOp,
   type Resource,
   ResourceName,
+  lstripSlash,
 } from '@struktoai/mirage-core'
 import { OPFSAccessor } from '../../accessor/opfs.ts'
 import { OPFS_COMMANDS } from '../../commands/builtin/opfs/index.ts'
@@ -258,7 +259,7 @@ export class OPFSResource implements Resource {
   async loadState(state: OPFSResourceState): Promise<void> {
     const handle = await this.ensureOpen()
     for (const dir of state.dirs) {
-      const rel = dir.replace(/^\/+/, '')
+      const rel = lstripSlash(dir)
       if (rel === '') continue
       await splitAndCreate(handle, rel)
     }

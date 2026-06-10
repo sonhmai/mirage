@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.mv import mv as generic_mv
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.s3.glob import resolve_glob
@@ -21,14 +24,6 @@ from mirage.core.s3.rename import rename
 from mirage.core.s3.stat import stat as stat_impl
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _exists(accessor: S3Accessor, path: PathSpec | str) -> bool:
-    try:
-        await stat_impl(accessor, path)
-        return True
-    except (FileNotFoundError, ValueError, Exception):
-        return False
 
 
 @command("mv", resource="s3", spec=SPECS["mv"], write=True)
@@ -46,14 +41,9 @@ async def mv(
     if len(paths) < 2:
         raise ValueError("mv: requires src and dst")
     paths = await resolve_glob(accessor, paths, index)
-    if n and await _exists(accessor, paths[1]):
-        return None, IOResult()
-    await rename(accessor, paths[0], paths[1])
-    writes = {
-        paths[0].original: b"",
-        paths[1].original: b"",
-    }
-    output = None
-    if v:
-        output = f"'{paths[0].original}' -> '{paths[1].original}'\n".encode()
-    return output, IOResult(writes=writes)
+    return await generic_mv(paths,
+                            rename=partial(rename, accessor),
+                            stat=partial(stat_impl, accessor),
+                            n=n,
+                            v=v,
+                            index=index)

@@ -14,85 +14,43 @@
 
 import {
   IOResult,
-  PathSpec,
   ResourceName,
   command,
+  cpGeneric,
   specOf,
   type CommandFnResult,
   type CommandOpts,
+  type FindOptions,
+  type PathSpec,
 } from '@struktoai/mirage-core'
-import { copy as sshCopy } from '../../../core/ssh/copy.ts'
-import { find as sshFind } from '../../../core/ssh/find.ts'
-import { stat as sshStat } from '../../../core/ssh/stat.ts'
+import { copy as coreCopy } from '../../../core/ssh/copy.ts'
+import { find as coreFind } from '../../../core/ssh/find.ts'
+import { stat as coreStat } from '../../../core/ssh/stat.ts'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
 
-async function exists(accessor: SSHAccessor, path: PathSpec): Promise<boolean> {
-  try {
-    await sshStat(accessor, path)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function toPathSpec(strPath: string, prefix: string): PathSpec {
-  return new PathSpec({
-    original: strPath,
-    directory: strPath,
-    resolved: false,
-    prefix,
-  })
-}
-
-async function cpCommand(
+function cpCommand(
   accessor: SSHAccessor,
   paths: PathSpec[],
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   if (paths.length < 2) {
-    return [
+    return Promise.resolve([
       null,
-      new IOResult({
-        exitCode: 1,
-        stderr: new TextEncoder().encode('cp: missing operand\n'),
-      }),
-    ]
+      new IOResult({ exitCode: 1, stderr: new TextEncoder().encode('cp: missing operand\n') }),
+    ])
   }
   const recursive = opts.flags.r === true || opts.flags.R === true || opts.flags.a === true
-  const noClobber = opts.flags.n === true
-  const verbose = opts.flags.v === true
-  const dst = paths[paths.length - 1]
-  if (dst === undefined) return [null, new IOResult()]
-  const lines: string[] = []
-
-  if (recursive) {
-    const src = paths[0]
-    if (src === undefined) return [null, new IOResult()]
-    const srcBase = src.stripPrefix.replace(/\/+$/, '')
-    const dstBase = dst.stripPrefix.replace(/\/+$/, '')
-    const entries = await sshFind(accessor, src, { type: 'f' })
-    for (const entry of entries) {
-      const rel = entry.slice(srcBase.length)
-      const dstPath = dstBase + rel
-      const dstSpec = toPathSpec(dstPath, dst.prefix)
-      if (noClobber && (await exists(accessor, dstSpec))) continue
-      const srcSpec = toPathSpec(entry, src.prefix)
-      await sshCopy(accessor, srcSpec, dstSpec)
-      if (verbose) lines.push(`${entry} -> ${dstPath}`)
-    }
-    const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
-    return [out, new IOResult()]
-  }
-
-  const sources = paths.slice(0, -1)
-  for (const src of sources) {
-    if (noClobber && (await exists(accessor, dst))) continue
-    await sshCopy(accessor, src, dst)
-    if (verbose) lines.push(`${src.original} -> ${dst.original}`)
-  }
-  const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
-  return [out, new IOResult()]
+  return cpGeneric(
+    paths,
+    (src: PathSpec, target: PathSpec) => coreCopy(accessor, src, target),
+    (src: PathSpec, options: FindOptions) => coreFind(accessor, src, options),
+    (p: PathSpec) => coreStat(accessor, p),
+    recursive,
+    opts.flags.n === true,
+    opts.flags.v === true,
+    opts.index ?? undefined,
+  )
 }
 
 export const SSH_CP = command({

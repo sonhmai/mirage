@@ -24,6 +24,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { prefixAggregate } from '../aggregators.ts'
 import { compilePattern, grepLines, grepStream } from '../grep_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { stripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -100,7 +101,7 @@ async function grepCommand(
     const recursive = opts.flags.r === true || opts.flags.R === true
     if (recursive && resolved.length === 1) {
       const only = resolved[0]
-      const stripped = only?.stripPrefix.replace(/^\/+|\/+$/g, '') ?? ''
+      const stripped = only ? stripSlash(only.stripPrefix) : ''
       const children: PathSpec[] = []
       const treeEntry = accessor.tree[stripped]
       if (treeEntry?.type === 'tree') {

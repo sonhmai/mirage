@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic.tac import tac as generic_tac
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.stream import read_stream
+from mirage.core.gdrive.stream import stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -40,6 +40,6 @@ async def tac(
     else:
         paths = []
     return await generic_tac(paths,
-                             read_stream=partial(read_stream, index=index),
+                             read_stream=partial(stream, index=index),
                              accessor=accessor,
                              stdin=stdin)

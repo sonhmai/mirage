@@ -21,6 +21,7 @@ import { SlackIndexEntry } from './entry.ts'
 import { fetchMessagesForDay, type SlackMessage } from './history.ts'
 import { detectScope } from './scope.ts'
 import { listUsers } from './users.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export const VIRTUAL_ROOTS = ['channels', 'dms', 'users'] as const
 
@@ -105,7 +106,7 @@ function normalizePath(path: PathSpec): PathParts {
   if (prefix !== '' && raw.startsWith(prefix)) {
     raw = raw.slice(prefix.length) || '/'
   }
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(raw)
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
   return { path, prefix, raw, key, virtualKey }
 }

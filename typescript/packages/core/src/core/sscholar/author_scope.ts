@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../types.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export type SSCholarAuthorLevel = 'root' | 'author' | 'file' | 'papers' | 'invalid'
 
@@ -27,7 +28,7 @@ export const AUTHOR_FILES: readonly string[] = Object.freeze(['profile.json', 'p
 
 export function detectAuthorScope(path: PathSpec | string): SSCholarAuthorScope {
   const raw = path instanceof PathSpec ? path.stripPrefix : path
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(raw)
   const empty: SSCholarAuthorScope = {
     level: 'root',
     authorId: null,

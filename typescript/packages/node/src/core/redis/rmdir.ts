@@ -15,6 +15,7 @@
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm } from './utils.ts'
+import { rstripSlash } from '@struktoai/mirage-core'
 
 export async function rmdir(accessor: RedisAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.stripPrefix)
@@ -22,7 +23,7 @@ export async function rmdir(accessor: RedisAccessor, path: PathSpec): Promise<vo
   if (!(await store.hasDir(p))) {
     throw new Error(`not a directory: ${p}`)
   }
-  const prefix = p.replace(/\/+$/, '') + '/'
+  const prefix = rstripSlash(p) + '/'
   const files = await store.listFiles()
   const dirs = await store.listDirs()
   const candidates = [...files, ...dirs]

@@ -16,7 +16,6 @@ import { ResourceName, command, rgGeneric, specOf } from '@struktoai/mirage-core
 import { readdir as opfsReaddir } from '../../../core/opfs/readdir.ts'
 import { stat as opfsStat } from '../../../core/opfs/stat.ts'
 import { stream as opfsStream } from '../../../core/opfs/stream.ts'
-import { find as opfsFind } from '../../../core/opfs/find.ts'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 
 export const OPFS_RG = command({
@@ -31,6 +30,5 @@ export const OPFS_RG = command({
       (p) => opfsStat(accessor, p),
       (p) => opfsReaddir(accessor, p),
       (p) => opfsStream(accessor, p),
-      (root, options) => opfsFind(accessor, root, options),
     ),
 })

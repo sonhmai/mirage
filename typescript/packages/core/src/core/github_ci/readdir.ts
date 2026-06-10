@@ -19,6 +19,7 @@ import { PathSpec } from '../../types.ts'
 import { listArtifacts } from './artifacts.ts'
 import { listJobsForRun, listRuns } from './runs.ts'
 import { listWorkflows } from './workflows.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 function safeName(name: string | undefined): string {
   if (name === undefined || name === '') return 'unknown'
@@ -47,7 +48,7 @@ export async function readdir(
 ): Promise<string[]> {
   const prefix = path.prefix
   const stripped = stripPrefix(path)
-  const key = stripped.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(stripped)
   const virtualKey = key === '' ? (prefix === '' ? '/' : prefix) : `${prefix}/${key}`
 
   if (key === '') {

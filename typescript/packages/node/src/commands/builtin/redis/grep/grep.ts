@@ -15,7 +15,7 @@
 import { ResourceName, command, grepGeneric, prefixAggregate, specOf } from '@struktoai/mirage-core'
 import { stream as redisStream } from '../../../../core/redis/stream.ts'
 import { stat as redisStat } from '../../../../core/redis/stat.ts'
-import { find as redisFind } from '../../../../core/redis/find.ts'
+import { readdir as redisReaddir } from '../../../../core/redis/readdir.ts'
 import type { RedisAccessor } from '../../../../accessor/redis.ts'
 
 export const REDIS_GREP = command({
@@ -29,7 +29,7 @@ export const REDIS_GREP = command({
       texts,
       opts,
       (p) => redisStat(accessor, p),
-      (root, options) => redisFind(accessor, root, options),
+      (p) => redisReaddir(accessor, p),
       (p) => redisStream(accessor, p),
     ),
   aggregate: prefixAggregate,

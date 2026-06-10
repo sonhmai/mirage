@@ -1,0 +1,103 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import pytest
+
+from mirage.commands.builtin.generic.mv import mv
+from mirage.types import FileStat, FileType, PathSpec
+
+
+def _spec(path: str) -> PathSpec:
+    return PathSpec(original=path, directory=path)
+
+
+def _key(p) -> str:
+    return (p.original if isinstance(p, PathSpec) else p).rstrip("/")
+
+
+def _make_backend(files: dict[str, bytes], dirs: set[str]):
+
+    async def stat(p, index=None) -> FileStat:
+        k = _key(p)
+        if k in dirs:
+            return FileStat(name=k.rsplit("/", 1)[-1], type=FileType.DIRECTORY)
+        if k in files:
+            return FileStat(name=k.rsplit("/", 1)[-1], type=FileType.TEXT)
+        raise FileNotFoundError(k)
+
+    async def rename(src, dst) -> None:
+        files[_key(dst)] = files.pop(_key(src))
+
+    return stat, rename
+
+
+async def _run(files, dirs, paths, **kw):
+    stat, rename = _make_backend(files, dirs)
+    return await mv([_spec(p) for p in paths],
+                    rename=rename,
+                    stat=stat,
+                    n=kw.get("n", False),
+                    v=kw.get("v", False))
+
+
+@pytest.mark.asyncio
+async def test_single_source_renames():
+    files = {"/a.txt": b"AAA"}
+    await _run(files, set(), ["/a.txt", "/b.txt"])
+    assert files["/b.txt"] == b"AAA"
+    assert "/a.txt" not in files
+
+
+@pytest.mark.asyncio
+async def test_multiple_sources_into_directory():
+    files = {"/a.txt": b"AAA", "/b.txt": b"BBB", "/d/keep": b"K"}
+    await _run(files, {"/d"}, ["/a.txt", "/b.txt", "/d"])
+    assert files["/d/a.txt"] == b"AAA"
+    assert files["/d/b.txt"] == b"BBB"
+    assert "/a.txt" not in files
+    assert "/b.txt" not in files
+
+
+@pytest.mark.asyncio
+async def test_multiple_sources_nondir_raises():
+    files = {"/a.txt": b"AAA", "/b.txt": b"BBB", "/dst.txt": b"DST"}
+    with pytest.raises(NotADirectoryError):
+        await _run(files, set(), ["/a.txt", "/b.txt", "/dst.txt"])
+    assert files["/a.txt"] == b"AAA"
+    assert files["/b.txt"] == b"BBB"
+    assert files["/dst.txt"] == b"DST"
+
+
+@pytest.mark.asyncio
+async def test_no_clobber_preserves_source_and_target():
+    files = {"/a.txt": b"NEW", "/d/a.txt": b"OLD"}
+    await _run(files, {"/d"}, ["/a.txt", "/d"], n=True)
+    assert files["/d/a.txt"] == b"OLD"
+    assert files["/a.txt"] == b"NEW"
+
+
+@pytest.mark.asyncio
+async def test_no_clobber_duplicate_basenames_keeps_skipped_source():
+    files = {"/x/a.txt": b"FIRST", "/y/a.txt": b"SECOND", "/d/keep": b"K"}
+    await _run(files, {"/d"}, ["/x/a.txt", "/y/a.txt", "/d"], n=True)
+    assert files["/d/a.txt"] == b"FIRST"
+    assert "/x/a.txt" not in files
+    assert files["/y/a.txt"] == b"SECOND"
+
+
+@pytest.mark.asyncio
+async def test_records_writes_for_source_and_target():
+    files = {"/a.txt": b"AAA", "/d/keep": b"K"}
+    _, io = await _run(files, {"/d"}, ["/a.txt", "/d"])
+    assert set(io.writes) == {"/a.txt", "/d/a.txt"}

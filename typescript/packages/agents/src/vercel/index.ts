@@ -12,13 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { encodeBase64 } from '@struktoai/mirage-core'
+import { encodeBase64, rstripSlash } from '@struktoai/mirage-core'
 import type { Workspace } from '@struktoai/mirage-node'
 import { tool } from 'ai'
 import { z } from 'zod'
 
 function parentOf(path: string): string {
-  const trimmed = path.replace(/\/+$/, '')
+  const trimmed = rstripSlash(path)
   const idx = trimmed.lastIndexOf('/')
   if (idx <= 0) return '/'
   return trimmed.slice(0, idx)

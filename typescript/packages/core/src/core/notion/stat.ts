@@ -17,6 +17,7 @@ import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { NotionTransport } from './_client.ts'
 import { getPage } from './pages.ts'
 import { parseSegment } from './pathing.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export interface NotionStatAccessor {
   readonly transport: NotionTransport
@@ -64,7 +65,7 @@ export async function stat(
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
   }
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   const virtualKey = makeVirtualKey(prefix, key)
 
   if (key === '') {

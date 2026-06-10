@@ -277,12 +277,15 @@ export { sha256sumGeneric } from './commands/builtin/generic/sha256sum.ts'
 export { jqGeneric, jqProvisionGeneric } from './commands/builtin/generic/jq.ts'
 export { grepGeneric } from './commands/builtin/generic/grep.ts'
 export { rgGeneric } from './commands/builtin/generic/rg.ts'
+export { cpGeneric } from './commands/builtin/generic/cp.ts'
+export { mvGeneric } from './commands/builtin/generic/mv.ts'
 export { awkGeneric } from './commands/builtin/generic/awk.ts'
 export { catGeneric, catProvisionGeneric } from './commands/builtin/generic/cat.ts'
 export { headGeneric, headProvisionGeneric } from './commands/builtin/generic/head.ts'
 export { tailGeneric } from './commands/builtin/generic/tail.ts'
 export { wcGeneric } from './commands/builtin/generic/wc.ts'
 export { readlinkGeneric } from './commands/builtin/generic/readlink.ts'
+export { fmtGeneric } from './commands/builtin/generic/fmt.ts'
 export { headStream } from './commands/builtin/head_helper.ts'
 export { basenameFn, dirnameFn, gnuBasename, gnuDirname } from './commands/builtin/path_helper.ts'
 export { detectFileType, FILE_MIME_MAP, formatFileResult } from './commands/builtin/file_helper.ts'
@@ -1024,6 +1027,26 @@ export { readdir as mongoReaddir } from './core/mongodb/readdir.ts'
 export { stat as mongoStat } from './core/mongodb/stat.ts'
 export { resolveGlob as resolveMongoGlob } from './core/mongodb/glob.ts'
 export { detectScope as detectMongoScope, type MongoDBScope } from './core/mongodb/scope.ts'
+export type { LanceDriver, LanceRow } from './core/lancedb/_driver.ts'
+export { LanceDBAccessor } from './accessor/lancedb.ts'
+export {
+  resolveLanceDBConfig,
+  type LanceDBConfig,
+  type LanceDBConfigResolved,
+} from './resource/lancedb/config.ts'
+export { LANCEDB_PROMPT } from './resource/lancedb/prompt.ts'
+export { LANCEDB_OPS } from './ops/lancedb/index.ts'
+export { LANCEDB_COMMANDS } from './commands/builtin/lancedb/index.ts'
+export { read as lanceRead } from './core/lancedb/read.ts'
+export { readdir as lanceReaddir } from './core/lancedb/readdir.ts'
+export { stat as lanceStat } from './core/lancedb/stat.ts'
+export { resolveGlob as resolveLanceGlob } from './core/lancedb/glob.ts'
+export { searchRowsOutput as lanceSearch } from './core/lancedb/search.ts'
+export {
+  detectScope as detectLanceScope,
+  ScopeLevel as LanceScopeLevel,
+  type LanceDBScope,
+} from './core/lancedb/scope.ts'
 export {
   countDocuments as mongoCountDocuments,
   findDocuments as mongoFindDocuments,
@@ -1203,3 +1226,5 @@ export {
 export { HttpPostHogDriver, type HttpPostHogDriverOptions } from './core/posthog/http_driver.ts'
 
 export { setHttpProxyBase } from './commands/builtin/utils/http.ts'
+
+export { lstripSlash, rstripSlash, stripSlash } from './util/slash.ts'

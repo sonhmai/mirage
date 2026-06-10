@@ -24,6 +24,7 @@ import type {
 } from 'ssh2'
 import { SSHAccessor } from '../../accessor/ssh.ts'
 import type { SSHConfig } from '../../resource/ssh/config.ts'
+import { rstripSlash } from '@struktoai/mirage-core'
 
 const S_IFDIR = 0o040000
 const S_IFREG = 0o100000
@@ -85,7 +86,7 @@ function statForPath(state: FakeSftp, path: string): Stats | null {
 }
 
 function children(state: FakeSftp, dir: string): FileEntryWithStats[] {
-  const base = dir === '/' ? '/' : `${dir.replace(/\/+$/, '')}/`
+  const base = dir === '/' ? '/' : `${rstripSlash(dir)}/`
   const seen = new Set<string>()
   const entries: FileEntryWithStats[] = []
   for (const [path, file] of state.files) {
@@ -133,7 +134,7 @@ function children(state: FakeSftp, dir: string): FileEntryWithStats[] {
 
 function parentDir(path: string): string {
   if (path === '/' || !path.startsWith('/')) return '/'
-  const trimmed = path.replace(/\/+$/, '')
+  const trimmed = rstripSlash(path)
   const idx = trimmed.lastIndexOf('/')
   if (idx <= 0) return '/'
   return trimmed.slice(0, idx)
@@ -417,7 +418,7 @@ export function makeFakeSftp(state: FakeSftp): SFTPWrapper {
         cb(noSuchFile(path))
         return
       }
-      const base = path === '/' ? '/' : `${path.replace(/\/+$/, '')}/`
+      const base = path === '/' ? '/' : `${rstripSlash(path)}/`
       for (const k of state.files.keys()) {
         if (k.startsWith(base)) {
           cb(failure(`directory not empty: ${path}`))
@@ -449,8 +450,8 @@ export function makeFakeSftp(state: FakeSftp): SFTPWrapper {
       }
       const dir = state.dirs.get(oldPath)
       if (dir !== undefined) {
-        const base = oldPath === '/' ? '/' : `${oldPath.replace(/\/+$/, '')}/`
-        const newBase = newPath === '/' ? '/' : `${newPath.replace(/\/+$/, '')}/`
+        const base = oldPath === '/' ? '/' : `${rstripSlash(oldPath)}/`
+        const newBase = newPath === '/' ? '/' : `${rstripSlash(newPath)}/`
         const fileMoves: [string, FakeSftpFile][] = []
         for (const [k, v] of state.files) {
           if (k.startsWith(base)) {

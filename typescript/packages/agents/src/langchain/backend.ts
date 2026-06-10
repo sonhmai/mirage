@@ -29,6 +29,7 @@ import type {
   WriteResult,
 } from 'deepagents'
 import { ioToExecuteResponse, ioToFileInfos, ioToGrepMatches } from './convert.ts'
+import { rstripSlash } from '@struktoai/mirage-core'
 
 const TEXT_EXTENSIONS = new Set([
   'txt',
@@ -76,7 +77,7 @@ function shellQuote(s: string): string {
 }
 
 function parentOf(path: string): string {
-  const trimmed = path.replace(/\/+$/, '')
+  const trimmed = rstripSlash(path)
   const idx = trimmed.lastIndexOf('/')
   if (idx <= 0) return '/'
   return trimmed.slice(0, idx)

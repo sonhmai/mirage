@@ -16,38 +16,41 @@ import {
   IOResult,
   ResourceName,
   command,
+  cpGeneric,
   specOf,
   type CommandFnResult,
   type CommandOpts,
+  type FindOptions,
   type PathSpec,
 } from '@struktoai/mirage-core'
-import { writeBytes as opfsWrite } from '../../../core/opfs/write.ts'
-import { read as opfsRead } from '../../../core/opfs/read.ts'
+import { copy as coreCopy } from '../../../core/opfs/copy.ts'
+import { find as coreFind } from '../../../core/opfs/find.ts'
+import { stat as coreStat } from '../../../core/opfs/stat.ts'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 
-async function cpCommand(
+function cpCommand(
   accessor: OPFSAccessor,
   paths: PathSpec[],
   _texts: string[],
-  _opts: CommandOpts,
+  opts: CommandOpts,
 ): Promise<CommandFnResult> {
   if (paths.length < 2) {
-    return [
+    return Promise.resolve([
       null,
-      new IOResult({
-        exitCode: 1,
-        stderr: new TextEncoder().encode('cp: missing operand\n'),
-      }),
-    ]
+      new IOResult({ exitCode: 1, stderr: new TextEncoder().encode('cp: missing operand\n') }),
+    ])
   }
-  const sources = paths.slice(0, -1)
-  const dst = paths[paths.length - 1]
-  if (dst === undefined) return [null, new IOResult()]
-  for (const src of sources) {
-    const data = await opfsRead(accessor, src)
-    await opfsWrite(accessor, dst, data)
-  }
-  return [null, new IOResult()]
+  const recursive = opts.flags.r === true || opts.flags.R === true || opts.flags.a === true
+  return cpGeneric(
+    paths,
+    (src: PathSpec, target: PathSpec) => coreCopy(accessor, src, target),
+    (src: PathSpec, options: FindOptions) => coreFind(accessor, src, options),
+    (p: PathSpec) => coreStat(accessor, p),
+    recursive,
+    opts.flags.n === true,
+    opts.flags.v === true,
+    opts.index ?? undefined,
+  )
 }
 
 export const OPFS_CP = command({

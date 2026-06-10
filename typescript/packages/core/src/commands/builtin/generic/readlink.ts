@@ -15,6 +15,7 @@
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { lstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -45,7 +46,7 @@ export function readlinkGeneric(
   const noNewline = opts.flags.n === true
   const results: string[] = []
   for (const p of paths) {
-    let vp = p.prefix !== '' ? p.prefix + '/' + p.original.replace(/^\/+/, '') : p.original
+    let vp = p.prefix !== '' ? p.prefix + '/' + lstripSlash(p.original) : p.original
     if (normalize) vp = normPath(vp)
     results.push(vp)
   }

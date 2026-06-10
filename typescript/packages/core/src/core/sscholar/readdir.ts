@@ -19,6 +19,7 @@ import { PathSpec } from '../../types.ts'
 import { searchPapersByField } from './_client.ts'
 import { PAPER_FILES, SSCHOLAR_FIELD_SLUGS, SSCHOLAR_YEARS } from './fields.ts'
 import { detectScope } from './scope.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 function notFound(p: string): Error {
   const err = new Error(p) as Error & { code?: string }
@@ -53,7 +54,7 @@ export async function readdir(
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const prefix = spec.prefix
   const scope = detectScope(spec)
-  const key = scope.resourcePath.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(scope.resourcePath)
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
 
   if (scope.level === 'invalid') throw notFound(spec.original)

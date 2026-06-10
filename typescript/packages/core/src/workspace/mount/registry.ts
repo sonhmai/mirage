@@ -18,6 +18,7 @@ import type { Resource } from '../../resource/base.ts'
 import { DevResource } from '../../resource/dev/dev.ts'
 import { ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
 import { Mount } from './mount.ts'
+import { rstripSlash, stripSlash } from '../../util/slash.ts'
 
 export const DEV_PREFIX = '/dev/'
 
@@ -246,15 +247,15 @@ export class MountRegistry {
       throw new Error(`no mount matches path: ${path}`)
     }
     const hadTrailing = path.endsWith('/')
-    const norm = `/${path.replace(/^\/+|\/+$/g, '')}`
-    const mountPrefix = m.prefix.replace(/\/+$/, '')
+    const norm = `/${stripSlash(path)}`
+    const mountPrefix = rstripSlash(m.prefix)
     return [m.resource, PathSpec.fromStrPath(hadTrailing ? `${norm}/` : norm, mountPrefix), m.mode]
   }
 
   mountFor(path: string): Mount | null {
-    const norm = `/${path.replace(/^\/+|\/+$/g, '')}`
+    const norm = `/${stripSlash(path)}`
     for (const m of this.mountList) {
-      const prefixNoTrail = m.prefix.replace(/\/+$/, '') || '/'
+      const prefixNoTrail = rstripSlash(m.prefix) || '/'
       if (norm === prefixNoTrail || norm.startsWith(m.prefix)) {
         return m
       }
@@ -268,7 +269,7 @@ export class MountRegistry {
 
   isExecAllowed(): boolean {
     for (const m of this.mountList) {
-      const prefixNoTrail = m.prefix.replace(/\/+$/, '') || '/'
+      const prefixNoTrail = rstripSlash(m.prefix) || '/'
       if (prefixNoTrail === '/') return m.mode === MountMode.EXEC
     }
     if (this.defaultMode === MountMode.EXEC) return true
@@ -332,7 +333,7 @@ export class MountRegistry {
   ): Promise<void> {
     const resource = realMount.resource
     if (resource.fingerprint === undefined) return
-    const mountPrefix = realMount.prefix.replace(/\/+$/, '')
+    const mountPrefix = rstripSlash(realMount.prefix)
     for (const scope of pathScopes) {
       const key = scope.original
       if (!(await cache.exists(key))) continue
@@ -358,6 +359,6 @@ export class MountRegistry {
 }
 
 function normalizePrefix(prefix: string): string {
-  const stripped = prefix.replace(/^\/+|\/+$/g, '')
+  const stripped = stripSlash(prefix)
   return stripped ? `/${stripped}/` : '/'
 }

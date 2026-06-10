@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
-import { PathSpec as PathSpecCtor } from '@struktoai/mirage-core'
+import { PathSpec as PathSpecCtor, rstripSlash } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { readdir } from './readdir.ts'
 
@@ -42,7 +42,7 @@ export async function resolveGlob(
       const entries = await readdir(accessor, p, index)
       const matched: PathSpec[] = []
       for (const entry of entries) {
-        const trimmed = entry.replace(/\/+$/, '')
+        const trimmed = rstripSlash(entry)
         const base = trimmed.split('/').pop() ?? trimmed
         if (!fnmatch(base, p.pattern)) continue
         matched.push(PathSpecCtor.fromStrPath(trimmed, p.prefix))

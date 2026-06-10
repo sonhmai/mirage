@@ -13,50 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GmailAccessor } from '../../../accessor/gmail.ts'
+import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { resolveGlob } from '../../../core/gmail/glob.ts'
 import { read as gmailRead } from '../../../core/gmail/read.ts'
 import { readdir as gmailReaddir } from '../../../core/gmail/readdir.ts'
+import { stat as gmailStat } from '../../../core/gmail/stat.ts'
 import { detectScope } from '../../../core/gmail/scope.ts'
 import { formatGrepResults, searchMessages } from '../../../core/gmail/search.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { PathSpec, ResourceName } from '../../../types.ts'
+import { type FileStat, type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { compilePattern, grepLines, type GrepLinesOptions } from '../grep_helper.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { rgGeneric } from '../generic/rg.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
-async function collectFiles(
+async function* gmailStream(
   accessor: GmailAccessor,
-  path: PathSpec,
-  index: CommandOpts['index'],
-): Promise<string[]> {
-  if (path.original.endsWith('.json') || path.original.endsWith('.jsonl')) {
-    return [path.original]
-  }
-  let children: string[]
-  try {
-    children = await gmailReaddir(accessor, path, index ?? undefined)
-  } catch {
-    return []
-  }
-  const files: string[] = []
-  for (const child of children) {
-    if (child.endsWith('.gmail.json')) {
-      files.push(child)
-    } else {
-      const childSpec = new PathSpec({
-        original: child,
-        directory: child,
-        resolved: false,
-        prefix: path.prefix,
-      })
-      files.push(...(await collectFiles(accessor, childSpec, index)))
-    }
-  }
-  return files
+  p: PathSpec,
+  index: IndexCacheStore | undefined,
+): AsyncIterable<Uint8Array> {
+  yield await gmailRead(accessor, p, index)
 }
 
 async function rgCommand(
@@ -72,26 +49,7 @@ async function rgCommand(
     ]
   }
   const pattern = texts[0]
-  const ignoreCase = opts.flags.i === true
-  const invert = opts.flags.v === true
-  const lineNumbers = opts.flags.n === true
-  const countOnly = opts.flags.c === true
-  const filesOnly = opts.flags.args_l === true || opts.flags.l === true
-  const wholeWord = opts.flags.w === true
-  const fixedString = opts.flags.F === true
-  const onlyMatching = opts.flags.o === true
   const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
-  const hidden = opts.flags.hidden === true
-  const pat = compilePattern(pattern, ignoreCase, fixedString, wholeWord)
-
-  const lineOpts: GrepLinesOptions = {
-    invert,
-    lineNumbers,
-    countOnly,
-    filesOnly,
-    onlyMatching,
-    maxCount,
-  }
 
   if (paths.length > 0) {
     const first = paths[0]
@@ -112,64 +70,16 @@ async function rgCommand(
         return [out, new IOResult()]
       }
     }
-
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const filePrefix = resolved[0]?.prefix ?? ''
-    const blobPaths: string[] = []
-    for (const p of resolved) blobPaths.push(...(await collectFiles(accessor, p, opts.index)))
-    const sortedUnique = [...new Set(blobPaths)].sort()
-    const allResults: string[] = []
-    let anyMatch = false
-    for (const bp of sortedUnique) {
-      if (!hidden && bp.split('/').some((part) => part.startsWith('.'))) continue
-      let data: Uint8Array
-      try {
-        const spec = new PathSpec({
-          original: bp,
-          directory: bp,
-          resolved: true,
-          prefix: filePrefix,
-        })
-        data = await gmailRead(accessor, spec, opts.index ?? undefined)
-      } catch {
-        continue
-      }
-      const text = DEC.decode(data)
-      if (text === '') continue
-      const lines = text.split('\n')
-      if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-      const matched = grepLines(bp, lines, pat, lineOpts)
-      if (matched.length === 0) continue
-      anyMatch = true
-      if (filesOnly) {
-        allResults.push(bp)
-        continue
-      }
-      if (countOnly) {
-        allResults.push(`${bp}:${String(matched.length)}`)
-        continue
-      }
-      for (const line of matched) allResults.push(`${bp}:${line}`)
-    }
-    if (!anyMatch) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-    const out: ByteSource = ENC.encode(allResults.join('\n'))
-    return [out, new IOResult()]
   }
 
-  const raw = await readStdinAsync(opts.stdin)
-  if (raw === null) {
-    return [
-      null,
-      new IOResult({ exitCode: 2, stderr: ENC.encode('rg: usage: rg [flags] pattern path\n') }),
-    ]
-  }
-  const lines = DEC.decode(raw).split('\n')
-  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-  const matched = grepLines('<stdin>', lines, pat, lineOpts)
-  if (matched.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-  if (countOnly) return [ENC.encode(String(matched.length)), new IOResult()]
-  const out: ByteSource = ENC.encode(matched.join('\n'))
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => gmailStat(accessor, p, opts.index ?? undefined)
+  const readdir = (p: PathSpec): Promise<string[]> =>
+    gmailReaddir(accessor, p, opts.index ?? undefined)
+  return rgGeneric(resolved, texts, opts, stat, readdir, (p) =>
+    gmailStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const GMAIL_RG = command({

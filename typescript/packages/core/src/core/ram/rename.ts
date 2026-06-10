@@ -15,6 +15,7 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { norm, nowIso } from './utils.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 export function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = norm(src.stripPrefix)
@@ -33,8 +34,8 @@ export function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec): Pro
     accessor.store.dirs.add(d)
     accessor.store.modified.set(d, accessor.store.modified.get(s) ?? now)
     accessor.store.modified.delete(s)
-    const srcPrefix = `${s.replace(/\/+$/, '')}/`
-    const dstPrefix = `${d.replace(/\/+$/, '')}/`
+    const srcPrefix = `${rstripSlash(s)}/`
+    const dstPrefix = `${rstripSlash(d)}/`
     for (const key of [...accessor.store.files.keys()]) {
       if (key.startsWith(srcPrefix)) {
         const newKey = dstPrefix + key.slice(srcPrefix.length)

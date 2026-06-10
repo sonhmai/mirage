@@ -20,6 +20,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
 import { resolveAcrossMounts } from '../../commands/safeguard.ts'
 import { applyFindActions } from './find_action_dispatch.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -100,7 +101,7 @@ function synthesizeFindMountEntries(
   const inamePat = typeof flagKwargs.iname === 'string' ? flagKwargs.iname : null
   const out: string[] = []
   for (const m of descendants) {
-    const prefixNoSlash = m.prefix.replace(/\/+$/, '')
+    const prefixNoSlash = rstripSlash(m.prefix)
     const depth = pathSegments(prefixNoSlash).length - parentDepth
     if (depth < minDepth) continue
     if (maxDepth !== null && !Number.isNaN(maxDepth) && depth > maxDepth) continue
@@ -160,7 +161,7 @@ export async function fanOutTraversal(
 ): Promise<Result> {
   const targetPath = paths[0]?.original ?? cwd
   const descendants = registry.descendantMounts(targetPath)
-  const descendantPrefixes = descendants.map((m) => m.prefix.replace(/\/+$/, ''))
+  const descendantPrefixes = descendants.map((m) => rstripSlash(m.prefix))
 
   const allStdout: Uint8Array[] = []
   let mergedIo = new IOResult()
@@ -178,12 +179,12 @@ export async function fanOutTraversal(
       const adjusted = adjustDepthFlags(flagKwargs, targetPath, mount.prefix)
       if (adjusted === null) continue
       subFlags = adjusted
-      const mountRoot = mount.prefix.replace(/\/+$/, '') || '/'
+      const mountRoot = rstripSlash(mount.prefix) || '/'
       subPaths = [
         new PathSpec({
           original: mountRoot,
           directory: mountRoot,
-          prefix: mount.prefix.replace(/\/+$/, ''),
+          prefix: rstripSlash(mount.prefix),
         }),
       ]
     }

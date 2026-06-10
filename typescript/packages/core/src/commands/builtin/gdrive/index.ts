@@ -33,6 +33,27 @@ import { GDRIVE_HEAD } from './head.ts'
 import { GDRIVE_JQ } from './jq.ts'
 import { GDRIVE_LS } from './ls.ts'
 import { GDRIVE_NL } from './nl.ts'
+import { GDRIVE_COLUMN } from './column.ts'
+import { GDRIVE_COMM } from './comm.ts'
+import { GDRIVE_EXPAND } from './expand.ts'
+import { GDRIVE_FMT } from './fmt.ts'
+import { GDRIVE_FOLD } from './fold.ts'
+import { GDRIVE_JOIN } from './join.ts'
+import { GDRIVE_LOOK } from './look.ts'
+import { GDRIVE_MD5 } from './md5.ts'
+import { GDRIVE_PASTE } from './paste.ts'
+import { GDRIVE_READLINK } from './readlink.ts'
+import { GDRIVE_REV } from './rev.ts'
+import { GDRIVE_SHA256SUM } from './sha256sum.ts'
+import { GDRIVE_SHUF } from './shuf.ts'
+import { GDRIVE_STRINGS } from './strings.ts'
+import { GDRIVE_TAC } from './tac.ts'
+import { GDRIVE_TR } from './tr.ts'
+import { GDRIVE_TSORT } from './tsort.ts'
+import { GDRIVE_UNEXPAND } from './unexpand.ts'
+import { GDRIVE_XXD } from './xxd.ts'
+import { GDRIVE_ZCAT } from './zcat.ts'
+import { GDRIVE_ZGREP } from './zgrep.ts'
 import { GDRIVE_REALPATH } from './realpath.ts'
 import { GDRIVE_RG } from './rg.ts'
 import { GDRIVE_SED } from './sed.ts'
@@ -123,12 +144,54 @@ const GDRIVE_NATIVE: readonly RegisteredCommand[] = [
   ...GDRIVE_WC_FEATHER,
   ...GDRIVE_WC_HDF5,
   ...GDRIVE_WC_PARQUET,
+  ...GDRIVE_COLUMN,
+  ...GDRIVE_COMM,
+  ...GDRIVE_EXPAND,
+  ...GDRIVE_FMT,
+  ...GDRIVE_FOLD,
+  ...GDRIVE_JOIN,
+  ...GDRIVE_LOOK,
+  ...GDRIVE_MD5,
+  ...GDRIVE_PASTE,
+  ...GDRIVE_READLINK,
+  ...GDRIVE_REV,
+  ...GDRIVE_SHA256SUM,
+  ...GDRIVE_SHUF,
+  ...GDRIVE_STRINGS,
+  ...GDRIVE_TAC,
+  ...GDRIVE_TR,
+  ...GDRIVE_TSORT,
+  ...GDRIVE_UNEXPAND,
+  ...GDRIVE_XXD,
+  ...GDRIVE_ZCAT,
+  ...GDRIVE_ZGREP,
 ]
 
 const GWS_FOR_GDRIVE: readonly RegisteredCommand[] = [
   ...GDOCS_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
   ...GSHEETS_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
   ...GSLIDES_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
+  ...GDRIVE_COLUMN,
+  ...GDRIVE_COMM,
+  ...GDRIVE_EXPAND,
+  ...GDRIVE_FMT,
+  ...GDRIVE_FOLD,
+  ...GDRIVE_JOIN,
+  ...GDRIVE_LOOK,
+  ...GDRIVE_MD5,
+  ...GDRIVE_PASTE,
+  ...GDRIVE_READLINK,
+  ...GDRIVE_REV,
+  ...GDRIVE_SHA256SUM,
+  ...GDRIVE_SHUF,
+  ...GDRIVE_STRINGS,
+  ...GDRIVE_TAC,
+  ...GDRIVE_TR,
+  ...GDRIVE_TSORT,
+  ...GDRIVE_UNEXPAND,
+  ...GDRIVE_XXD,
+  ...GDRIVE_ZCAT,
+  ...GDRIVE_ZGREP,
 ]
 
 export const GDRIVE_COMMANDS: readonly RegisteredCommand[] = [...GDRIVE_NATIVE, ...GWS_FOR_GDRIVE]

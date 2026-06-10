@@ -18,6 +18,7 @@ import type { NotionTransport } from './_client.ts'
 import { normalizePage, toJsonBytes } from './normalize.ts'
 import { getChildBlocks, getPage } from './pages.ts'
 import { parseSegment } from './pathing.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export interface NotionReadAccessor {
   readonly transport: NotionTransport
@@ -40,7 +41,7 @@ export async function read(
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
   }
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   if (key === '') throw enoent(path.original)
   const parts = key.split('/')
   const last = parts[parts.length - 1] ?? ''

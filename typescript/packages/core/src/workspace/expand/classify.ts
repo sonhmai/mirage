@@ -14,6 +14,7 @@
 
 import { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 const FILENAME_CHAR = /[a-zA-Z0-9_./]/
 const NON_PATH_CHAR = /[(){}=;|&<> ]/
@@ -72,7 +73,7 @@ export function classifyWord(
     if (!FILENAME_CHAR.test(word) || NON_PATH_CHAR.test(word)) {
       return word
     }
-    const path = posixNormpath(`${cwd.replace(/\/+$/, '')}/${word}`)
+    const path = posixNormpath(`${rstripSlash(cwd)}/${word}`)
     const mount = registry.mountFor(path)
     if (mount === null) return word
     const lastSlash = path.lastIndexOf('/')
@@ -87,7 +88,7 @@ export function classifyWord(
   if (!hasGlob && word.includes('/') && RELATIVE_PATH.test(word)) {
     let w = word
     if (w.includes('\\')) w = unescapePath(w)
-    const path = posixNormpath(`${cwd.replace(/\/+$/, '')}/${w}`)
+    const path = posixNormpath(`${rstripSlash(cwd)}/${w}`)
     if (registry.mountFor(path) === null) return word
     return new PathSpec({
       original: path,
@@ -106,7 +107,7 @@ export function classifyBarePath(
 ): string | PathSpec {
   const classified = classifyWord(word, registry, cwd)
   if (typeof classified !== 'string') return classified
-  const path = posixNormpath(`${cwd.replace(/\/+$/, '')}/${word}`)
+  const path = posixNormpath(`${rstripSlash(cwd)}/${word}`)
   if (registry.mountFor(path) === null) return word
   const hasGlob = GLOB_CHARS.some((ch) => word.includes(ch))
   if (hasGlob) {

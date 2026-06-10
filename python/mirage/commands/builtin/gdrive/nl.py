@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic.nl import nl as generic_nl
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.stream import read_stream
+from mirage.core.gdrive.stream import stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -46,7 +46,7 @@ async def nl(
         paths = []
     return await generic_nl(
         paths,
-        read_stream=partial(read_stream, index=index),
+        read_stream=partial(stream, index=index),
         accessor=accessor,
         stdin=stdin,
         body_numbering_raw=b,

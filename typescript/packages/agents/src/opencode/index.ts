@@ -14,6 +14,7 @@
 
 import type { Workspace } from '@struktoai/mirage-node'
 import { z } from 'zod'
+import { rstripSlash } from '@struktoai/mirage-core'
 
 export interface ToolContext {
   sessionID: string
@@ -44,7 +45,7 @@ async function resolveWs(ws: WsLike, ctx: ToolContext): Promise<Workspace> {
 }
 
 function parentOf(path: string): string {
-  const trimmed = path.replace(/\/+$/, '')
+  const trimmed = rstripSlash(path)
   const idx = trimmed.lastIndexOf('/')
   if (idx <= 0) return '/'
   return trimmed.slice(0, idx)

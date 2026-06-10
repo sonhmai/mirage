@@ -17,6 +17,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { getAttachment, getMessageProcessed } from './messages.ts'
 import { readdir } from './readdir.ts'
+import { rstripSlash, stripSlash } from '../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -33,7 +34,7 @@ function eisdir(p: string): Error {
 }
 
 function dirname(p: string): string {
-  const norm = p.replace(/\/+$/, '')
+  const norm = rstripSlash(p)
   const idx = norm.lastIndexOf('/')
   if (idx <= 0) return '/'
   return norm.slice(0, idx)
@@ -47,7 +48,7 @@ export async function read(
   const prefix = path.prefix
   let p = path.original
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   if (index === undefined) throw enoent(path.original)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)

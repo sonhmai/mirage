@@ -14,7 +14,18 @@
 
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { type FileStat, FileType } from '../../types.ts'
+import { getExtension } from '../resolve.ts'
 import { grepContextLines } from './grep_context.ts'
+
+const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.parquet',
+  '.orc',
+  '.feather',
+  '.arrow',
+  '.ipc',
+  '.hdf5',
+  '.h5',
+])
 
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -182,12 +193,13 @@ export async function grepRecursive(
   compiled: RegExp,
   opts: GrepFilesOnlyOptions,
   warnings: string[] | null,
+  filesOnly = true,
 ): Promise<string[]> {
-  const filesOnlyOpts: GrepLinesOptions = {
+  const lineOpts: GrepLinesOptions = {
     invert: opts.invert,
     lineNumbers: opts.lineNumbers,
     countOnly: opts.countOnly,
-    filesOnly: true,
+    filesOnly,
     onlyMatching: opts.onlyMatching,
     maxCount: opts.maxCount,
   }
@@ -218,24 +230,28 @@ export async function grepRecursive(
         compiled,
         opts,
         warnings,
+        filesOnly,
       )
       for (const r of sub) results.push(r)
-    } else {
-      try {
-        const lines = new TextDecoder('utf-8', { fatal: false })
-          .decode(await readBytesFn(entry))
-          .split('\n')
-        if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-        const fileResults = grepLines(entry, lines, compiled, filesOnlyOpts)
-        if (opts.countOnly) {
-          if (fileResults.length > 0) results.push(`${entry}:${fileResults[0] ?? ''}`)
-        } else {
-          for (const r of fileResults) results.push(r)
-        }
-      } catch (err) {
-        if (warnings !== null)
-          warnings.push(`grep: ${entry}: ${err instanceof Error ? err.message : String(err)}`)
+      continue
+    }
+    if (BINARY_EXTENSIONS.has(getExtension(entry) ?? '')) continue
+    try {
+      const lines = new TextDecoder('utf-8', { fatal: false })
+        .decode(await readBytesFn(entry))
+        .split('\n')
+      if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+      const fileResults = grepLines(entry, lines, compiled, lineOpts)
+      if (opts.countOnly) {
+        if (fileResults.length > 0) results.push(`${entry}:${fileResults[0] ?? ''}`)
+      } else if (filesOnly) {
+        for (const r of fileResults) results.push(r)
+      } else {
+        for (const r of fileResults) results.push(`${entry}:${r}`)
       }
+    } catch (err) {
+      if (warnings !== null)
+        warnings.push(`grep: ${entry}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
   return results

@@ -23,7 +23,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
 from mirage.core.gdrive.read import read as read_bytes
-from mirage.core.gdrive.stream import read_stream
+from mirage.core.gdrive.stream import stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -44,8 +44,7 @@ async def sha256sum(
         paths = []
     return await generic_sha256sum(paths,
                                    read_bytes=partial(read_bytes, index=index),
-                                   read_stream=partial(read_stream,
-                                                       index=index),
+                                   read_stream=partial(stream, index=index),
                                    accessor=accessor,
                                    stdin=stdin,
                                    check=c)

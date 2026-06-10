@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rstripSlash } from '../../util/slash.ts'
+
 export class LangfuseApiError extends Error {
   constructor(
     message: string,
@@ -47,7 +49,7 @@ function buildUrl(
   path: string,
   query: Record<string, string | number | undefined>,
 ): string {
-  const trimmed = base.replace(/\/+$/, '')
+  const trimmed = rstripSlash(base)
   const cleanPath = path.startsWith('/') ? path : `/${path}`
   const params: string[] = []
   for (const [k, v] of Object.entries(query)) {

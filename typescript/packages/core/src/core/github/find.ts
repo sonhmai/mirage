@@ -16,12 +16,13 @@ import type { GitHubAccessor } from '../../accessor/github.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import type { PathSpec } from '../../types.ts'
 import { fnmatch } from '../s3/_client.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 function strip(path: PathSpec): string {
   const prefix = path.prefix
   let p = path.original
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  return p.replace(/^\/+|\/+$/g, '')
+  return stripSlash(p)
 }
 
 export function find(

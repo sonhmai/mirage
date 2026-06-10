@@ -1,0 +1,128 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+from collections.abc import AsyncIterator
+from functools import partial
+
+from mirage.accessor.lancedb import LanceDBAccessor
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.grep_helper import (compile_pattern, grep_lines,
+                                                 grep_recursive)
+from mirage.commands.builtin.lancedb._provision import metadata_provision
+from mirage.commands.builtin.utils.output import (format_optional_records,
+                                                  format_records)
+from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
+                                                call_stat)
+from mirage.commands.registry import command
+from mirage.commands.spec import SPECS
+from mirage.core.lancedb.glob import resolve_glob
+from mirage.core.lancedb.read import read as lancedb_read
+from mirage.core.lancedb.readdir import readdir as _readdir
+from mirage.core.lancedb.stat import stat as _stat
+from mirage.io.types import ByteSource, IOResult
+from mirage.provision.types import ProvisionResult
+from mirage.types import PathSpec
+
+
+async def grep_provision(
+    accessor: LanceDBAccessor,
+    paths: list[PathSpec],
+    *texts: str,
+    **_extra: object,
+) -> ProvisionResult:
+    return await metadata_provision("grep " +
+                                    " ".join(texts +
+                                             tuple(str(p) for p in paths)))
+
+
+@command("grep",
+         resource="lancedb",
+         spec=SPECS["grep"],
+         provision=grep_provision)
+async def grep(
+    accessor: LanceDBAccessor,
+    paths: list[PathSpec],
+    *texts: str,
+    stdin: AsyncIterator[bytes] | bytes | None = None,
+    r: bool = False,
+    R: bool = False,
+    i: bool = False,
+    v: bool = False,
+    n: bool = False,
+    c: bool = False,
+    args_l: bool = False,
+    w: bool = False,
+    F: bool = False,
+    o: bool = False,
+    m: str | None = None,
+    e: str | None = None,
+    prefix: str = "",
+    index: IndexCacheStore = None,
+    **_extra: object,
+) -> tuple[ByteSource | None, IOResult]:
+    if e is not None:
+        pattern = e
+    elif texts:
+        pattern = texts[0]
+    else:
+        raise ValueError("grep: usage: grep [flags] pattern [path]")
+    if not paths:
+        _resolve_source(stdin, "grep: missing operand")
+        raise ValueError("grep: missing operand")
+
+    max_count = int(m) if m is not None else None
+    paths = await resolve_glob(accessor, paths, index=index)
+    file_prefix = paths[0].prefix if paths else ""
+    compiled = compile_pattern(pattern, i, F, w)
+    rd = partial(call_readdir,
+                 _readdir,
+                 accessor,
+                 index=index,
+                 prefix=file_prefix)
+    st = partial(call_stat, _stat, accessor, index=index, prefix=file_prefix)
+    rb = partial(call_read_bytes,
+                 lancedb_read,
+                 accessor,
+                 index=index,
+                 prefix=file_prefix)
+
+    if r or R:
+        warnings: list[str] = []
+        results = await grep_recursive(rd, st, rb, paths[0].original, compiled,
+                                       v, n, c, args_l, o, max_count, warnings)
+        stderr = format_optional_records(warnings)
+        if not results:
+            return b"", IOResult(exit_code=1, stderr=stderr)
+        return format_records(results), IOResult(stderr=stderr)
+
+    all_results: list[str] = []
+    multi = len(paths) > 1
+    for p in paths:
+        data = (await rb(p.original)).decode(errors="replace").splitlines()
+        hits = grep_lines(p.original, data, compiled, v, n, c, args_l, o,
+                          max_count)
+        if c:
+            if hits:
+                all_results.append(
+                    f"{p.original}:{hits[0]}" if multi else hits[0])
+        elif args_l:
+            all_results.extend(hits)
+        elif multi:
+            all_results.extend(f"{p.original}:{hit}" for hit in hits)
+        else:
+            all_results.extend(hits)
+    if not all_results:
+        return b"", IOResult(exit_code=1)
+    return format_records(all_results), IOResult()

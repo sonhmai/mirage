@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { GMAIL_API_BASE, type TokenManager, googleGet } from '../google/_client.ts'
+import { GMAIL_API_BASE, type TokenManager, googleGet, googlePost } from '../google/_client.ts'
 
 export interface GmailHeader {
   name?: string
@@ -113,6 +113,11 @@ export async function getMessageRaw(
 ): Promise<GmailMessageRaw> {
   const url = `${GMAIL_API_BASE}/users/me/messages/${messageId}?format=full`
   return (await googleGet(tokenManager, url)) as GmailMessageRaw
+}
+
+export async function trashMessage(tokenManager: TokenManager, messageId: string): Promise<void> {
+  const url = `${GMAIL_API_BASE}/users/me/messages/${messageId}/trash`
+  await googlePost(tokenManager, url, {})
 }
 
 function base64UrlDecodeToBytes(input: string): Uint8Array {

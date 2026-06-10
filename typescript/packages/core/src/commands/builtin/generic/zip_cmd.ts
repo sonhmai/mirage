@@ -16,6 +16,7 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { deflateRaw } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { lstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -166,7 +167,7 @@ export async function zipGeneric(
     const raw = await materialize(stream(p))
     const data = new Uint8Array(raw.byteLength)
     data.set(raw)
-    const arcname = junkPaths ? basename(p.original) : p.original.replace(/^\/+/, '')
+    const arcname = junkPaths ? basename(p.original) : lstripSlash(p.original)
     const compressed = await deflateRaw(data)
     items.push({
       name: arcname,

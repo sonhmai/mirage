@@ -23,6 +23,7 @@ import type {
   WriteOperations,
 } from '@mariozechner/pi-coding-agent'
 import picomatch from 'picomatch'
+import { rstripSlash } from '@struktoai/mirage-core'
 
 export interface MirageOperationsBundle {
   read: ReadOperations
@@ -35,7 +36,7 @@ export interface MirageOperationsBundle {
 }
 
 async function ensureParent(ws: Workspace, dir: string): Promise<void> {
-  const norm = dir.replace(/\/+$/, '') || '/'
+  const norm = rstripSlash(dir) || '/'
   if (norm === '/' || (await ws.fs.exists(norm))) return
   const parent = norm.substring(0, norm.lastIndexOf('/')) || '/'
   await ensureParent(ws, parent)
@@ -127,7 +128,7 @@ export function mirageOperations(ws: Workspace): MirageOperationsBundle {
     glob: async (pattern, cwd, options) => {
       const matcher = picomatch(pattern, { dot: false })
       const ignoreMatchers = options.ignore.map((p) => picomatch(p, { dot: false }))
-      const root = cwd.replace(/\/+$/, '') || '/'
+      const root = rstripSlash(cwd) || '/'
       const cwdPrefix = root === '/' ? '/' : `${root}/`
       const results: string[] = []
       await walkDirectory(
@@ -150,7 +151,7 @@ export function mirageOperations(ws: Workspace): MirageOperationsBundle {
     },
     readdir: async (absolutePath: string) => {
       const entries = await ws.fs.readdir(absolutePath)
-      const prefix = absolutePath === '/' ? '/' : `${absolutePath.replace(/\/+$/, '')}/`
+      const prefix = absolutePath === '/' ? '/' : `${rstripSlash(absolutePath)}/`
       return entries.map((e) => (e.startsWith(prefix) ? e.slice(prefix.length) : e))
     },
   }

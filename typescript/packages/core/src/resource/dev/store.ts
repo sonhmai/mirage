@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../util/slash.ts'
+
 const DEV_NAMES = new Set(['null', 'zero'])
 const ZERO_CHUNK_SIZE = 1 << 20
 
 function strip(key: string): string {
-  return key.replace(/^\/+|\/+$/g, '')
+  return stripSlash(key)
 }
 
 export class DevFiles extends Map<string, Uint8Array> {

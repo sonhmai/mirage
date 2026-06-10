@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '../../types.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export interface GmailScope {
   useNative: boolean
@@ -25,8 +26,8 @@ export function detectScope(path: PathSpec): GmailScope {
   const prefix = path.prefix || ''
 
   if (path.pattern?.endsWith('.gmail.json')) {
-    let dirKey = path.directory.replace(/^\/+|\/+$/g, '')
-    const trimmedPrefix = prefix.replace(/^\/+|\/+$/g, '')
+    let dirKey = stripSlash(path.directory)
+    const trimmedPrefix = stripSlash(prefix)
     if (trimmedPrefix !== '' && dirKey.startsWith(`${trimmedPrefix}/`)) {
       dirKey = dirKey.slice(trimmedPrefix.length + 1)
     }

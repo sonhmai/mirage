@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../types.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export interface LangfuseScope {
   level: string
@@ -31,7 +32,7 @@ function stripIdSuffix(name: string): string {
 
 export function detectScope(path: PathSpec | string): LangfuseScope {
   const raw = path instanceof PathSpec ? path.stripPrefix : path
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(raw)
 
   if (key === '') {
     return {

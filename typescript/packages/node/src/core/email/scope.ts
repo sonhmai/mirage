@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '@struktoai/mirage-core'
+import { stripSlash } from '@struktoai/mirage-core'
 
 export interface EmailScope {
   useNative: boolean
@@ -21,7 +22,7 @@ export interface EmailScope {
 }
 
 export function detectScope(path: PathSpec): EmailScope {
-  const key = path.stripPrefix.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(path.stripPrefix)
   if (key === '') {
     return { useNative: false, folder: null, resourcePath: '/' }
   }
@@ -42,7 +43,7 @@ export function extractFolder(paths: readonly PathSpec[]): string | null {
   if (paths.length === 0) return null
   const p = paths[0]
   if (p === undefined) return null
-  const key = p.stripPrefix.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p.stripPrefix)
   const parts = key.split('/').filter((s) => s !== '')
   return parts[0] ?? null
 }

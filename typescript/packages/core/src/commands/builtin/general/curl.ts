@@ -18,13 +18,14 @@ import { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { httpFormRequest, httpRequest } from '../utils/http.ts'
+import { rstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
 export function resolveTarget(o: string, cwd: string): PathSpec {
   let path = o
   if (!o.startsWith('/')) {
-    const base = cwd.replace(/\/+$/, '')
+    const base = rstripSlash(cwd)
     path = base !== '' ? `${base}/${o}` : `/${o}`
   }
   const lastSlash = path.lastIndexOf('/')

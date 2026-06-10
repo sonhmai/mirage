@@ -21,6 +21,8 @@ import {
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
+  rstripSlash,
+  stripSlash,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { resolveGlob } from '../../../core/email/glob.ts'
@@ -54,7 +56,7 @@ async function walk(
   const results: string[] = []
   for (const child of children) {
     const isFolder = child.endsWith('/')
-    const trimmed = isFolder ? child.replace(/\/+$/, '') : child
+    const trimmed = isFolder ? rstripSlash(child) : child
     results.push(trimmed)
     if (isFolder) {
       const childSpec = new PathSpec({
@@ -93,12 +95,12 @@ async function findCommand(
   const minDepth = minDepthRaw !== null ? Number.parseInt(minDepthRaw, 10) : null
 
   const allPaths = await walk(accessor, p0, opts.index, maxDepth, 0)
-  const searchKey = p0.stripPrefix.replace(/^\/+|\/+$/g, '')
+  const searchKey = stripSlash(p0.stripPrefix)
   const baseDepth = searchKey === '' ? -1 : searchKey.split('/').length - 1
   const results: string[] = []
   for (const p of [...allPaths].sort()) {
     const stripped = p.startsWith(p0.prefix) ? p.slice(p0.prefix.length) : p
-    const trimmed = stripped.replace(/^\/+|\/+$/g, '')
+    const trimmed = stripSlash(stripped)
     const depth = trimmed === '' ? -1 : trimmed.split('/').length - (baseDepth + 2)
     if (minDepth !== null && depth < minDepth) continue
     const entryName = p.split('/').pop() ?? p

@@ -15,6 +15,7 @@
 import type { Resource } from '../../resource/base.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 export interface ResourceWithGlob extends Resource {
   glob(paths: readonly PathSpec[], prefix?: string): Promise<PathSpec[]>
@@ -41,7 +42,7 @@ export async function resolveGlobs(
         result.push(item)
         continue
       }
-      const prefix = mount.prefix.replace(/\/+$/, '')
+      const prefix = rstripSlash(mount.prefix)
       const withPrefix = new PathSpec({
         original: item.original,
         directory: item.directory,

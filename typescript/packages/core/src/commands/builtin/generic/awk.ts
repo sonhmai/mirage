@@ -17,6 +17,7 @@ import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { awkStream } from './awk_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { lstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -25,7 +26,7 @@ type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
 function stripMount(virtualPath: string, prefix: string): string {
   if (prefix !== '' && virtualPath.startsWith(prefix + '/')) {
-    return '/' + virtualPath.slice(prefix.length).replace(/^\/+/, '')
+    return '/' + lstripSlash(virtualPath.slice(prefix.length))
   }
   return virtualPath
 }

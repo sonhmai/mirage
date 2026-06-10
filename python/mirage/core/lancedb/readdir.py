@@ -1,0 +1,61 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+from mirage.accessor.lancedb import LanceDBAccessor
+from mirage.cache.index import IndexCacheStore
+from mirage.core.lancedb.query import (distinct_values, list_tables,
+                                       rows_matching)
+from mirage.core.lancedb.scope import ScopeLevel, detect_scope
+from mirage.types import PathSpec
+
+
+def _row_files(rows: list[dict], config) -> list[str]:
+    names: list[str] = []
+    for row in rows:
+        rid = row[config.id_column]
+        names.append(f"{rid}.md")
+        if config.blob_column:
+            names.append(f"{rid}.{config.blob_ext}")
+    return names
+
+
+async def readdir(
+    accessor: LanceDBAccessor,
+    path: PathSpec,
+    index: IndexCacheStore = None,
+) -> list[str]:
+    if isinstance(path, str):
+        path = PathSpec(original=path, directory=path)
+    config = accessor.config
+    scope = detect_scope(path, config)
+    base = path.original.rstrip("/")
+
+    if scope.level == ScopeLevel.ROOT:
+        names = await list_tables(accessor)
+        return [f"{base}/{name}" for name in names]
+
+    if scope.level == ScopeLevel.GROUP_DIR:
+        depth = len(scope.filters)
+        total = len(config.group_by)
+        if depth < total:
+            names = await distinct_values(accessor, scope.table,
+                                          config.group_by[depth],
+                                          scope.filters, config.max_rows)
+        else:
+            rows = await rows_matching(accessor, scope.table, scope.filters,
+                                       [config.id_column], config.max_rows)
+            names = _row_files(rows, config)
+        return [f"{base}/{name}" for name in names]
+
+    raise FileNotFoundError(path.original)

@@ -18,81 +18,24 @@ import { DiscordApiError } from '../../../core/discord/_client.ts'
 import { resolveDiscordGlob } from '../../../core/discord/glob.ts'
 import { read as discordRead } from '../../../core/discord/read.ts'
 import { readdir as discordReaddir } from '../../../core/discord/readdir.ts'
+import { stat as discordStat } from '../../../core/discord/stat.ts'
 import { detectScope } from '../../../core/discord/scope.ts'
 import { listChannels } from '../../../core/discord/channels.ts'
 import { formatGrepResults, searchGuild } from '../../../core/discord/search.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { PathSpec, ResourceName } from '../../../types.ts'
+import { IOResult } from '../../../io/types.ts'
+import { type FileStat, type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { compilePattern, grepLines } from '../grep_helper.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { rgGeneric } from '../generic/rg.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
-interface RgFlags {
-  ignoreCase: boolean
-  invert: boolean
-  lineNumbers: boolean
-  countOnly: boolean
-  filesOnly: boolean
-  wholeWord: boolean
-  fixedString: boolean
-  onlyMatching: boolean
-  maxCount: number | null
-  hidden: boolean
-}
-
-function parseRgFlags(flags: Record<string, string | boolean>): RgFlags {
-  const toInt = (v: string | boolean | undefined): number | null =>
-    typeof v === 'string' ? Number.parseInt(v, 10) : null
-  return {
-    ignoreCase: flags.i === true,
-    invert: flags.v === true,
-    lineNumbers: flags.n === true,
-    countOnly: flags.c === true,
-    filesOnly: flags.args_l === true,
-    wholeWord: flags.w === true,
-    fixedString: flags.F === true,
-    onlyMatching: flags.o === true,
-    maxCount: toInt(flags.m),
-    hidden: flags.hidden === true,
-  }
-}
-
-async function collectFiles(
+async function* discordStream(
   accessor: DiscordAccessor,
-  path: PathSpec,
+  p: PathSpec,
   index: IndexCacheStore | undefined,
-): Promise<string[]> {
-  let children: string[]
-  try {
-    children = await discordReaddir(accessor, path, index)
-  } catch {
-    return []
-  }
-  const files: string[] = []
-  for (const child of children) {
-    if (child.endsWith('.json') || child.endsWith('.jsonl')) {
-      files.push(child)
-    } else {
-      const childSpec = new PathSpec({
-        original: child,
-        directory: child,
-        resolved: false,
-        prefix: path.prefix,
-      })
-      const sub = await collectFiles(accessor, childSpec, index)
-      files.push(...sub)
-    }
-  }
-  return files
-}
-
-function splitLinesNoTrailing(text: string): string[] {
-  const stripped = text.endsWith('\n') ? text.slice(0, -1) : text
-  return stripped === '' ? [] : stripped.split('\n')
+): AsyncIterable<Uint8Array> {
+  yield await discordRead(accessor, p, index)
 }
 
 async function rgCommand(
@@ -108,8 +51,7 @@ async function rgCommand(
       new IOResult({ exitCode: 2, stderr: ENC.encode('rg: usage: rg [flags] pattern [path]\n') }),
     ]
   }
-  const f = parseRgFlags(opts.flags)
-  const pat = compilePattern(exprText, f.ignoreCase, f.fixedString, f.wholeWord)
+  const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
 
   const pushdownWarnings: string[] = []
   if (paths.length > 0) {
@@ -118,7 +60,7 @@ async function rgCommand(
       const scope = detectScope(firstPath)
       if (scope.useNative && scope.guildId !== undefined) {
         try {
-          const count = f.maxCount ?? 100
+          const count = maxCount ?? 100
           const raw = await searchGuild(accessor, scope.guildId, exprText, scope.channelId, count)
           const channelMap = new Map<string, string>()
           if (scope.channelId === undefined) {
@@ -132,7 +74,7 @@ async function rgCommand(
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           pushdownWarnings.push(
-            `discord: native search push-down failed (${msg}); ` + `falling back to per-file scan`,
+            `discord: native search push-down failed (${msg}); falling back to per-file scan`,
           )
           const status = err instanceof DiscordApiError ? err.status : null
           const lower = msg.toLowerCase()
@@ -151,72 +93,20 @@ async function rgCommand(
         }
       }
     }
-    const resolved = await resolveDiscordGlob(accessor, paths, opts.index ?? undefined)
-    const filePaths: string[] = []
-    const filePrefix = resolved[0]?.prefix ?? ''
-    for (const p of resolved) {
-      const sub = await collectFiles(accessor, p, opts.index ?? undefined)
-      filePaths.push(...sub)
-    }
-    const sortedFiles = Array.from(new Set(filePaths)).sort()
-    const allResults: string[] = []
-    let anyMatch = false
-    for (const bp of sortedFiles) {
-      if (!f.hidden && bp.split('/').some((part) => part.startsWith('.'))) continue
-      let data: Uint8Array
-      try {
-        const bpSpec = new PathSpec({
-          original: bp,
-          directory: bp,
-          resolved: true,
-          prefix: filePrefix,
-        })
-        data = await discordRead(accessor, bpSpec, opts.index ?? undefined)
-      } catch {
-        continue
-      }
-      const text = DEC.decode(data)
-      if (text === '') continue
-      const lines = splitLinesNoTrailing(text)
-      const matched = grepLines(bp, lines, pat, f)
-      if (matched.length === 0) continue
-      anyMatch = true
-      if (f.filesOnly) {
-        allResults.push(bp)
-        continue
-      }
-      if (f.countOnly) {
-        allResults.push(`${bp}:${String(matched.length)}`)
-        continue
-      }
-      for (const line of matched) {
-        allResults.push(`${bp}:${line}`)
-      }
-    }
-    const stderr =
-      pushdownWarnings.length > 0 ? ENC.encode(pushdownWarnings.join('\n') + '\n') : undefined
-    if (!anyMatch) {
-      return [
-        new Uint8Array(0),
-        new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) }),
-      ]
-    }
-    const out: ByteSource = ENC.encode(allResults.join('\n'))
-    return [out, new IOResult({ ...(stderr !== undefined ? { stderr } : {}) })]
   }
 
-  const raw = await readStdinAsync(opts.stdin)
-  if (raw === null) {
-    return [
-      null,
-      new IOResult({ exitCode: 2, stderr: ENC.encode('rg: usage: rg [flags] pattern path\n') }),
-    ]
+  const resolved =
+    paths.length > 0 ? await resolveDiscordGlob(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => discordStat(accessor, p, opts.index ?? undefined)
+  const readdir = (p: PathSpec): Promise<string[]> =>
+    discordReaddir(accessor, p, opts.index ?? undefined)
+  const result = await rgGeneric(resolved, texts, opts, stat, readdir, (p) =>
+    discordStream(accessor, p, opts.index ?? undefined),
+  )
+  if (result !== null && pushdownWarnings.length > 0) {
+    result[1].stderr = ENC.encode(pushdownWarnings.join('\n') + '\n')
   }
-  const lines = splitLinesNoTrailing(DEC.decode(raw))
-  const matched = grepLines('<stdin>', lines, pat, f)
-  if (matched.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-  if (f.countOnly) return [ENC.encode(String(matched.length)), new IOResult()]
-  return [ENC.encode(matched.join('\n')), new IOResult()]
+  return result
 }
 
 export const DISCORD_RG = command({

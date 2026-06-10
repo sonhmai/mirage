@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.mv import mv as generic_mv
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.glob import resolve_glob
@@ -21,14 +24,6 @@ from mirage.core.ram.rename import rename
 from mirage.core.ram.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _exists(accessor: RAMAccessor, path: str) -> bool:
-    try:
-        await stat_core(accessor, path)
-        return True
-    except (FileNotFoundError, ValueError):
-        return False
 
 
 @command("mv", resource="ram", spec=SPECS["mv"], write=True)
@@ -46,10 +41,9 @@ async def mv(
     if accessor.store is None or len(paths) < 2:
         raise ValueError("mv: requires src and dst")
     paths = await resolve_glob(accessor, paths, index)
-    if n and await _exists(accessor, paths[1]):
-        return None, IOResult()
-    await rename(accessor, paths[0], paths[1])
-    output = None
-    if v:
-        output = f"'{paths[0].original}' -> '{paths[1].original}'\n".encode()
-    return output, IOResult()
+    return await generic_mv(paths,
+                            rename=partial(rename, accessor),
+                            stat=partial(stat_core, accessor),
+                            n=n,
+                            v=v,
+                            index=index)

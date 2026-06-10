@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { normalizeFields } from '../../utils/normalize.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 export interface PostHogConfig {
   apiKey?: string | null
@@ -33,7 +34,7 @@ export function normalizePostHogConfig(input: Record<string, unknown>): PostHogC
 function hostToUrl(host: string | undefined): string {
   if (host === undefined || host === 'us') return 'https://us.posthog.com'
   if (host === 'eu') return 'https://eu.posthog.com'
-  if (host.startsWith('http')) return host.replace(/\/+$/, '')
+  if (host.startsWith('http')) return rstripSlash(host)
   return `https://${host}`
 }
 

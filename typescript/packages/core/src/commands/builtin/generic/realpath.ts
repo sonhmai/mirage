@@ -15,11 +15,12 @@
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { rstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
 function normalize(p: string, cwd: string): string {
-  const path = p.startsWith('/') ? p : `${cwd.replace(/\/+$/, '')}/${p}`
+  const path = p.startsWith('/') ? p : `${rstripSlash(cwd)}/${p}`
   const parts = path.split('/').filter((s) => s !== '' && s !== '.')
   const out: string[] = []
   for (const part of parts) {

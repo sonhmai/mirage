@@ -147,6 +147,15 @@ export async function googlePut(tm: TokenManager, url: string, json: unknown): P
   return r.json()
 }
 
+export async function googleDelete(tm: TokenManager, url: string): Promise<void> {
+  const headers = await googleHeaders(tm)
+  const r = await fetch(url, { method: 'DELETE', headers })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new GoogleApiError(`Google DELETE ${url} → ${String(r.status)} ${text}`, r.status)
+  }
+}
+
 export async function googleGetBytes(tm: TokenManager, url: string): Promise<Uint8Array> {
   const headers = await googleHeaders(tm)
   const r = await fetch(url, { headers, redirect: 'follow' })

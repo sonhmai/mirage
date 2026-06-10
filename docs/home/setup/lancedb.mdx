@@ -1,0 +1,56 @@
+---
+title: LanceDB
+icon: database
+description: Set up a LanceDB connection for the LanceDB resource.
+---
+
+LanceDB mounts a table as a read-only filesystem: group-by columns become nested
+folders, each row is a card plus an optional blob file, and semantic search is
+the `search` command.
+
+## Connection
+
+### Local / embedded
+
+Point `uri` at a directory. LanceDB stores the table there, no server needed.
+
+```bash
+# .env.development
+LANCEDB_URI=/data/fashion.lancedb
+```
+
+### Object storage
+
+`uri` also accepts `s3://`, `gs://`, and `az://` prefixes for tables backed by
+object storage.
+
+### Cloud and Enterprise
+
+`db://` URIs connect to LanceDB Cloud (`api_key` + `region`) or Enterprise
+(`api_key` + `host_override`):
+
+```bash
+# .env.development
+LANCEDB_URI=db://my-database
+LANCEDB_API_KEY=sk_...
+LANCEDB_REGION=us-east-1
+# Enterprise only
+LANCEDB_HOST_OVERRIDE=https://my-database.us-east-1.api.lancedb.com
+```
+
+## Search
+
+Search is the `search "<query>" <path>` command. It returns ranked rows as their
+canonical `<id>.md` file paths plus a score, so results compose with `cat`, `wc`,
+and pipes (`grep`/`rg` stay lexical). It requires a table built with an embedding
+function on a source field, so `tbl.search(text)` auto-embeds the query.
+
+## Limits
+
+The resource is read-only and bounds how much an agent can pull:
+
+- `search_limit` (10): default top-k returned by `search`.
+- `max_rows` (1,000): hard ceiling on rows listed per folder.
+
+See the [Python](/python/resource/lancedb) and [TypeScript](/typescript/setup/lancedb)
+resource pages for full config.

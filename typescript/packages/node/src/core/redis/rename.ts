@@ -15,6 +15,7 @@
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm, nowIso } from './utils.ts'
+import { rstripSlash } from '@struktoai/mirage-core'
 
 export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = norm(src.stripPrefix)
@@ -37,8 +38,8 @@ export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSp
     await store.delModified(s)
     await store.addDir(d)
     await store.setModified(d, mod ?? now)
-    const prefix = s.replace(/\/+$/, '') + '/'
-    const dPrefix = d.replace(/\/+$/, '') + '/'
+    const prefix = rstripSlash(s) + '/'
+    const dPrefix = rstripSlash(d) + '/'
     const files = await store.listFiles()
     for (const key of files) {
       if (key.startsWith(prefix)) {

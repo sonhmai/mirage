@@ -29,6 +29,7 @@ import { GSHEETS_LS } from './ls.ts'
 import { GSHEETS_NL } from './nl.ts'
 import { GSHEETS_REALPATH } from './realpath.ts'
 import { GSHEETS_RG } from './rg.ts'
+import { GSHEETS_RM } from './rm.ts'
 import { GSHEETS_STAT } from './stat.ts'
 import { GSHEETS_TAIL } from './tail.ts'
 import { GSHEETS_TREE } from './tree.ts'
@@ -51,6 +52,7 @@ export const GSHEETS_COMMANDS: readonly RegisteredCommand[] = [
   ...GSHEETS_NL,
   ...GSHEETS_REALPATH,
   ...GSHEETS_RG,
+  ...GSHEETS_RM,
   ...GSHEETS_STAT,
   ...GSHEETS_TAIL,
   ...GSHEETS_TREE,

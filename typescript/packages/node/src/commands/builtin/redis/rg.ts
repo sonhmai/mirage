@@ -16,7 +16,6 @@ import { ResourceName, command, rgGeneric, specOf } from '@struktoai/mirage-core
 import { readdir as redisReaddir } from '../../../core/redis/readdir.ts'
 import { stat as redisStat } from '../../../core/redis/stat.ts'
 import { stream as redisStream } from '../../../core/redis/stream.ts'
-import { find as redisFind } from '../../../core/redis/find.ts'
 import type { RedisAccessor } from '../../../accessor/redis.ts'
 
 export const REDIS_RG = command({
@@ -31,6 +30,5 @@ export const REDIS_RG = command({
       (p) => redisStat(accessor, p),
       (p) => redisReaddir(accessor, p),
       (p) => redisStream(accessor, p),
-      (root, options) => redisFind(accessor, root, options),
     ),
 })

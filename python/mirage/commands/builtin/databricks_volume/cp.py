@@ -12,14 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.databricks_volume._helpers import (
-    child_path, is_directory, path_exists, same_backend_file)
+from mirage.commands.builtin.databricks_volume._helpers import \
+    same_backend_file
+from mirage.commands.builtin.utils.copy import (copy_targets, is_directory,
+                                                path_exists)
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.databricks_volume.copy import copy as copy_core
 from mirage.core.databricks_volume.glob import resolve_glob
+from mirage.core.databricks_volume.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -43,24 +48,18 @@ async def cp(
         raise ValueError("cp: requires src and dst")
     paths = await resolve_glob(accessor, paths, index)
     recursive = r or R or a
+    stat = partial(stat_core, accessor)
     *sources, dst = paths
-    dst_is_dir = await is_directory(accessor, dst, index)
-    # POSIX multi-source form requires the final operand to be a directory.
-    if len(sources) > 1 and not dst_is_dir:
-        raise NotADirectoryError(f"target '{dst.original}' is not a directory")
+    dst_is_dir = await is_directory(stat, dst, index)
     writes: dict[str, bytes] = {}
     lines: list[str] = []
     errors: list[str] = []
-    for src in sources:
-        target = dst
-        if dst_is_dir:
-            name = src.strip_prefix.rstrip("/").rsplit("/", 1)[-1]
-            target = child_path(dst, name)
+    for src, target in copy_targets(sources, dst, dst_is_dir):
         if same_backend_file(accessor, src, target):
             errors.append(f"cp: '{src.original}' and '{target.original}' "
                           "are the same file")
             continue
-        if n and await path_exists(accessor, target, index):
+        if n and await path_exists(stat, target):
             continue
         await copy_core(accessor, src, target, index, recursive=recursive)
         writes[target.strip_prefix] = b""

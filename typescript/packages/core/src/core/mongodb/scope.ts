@@ -15,6 +15,7 @@
 import { PathSpec } from '../../types.ts'
 import type { EntityKind } from './types.ts'
 import { KIND_DIR_NAMES, ScopeLevel } from './types.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export interface MongoDBScope {
   level: ScopeLevel
@@ -36,7 +37,7 @@ function scope(
 
 export function detectScope(path: PathSpec | string): MongoDBScope {
   const raw = path instanceof PathSpec ? path.stripPrefix : path
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(raw)
 
   if (key === '') {
     return scope(ScopeLevel.ROOT, '/')

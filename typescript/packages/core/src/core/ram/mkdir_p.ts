@@ -15,11 +15,11 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { norm, nowIso } from './utils.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export function mkdirP(accessor: RAMAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.stripPrefix)
-  const parts = p
-    .replace(/^\/+|\/+$/g, '')
+  const parts = stripSlash(p)
     .split('/')
     .filter((s) => s !== '')
   const now = nowIso()

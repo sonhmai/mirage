@@ -49,6 +49,7 @@
   },
   "dependencies": {
     "@struktoai/mirage-core": "workspace:*",
+    "@lancedb/lancedb": "^0.30.0",
     "fs-monkey": "^1.1.0",
     "imapflow": "^1.0.0",
     "mailparser": "^3.6.0",

@@ -17,6 +17,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { SHEETS_API_BASE, type TokenManager, googleGet } from '../google/_client.ts'
 import { readdir } from './readdir.ts'
+import { rstripSlash, stripSlash } from '../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -66,12 +67,12 @@ export async function read(
   const prefix = path.prefix
   let p = path.original
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   if (index === undefined) throw enoent(path.original)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)
   if (result.entry === undefined || result.entry === null) {
-    const parentKey = virtualKey.replace(/\/+$/, '').replace(/\/[^/]+$/, '') || '/'
+    const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
     if (parentKey !== virtualKey) {
       const parentPath = PathSpec.fromStrPath(parentKey, prefix)
       try {

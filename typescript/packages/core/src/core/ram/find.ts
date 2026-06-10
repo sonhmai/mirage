@@ -15,6 +15,7 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { norm } from './utils.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 export interface FindOptions {
   name?: string | null
@@ -47,7 +48,7 @@ export function find(
   options: FindOptions = {},
 ): Promise<string[]> {
   const p = norm(path.stripPrefix)
-  const prefix = p.replace(/\/+$/, '') + '/'
+  const prefix = rstripSlash(p) + '/'
   const baseDepth = p === '/' ? 0 : (p.match(/\//g) ?? []).length
   const results: string[] = []
   const candidates: [string, 'f' | 'd'][] = []

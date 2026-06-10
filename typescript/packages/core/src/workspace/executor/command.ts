@@ -37,6 +37,7 @@ import { maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
 import { resolveAcrossMounts, resolveSafeguard } from '../../commands/safeguard.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
+import { rstripSlash, stripSlash } from '../../util/slash.ts'
 
 const JOB_BUILTINS: ReadonlySet<string> = new Set(['wait', 'fg', 'kill', 'jobs', 'ps'])
 
@@ -208,6 +209,14 @@ export async function handleCommand(
     )
   }
 
+  // resolveMount may redirect a warm remote read to the cache mount, which
+  // does not carry the origin mount's per-command safeguards. Resolve the
+  // safeguard from the real (pre-redirect) mount so the cap survives the hit.
+  const realMount = registry.mountFor(
+    pathScopes.length > 0 ? (pathScopes[0]?.original ?? session.cwd) : session.cwd,
+  )
+  const safeguardOverride = realMount?.commandSafeguards.get(cmdName) ?? null
+
   try {
     const [initialStdout, io] = await mount.executeCmd(cmdName, paths, texts, flagKwargs, {
       stdin,
@@ -218,6 +227,7 @@ export async function handleCommand(
       env: session.env,
       execAllowed: registry.isExecAllowed(),
       ...(pythonRuntime !== undefined ? { pythonRuntime } : {}),
+      safeguardOverride,
     })
     let stdout = initialStdout
     if (cmdName === 'ls' && io.exitCode === 0) {
@@ -240,7 +250,7 @@ export async function handleCommand(
         if (io.exitCode === 0) io.exitCode = 1
       }
     }
-    const prefix = mount.prefix.replace(/\/+$/, '')
+    const prefix = rstripSlash(mount.prefix)
     if (prefix !== '' && mount !== registry.defaultMount) {
       io.reads = prefixKeys(io.reads, prefix)
       io.writes = prefixKeys(io.writes, prefix)
@@ -277,7 +287,7 @@ function parseFlags(
   for (const item of parts) {
     if (item instanceof PathSpec) {
       scopeMap.set(item.original, item)
-      const stripped = item.original.replace(/\/+$/, '')
+      const stripped = rstripSlash(item.original)
       if (stripped !== item.original) scopeMap.set(stripped, item)
     }
   }
@@ -555,7 +565,7 @@ async function tryUnmountIntercept(
   if (!recursive) return null
 
   const original = pathScope.original
-  const stripped = original.replace(/^\/+|\/+$/g, '')
+  const stripped = stripSlash(original)
   const norm = stripped ? `/${stripped}/` : '/'
   const matched = registry.mountForPrefix(norm)
   if (matched === null) return null

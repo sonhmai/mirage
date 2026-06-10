@@ -22,6 +22,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { humanSize } from '../utils/formatting.ts'
 import { metadataProvision } from './provision.ts'
+import { rstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -45,7 +46,7 @@ async function walkSize(
   }
   let total = 0
   for (const child of children) {
-    const trimmed = child.replace(/\/+$/, '')
+    const trimmed = rstripSlash(child)
     const childSpec = new PathSpec({
       original: trimmed,
       directory: trimmed,

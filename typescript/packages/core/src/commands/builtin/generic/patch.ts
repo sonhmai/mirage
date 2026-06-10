@@ -16,6 +16,7 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import { lstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -115,7 +116,7 @@ function parsePatch(patchText: string, stripCount: number): Map<string, Hunk[]> 
       }
       if (currentFile !== null) files.set(currentFile, currentHunks)
       const rawPath = (line.slice(4).split('\t')[0] ?? '').trim()
-      currentFile = '/' + stripPath(rawPath, stripCount).replace(/^\/+/, '')
+      currentFile = '/' + lstripSlash(stripPath(rawPath, stripCount))
       currentHunks = []
       currentHunkLines = []
       continue

@@ -20,6 +20,7 @@ import { databaseExists, entityExists, listCollections, listDatabases } from './
 import { detectScope } from './scope.ts'
 import type { EntityKind } from './types.ts'
 import { KIND_TO_DIR, KIND_TO_RESOURCE_TYPE, RESOURCE_TYPE_DATABASE, ScopeLevel } from './types.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 function notFound(p: string): Error {
   const err = new Error(p) as Error & { code?: string }
@@ -35,7 +36,7 @@ export async function readdir(
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const prefix = spec.prefix
   const scope = detectScope(spec)
-  const virtualKey = `${prefix}${scope.resourcePath}`.replace(/\/+$/, '') || '/'
+  const virtualKey = rstripSlash(`${prefix}${scope.resourcePath}`) || '/'
 
   if (scope.level === ScopeLevel.ROOT) {
     return listRoot(accessor, virtualKey, index, prefix)

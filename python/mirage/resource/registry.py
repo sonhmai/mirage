@@ -137,6 +137,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "nextcloud":
     ResourceEntry("mirage.resource.nextcloud:NextcloudResource",
                   "mirage.resource.nextcloud:NextcloudConfig"),
+    "lancedb":
+    ResourceEntry("mirage.resource.lancedb:LanceDBResource",
+                  "mirage.resource.lancedb:LanceDBConfig"),
 }
 
 

@@ -425,11 +425,20 @@ CASES: list[tuple[str, str]] = [
     ("sort_stdin", "cat /data/dup.txt | sort"),
     ("rev_stdin", "echo hello | rev"),
     ("base64_stdin_d", "echo aGVsbG8= | base64 -d"),
+
+    # ----- cp / mv multi-source into a directory (last; these mutate) -----
+    ("cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"),
+    ("cp_multi_verify_a", "cat /data/sub/a.txt"),
+    ("cp_multi_verify_b", "cat /data/sub/b.txt"),
+    ("mv_multi_into_dir", "mv /data/sub/a.txt /data/sub/b.txt /data/sub/deep"),
+    ("mv_multi_verify_a", "cat /data/sub/deep/a.txt"),
+    ("mv_multi_verify_b", "cat /data/sub/deep/b.txt"),
 ]
 
 EXIT_CODE_CASES: list[tuple[str, str]] = [
     ("lazy_exit_grep_match", "grep hello /data/a.txt"),
     ("lazy_exit_grep_no_match", "grep zzz /data/a.txt"),
+    ("cp_reject_multi_nondir", "cp /data/a.txt /data/b.txt /data/c.txt"),
 ]
 
 

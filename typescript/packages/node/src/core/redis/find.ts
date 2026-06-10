@@ -15,6 +15,7 @@
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm } from './utils.ts'
+import { rstripSlash } from '@struktoai/mirage-core'
 
 export interface FindOptions {
   name?: string | null
@@ -48,7 +49,7 @@ export async function find(
 ): Promise<string[]> {
   const p = norm(path.stripPrefix)
   const store = accessor.store
-  const prefix = p.replace(/\/+$/, '') + '/'
+  const prefix = rstripSlash(p) + '/'
   const baseDepth = p === '/' ? 0 : (p.match(/\//g) ?? []).length
   const results: string[] = []
   const candidates: [string, 'f' | 'd'][] = []

@@ -19,6 +19,7 @@ import { PathSpec } from '../../types.ts'
 import { listLabels } from './labels.ts'
 import type { GmailMessageRaw } from './messages.ts'
 import { extractAttachments, extractHeader, getMessageRaw, listMessages } from './messages.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 const TITLE_MAX = 80
 const UNSAFE = /[^\w\s\-.]/g
@@ -62,7 +63,7 @@ export async function readdir(
   const raw = path.pattern !== null ? path.directory : path.original
   let p = raw
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
   const parts = key === '' ? [] : key.split('/')
   const depth = parts.length

@@ -16,6 +16,7 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { inflateRaw } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { lstripSlash, rstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -148,8 +149,8 @@ export async function unzipGeneric(
   const outputLines: string[] = []
   for (const e of entries) {
     if (e.name.endsWith('/')) continue
-    const entryName = e.name.replace(/^\/+/, '')
-    const outPath = dest.replace(/\/+$/, '') + '/' + entryName
+    const entryName = lstripSlash(e.name)
+    const outPath = rstripSlash(dest) + '/' + entryName
     await ensureParents(mkdir, outPath)
     await write(makePathSpec(outPath), e.data)
     const reportPath = mountPrefix !== '' ? mountPrefix + outPath : outPath

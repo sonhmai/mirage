@@ -14,7 +14,13 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../../core/github_ci/read.ts', () => ({ read: vi.fn() }))
+vi.mock('../../../core/github_ci/read.ts', () => {
+  const read = vi.fn()
+  async function* stream(...args: unknown[]) {
+    yield await (read as (...a: unknown[]) => Promise<Uint8Array>)(...args)
+  }
+  return { read, stream }
+})
 vi.mock('../../../core/github_ci/readdir.ts', () => ({ readdir: vi.fn() }))
 vi.mock('../../../core/github_ci/stat.ts', () => ({ stat: vi.fn() }))
 

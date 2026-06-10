@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DRIVE_API_BASE, googleGet, googleGetBytes, googleGetStream } from './_client.ts'
+import {
+  DRIVE_API_BASE,
+  googleDelete,
+  googleGet,
+  googleGetBytes,
+  googleGetStream,
+} from './_client.ts'
 import type { TokenManager } from './_client.ts'
 
 const FIELDS =
@@ -145,6 +151,11 @@ export async function getFileMetadata(tm: TokenManager, fileId: string): Promise
 export async function downloadFile(tm: TokenManager, fileId: string): Promise<Uint8Array> {
   const url = `${DRIVE_API_BASE}/files/${fileId}?alt=media`
   return googleGetBytes(tm, url)
+}
+
+export async function deleteFile(tm: TokenManager, fileId: string): Promise<void> {
+  const url = `${DRIVE_API_BASE}/files/${fileId}`
+  await googleDelete(tm, url)
 }
 
 export async function* downloadFileStream(

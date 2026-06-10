@@ -14,7 +14,6 @@
 
 import { exitOnEmpty } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import type { FindOptions } from '../../../resource/base.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { compilePattern, grepStream } from '../grep_helper.ts'
@@ -26,8 +25,13 @@ const ENC = new TextEncoder()
 
 type Stat = (p: PathSpec) => Promise<FileStat>
 type Readdir = (p: PathSpec) => Promise<string[]>
-type Find = (root: PathSpec, options: FindOptions) => Promise<string[]>
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
+type ScopeCheck = (
+  readdir: (p: string) => Promise<string[]>,
+  stat: (p: string) => Promise<FileStat>,
+  scope: PathSpec,
+  recursive: boolean,
+) => Promise<string | null>
 
 interface RgFlags {
   ignoreCase: boolean
@@ -81,7 +85,7 @@ export async function rgGeneric(
   stat: Stat,
   readdir: Readdir,
   stream: Stream,
-  find: Find,
+  scopeCheck?: ScopeCheck,
 ): Promise<CommandFnResult> {
   const [exprText] = texts
   if (exprText === undefined) {
@@ -122,12 +126,22 @@ export async function rgGeneric(
     }
   }
 
-  const readdirFn = (p: string): Promise<string[]> => find(makeSpec(p, first), { type: null })
+  const readdirFn = (p: string): Promise<string[]> => readdir(makeSpec(p, first))
   const statFn = (p: string): Promise<FileStat> => stat(makeSpec(p, first))
   const readBytesFn = (p: string): Promise<Uint8Array> => materialize(stream(makeSpec(p, first)))
 
+  let scopeWarn: string | null = null
+  if (scopeCheck !== undefined && !first.resolved) {
+    try {
+      scopeWarn = await scopeCheck(readdirFn, statFn, first, true)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(msg) })]
+    }
+  }
+
   if (isDir && opts.filetypeFns !== null && Object.keys(opts.filetypeFns).length > 0) {
-    const warnings: string[] = []
+    const warnings: string[] = scopeWarn !== null ? [scopeWarn] : []
     const results = await rgFolderFiletype(
       readdirFn,
       statFn,
@@ -151,12 +165,12 @@ export async function rgGeneric(
       },
       warnings,
     )
-    const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : undefined
+    const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
     if (results.length === 0) {
       const io = new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) })
       return [new Uint8Array(0), io]
     }
-    const out: ByteSource = ENC.encode(results.join('\n'))
+    const out: ByteSource = ENC.encode(results.join('\n') + '\n')
     const io = new IOResult(stderr !== undefined ? { stderr } : {})
     return [out, io]
   }
@@ -169,7 +183,7 @@ export async function rgGeneric(
     flags.fileType !== null ||
     flags.globPattern !== null
   if (needsFull) {
-    const warnings: string[] = []
+    const warnings: string[] = scopeWarn !== null ? [scopeWarn] : []
     const results = await rgFull(
       readdirFn,
       statFn,
@@ -194,15 +208,15 @@ export async function rgGeneric(
       },
       warnings,
     )
-    const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : undefined
+    const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
     if (results.length === 0) {
       const io = new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) })
       return [new Uint8Array(0), io]
     }
-    const out: ByteSource = ENC.encode(results.join('\n'))
+    const out: ByteSource = ENC.encode(results.join('\n') + '\n')
     const io = new IOResult(stderr !== undefined ? { stderr } : {})
     return [out, io]
   }
 
-  return grepGeneric('rg', paths, texts, opts, stat, find, stream)
+  return grepGeneric('rg', paths, texts, opts, stat, readdir, stream)
 }

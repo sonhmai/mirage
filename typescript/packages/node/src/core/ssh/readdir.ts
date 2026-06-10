@@ -16,6 +16,7 @@ import type { FileEntryWithStats } from 'ssh2'
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { enoent, isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
+import { stripSlash } from '@struktoai/mirage-core'
 
 export async function readdir(accessor: SSHAccessor, p: PathSpec): Promise<string[]> {
   const sftp = await accessor.sftp()
@@ -31,7 +32,7 @@ export async function readdir(accessor: SSHAccessor, p: PathSpec): Promise<strin
       resolveFn(entries)
     })
   })
-  const base = `/${virtual.replace(/^\/+|\/+$/g, '')}`
+  const base = `/${stripSlash(virtual)}`
   const dirPrefix = base === '/' ? '/' : `${base}/`
   const mountPrefix = p.prefix
   const names: string[] = []

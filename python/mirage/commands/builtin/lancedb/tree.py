@@ -12,41 +12,43 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.gmail import GmailAccessor
+from functools import partial
+
+from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.output import format_optional_records
+from mirage.commands.builtin.generic.tree import tree as generic_tree
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.gmail.glob import resolve_glob
-from mirage.core.gmail.unlink import unlink
+from mirage.core.lancedb.glob import resolve_glob
+from mirage.core.lancedb.readdir import readdir
+from mirage.core.lancedb.stat import stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("rm", resource="gmail", spec=SPECS["rm"], write=True)
-async def rm(
-    accessor: GmailAccessor,
+@command("tree", resource="lancedb", spec=SPECS["tree"])
+async def tree(
+    accessor: LanceDBAccessor,
     paths: list[PathSpec],
     *texts: str,
-    f: bool = False,
-    v: bool = False,
+    stdin: bytes | None = None,
+    L: str | None = None,
+    a: bool = False,
+    args_I: str | None = None,
+    d: bool = False,
+    P: str | None = None,
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not paths:
-        raise ValueError("rm: missing operand")
     paths = await resolve_glob(accessor, paths, index)
-    verbose_parts: list[str] = []
-    removed: dict[str, bytes] = {}
-    for p in paths:
-        try:
-            await unlink(accessor, p, index)
-        except (FileNotFoundError, ValueError):
-            if f:
-                continue
-            raise
-        removed[p.strip_prefix] = b""
-        if v:
-            verbose_parts.append(f"removed '{p.original}'")
-    output = format_optional_records(verbose_parts) if v else None
-    return output, IOResult(writes=removed)
+    return await generic_tree(
+        paths[0],
+        readdir=partial(readdir, accessor),
+        stat=partial(stat, accessor),
+        max_depth=int(L) if L is not None else None,
+        show_hidden=a,
+        ignore_pattern=args_I,
+        dirs_only=d,
+        match_pattern=P,
+        index=index,
+    )

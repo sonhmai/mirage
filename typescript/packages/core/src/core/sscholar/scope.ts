@@ -14,6 +14,7 @@
 
 import { PathSpec } from '../../types.ts'
 import { PAPER_FILES, SSCHOLAR_FIELD_SLUGS, SSCHOLAR_YEARS, slugToField } from './fields.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export type SSCholarPaperLevel = 'root' | 'field' | 'year' | 'paper' | 'file' | 'invalid'
 
@@ -29,7 +30,7 @@ export interface SSCholarPaperScope {
 
 export function detectScope(path: PathSpec | string): SSCholarPaperScope {
   const raw = path instanceof PathSpec ? path.stripPrefix : path
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(raw)
   const empty: SSCholarPaperScope = {
     level: 'root',
     fieldSlug: null,

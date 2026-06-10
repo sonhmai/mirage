@@ -57,6 +57,20 @@ async def read_stream(
     return _stream_file(accessor, result.entry.id, path, chunk_size)
 
 
+async def stream(
+    accessor: GDriveAccessor,
+    path: PathSpec,
+    index: IndexCacheStore = None,
+    chunk_size: int = 8192,
+) -> AsyncIterator[bytes]:
+    result = await read_stream(accessor, path, index, chunk_size)
+    if isinstance(result, bytes):
+        yield result
+        return
+    async for chunk in result:
+        yield chunk
+
+
 async def _stream_file(
     accessor: GDriveAccessor,
     file_id: str,

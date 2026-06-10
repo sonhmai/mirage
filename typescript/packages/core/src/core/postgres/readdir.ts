@@ -18,6 +18,7 @@ import { PathSpec } from '../../types.ts'
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import { listMatviews, listSchemas, listTables, listViews } from './_client.ts'
 import { detectScope } from './scope.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 export async function readdir(
   accessor: PostgresAccessor,
@@ -37,14 +38,14 @@ export async function readdir(
     return listRoot(accessor, virtualKey, index, prefix)
   }
   if (scope.level === 'schema') {
-    const base = raw.replace(/\/+$/, '')
+    const base = rstripSlash(raw)
     return [`${prefix}${base}/tables`, `${prefix}${base}/views`]
   }
   if (scope.level === 'kind') {
     return listEntities(accessor, scope.schema, scope.kind, virtualKey, index, prefix, raw)
   }
   if (scope.level === 'entity') {
-    const base = raw.replace(/\/+$/, '')
+    const base = rstripSlash(raw)
     return [`${prefix}${base}/schema.json`, `${prefix}${base}/rows.jsonl`]
   }
   const err = new Error(raw) as Error & { code?: string }
@@ -120,6 +121,6 @@ async function listEntities(
     }),
   ])
   if (index !== undefined) await index.setDir(virtualKey, entries)
-  const base = raw.replace(/\/+$/, '')
+  const base = rstripSlash(raw)
   return entries.map(([n]) => `${prefix}${base}/${n}`)
 }

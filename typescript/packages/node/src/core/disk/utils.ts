@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import path from 'node:path'
+import { lstripSlash, stripSlash } from '@struktoai/mirage-core'
 
 export function resolveSafe(root: string, virtual: string): string {
-  const relative = virtual.replace(/^\/+/, '')
+  const relative = lstripSlash(virtual)
   const resolved = path.resolve(root, relative)
   const rootResolved = path.resolve(root)
   if (resolved !== rootResolved && !resolved.startsWith(rootResolved + path.sep)) {
@@ -25,7 +26,7 @@ export function resolveSafe(root: string, virtual: string): string {
 }
 
 export function norm(p: string): string {
-  return `/${p.replace(/^\/+|\/+$/g, '')}`
+  return `/${stripSlash(p)}`
 }
 
 export function parent(p: string): string {

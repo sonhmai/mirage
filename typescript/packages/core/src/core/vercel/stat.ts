@@ -16,6 +16,7 @@ import type { VercelAccessor } from '../../accessor/vercel.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { detectScope } from './scope.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 function notFound(p: string): Error {
   const err = new Error(p) as Error & { code?: string }
@@ -42,11 +43,7 @@ function statImpl(path: PathSpec | string): FileStat {
     scope.level === 'projects_dir' ||
     scope.level === 'deployments_dir'
   ) {
-    const name =
-      scope.resourcePath
-        .replace(/^\/+|\/+$/g, '')
-        .split('/')
-        .pop() ?? ''
+    const name = stripSlash(scope.resourcePath).split('/').pop() ?? ''
     return new FileStat({ name, type: FileType.DIRECTORY })
   }
 

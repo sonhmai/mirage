@@ -12,16 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { lstripSlash } from '../util/slash.ts'
+
 /** Normalize a key prefix: empty/undefined → '', strip leading /, ensure trailing /. */
 export function normalize(raw: string | undefined): string {
   if (raw === undefined || raw === '') return ''
-  const stripped = raw.replace(/^\/+/, '')
+  const stripped = lstripSlash(raw)
   return stripped.endsWith('/') ? stripped : `${stripped}/`
 }
 
 /** Prepend a normalized prefix to a virtual path. */
 export function apply(prefix: string, path: string): string {
-  return prefix + path.replace(/^\/+/, '')
+  return prefix + lstripSlash(path)
 }
 
 /** Same as apply() but guarantees a trailing slash for LIST-style ops. */

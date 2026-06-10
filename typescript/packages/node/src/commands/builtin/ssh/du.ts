@@ -21,6 +21,8 @@ import {
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
+  rstripSlash,
+  stripSlash,
 } from '@struktoai/mirage-core'
 import { du as sshDu, duAll as sshDuAll } from '../../../core/ssh/du.ts'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
@@ -38,10 +40,10 @@ function humanSize(n: number): string {
 }
 
 function depthOf(entryPath: string, basePath: string): number {
-  const base = basePath.replace(/\/+$/, '')
-  const rel = entryPath.replace(/\/+$/, '').slice(base.length)
+  const base = rstripSlash(basePath)
+  const rel = rstripSlash(entryPath).slice(base.length)
   if (!rel) return 0
-  return (rel.replace(/^\/+|\/+$/g, '').match(/\//g) ?? []).length + 1
+  return (stripSlash(rel).match(/\//g) ?? []).length + 1
 }
 
 async function duCommand(

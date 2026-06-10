@@ -12,51 +12,35 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { rename as ramRename } from '../../../core/ram/rename.ts'
 import { stat as ramStat } from '../../../core/ram/stat.ts'
-import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { IOResult } from '../../../io/types.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
+import { type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { mvGeneric } from '../generic/mv.ts'
 
-async function exists(accessor: RAMAccessor, path: PathSpec): Promise<boolean> {
-  try {
-    await ramStat(accessor, path)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function mvCommand(
+function mvCommand(
   accessor: RAMAccessor,
   paths: PathSpec[],
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   if (paths.length < 2) {
-    return [
+    return Promise.resolve([
       null,
-      new IOResult({
-        exitCode: 1,
-        stderr: new TextEncoder().encode('mv: missing operand\n'),
-      }),
-    ]
+      new IOResult({ exitCode: 1, stderr: new TextEncoder().encode('mv: missing operand\n') }),
+    ])
   }
-  const noClobber = opts.flags.n === true
-  const verbose = opts.flags.v === true
-  const sources = paths.slice(0, -1)
-  const dst = paths[paths.length - 1]
-  if (dst === undefined) return [null, new IOResult()]
-  const lines: string[] = []
-  for (const src of sources) {
-    if (noClobber && (await exists(accessor, dst))) continue
-    await ramRename(accessor, src, dst)
-    if (verbose) lines.push(`'${src.original}' -> '${dst.original}'`)
-  }
-  const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
-  return [out, new IOResult()]
+  return mvGeneric(
+    paths,
+    (src: PathSpec, target: PathSpec) => ramRename(accessor, src, target),
+    (p: PathSpec) => ramStat(accessor, p),
+    opts.flags.n === true,
+    opts.flags.v === true,
+    opts.index ?? undefined,
+  )
 }
 
 export const RAM_MV = command({

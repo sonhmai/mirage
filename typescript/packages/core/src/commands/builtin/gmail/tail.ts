@@ -13,40 +13,34 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GmailAccessor } from '../../../accessor/gmail.ts'
-import { resolveGlob } from '../../../core/gmail/glob.ts'
+import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { read as gmailRead } from '../../../core/gmail/read.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { resolveGlob } from '../../../core/gmail/glob.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { parseN, tailBytes } from '../tail_helper.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { tailGeneric } from '../generic/tail.ts'
 import { fileReadProvision } from './provision.ts'
 
-const ENC = new TextEncoder()
+async function* gmailStream(
+  accessor: GmailAccessor,
+  p: PathSpec,
+  index: IndexCacheStore | undefined,
+): AsyncIterable<Uint8Array> {
+  yield await gmailRead(accessor, p, index)
+}
 
 async function tailCommand(
   accessor: GmailAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const [lines, plusMode] = parseN(typeof opts.flags.n === 'string' ? opts.flags.n : null)
-  const bytesMode = typeof opts.flags.c === 'string' ? Number.parseInt(opts.flags.c, 10) : null
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    const raw = await gmailRead(accessor, first, opts.index ?? undefined)
-    const out: ByteSource = tailBytes(raw, lines, bytesMode, plusMode)
-    return [out, new IOResult()]
-  }
-  const raw = await readStdinAsync(opts.stdin)
-  if (raw === null) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tail: missing operand\n') })]
-  }
-  const out: ByteSource = tailBytes(raw, lines, bytesMode, plusMode)
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return tailGeneric(resolved, texts, opts, (p) =>
+    gmailStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const GMAIL_TAIL = command({

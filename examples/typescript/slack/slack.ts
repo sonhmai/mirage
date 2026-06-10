@@ -133,6 +133,32 @@ async function main(): Promise<void> {
       console.log(`  ${tailOut.slice(0, 120)}`)
     }
 
+    // ── basename / dirname / realpath (path ops) ───────
+    console.log(`\n=== basename ${filePath} ===`)
+    r = await ws.execute(`basename "${filePath}"`)
+    const baseOut = r.stdoutText.trim()
+    console.log(`  ${baseOut}`)
+    if (baseOut !== target) throw new Error(`basename expected ${target}, got ${baseOut}`)
+
+    console.log(`\n=== dirname ${filePath} ===`)
+    r = await ws.execute(`dirname "${filePath}"`)
+    const dirOut = r.stdoutText.trim()
+    console.log(`  ${dirOut}`)
+    if (dirOut !== datePath) throw new Error(`dirname expected ${datePath}, got ${dirOut}`)
+
+    console.log(`\n=== realpath ${filePath} ===`)
+    r = await ws.execute(`realpath "${filePath}"`)
+    const realOut = r.stdoutText.trim()
+    console.log(`  ${realOut}`)
+    if (realOut !== filePath) throw new Error(`realpath expected ${filePath}, got ${realOut}`)
+
+    console.log(`\n=== realpath -e ${filePath} (must exist) ===`)
+    r = await ws.execute(`realpath -e "${filePath}"`)
+    console.log(`  exit=${r.exitCode} ${r.stdoutText.trim()}`)
+    if (r.exitCode !== 0) {
+      throw new Error(`regression: realpath -e failed for existing file; stderr=${r.stderrText}`)
+    }
+
     // ── grep at FILE level ─────────────────────────────
     console.log(`\n=== grep message ${target} ===`)
     r = await ws.execute(`grep message "${filePath}"`)

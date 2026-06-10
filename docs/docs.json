@@ -164,7 +164,8 @@
                 "icon": "database",
                 "pages": [
                   "home/setup/mongodb",
-                  "home/setup/postgres"
+                  "home/setup/postgres",
+                  "home/setup/lancedb"
                 ]
               },
               {
@@ -305,7 +306,8 @@
                 "icon": "database",
                 "pages": [
                   "python/resource/mongodb",
-                  "python/resource/postgres"
+                  "python/resource/postgres",
+                  "python/resource/lancedb"
                 ]
               },
               {
@@ -432,7 +434,8 @@
                 "icon": "database",
                 "pages": [
                   "typescript/setup/mongodb",
-                  "typescript/setup/postgres"
+                  "typescript/setup/postgres",
+                  "typescript/setup/lancedb"
                 ]
               },
               {

@@ -17,6 +17,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { dropboxDownload, dropboxDownloadStream } from './_client.ts'
 import { readdir } from './readdir.ts'
+import { rstripSlash, stripSlash } from '../../util/slash.ts'
 
 function enoent(p: string): Error {
   const e = new Error(`ENOENT: ${p}`) as Error & { code: string }
@@ -33,7 +34,7 @@ function eisdir(p: string): Error {
 function dropboxPathFromVirtual(virtualKey: string, prefix: string): string {
   let key = virtualKey
   if (prefix !== '' && key.startsWith(prefix)) key = key.slice(prefix.length)
-  key = key.replace(/^\/+|\/+$/g, '')
+  key = stripSlash(key)
   return key === '' ? '' : `/${key}`
 }
 
@@ -45,14 +46,14 @@ export async function read(
   const prefix = path.prefix
   let p = path.original
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   if (key === '') throw eisdir(path.original)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
 
   let entry = index !== undefined ? (await index.get(virtualKey)).entry : null
   if (entry === undefined || entry === null) {
     if (index !== undefined) {
-      const parentKey = virtualKey.replace(/\/+$/, '').replace(/\/[^/]+$/, '') || '/'
+      const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
       if (parentKey !== virtualKey) {
         const parentPath = PathSpec.fromStrPath(parentKey, prefix)
         try {
@@ -78,14 +79,14 @@ export async function* stream(
   const prefix = path.prefix
   let p = path.original
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   if (key === '') throw eisdir(path.original)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
 
   let entry = index !== undefined ? (await index.get(virtualKey)).entry : null
   if (entry === undefined || entry === null) {
     if (index !== undefined) {
-      const parentKey = virtualKey.replace(/\/+$/, '').replace(/\/[^/]+$/, '') || '/'
+      const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
       if (parentKey !== virtualKey) {
         const parentPath = PathSpec.fromStrPath(parentKey, prefix)
         try {

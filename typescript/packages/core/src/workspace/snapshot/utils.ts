@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../util/slash.ts'
+
 export const FORMAT_VERSION = 2
 
 export const BLOB_REF_KEY = '__file'
@@ -24,6 +26,6 @@ export function isSafeBlobPath(path: unknown): path is string {
 }
 
 export function normMountPrefix(prefix: string): string {
-  const s = prefix.replace(/^\/+|\/+$/g, '')
+  const s = stripSlash(prefix)
   return s === '' ? '/' : '/' + s + '/'
 }

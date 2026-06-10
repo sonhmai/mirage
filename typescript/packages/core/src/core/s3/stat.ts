@@ -17,9 +17,10 @@ import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { guessType } from '../../utils/filetype.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { createS3Client, isNotFoundError, loadS3Module, s3Key } from './_client.ts'
+import { rstripSlash, stripSlash } from '../../util/slash.ts'
 
 function basename(path: string): string {
-  const stripped = path.replace(/\/+$/, '')
+  const stripped = rstripSlash(path)
   const idx = stripped.lastIndexOf('/')
   return idx >= 0 ? stripped.slice(idx + 1) : stripped
 }
@@ -33,7 +34,7 @@ export async function stat(
   const prefix = path.prefix
   const rawPath =
     prefix !== '' && original.startsWith(prefix) ? original.slice(prefix.length) || '/' : original
-  const stripped = rawPath.replace(/^\/+|\/+$/g, '')
+  const stripped = stripSlash(rawPath)
   if (stripped === '') {
     return new FileStat({ name: '/', type: FileType.DIRECTORY })
   }
@@ -43,7 +44,7 @@ export async function stat(
   // to coexist — without this hint we'd return the file and commands like
   // `ls /s3/csv/` would list one entry (the file itself) instead of the
   // directory's contents.
-  const hintsDirectory = /\/+$/.test(rawPath)
+  const hintsDirectory = rawPath.endsWith('/')
 
   // Fast path: check the index cache populated by readdir(). Matches
   // Python's mirage/core/s3/stat.py fast-path. Saves a network round-trip
@@ -85,7 +86,7 @@ export async function stat(
   try {
     if (hintsDirectory) {
       // Skip HeadObject — caller already said it's a directory.
-      const pfx = s3Key(rawPath, config).replace(/\/+$/, '') + '/'
+      const pfx = rstripSlash(s3Key(rawPath, config)) + '/'
       const listResp = (await send(
         new ListObjectsV2Command({
           Bucket: config.bucket,
@@ -129,7 +130,7 @@ export async function stat(
     }
 
     // Not a file — probe for directory prefix.
-    const pfx = s3Key(rawPath, config).replace(/\/+$/, '') + '/'
+    const pfx = rstripSlash(s3Key(rawPath, config)) + '/'
     const listResp = (await send(
       new ListObjectsV2Command({
         Bucket: config.bucket,

@@ -23,6 +23,7 @@ import { listGuilds } from './guilds.ts'
 import { listMessagesForDay } from './history.ts'
 import { listMembers } from './members.ts'
 import { DiscordApiError } from './_client.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 const DISCORD_EPOCH = 1420070400000n
 const SOFT_STATUSES = new Set([403, 404, 429])
@@ -83,7 +84,7 @@ function normalize(path: PathSpec): Normalized {
   if (prefix !== '' && raw.startsWith(prefix)) {
     raw = raw.slice(prefix.length) || '/'
   }
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(raw)
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
   return { prefix, key, virtualKey, rawPath: path.original }
 }

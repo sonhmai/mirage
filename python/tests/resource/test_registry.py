@@ -48,6 +48,7 @@ EXPECTED_RESOURCES = {
     "trello",
     "mongodb",
     "postgres",
+    "lancedb",
     "notion",
     "langfuse",
     "ssh",

@@ -18,6 +18,7 @@ from mirage.commands.builtin.gmail.cat import cat
 from mirage.commands.builtin.gmail.dirname import dirname
 from mirage.commands.builtin.gmail.find import find
 from mirage.commands.builtin.gmail.grep import grep
+from mirage.commands.builtin.gmail.gws_gmail_delete import gws_gmail_delete
 from mirage.commands.builtin.gmail.gws_gmail_forward import gws_gmail_forward
 from mirage.commands.builtin.gmail.gws_gmail_read import gws_gmail_read
 from mirage.commands.builtin.gmail.gws_gmail_reply import gws_gmail_reply
@@ -31,7 +32,6 @@ from mirage.commands.builtin.gmail.ls import ls
 from mirage.commands.builtin.gmail.nl import nl
 from mirage.commands.builtin.gmail.realpath import realpath
 from mirage.commands.builtin.gmail.rg import rg
-from mirage.commands.builtin.gmail.rm import rm
 from mirage.commands.builtin.gmail.stat import stat
 from mirage.commands.builtin.gmail.tail import tail
 from mirage.commands.builtin.gmail.tree import tree
@@ -52,7 +52,6 @@ COMMANDS = [
     nl,
     realpath,
     rg,
-    rm,
     stat,
     tail,
     tree,
@@ -63,5 +62,6 @@ COMMANDS = [
     gws_gmail_forward,
     gws_gmail_triage,
     gws_gmail_read,
+    gws_gmail_delete,
     grep,
 ]

@@ -16,6 +16,7 @@ import type { GitHubAccessor } from '../../accessor/github.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { fetchBlob } from './_client.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 function enoent(path: string): Error {
   const e = new Error(`ENOENT: ${path}`) as Error & { code: string }
@@ -39,7 +40,7 @@ function stripPrefix(path: PathSpec): string {
 }
 
 function indexKey(p: string): string {
-  const trimmed = p.replace(/^\/+|\/+$/g, '')
+  const trimmed = stripSlash(p)
   return trimmed === '' ? '/' : `/${trimmed}`
 }
 

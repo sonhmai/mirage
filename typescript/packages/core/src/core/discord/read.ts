@@ -19,6 +19,7 @@ import { downloadFile } from './files.ts'
 import { getHistoryJsonl } from './history.ts'
 import { listMembers } from './members.ts'
 import { readdir as discordReaddir } from './readdir.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 const encoder = new TextEncoder()
 
@@ -38,7 +39,7 @@ export async function read(
   if (prefix !== '' && raw.startsWith(prefix)) {
     raw = raw.slice(prefix.length) || '/'
   }
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(raw)
   const parts = key.split('/')
 
   // <guild>/channels/<ch>/<date>/chat.jsonl

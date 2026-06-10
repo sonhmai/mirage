@@ -14,6 +14,7 @@
 
 import { MountMode } from '../types.ts'
 import type { Mount } from './mount/mount.ts'
+import { rstripSlash } from '../util/slash.ts'
 
 const HELP_HINT =
   'Tip: run `man` to list every available command grouped by resource, `man <cmd>` for a single entry, and `<cmd> --help` for flag details.'
@@ -24,7 +25,7 @@ export function buildFilePrompt(mounts: readonly Mount[]): string {
     const r = m.resource as { prompt?: string; writePrompt?: string }
     const prompt = r.prompt
     if (prompt === undefined || prompt === '') continue
-    const prefix = m.prefix.replace(/\/+$/, '') || '/'
+    const prefix = rstripSlash(m.prefix) || '/'
     let section = prompt.replace(/\{prefix\}/g, prefix)
     if (m.mode !== MountMode.READ && r.writePrompt !== undefined && r.writePrompt !== '') {
       section += '\n' + r.writePrompt.replace(/\{prefix\}/g, prefix)

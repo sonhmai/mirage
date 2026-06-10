@@ -15,10 +15,11 @@
 import { posixNormpath } from '../../workspace/expand/classify.ts'
 import { AMBIGUOUS_NAMES } from './constants.ts'
 import { type CommandSpec, OperandKind, ParsedArgs } from './types.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 export function resolvePath(cwd: string, path: string): string {
   if (path.startsWith('/')) return posixNormpath(path)
-  return posixNormpath(`${cwd.replace(/\/+$/, '')}/${path}`)
+  return posixNormpath(`${rstripSlash(cwd)}/${path}`)
 }
 
 export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): ParsedArgs {

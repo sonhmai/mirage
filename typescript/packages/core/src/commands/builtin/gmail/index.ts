@@ -18,6 +18,7 @@ import { GMAIL_CAT } from './cat.ts'
 import { GMAIL_DIRNAME } from './dirname.ts'
 import { GMAIL_FIND } from './find.ts'
 import { GMAIL_GREP } from './grep.ts'
+import { GMAIL_GWS_DELETE } from './gws_gmail_delete.ts'
 import { GMAIL_GWS_FORWARD } from './gws_gmail_forward.ts'
 import { GMAIL_GWS_READ } from './gws_gmail_read.ts'
 import { GMAIL_GWS_REPLY } from './gws_gmail_reply.ts'
@@ -57,4 +58,5 @@ export const GMAIL_COMMANDS: readonly RegisteredCommand[] = [
   ...GMAIL_GWS_FORWARD,
   ...GMAIL_GWS_TRIAGE,
   ...GMAIL_GWS_READ,
+  ...GMAIL_GWS_DELETE,
 ]

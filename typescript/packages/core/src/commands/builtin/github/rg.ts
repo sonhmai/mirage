@@ -26,6 +26,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { compilePattern, grepLines, grepStream } from '../grep_helper.ts'
 import { rgFolderFiletype, rgFull } from '../rg_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { lstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -167,7 +168,7 @@ async function rgCommand(
     const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : undefined
     let finalResults = results
     if (first.prefix !== '' && flags.filesOnly) {
-      finalResults = finalResults.map((r) => first.prefix + '/' + r.replace(/^\/+/, ''))
+      finalResults = finalResults.map((r) => first.prefix + '/' + lstripSlash(r))
     }
     if (finalResults.length === 0) {
       const io = new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) })
@@ -220,7 +221,7 @@ async function rgCommand(
     const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : undefined
     let finalResults = results
     if (first.prefix !== '' && flags.filesOnly) {
-      finalResults = finalResults.map((r) => first.prefix + '/' + r.replace(/^\/+/, ''))
+      finalResults = finalResults.map((r) => first.prefix + '/' + lstripSlash(r))
     }
     if (finalResults.length === 0) {
       const io = new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) })
@@ -258,7 +259,7 @@ async function rgCommand(
     if (allResults.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
     let finalResults = allResults
     if (first.prefix !== '') {
-      finalResults = finalResults.map((r) => first.prefix + '/' + r.replace(/^\/+/, ''))
+      finalResults = finalResults.map((r) => first.prefix + '/' + lstripSlash(r))
     }
     const out: ByteSource = ENC.encode(finalResults.join('\n'))
     return [out, new IOResult()]

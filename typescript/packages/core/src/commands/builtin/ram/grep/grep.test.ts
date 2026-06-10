@@ -50,7 +50,7 @@ describe('grep', () => {
     const { text } = await runGrep(resource, 'hello', [PathSpec.fromStrPath('/tmp/a.txt')], {
       args_l: true,
     })
-    expect(text).toBe('/tmp/a.txt')
+    expect(text).toBe('/tmp/a.txt\n')
   })
 
   it('no match returns exitCode 1', async () => {
@@ -71,6 +71,16 @@ describe('grep', () => {
     expect(exitCode).toBe(1)
   })
 
+  it('-r on a single file prefixes the filename', async () => {
+    const resource = new RAMResource()
+    resource.store.files.set('/log.txt', ENC.encode('one\nerror here\ntwo\nerror again\n'))
+    const { text } = await runGrep(resource, 'error', [PathSpec.fromStrPath('/log.txt')], {
+      r: true,
+      n: true,
+    })
+    expect(text).toBe('/log.txt:2:error here\n/log.txt:4:error again\n')
+  })
+
   it('-i ignore case matches', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/a.txt', ENC.encode('Hello World\nhello world\nHELLO'))
@@ -78,7 +88,7 @@ describe('grep', () => {
       i: true,
       args_l: true,
     })
-    expect(text).toBe('/tmp/a.txt')
+    expect(text).toBe('/tmp/a.txt\n')
   })
 
   it('-v invert match', async () => {
@@ -88,7 +98,7 @@ describe('grep', () => {
       v: true,
       args_l: true,
     })
-    expect(text).toBe('/tmp/a.txt')
+    expect(text).toBe('/tmp/a.txt\n')
   })
 
   it('-c count only', async () => {

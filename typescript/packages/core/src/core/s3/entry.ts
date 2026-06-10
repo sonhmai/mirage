@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IndexEntry, type IndexEntryInit, ResourceType } from '../../cache/index/config.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 export interface S3IndexEntryInit extends IndexEntryInit {
   etag?: string
@@ -35,7 +36,7 @@ export class S3IndexEntry extends IndexEntry {
 
   static fromObject(obj: S3Object): S3IndexEntry {
     const key = obj.Key ?? ''
-    const name = key.replace(/\/+$/, '').split('/').pop() ?? ''
+    const name = rstripSlash(key).split('/').pop() ?? ''
     const modified = obj.LastModified
     const remoteTime =
       modified instanceof Date
@@ -55,7 +56,7 @@ export class S3IndexEntry extends IndexEntry {
   }
 
   static fromPrefix(prefix: string): S3IndexEntry {
-    const name = prefix.replace(/\/+$/, '').split('/').pop() ?? ''
+    const name = rstripSlash(prefix).split('/').pop() ?? ''
     return new S3IndexEntry({
       id: prefix,
       name,

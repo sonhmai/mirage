@@ -78,7 +78,6 @@ export class RAMIndexCacheStore extends IndexCacheStore {
         this.entries.set(fullPath, stored)
         childKeys.push(fullPath)
       }
-      childKeys.sort()
       this.children.set(resourcePath, childKeys)
       this.expiry.set(resourcePath, exp)
       return Promise.resolve()

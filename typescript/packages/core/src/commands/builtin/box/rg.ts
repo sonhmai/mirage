@@ -22,6 +22,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { compilePattern, grepLines, type GrepLinesOptions } from '../grep_helper.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import { rstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -43,7 +44,7 @@ async function collectFiles(
     if (!isFolder) {
       files.push(child)
     } else {
-      const trimmed = child.replace(/\/+$/, '')
+      const trimmed = rstripSlash(child)
       const childSpec = new PathSpec({
         original: trimmed,
         directory: trimmed,

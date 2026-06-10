@@ -15,10 +15,11 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { norm } from './utils.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 export function du(accessor: RAMAccessor, path: PathSpec): Promise<number> {
   const p = norm(path.stripPrefix)
-  const prefix = p.replace(/\/+$/, '') + '/'
+  const prefix = rstripSlash(p) + '/'
   let total = 0
   for (const [key, data] of accessor.store.files) {
     if (key === p || key.startsWith(prefix)) total += data.byteLength
@@ -31,7 +32,7 @@ export function duAll(
   path: PathSpec,
 ): Promise<[entries: [string, number][], total: number]> {
   const p = norm(path.stripPrefix)
-  const prefix = p.replace(/\/+$/, '') + '/'
+  const prefix = rstripSlash(p) + '/'
   const entries: [string, number][] = []
   let total = 0
   const sortedKeys = [...accessor.store.files.keys()].sort()

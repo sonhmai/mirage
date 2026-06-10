@@ -26,6 +26,7 @@ import { GSLIDES_LS } from './ls.ts'
 import { GSLIDES_NL } from './nl.ts'
 import { GSLIDES_REALPATH } from './realpath.ts'
 import { GSLIDES_RG } from './rg.ts'
+import { GSLIDES_RM } from './rm.ts'
 import { GSLIDES_STAT } from './stat.ts'
 import { GSLIDES_TAIL } from './tail.ts'
 import { GSLIDES_TREE } from './tree.ts'
@@ -45,6 +46,7 @@ export const GSLIDES_COMMANDS: readonly RegisteredCommand[] = [
   ...GSLIDES_NL,
   ...GSLIDES_REALPATH,
   ...GSLIDES_RG,
+  ...GSLIDES_RM,
   ...GSLIDES_STAT,
   ...GSLIDES_TAIL,
   ...GSLIDES_TREE,

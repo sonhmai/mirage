@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Workspace as CoreWorkspace } from '@struktoai/mirage-core'
+import { lstripSlash, stripSlash } from '@struktoai/mirage-core'
 
 export type WorkspaceStateDict = Awaited<ReturnType<CoreWorkspace['toStateDict']>>
 
@@ -35,12 +36,12 @@ export interface TreeInputs {
 }
 
 function stripSlashes(p: string): string {
-  return p.replace(/^\/+/, '').replace(/\/+$/, '')
+  return stripSlash(p)
 }
 
 function treePath(prefix: string, rel: string): string {
   const p = stripSlashes(prefix)
-  const r = rel.replace(/^\/+/, '')
+  const r = lstripSlash(rel)
   return p === '' ? r : `${p}/${r}`
 }
 

@@ -14,6 +14,7 @@
 
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { Session } from '../workspace/session/session.ts'
+import { stripSlash } from '../util/slash.ts'
 
 const sessionStorage = createAsyncContext<Session>()
 
@@ -39,7 +40,7 @@ export class MountNotAllowedError extends Error {
 export function assertMountAllowed(mountPrefix: string): void {
   const sess = getCurrentSession()
   if (sess?.allowedMounts == null) return
-  const stripped = mountPrefix.replace(/^\/+|\/+$/g, '')
+  const stripped = stripSlash(mountPrefix)
   const norm = stripped === '' ? '/' : '/' + stripped
   // A user-defined root mount (`{"/": resource}`) currently bypasses the
   // allowlist entirely. This is an undocumented escape hatch: a session

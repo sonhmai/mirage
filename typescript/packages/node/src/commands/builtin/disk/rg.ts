@@ -16,7 +16,6 @@ import { ResourceName, command, rgGeneric, specOf } from '@struktoai/mirage-core
 import { readdir as diskReaddir } from '../../../core/disk/readdir.ts'
 import { stat as diskStat } from '../../../core/disk/stat.ts'
 import { stream as diskStream } from '../../../core/disk/stream.ts'
-import { find as diskFind } from '../../../core/disk/find.ts'
 import type { DiskAccessor } from '../../../accessor/disk.ts'
 
 export const DISK_RG = command({
@@ -31,6 +30,5 @@ export const DISK_RG = command({
       (p) => diskStat(accessor, p),
       (p) => diskReaddir(accessor, p),
       (p) => diskStream(accessor, p),
-      (root, options) => diskFind(accessor, root, options),
     ),
 })

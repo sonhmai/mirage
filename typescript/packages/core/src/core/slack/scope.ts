@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '../../types.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export type SlackTarget = 'date' | 'messages' | 'files'
 
@@ -29,7 +30,7 @@ export interface SlackScope {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 function stripSlashes(s: string): string {
-  return s.replace(/^\/+|\/+$/g, '')
+  return stripSlash(s)
 }
 
 function splitDirname(dirname: string): [string, string | undefined] {

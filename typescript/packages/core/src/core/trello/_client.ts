@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rstripSlash } from '../../util/slash.ts'
+
 export class TrelloApiError extends Error {
   constructor(
     public readonly endpoint: string,
@@ -47,7 +49,7 @@ export class HttpTrelloTransport implements TrelloTransport {
   constructor(opts: HttpTrelloTransportOptions) {
     this.apiKey = opts.apiKey
     this.apiToken = opts.apiToken
-    this.baseUrl = (opts.baseUrl ?? 'https://api.trello.com/1').replace(/\/+$/, '')
+    this.baseUrl = rstripSlash(opts.baseUrl ?? 'https://api.trello.com/1')
   }
 
   async call(

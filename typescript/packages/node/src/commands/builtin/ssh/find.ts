@@ -21,6 +21,7 @@ import {
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
+  rstripSlash,
 } from '@struktoai/mirage-core'
 import { find as sshFind } from '../../../core/ssh/find.ts'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
@@ -117,12 +118,12 @@ async function findCommand(
     } catch {
       continue
     }
-    const rootKey = root.stripPrefix.replace(/\/+$/, '') || '/'
+    const rootKey = rstripSlash(root.stripPrefix) || '/'
     for (const key of keys) {
       const displayPath =
         root.original === '/'
           ? key
-          : root.original.replace(/\/+$/, '') + key.slice(rootKey === '/' ? 0 : rootKey.length)
+          : rstripSlash(root.original) + key.slice(rootKey === '/' ? 0 : rootKey.length)
       matches.push(displayPath)
     }
   }

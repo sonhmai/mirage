@@ -30,6 +30,7 @@ import {
   projectFilename,
   teamDirname,
 } from './pathing.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export interface LinearReaddirFilter {
   teamIds?: readonly string[]
@@ -87,7 +88,7 @@ export async function readdir(
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
   }
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   const virtualKey = makeVirtualKey(prefix, key)
 
   if (key === '') {

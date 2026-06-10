@@ -16,6 +16,7 @@ import { readBytes } from '../../../core/trello/read.ts'
 import type { TrelloTransport } from '../../../core/trello/_client.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import type { CommandOpts } from '../../config.ts'
+import { stripSlash } from '../../../util/slash.ts'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
@@ -32,7 +33,7 @@ export async function resolveTextInput(
 ): Promise<string> {
   if (opts.inlineText !== null && opts.inlineText !== '') return opts.inlineText
   if (opts.filePath !== null && opts.filePath !== '') {
-    const stripped = opts.filePath.replace(/^\/+|\/+$/g, '')
+    const stripped = stripSlash(opts.filePath)
     const path = stripped !== '' ? `/${stripped}` : '/'
     const data = await readBytes(transport, path)
     return DEC.decode(data)

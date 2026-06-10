@@ -15,6 +15,7 @@
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { rstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -48,7 +49,7 @@ export async function mktempGeneric(
   } else {
     name = `${template}.${randomSuffix(8)}`
   }
-  const path = `${parent.replace(/\/+$/, '')}/${name}`
+  const path = `${rstripSlash(parent)}/${name}`
   await mkdir(makePathSpec(parent), true)
   if (opts.flags.d === true) {
     await mkdir(makePathSpec(path))

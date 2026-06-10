@@ -19,6 +19,7 @@ import { listAnnotations } from './annotations.ts'
 import { downloadArtifact } from './artifacts.ts'
 import { downloadJobLog, getJob, getRun, listJobsForRun } from './runs.ts'
 import { getWorkflow } from './workflows.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -48,7 +49,7 @@ export async function read(
 ): Promise<Uint8Array> {
   const prefix = path.prefix
   const stripped = stripPrefix(path)
-  const key = stripped.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(stripped)
   const parts = key === '' ? [] : key.split('/')
   const virtualKey = `${prefix}/${key}`
 

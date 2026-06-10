@@ -18,6 +18,7 @@ import { utcDateFolder } from '../utils/dates.ts'
 import type { ExecutionRecord } from '../workspace/types.ts'
 import { LogEntry } from './log_entry.ts'
 import type { OpRecord } from './record.ts'
+import { rstripSlash } from '../util/slash.ts'
 
 export class Observer {
   readonly resource: Resource
@@ -34,7 +35,7 @@ export class Observer {
   }
 
   isObserverPath(path: string): boolean {
-    const norm = this.prefix.replace(/\/+$/, '')
+    const norm = rstripSlash(this.prefix)
     return path === norm || path.startsWith(norm + '/')
   }
 

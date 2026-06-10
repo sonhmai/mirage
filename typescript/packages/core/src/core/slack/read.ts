@@ -17,6 +17,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { getHistoryJsonl } from './history.ts'
 import { getUserProfile } from './users.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 const encoder = new TextEncoder()
 
@@ -36,7 +37,7 @@ export async function read(
   if (prefix !== '' && raw.startsWith(prefix)) {
     raw = raw.slice(prefix.length) || '/'
   }
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(raw)
   const parts = key.split('/')
   const part0 = parts[0] ?? ''
   const part1 = parts[1] ?? ''

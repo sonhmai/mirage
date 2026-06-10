@@ -14,7 +14,7 @@
 
 import { stream as ramStream } from '../../../../core/ram/stream.ts'
 import { stat as ramStat } from '../../../../core/ram/stat.ts'
-import { find as ramFind } from '../../../../core/ram/find.ts'
+import { readdir as ramReaddir } from '../../../../core/ram/readdir.ts'
 import type { RAMAccessor } from '../../../../accessor/ram.ts'
 import { ResourceName } from '../../../../types.ts'
 import { command } from '../../../config.ts'
@@ -33,7 +33,7 @@ export const RAM_GREP = command({
       texts,
       opts,
       (p) => ramStat(accessor, p),
-      (root, options) => ramFind(accessor, root, options),
+      (p) => ramReaddir(accessor, p),
       (p) => ramStream(accessor, p),
     ),
   aggregate: prefixAggregate,

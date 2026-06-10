@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.cp import cp as generic_cp
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.copy import copy
@@ -22,14 +25,6 @@ from mirage.core.disk.glob import resolve_glob
 from mirage.core.disk.stat import stat as stat_impl
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _exists(accessor: DiskAccessor, path: PathSpec | str) -> bool:
-    try:
-        await stat_impl(accessor, path)
-        return True
-    except (FileNotFoundError, ValueError):
-        return False
 
 
 @command("cp", resource="disk", spec=SPECS["cp"], write=True)
@@ -50,25 +45,12 @@ async def cp(
     if accessor.root is None or len(paths) < 2:
         raise ValueError("cp: requires src and dst")
     paths = await resolve_glob(accessor, paths, index)
-    recursive = r or R or a
-    verbose_lines: list[str] = []
-    if recursive:
-        src_base = paths[0].strip_prefix.rstrip("/")
-        entries = await find_impl(accessor, paths[0], type="file")
-        for entry in entries:
-            rel = entry[len(src_base):]
-            dst = paths[1].strip_prefix.rstrip("/") + rel
-            if n and await _exists(accessor, dst):
-                continue
-            await copy(accessor, entry, dst)
-            if v:
-                verbose_lines.append(f"{entry} -> {dst}")
-        output = "\n".join(verbose_lines) + "\n" if verbose_lines else None
-        return output.encode() if output else None, IOResult()
-    if n and await _exists(accessor, paths[1]):
-        return None, IOResult()
-    await copy(accessor, paths[0], paths[1])
-    output = None
-    if v:
-        output = f"{paths[0].original} -> {paths[1].original}\n".encode()
-    return output, IOResult(writes={paths[1].original: b""})
+    return await generic_cp(paths,
+                            copy=partial(copy, accessor),
+                            find=partial(find_impl, accessor),
+                            find_type="file",
+                            stat=partial(stat_impl, accessor),
+                            recursive=r or R or a,
+                            n=n,
+                            v=v,
+                            index=index)

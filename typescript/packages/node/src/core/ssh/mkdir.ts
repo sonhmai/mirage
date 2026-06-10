@@ -16,6 +16,7 @@ import type { PathSpec } from '@struktoai/mirage-core'
 import type { SFTPWrapper, Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { enoent, isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
+import { stripSlash } from '@struktoai/mirage-core'
 
 async function statRemote(sftp: SFTPWrapper, remote: string): Promise<Stats | null> {
   return new Promise<Stats | null>((resolveFn) => {
@@ -57,7 +58,7 @@ export async function mkdir(accessor: SSHAccessor, p: PathSpec, recursive: boole
     }
     return
   }
-  const cleaned = virtual.replace(/^\/+|\/+$/g, '')
+  const cleaned = stripSlash(virtual)
   if (cleaned.length === 0) return
   const parts = cleaned.split('/')
   let cur = ''

@@ -23,6 +23,7 @@ import {
   stripKeyPrefix,
   withClient,
 } from './_client.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 export async function find(
   accessor: S3Accessor,
@@ -78,7 +79,7 @@ export async function find(
         if (options.iname !== null && options.iname !== undefined) {
           if (!fnmatch(entryName.toLowerCase(), options.iname.toLowerCase())) continue
         }
-        const fullPath = ('/' + stripKeyPrefix(key, accessor.config)).replace(/\/+$/, '') || '/'
+        const fullPath = rstripSlash('/' + stripKeyPrefix(key, accessor.config)) || '/'
         if (options.pathPattern !== null && options.pathPattern !== undefined) {
           if (!fnmatch(fullPath, options.pathPattern)) continue
         }

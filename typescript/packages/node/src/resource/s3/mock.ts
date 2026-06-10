@@ -24,6 +24,7 @@ import {
   CopyObjectCommand,
 } from '@aws-sdk/client-s3'
 import { createHash } from 'node:crypto'
+import { lstripSlash } from '@struktoai/mirage-core'
 
 const LAST_MODIFIED = new Date('2026-03-31T00:00:00Z')
 
@@ -214,7 +215,7 @@ export function installS3Mock(store: S3MockStore = new S3MockStore()): S3Mock {
   mock
     .on(CopyObjectCommand)
     .callsFake((input: { Bucket: string; Key: string; CopySource: string }) => {
-      const source = input.CopySource.replace(/^\/+/, '')
+      const source = lstripSlash(input.CopySource)
       const idx = source.indexOf('/')
       const srcBucket = idx > 0 ? source.slice(0, idx) : input.Bucket
       const srcKey = idx > 0 ? source.slice(idx + 1) : source

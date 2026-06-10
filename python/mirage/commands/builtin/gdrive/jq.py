@@ -23,7 +23,7 @@ from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
 from mirage.core.gdrive.read import read as read_bytes
 from mirage.core.gdrive.stat import stat as _stat_async
-from mirage.core.gdrive.stream import read_stream as _stream
+from mirage.core.gdrive.stream import stream as _stream
 from mirage.core.jq import is_jsonl_path, is_streamable_jsonl_expr
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision import Precision, ProvisionResult

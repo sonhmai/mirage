@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../types.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export type VercelLevel =
   | 'root'
@@ -49,7 +50,7 @@ export const DEPLOYMENT_FILES: readonly string[] = Object.freeze(['info.json', '
 
 export function detectScope(path: PathSpec | string): VercelScope {
   const raw = path instanceof PathSpec ? path.stripPrefix : path
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(raw)
   const empty: VercelScope = {
     level: 'root',
     teamId: null,

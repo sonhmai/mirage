@@ -17,6 +17,7 @@ import { PathSpec } from '../../../types.ts'
 import { gzip, gunzip } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readTar, writeTar, type TarEntry } from '../tar_helper.ts'
+import { lstripSlash, rstripSlash, stripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -90,7 +91,7 @@ export async function tarGeneric(
     const entries: TarEntry[] = []
     for (const p of filtered) {
       const data = await materialize(stream(p))
-      const name = p.original.replace(/^\/+/, '')
+      const name = lstripSlash(p.original)
       entries.push({ name, data, isFile: true })
       if (verbose) verboseLines.push(name)
     }
@@ -124,8 +125,8 @@ export async function tarGeneric(
       const nameParts = entry.name.split('/')
       const stripped = stripN > 0 ? nameParts.slice(stripN) : nameParts
       if (stripped.length === 0) continue
-      const outPath = destPath.replace(/\/+$/, '') + '/' + stripped.join('/')
-      const parts = outPath.replace(/^\/+|\/+$/g, '').split('/')
+      const outPath = rstripSlash(destPath) + '/' + stripped.join('/')
+      const parts = stripSlash(outPath).split('/')
       for (let pi = 1; pi < parts.length; pi++) {
         const d = '/' + parts.slice(0, pi).join('/')
         try {

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
-import { IndexEntry, PathSpec as PathSpecCtor } from '@struktoai/mirage-core'
+import { IndexEntry, PathSpec as PathSpecCtor, stripSlash } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { fetchHeaders, listMessageUids } from './_client.ts'
 import { listFolders } from './folders.ts'
@@ -60,7 +60,7 @@ export async function readdir(
   const raw = path.pattern !== null ? path.directory : path.original
   let p = raw
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
   const parts = key === '' ? [] : key.split('/')
   const depth = parts.length

@@ -1150,8 +1150,34 @@ c
 olleh
 === base64_stdin_d ===
 hello
+=== cp_multi_into_dir ===
+
+=== cp_multi_verify_a ===
+hello
+world
+foo
+bar
+baz
+=== cp_multi_verify_b ===
+1
+2
+3
+=== mv_multi_into_dir ===
+
+=== mv_multi_verify_a ===
+hello
+world
+foo
+bar
+baz
+=== mv_multi_verify_b ===
+1
+2
+3
 === lazy_exit_grep_match ===
 exit=0
 hello
 === lazy_exit_grep_no_match ===
+exit=1
+=== cp_reject_multi_nondir ===
 exit=1

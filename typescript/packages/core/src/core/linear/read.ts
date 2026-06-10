@@ -38,6 +38,7 @@ import {
   type NormalizedProjectIssue,
 } from './normalize.ts'
 import { splitSuffixId } from './pathing.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 function enoent(path: string): Error {
   const err = new Error(`ENOENT: ${path}`) as Error & { code: string }
@@ -54,7 +55,7 @@ export async function readBytes(
   path: string,
   filter: ReadFilter = {},
 ): Promise<Uint8Array> {
-  const key = path.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(path)
   const parts = key.split('/')
 
   if (parts.length === 3 && parts[0] === 'teams' && parts[2] === 'team.json') {

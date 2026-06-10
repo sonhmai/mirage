@@ -17,6 +17,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { getExtension } from '../../commands/resolve.ts'
 import { readdir as coreReaddir } from './readdir.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 function enoent(path: string): Error {
   const e = new Error(`ENOENT: ${path}`) as Error & { code: string }
@@ -34,7 +35,7 @@ function stripPrefix(path: PathSpec): string {
 }
 
 function indexKey(p: string): string {
-  const trimmed = p.replace(/^\/+|\/+$/g, '')
+  const trimmed = stripSlash(p)
   return trimmed === '' ? '/' : `/${trimmed}`
 }
 
@@ -52,7 +53,7 @@ export async function stat(
 ): Promise<FileStat> {
   const prefix = path.prefix
   const p = stripPrefix(path)
-  const trimmed = p.replace(/^\/+|\/+$/g, '')
+  const trimmed = stripSlash(p)
   if (trimmed === '') {
     return new FileStat({ name: '/', type: FileType.DIRECTORY })
   }

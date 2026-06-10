@@ -16,36 +16,36 @@ import {
   IOResult,
   ResourceName,
   command,
+  mvGeneric,
   specOf,
   type CommandFnResult,
   type CommandOpts,
   type PathSpec,
 } from '@struktoai/mirage-core'
-import { rename as opfsRename } from '../../../core/opfs/rename.ts'
+import { rename as coreRename } from '../../../core/opfs/rename.ts'
+import { stat as coreStat } from '../../../core/opfs/stat.ts'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 
-async function mvCommand(
+function mvCommand(
   accessor: OPFSAccessor,
   paths: PathSpec[],
   _texts: string[],
-  _opts: CommandOpts,
+  opts: CommandOpts,
 ): Promise<CommandFnResult> {
   if (paths.length < 2) {
-    return [
+    return Promise.resolve([
       null,
-      new IOResult({
-        exitCode: 1,
-        stderr: new TextEncoder().encode('mv: missing operand\n'),
-      }),
-    ]
+      new IOResult({ exitCode: 1, stderr: new TextEncoder().encode('mv: missing operand\n') }),
+    ])
   }
-  const sources = paths.slice(0, -1)
-  const dst = paths[paths.length - 1]
-  if (dst === undefined) return [null, new IOResult()]
-  for (const src of sources) {
-    await opfsRename(accessor, src, dst)
-  }
-  return [null, new IOResult()]
+  return mvGeneric(
+    paths,
+    (src: PathSpec, target: PathSpec) => coreRename(accessor, src, target),
+    (p: PathSpec) => coreStat(accessor, p),
+    opts.flags.n === true,
+    opts.flags.v === true,
+    opts.index ?? undefined,
+  )
 }
 
 export const OPFS_MV = command({

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType, type OpRecord, type Workspace } from '@struktoai/mirage-core'
+import { FileType, type OpRecord, type Workspace, rstripSlash } from '@struktoai/mirage-core'
 import { isMacosMetadata } from './platform/macos.ts'
 
 const ENV_AGENT_ID = 'MIRAGE_AGENT_ID'
@@ -154,17 +154,17 @@ export class MirageFS {
   }
 
   private isVirtualDir(path: string): boolean {
-    const bare = path.replace(/\/+$/, '')
+    const bare = rstripSlash(path)
     const normalized = bare + '/'
     for (const p of this.prefixes) {
-      const pBare = p.replace(/\/+$/, '')
+      const pBare = rstripSlash(p)
       if (p.startsWith(normalized) || pBare === bare) return true
     }
     return false
   }
 
   private virtualChildren(path: string): string[] {
-    const normalized = path === '/' ? '/' : path.replace(/\/+$/, '') + '/'
+    const normalized = path === '/' ? '/' : rstripSlash(path) + '/'
     const children = new Set<string>()
     for (const p of this.prefixes) {
       if (p.startsWith(normalized) && p !== normalized) {
@@ -312,7 +312,7 @@ export class MirageFS {
       try {
         const entries = await this.ws.fs.readdir(path)
         for (const e of entries) {
-          const part = e.replace(/\/+$/, '').split('/').pop() ?? ''
+          const part = rstripSlash(e).split('/').pop() ?? ''
           if (part !== '' && !isMacosMetadata(part)) names.add(part)
         }
       } catch {

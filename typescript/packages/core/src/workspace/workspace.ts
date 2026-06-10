@@ -80,6 +80,7 @@ import { SessionManager } from './session/manager.ts'
 import type { Session } from './session/session.ts'
 import { ExecutionHistory } from './history.ts'
 import { ExecutionNode, ExecutionRecord } from './types.ts'
+import { stripSlash } from '../util/slash.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 
@@ -401,7 +402,7 @@ export class Workspace {
     let allowed = options.allowedMounts ?? null
     if (allowed !== null) {
       const normalized = new Set<string>()
-      for (const m of allowed) normalized.add('/' + m.replace(/^\/+|\/+$/g, ''))
+      for (const m of allowed) normalized.add('/' + stripSlash(m))
       for (const p of this.infrastructureMountPrefixes()) normalized.add(p)
       allowed = normalized
     }
@@ -419,8 +420,8 @@ export class Workspace {
   private infrastructureMountPrefixes(): Set<string> {
     const prefixes = new Set<string>(['/dev'])
     const def = this.registry.defaultMount
-    if (def !== null) prefixes.add('/' + def.prefix.replace(/^\/+|\/+$/g, ''))
-    prefixes.add('/' + this.observer.prefix.replace(/^\/+|\/+$/g, ''))
+    if (def !== null) prefixes.add('/' + stripSlash(def.prefix))
+    prefixes.add('/' + stripSlash(this.observer.prefix))
     return prefixes
   }
 
@@ -483,7 +484,7 @@ export class Workspace {
    */
   async unmount(prefix: string): Promise<void> {
     if (this.closed) throw new Error('Workspace is closed')
-    const stripped = prefix.replace(/^\/+|\/+$/g, '')
+    const stripped = stripSlash(prefix)
     const norm = stripped ? `/${stripped}/` : '/'
     if (norm === '/' || norm === '/_default/') {
       throw new Error(`cannot unmount cache root: ${prefix}`)
@@ -491,7 +492,7 @@ export class Workspace {
     if (norm === '/dev/') {
       throw new Error(`cannot unmount reserved prefix: /dev/`)
     }
-    const observerStripped = this.observer.prefix.replace(/^\/+|\/+$/g, '')
+    const observerStripped = stripSlash(this.observer.prefix)
     const observerNorm = observerStripped ? `/${observerStripped}/` : '/'
     if (norm === observerNorm) {
       throw new Error(`cannot unmount observer prefix: ${this.observer.prefix}`)
@@ -1045,6 +1046,6 @@ export class Workspace {
 }
 
 function normalizePrefix(prefix: string): string {
-  const s = prefix.replace(/^\/+|\/+$/g, '')
+  const s = stripSlash(prefix)
   return s === '' ? '/' : `/${s}/`
 }

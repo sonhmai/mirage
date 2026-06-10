@@ -18,6 +18,7 @@ import { PathSpec } from '../../../types.ts'
 import { handlePython } from '../../../workspace/executor/python/handle.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { rstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -36,7 +37,7 @@ function normalizePosix(p: string): string {
 }
 
 function resolveScript(name: string, cwd: string): PathSpec {
-  const joined = name.startsWith('/') ? name : `${cwd.replace(/\/+$/, '')}/${name}`
+  const joined = name.startsWith('/') ? name : `${rstripSlash(cwd)}/${name}`
   const path = normalizePosix(joined)
   const lastSlash = path.lastIndexOf('/')
   const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'

@@ -86,6 +86,8 @@ export { PostgresResource, type PostgresResourceOptions } from './resource/postg
 export { PostgresStore } from './resource/postgres/store.ts'
 export { MongoDBResource, type MongoDBResourceOptions } from './resource/mongodb/mongodb.ts'
 export { MongoDBStore } from './resource/mongodb/store.ts'
+export { LanceDBResource, type LanceDBResourceOptions } from './resource/lancedb/lancedb.ts'
+export { LanceDBStore } from './resource/lancedb/store.ts'
 export {
   SSCholarPaperResource,
   type SSCholarPaperResourceOptions,

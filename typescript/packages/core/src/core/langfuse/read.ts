@@ -16,6 +16,7 @@ import type { LangfuseAccessor } from '../../accessor/langfuse.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { fetchDatasetItems, fetchDatasetRuns, fetchPrompt, fetchTrace } from './_client.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -45,7 +46,7 @@ export async function read(
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
   }
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   if (key === '') throw enoent(p)
   const parts = key.split('/')
   for (const part of parts) {

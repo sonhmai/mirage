@@ -45,3 +45,8 @@ jobs:
         run: |
           ./python/.venv/bin/python integ/s3.py > /tmp/s3.out
           diff integ/truth_s3.txt /tmp/s3.out
+
+      - name: Run shared command suite on s3 (moto) and diff against shared truth
+        run: |
+          ./python/.venv/bin/python integ/s3_cases.py > /tmp/s3_cases.out
+          diff integ/truth.txt /tmp/s3_cases.out

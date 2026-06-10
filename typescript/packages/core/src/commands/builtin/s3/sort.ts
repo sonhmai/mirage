@@ -14,16 +14,11 @@
 
 import type { S3Accessor } from '../../../accessor/s3.ts'
 import { resolveGlob } from '../../../core/s3/glob.ts'
-import { read as s3Read } from '../../../core/s3/read.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { stream as s3Stream } from '../../../core/s3/stream.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { parseKeyOptions, sortAndDedupe, splitSortLines } from '../sort_helper.ts'
-import { readStdinAsync } from '../utils/stream.ts'
-
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+import { sortGeneric } from '../generic/sort.ts'
 
 async function sortCommand(
   accessor: S3Accessor,
@@ -31,27 +26,9 @@ async function sortCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const keyOpts = parseKeyOptions(opts.flags)
-  const reverse = opts.flags.r === true
-  const unique = opts.flags.u === true
-  let allLines: string[] = []
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    for (const p of resolved) {
-      const data = DEC.decode(await s3Read(accessor, p, opts.index ?? undefined))
-      allLines = allLines.concat(splitSortLines(data))
-    }
-  } else {
-    const raw = await readStdinAsync(opts.stdin)
-    if (raw === null) {
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('sort: missing operand\n') })]
-    }
-    allLines = splitSortLines(DEC.decode(raw))
-  }
-  const sorted = sortAndDedupe(allLines, keyOpts, reverse, unique)
-  const output = sorted.join('\n')
-  const out: ByteSource = output === '' ? new Uint8Array(0) : ENC.encode(output + '\n')
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return sortGeneric(resolved, opts, (p) => s3Stream(accessor, p))
 }
 
 export const S3_SORT = command({

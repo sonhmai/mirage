@@ -19,6 +19,7 @@ import type { PathSpec } from '../../types.ts'
 import { globToModifiedRange } from '../google/date_glob.ts'
 import { listAllFiles } from '../google/drive.ts'
 import { makeFilename } from '../../resource/gsheets/sheet_entry.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 const MIME = 'application/vnd.google-apps.spreadsheet'
 
@@ -32,7 +33,7 @@ export async function readdir(
   const raw = path.pattern ? path.directory : path.original
   let p = raw
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
 
   if (key === '') return [`${prefix}/owned`, `${prefix}/shared`]

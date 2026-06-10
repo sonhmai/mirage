@@ -16,6 +16,7 @@ import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { readdir as coreReaddir } from './readdir.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 const VIRTUAL_DIRS: ReadonlySet<string> = new Set(['', 'channels', 'dms', 'users'])
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -83,7 +84,7 @@ export async function stat(
   if (prefix !== '' && raw.startsWith(prefix)) {
     raw = raw.slice(prefix.length) || '/'
   }
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(raw)
 
   if (VIRTUAL_DIRS.has(key)) {
     const name = key !== '' ? key : '/'

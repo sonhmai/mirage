@@ -24,6 +24,7 @@ export interface GCSConfig {
   endpoint?: string
   region?: string
   timeoutMs?: number
+  forcePathStyle?: boolean
 }
 
 export interface GCSConfigRedacted {
@@ -52,6 +53,7 @@ export function gcsToS3Config(config: GCSConfig): S3Config {
     accessKeyId: config.accessKeyId,
     secretAccessKey: config.secretAccessKey,
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
   }
 }
 

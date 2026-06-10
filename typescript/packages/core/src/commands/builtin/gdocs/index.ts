@@ -27,6 +27,7 @@ import { GDOCS_LS } from './ls.ts'
 import { GDOCS_NL } from './nl.ts'
 import { GDOCS_REALPATH } from './realpath.ts'
 import { GDOCS_RG } from './rg.ts'
+import { GDOCS_RM } from './rm.ts'
 import { GDOCS_STAT } from './stat.ts'
 import { GDOCS_TAIL } from './tail.ts'
 import { GDOCS_TREE } from './tree.ts'
@@ -47,6 +48,7 @@ export const GDOCS_COMMANDS: readonly RegisteredCommand[] = [
   ...GDOCS_NL,
   ...GDOCS_REALPATH,
   ...GDOCS_RG,
+  ...GDOCS_RM,
   ...GDOCS_STAT,
   ...GDOCS_TAIL,
   ...GDOCS_TREE,

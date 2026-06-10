@@ -18,6 +18,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { fetchDirTree } from './_client.ts'
 import { indexEntryForChild } from './entry.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 function enoent(path: string): Error {
   const e = new Error(`ENOENT: ${path}`) as Error & { code: string }
@@ -35,7 +36,7 @@ function stripPrefix(path: PathSpec): string {
 }
 
 function normalizeKey(p: string): string {
-  const trimmed = p.replace(/^\/+|\/+$/g, '')
+  const trimmed = stripSlash(p)
   return trimmed === '' ? '/' : `/${trimmed}`
 }
 
@@ -96,8 +97,7 @@ async function resolveDirSha(
   if (result.entry !== undefined && result.entry !== null) {
     return result.entry.id
   }
-  const parts = key
-    .replace(/^\/+|\/+$/g, '')
+  const parts = stripSlash(key)
     .split('/')
     .filter((p) => p !== '')
   let currentSha = accessor.ref

@@ -22,6 +22,7 @@ import { PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { lstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -154,7 +155,7 @@ async function* awkStream(
 
 function stripMount(virtualPath: string, prefix: string): string {
   if (prefix !== '' && virtualPath.startsWith(prefix + '/')) {
-    return '/' + virtualPath.slice(prefix.length).replace(/^\/+/, '')
+    return '/' + lstripSlash(virtualPath.slice(prefix.length))
   }
   return virtualPath
 }

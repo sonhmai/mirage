@@ -211,6 +211,26 @@ async def test_grep_recursive_finds_files_in_subdirs():
 
 
 @pytest.mark.asyncio
+async def test_grep_recursive_single_file_prefixes_filename():
+    readdir, stat, rb, rs = _make_backend({
+        "/log.txt":
+        b"one\nerror here\ntwo\nerror again\n",
+    })
+    output, _ = await grep(
+        [_spec("/log.txt")],
+        pattern="error",
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+        recursive=True,
+        line_numbers=True,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "/log.txt:2:error here\n/log.txt:4:error again\n"
+
+
+@pytest.mark.asyncio
 async def test_grep_files_only_lists_matching_files():
     readdir, stat, rb, rs = _make_backend({
         "/dir/a.txt": b"apple\n",

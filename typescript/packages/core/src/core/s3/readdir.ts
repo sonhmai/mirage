@@ -17,6 +17,7 @@ import type { PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { createS3Client, loadS3Module, s3Prefix } from './_client.ts'
 import { S3IndexEntry } from './entry.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 export async function readdir(
   accessor: S3Accessor,
@@ -33,9 +34,9 @@ export async function readdir(
 
   // Fast path: the index cache may already have this directory populated
   // from a previous readdir. Mirror Python's mirage/core/s3/readdir.py.
-  const virtualKey = rawPath === '/' ? '/' : rawPath.replace(/\/+$/, '') || '/'
+  const virtualKey = rawPath === '/' ? '/' : rstripSlash(rawPath) || '/'
   const rawFullKey = prefix !== '' ? `${prefix}${virtualKey}` : virtualKey
-  const fullVirtualKey = rawFullKey.replace(/\/+$/, '') || '/'
+  const fullVirtualKey = rstripSlash(rawFullKey) || '/'
   if (index !== undefined) {
     const listing = await index.listDir(fullVirtualKey)
     if (listing.entries !== undefined && listing.entries !== null) {
@@ -77,7 +78,7 @@ export async function readdir(
       for (const cp of resp.CommonPrefixes ?? []) {
         const p = cp.Prefix
         if (p === undefined) continue
-        const name = p.slice(s3Pfx.length).replace(/\/+$/, '')
+        const name = rstripSlash(p.slice(s3Pfx.length))
         if (name !== '') {
           entries.add(name)
           dirKeys.add(name)
@@ -104,7 +105,7 @@ export async function readdir(
   // Align with RAM/Disk: return fully-qualified paths (mount prefix + directory + name)
   // so commands like `ls` can stat each entry without re-resolving.
   const mountPrefix = prefix
-  const virtualDir = rawPath === '' || rawPath === '/' ? '/' : rawPath.replace(/\/+$/, '') + '/'
+  const virtualDir = rawPath === '' || rawPath === '/' ? '/' : rstripSlash(rawPath) + '/'
   const sortedNames = [...entries].sort()
   const virtualEntries = sortedNames.map((name) => `${mountPrefix}${virtualDir}${name}`)
 

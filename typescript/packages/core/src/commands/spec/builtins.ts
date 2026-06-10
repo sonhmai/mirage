@@ -205,6 +205,15 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
     positional: [new Operand({ kind: OperandKind.TEXT })],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
+  search: new CommandSpec({
+    options: [
+      new Option({ long: '--method', valueKind: OperandKind.TEXT }),
+      new Option({ long: '--top-k', valueKind: OperandKind.TEXT }),
+      new Option({ long: '--threshold', valueKind: OperandKind.TEXT }),
+    ],
+    positional: [new Operand({ kind: OperandKind.TEXT })],
+    rest: new Operand({ kind: OperandKind.PATH }),
+  }),
   sort: new CommandSpec({
     options: [
       new Option({ short: '-r' }),

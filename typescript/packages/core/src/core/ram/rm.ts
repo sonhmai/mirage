@@ -15,10 +15,11 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { norm } from './utils.ts'
+import { rstripSlash } from '../../util/slash.ts'
 
 export function rmR(accessor: RAMAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.stripPrefix)
-  const prefix = p.replace(/\/+$/, '') + '/'
+  const prefix = rstripSlash(p) + '/'
   for (const key of [...accessor.store.files.keys()]) {
     if (key === p || key.startsWith(prefix)) {
       accessor.store.files.delete(key)

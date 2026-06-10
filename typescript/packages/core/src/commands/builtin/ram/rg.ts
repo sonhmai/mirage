@@ -15,7 +15,6 @@
 import { readdir as ramReaddir } from '../../../core/ram/readdir.ts'
 import { stat as ramStat } from '../../../core/ram/stat.ts'
 import { stream as ramStream } from '../../../core/ram/stream.ts'
-import { find as ramFind } from '../../../core/ram/find.ts'
 import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { ResourceName } from '../../../types.ts'
 import { command } from '../../config.ts'
@@ -34,6 +33,5 @@ export const RAM_RG = command({
       (p) => ramStat(accessor, p),
       (p) => ramReaddir(accessor, p),
       (p) => ramStream(accessor, p),
-      (root, options) => ramFind(accessor, root, options),
     ),
 })

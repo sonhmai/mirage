@@ -20,6 +20,7 @@ import { PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { metadataProvision } from './provision.ts'
+import { lstripSlash } from '../../../util/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -116,7 +117,7 @@ async function findCommand(
     results = []
   }
   if (p0.prefix !== '') {
-    results = results.map((r) => p0.prefix + '/' + r.replace(/^\/+/, ''))
+    results = results.map((r) => p0.prefix + '/' + lstripSlash(r))
   }
   const out: ByteSource = ENC.encode(results.join('\n'))
   return [out, new IOResult()]

@@ -19,6 +19,7 @@ import type { NotionTransport } from './_client.ts'
 import { extractIdNoDashes, pageSegmentName } from './normalize.ts'
 import { getChildPages, searchTopLevelPages } from './pages.ts'
 import { formatSegment, parseSegment } from './pathing.ts'
+import { stripSlash } from '../../util/slash.ts'
 
 export interface NotionReaddirAccessor {
   readonly transport: NotionTransport
@@ -50,7 +51,7 @@ export async function readdir(
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
   }
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   const virtualKey = makeVirtualKey(prefix, key)
 
   if (key === '') {

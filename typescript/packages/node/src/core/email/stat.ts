@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
-import { FileStat, FileType } from '@struktoai/mirage-core'
+import { FileStat, FileType, stripSlash } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { listFolders } from './folders.ts'
 
@@ -47,7 +47,7 @@ export async function stat(
   const prefix = path.prefix
   let p = path.original
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = p.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(p)
   if (key === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
 
   if (index === undefined) throw enoent(path.original)

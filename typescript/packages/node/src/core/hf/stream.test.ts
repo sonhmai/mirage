@@ -32,8 +32,8 @@ describe('hf stream', () => {
       chunks.push(chunk)
     }
     expect(chunks.length).toBe(2)
-    expect(chunks[0].byteLength).toBe(8192)
-    expect(chunks[1].byteLength).toBe(1808)
+    expect(chunks[0]?.byteLength).toBe(8192)
+    expect(chunks[1]?.byteLength).toBe(1808)
     expect(Buffer.concat(chunks).toString()).toBe('a'.repeat(10000))
   })
 

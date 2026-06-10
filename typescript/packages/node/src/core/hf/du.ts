@@ -35,7 +35,10 @@ export async function du(accessor: HfAccessor, path: PathSpec): Promise<number> 
   return total
 }
 
-export async function duAll(accessor: HfAccessor, path: PathSpec): Promise<[string, number][]> {
+export async function duAll(
+  accessor: HfAccessor,
+  path: PathSpec,
+): Promise<[[string, number][], number]> {
   const target = rawPathOf(path)
   const pfx = stripSlash(target)
   const scanPath = pfx !== '' ? `${pfx}/` : '/'
@@ -55,8 +58,7 @@ export async function duAll(accessor: HfAccessor, path: PathSpec): Promise<[stri
     if (!isNotFound(err)) throw err
   }
   results.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
-  results.push([target, total])
-  return results
+  return [results, total]
 }
 
 function lstrip(value: string): string {

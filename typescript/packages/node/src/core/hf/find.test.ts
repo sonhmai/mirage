@@ -91,14 +91,14 @@ describe('hf du', () => {
     expect(await du(accessor, PathSpec.fromStrPath('/missing'))).toBe(0)
   })
 
-  it('duAll lists per-file sizes plus a total row', async () => {
+  it('duAll lists per-file sizes plus a total', async () => {
     const accessor = accessorWith(FILES)
-    const rows = await duAll(accessor, PathSpec.fromStrPath('/onnx'))
+    const [rows, total] = await duAll(accessor, PathSpec.fromStrPath('/onnx'))
     expect(rows).toEqual([
       ['/onnx/model.onnx', 2],
       ['/onnx/sub/extra.txt', 1],
-      ['/onnx', 3],
     ])
+    expect(total).toBe(3)
   })
 })
 

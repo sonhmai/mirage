@@ -74,6 +74,9 @@ async function main(): Promise<void> {
     const tree = await run(ws, 'tree /gsheets/')
     printOut('tree /gsheets/', tree.out, tree.err, 500)
 
+    const findOwned = await run(ws, "find /gsheets/owned/ -name '*.gsheet.json' | head -n 5")
+    printOut('find /gsheets/owned/', findOwned.out, findOwned.err, 2000)
+
     console.log('\n=== gws-sheets-spreadsheets-create ===')
     const create = await run(
       ws,

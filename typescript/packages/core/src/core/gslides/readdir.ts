@@ -17,11 +17,16 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { globToModifiedRange } from '../google/date_glob.ts'
-import { listAllFiles } from '../google/drive.ts'
+import { GoogleFileSuffix, listAllFiles } from '../google/drive.ts'
 import { makeFilename } from '../../resource/gslides/slide_entry.ts'
 import { stripSlash } from '../../util/slash.ts'
 
 const MIME = 'application/vnd.google-apps.presentation'
+
+export function isDirName(child: string): boolean {
+  // readdir emits only folders and rendered *.gslide.json files.
+  return !child.endsWith(GoogleFileSuffix.GSLIDE)
+}
 
 export async function readdir(
   accessor: GSlidesAccessor,

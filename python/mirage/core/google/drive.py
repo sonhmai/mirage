@@ -13,10 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from enum import Enum
 
 from mirage.core.google._client import (DRIVE_API_BASE, TokenManager,
                                         google_delete, google_get,
                                         google_get_bytes, google_get_stream)
+
+
+class GoogleFileSuffix(str, Enum):
+    """Rendered vfs filename suffixes; readdir emits only folders and these."""
+    GDOC = ".gdoc.json"
+    GSHEET = ".gsheet.json"
+    GSLIDE = ".gslide.json"
+    GMAIL = ".gmail.json"
+
 
 FIELDS = ("nextPageToken,"
           "files(id,name,mimeType,size,quotaBytesUsed,"
@@ -24,9 +34,9 @@ FIELDS = ("nextPageToken,"
           "owners,capabilities/canEdit,parents)")
 
 MIME_TO_EXT = {
-    "application/vnd.google-apps.document": ".gdoc.json",
-    "application/vnd.google-apps.spreadsheet": ".gsheet.json",
-    "application/vnd.google-apps.presentation": ".gslide.json",
+    "application/vnd.google-apps.document": GoogleFileSuffix.GDOC.value,
+    "application/vnd.google-apps.spreadsheet": GoogleFileSuffix.GSHEET.value,
+    "application/vnd.google-apps.presentation": GoogleFileSuffix.GSLIDE.value,
 }
 
 WORKSPACE_MIMES = set(MIME_TO_EXT.keys())

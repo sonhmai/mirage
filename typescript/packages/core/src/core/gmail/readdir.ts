@@ -19,7 +19,13 @@ import { PathSpec } from '../../types.ts'
 import { listLabels } from './labels.ts'
 import type { GmailMessageRaw } from './messages.ts'
 import { extractAttachments, extractHeader, getMessageRaw, listMessages } from './messages.ts'
+import { GoogleFileSuffix } from '../google/drive.ts'
 import { stripSlash } from '../../util/slash.ts'
+
+export function isDirName(child: string): boolean {
+  // readdir emits only label/date dirs and rendered *.gmail.json files.
+  return !child.endsWith(GoogleFileSuffix.GMAIL)
+}
 
 const TITLE_MAX = 80
 const UNSAFE = /[^\w\s\-.]/g

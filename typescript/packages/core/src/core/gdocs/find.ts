@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import type { GDocsAccessor } from '../../accessor/gdocs.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import type { PathSpec } from '../../types.ts'
@@ -21,7 +21,7 @@ import { isDirName, readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 
 export async function find(
-  accessor: GDriveAccessor,
+  accessor: GDocsAccessor,
   path: PathSpec,
   options: FindOptions = {},
   index?: IndexCacheStore,

@@ -42,8 +42,9 @@ function fakeFind(root: PathSpec, _options: FindOptions): Promise<string[]> {
 
 describe('generic command find', () => {
   it('skips roots whose find raises ENOENT', async () => {
-    const [out] = await findGeneric([spec('/missing'), spec('/')], [], makeOpts(), fakeFind)
-    expect(DEC.decode(out as Uint8Array)).toBe('/found.txt\n')
+    const result = await findGeneric([spec('/missing'), spec('/')], [], makeOpts(), fakeFind)
+    expect(result).not.toBeNull()
+    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/found.txt\n')
   })
 
   it('propagates non-ENOENT errors', async () => {

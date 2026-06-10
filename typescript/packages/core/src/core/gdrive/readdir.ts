@@ -19,6 +19,12 @@ import { PathSpec } from '../../types.ts'
 import { MIME_TO_EXT, listFiles } from '../google/drive.ts'
 import { rstripSlash, stripSlash } from '../../util/slash.ts'
 
+export function isDirName(child: string): boolean | null {
+  // Cold listings mark folders with a trailing slash; warm index-cache
+  // entries are slash-less, so classification falls back to stat.
+  return child.endsWith('/') ? true : null
+}
+
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 const DOC_MIME = 'application/vnd.google-apps.document'
 const SHEET_MIME = 'application/vnd.google-apps.spreadsheet'
@@ -46,6 +52,9 @@ export async function readdir(
 
   if (index !== undefined) {
     const cached = await index.listDir(virtualKey)
+    // Cached entries are slash-less, while the cold path below marks folders
+    // with a trailing slash. Callers must not infer dir-ness from the slash
+    // alone (see find's stat fallback).
     if (cached.entries !== undefined && cached.entries !== null) return cached.entries
   }
 

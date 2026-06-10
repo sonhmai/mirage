@@ -113,6 +113,33 @@ describe('walkFind', () => {
     })
     expect(out).toEqual(['/naive.txt'])
   })
+
+  it('keeps a child whose readdir raises ENOENT but stops descending', async () => {
+    const deps = makeDeps({ '/': ['/ghost/'] })
+    expect(await walkFind(ROOT, deps)).toEqual(['/ghost'])
+  })
+
+  it('propagates non-ENOENT stat errors from the dir-classification fallback', async () => {
+    const base = makeDeps({ '/': ['/mystery'] })
+    const deps: WalkFindDeps = { ...base, stat: () => Promise.reject(new Error('rate limited')) }
+    await expect(walkFind(ROOT, deps, { type: 'f' })).rejects.toThrow('rate limited')
+  })
+
+  it('propagates non-ENOENT stat errors during size filtering', async () => {
+    const base = makeDeps({ '/': ['/a.json'] })
+    const deps: WalkFindDeps = {
+      ...base,
+      isDirName: () => false,
+      stat: () => Promise.reject(new Error('rate limited')),
+    }
+    await expect(walkFind(ROOT, deps, { minSize: 1 })).rejects.toThrow('rate limited')
+  })
+
+  it('drops entries whose stat raises ENOENT during size filtering', async () => {
+    const base = makeDeps({ '/': ['/a.json'] })
+    const deps: WalkFindDeps = { ...base, isDirName: () => false }
+    expect(await walkFind(ROOT, deps, { minSize: 1 })).toEqual([])
+  })
 })
 
 describe('modifiedTs', () => {

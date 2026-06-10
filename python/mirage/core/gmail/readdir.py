@@ -22,9 +22,16 @@ from mirage.core.gmail.date_query import date_dir_to_gmail_query
 from mirage.core.gmail.labels import list_labels
 from mirage.core.gmail.messages import (_extract_attachments, _extract_header,
                                         get_message_raw, list_messages)
+from mirage.core.google.drive import GoogleFileSuffix
 from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
+
+
+def is_dir_name(child: str) -> bool:
+    # readdir emits only label/date dirs and rendered *.gmail.json files.
+    return not child.endswith(GoogleFileSuffix.GMAIL.value)
+
 
 TITLE_MAX = 80
 UNSAFE = re.compile(r"[^\w\s\-.]")

@@ -52,8 +52,10 @@ async function statEntry(
   const spec = new PathSpec({ original: path, directory: path, resolved: false, prefix })
   try {
     return await deps.stat(spec, index)
-  } catch {
-    return null
+  } catch (err) {
+    // Only missing entries resolve to null; API errors (rate limit, auth) propagate.
+    if (isEnoent(err)) return null
+    throw err
   }
 }
 

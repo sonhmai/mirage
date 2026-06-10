@@ -13,89 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GmailAccessor } from '../../../accessor/gmail.ts'
-import { resolveGlob } from '../../../core/gmail/glob.ts'
-import { readdir as gmailReaddir } from '../../../core/gmail/readdir.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { PathSpec, ResourceName } from '../../../types.ts'
+import { find as gmailFind } from '../../../core/gmail/find.ts'
+import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { findGeneric } from '../generic/find.ts'
 import { metadataProvision } from './provision.ts'
-import { rstripSlash, stripSlash } from '../../../util/slash.ts'
-import { fnmatch } from '../../../util/fnmatch.ts'
-
-const ENC = new TextEncoder()
-
-async function walk(
-  accessor: GmailAccessor,
-  path: PathSpec,
-  index: CommandOpts['index'],
-  maxDepth: number | null,
-  depth: number,
-): Promise<string[]> {
-  if (maxDepth !== null && depth > maxDepth) return []
-  let children: string[]
-  try {
-    children = await gmailReaddir(accessor, path, index ?? undefined)
-  } catch {
-    return []
-  }
-  const results: string[] = []
-  for (const child of children) {
-    const isFolder = child.endsWith('/')
-    const trimmed = isFolder ? rstripSlash(child) : child
-    results.push(trimmed)
-    if (isFolder) {
-      const childSpec = new PathSpec({
-        original: trimmed,
-        directory: trimmed,
-        resolved: false,
-        prefix: path.prefix,
-      })
-      const sub = await walk(accessor, childSpec, index, maxDepth, depth + 1)
-      results.push(...sub)
-    }
-  }
-  return results
-}
 
 async function findCommand(
   accessor: GmailAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  const p0 =
-    resolved[0] ??
-    new PathSpec({
-      original: '/',
-      directory: '/',
-      resolved: false,
-      prefix: opts.mountPrefix ?? '',
-    })
-  const nameFlag = typeof opts.flags.name === 'string' ? opts.flags.name : null
-  const inameFlag = typeof opts.flags.iname === 'string' ? opts.flags.iname : null
-  const maxDepthRaw = typeof opts.flags.maxdepth === 'string' ? opts.flags.maxdepth : null
-  const minDepthRaw = typeof opts.flags.mindepth === 'string' ? opts.flags.mindepth : null
-  const maxDepth = maxDepthRaw !== null ? Number.parseInt(maxDepthRaw, 10) : null
-  const minDepth = minDepthRaw !== null ? Number.parseInt(minDepthRaw, 10) : null
-
-  const allPaths = await walk(accessor, p0, opts.index, maxDepth, 0)
-  const searchKey = stripSlash(p0.stripPrefix)
-  const baseDepth = searchKey === '' ? -1 : searchKey.split('/').length - 1
-  const results: string[] = []
-  for (const p of [...allPaths].sort()) {
-    const stripped = p.startsWith(p0.prefix) ? p.slice(p0.prefix.length) : p
-    const trimmed = stripSlash(stripped)
-    const depth = trimmed === '' ? -1 : trimmed.split('/').length - (baseDepth + 2)
-    if (minDepth !== null && depth < minDepth) continue
-    const entryName = p.split('/').pop() ?? p
-    if (nameFlag !== null && !fnmatch(entryName, nameFlag)) continue
-    if (inameFlag !== null && !fnmatch(entryName.toLowerCase(), inameFlag.toLowerCase())) continue
-    results.push(p)
-  }
-  const out: ByteSource = ENC.encode(results.join('\n'))
-  return [out, new IOResult()]
+  return findGeneric(paths, texts, opts, (root, options) =>
+    gmailFind(accessor, root, options, opts.index ?? undefined),
+  )
 }
 
 export const GMAIL_FIND = command({

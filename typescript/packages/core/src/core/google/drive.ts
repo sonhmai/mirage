@@ -27,10 +27,18 @@ const FIELDS =
   'createdTime,modifiedTime,' +
   'owners,capabilities/canEdit,parents)'
 
+// Rendered vfs filename suffixes; readdir emits only folders and these.
+export const GoogleFileSuffix = Object.freeze({
+  GDOC: '.gdoc.json',
+  GSHEET: '.gsheet.json',
+  GSLIDE: '.gslide.json',
+  GMAIL: '.gmail.json',
+} as const)
+
 export const MIME_TO_EXT: Readonly<Record<string, string>> = Object.freeze({
-  'application/vnd.google-apps.document': '.gdoc.json',
-  'application/vnd.google-apps.spreadsheet': '.gsheet.json',
-  'application/vnd.google-apps.presentation': '.gslide.json',
+  'application/vnd.google-apps.document': GoogleFileSuffix.GDOC,
+  'application/vnd.google-apps.spreadsheet': GoogleFileSuffix.GSHEET,
+  'application/vnd.google-apps.presentation': GoogleFileSuffix.GSLIDE,
 })
 
 export const WORKSPACE_MIMES: ReadonlySet<string> = new Set(Object.keys(MIME_TO_EXT))

@@ -17,6 +17,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import { PathSpec } from '../../types.ts'
 import { fnmatch } from '../../util/fnmatch.ts'
+import { modifiedTs } from '../generic/find.ts'
 import { resolvePath } from './path.ts'
 import { stat } from './stat.ts'
 import { walk } from './walk.ts'
@@ -89,9 +90,8 @@ async function matches(
   }
   if (options.mtimeMin != null || options.mtimeMax != null) {
     const itemStat = await stat(accessor, spec, index)
-    if (itemStat.modified === null) return false
-    const modTs = Date.parse(itemStat.modified) / 1000
-    if (Number.isNaN(modTs)) return false
+    const modTs = modifiedTs(itemStat.modified)
+    if (modTs === null) return false
     if (options.mtimeMin != null && modTs < options.mtimeMin) return false
     if (options.mtimeMax != null && modTs > options.mtimeMax) return false
   }

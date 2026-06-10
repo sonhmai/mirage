@@ -14,9 +14,10 @@
 
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import type { FindOptions } from '../../resource/base.ts'
-import { PathSpec } from '../../types.ts'
+import type { PathSpec } from '../../types.ts'
+import { walkFind } from '../generic/find.ts'
 import { readdir } from './readdir.ts'
-import { fnmatch } from '../../util/fnmatch.ts'
+import { stat } from './stat.ts'
 
 function isRowFile(name: string, config: LanceDBAccessor['config']): boolean {
   if (name.endsWith('.md')) return true
@@ -24,57 +25,20 @@ function isRowFile(name: string, config: LanceDBAccessor['config']): boolean {
   return false
 }
 
-async function walk(
-  accessor: LanceDBAccessor,
-  spec: PathSpec,
-  maxDepth: number | null,
-  depth: number,
-  out: { path: string; depth: number; file: boolean }[],
-): Promise<void> {
-  if (maxDepth !== null && depth > maxDepth) return
-  let children: string[]
-  try {
-    children = await readdir(accessor, spec)
-  } catch {
-    return
-  }
-  for (const child of children) {
-    const name = child.split('/').pop() ?? ''
-    const file = isRowFile(name, accessor.config)
-    out.push({ path: child, depth, file })
-    if (file) continue
-    const childSpec = new PathSpec({
-      original: child,
-      directory: child,
-      resolved: false,
-      prefix: spec.prefix,
-    })
-    await walk(accessor, childSpec, maxDepth, depth + 1, out)
-  }
-}
-
 export async function find(
   accessor: LanceDBAccessor,
   path: PathSpec,
   options: FindOptions = {},
 ): Promise<string[]> {
-  const collected: { path: string; depth: number; file: boolean }[] = []
-  await walk(accessor, path, options.maxDepth ?? null, 1, collected)
-  const results: string[] = []
-  for (const entry of collected.sort((a, b) => a.path.localeCompare(b.path))) {
-    const name = entry.path.split('/').pop() ?? ''
-    if (options.minDepth != null && entry.depth < options.minDepth) continue
-    if (options.type === 'f' && !entry.file) continue
-    if (options.type === 'd' && entry.file) continue
-    if (options.orNames != null && options.orNames.length > 0) {
-      if (!options.orNames.some((pat) => fnmatch(name, pat))) continue
-    } else if (options.name != null && !fnmatch(name, options.name)) {
-      continue
-    }
-    if (options.iname != null && !fnmatch(name.toLowerCase(), options.iname.toLowerCase())) {
-      continue
-    }
-    results.push(entry.path)
-  }
-  return results
+  return walkFind(
+    path,
+    {
+      readdir: (spec) => readdir(accessor, spec),
+      stat: (spec, idx) => stat(accessor, spec, idx),
+      // Row files are recognized by extension, so classification never
+      // needs the stat fallback.
+      isDirName: (child) => !isRowFile(child.split('/').pop() ?? '', accessor.config),
+    },
+    options,
+  )
 }

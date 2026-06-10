@@ -39,10 +39,16 @@ function makeAccessor(): DropboxAccessor {
   return new DropboxAccessor({ tokenManager: STUB_TM })
 }
 
+function enoent(p: string): Error {
+  const e = new Error(`ENOENT: ${p}`) as Error & { code: string }
+  e.code = 'ENOENT'
+  return e
+}
+
 function mockTree(tree: Record<string, string[]>): void {
   vi.mocked(readdirMod.readdir).mockImplementation((_accessor, spec) => {
     const children = tree[spec.original]
-    if (children === undefined) return Promise.reject(new Error(`ENOENT: ${spec.original}`))
+    if (children === undefined) return Promise.reject(enoent(spec.original))
     return Promise.resolve(children)
   })
 }
@@ -50,7 +56,7 @@ function mockTree(tree: Record<string, string[]>): void {
 function mockStats(stats: Record<string, { size?: number; modified?: string }>): void {
   vi.mocked(statMod.stat).mockImplementation((_accessor, spec) => {
     const entry = stats[spec.original]
-    if (entry === undefined) return Promise.reject(new Error(`ENOENT: ${spec.original}`))
+    if (entry === undefined) return Promise.reject(enoent(spec.original))
     const name = spec.original.split('/').pop() ?? ''
     return Promise.resolve(
       new FileStat({
@@ -214,5 +220,36 @@ describe('dropbox core find', () => {
     expect(files).toEqual(['/docs/readme.md', '/notes.txt'])
     const dirs = await find(makeAccessor(), ROOT, { type: 'd' })
     expect(dirs).toEqual(['/docs'])
+  })
+
+  it('sorts by codepoint, not locale', async () => {
+    mockTree({ '/': ['/Zeta.txt', '/alpha.txt'] })
+    mockStats({ '/Zeta.txt': { size: 1 }, '/alpha.txt': { size: 1 } })
+    const out = await find(makeAccessor(), ROOT)
+    expect(out).toEqual(['/Zeta.txt', '/alpha.txt'])
+  })
+
+  it('keeps a child whose readdir raises ENOENT but stops descending', async () => {
+    mockTree({ '/': ['/ghost/'] })
+    const out = await find(makeAccessor(), ROOT)
+    expect(out).toEqual(['/ghost'])
+  })
+
+  it('propagates non-ENOENT readdir errors', async () => {
+    vi.mocked(readdirMod.readdir).mockImplementation((_accessor, spec) => {
+      if (spec.original === '/') return Promise.resolve(['/bad/'])
+      return Promise.reject(new Error('rate limited'))
+    })
+    await expect(find(makeAccessor(), ROOT)).rejects.toThrow('rate limited')
+  })
+
+  it('parses naive modified timestamps as UTC', async () => {
+    mockTree({ '/': ['/naive.txt'] })
+    mockStats({ '/naive.txt': { size: 1, modified: '2026-01-05T00:00:00' } })
+    const out = await find(makeAccessor(), ROOT, {
+      mtimeMin: Date.parse('2026-01-04T23:30:00Z') / 1000,
+      mtimeMax: Date.parse('2026-01-05T00:30:00Z') / 1000,
+    })
+    expect(out).toEqual(['/naive.txt'])
   })
 })

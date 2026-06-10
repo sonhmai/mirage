@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isEnoent } from '../../../core/generic/find.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import { PathSpec } from '../../../types.ts'
@@ -110,8 +111,11 @@ export async function findGeneric(
         ...(pathFlag !== null ? { pathPattern: pathFlag } : {}),
         ...(orNames.length > 1 ? { orNames } : {}),
       })
-    } catch {
-      continue
+    } catch (err) {
+      // GNU find reports missing roots and moves on; anything else
+      // (rate limits, auth failures) must surface.
+      if (isEnoent(err)) continue
+      throw err
     }
     const rootKey = rstripSlash(root.stripPrefix) || '/'
     for (const key of keys) {

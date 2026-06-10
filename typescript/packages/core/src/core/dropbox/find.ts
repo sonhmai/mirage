@@ -15,67 +15,15 @@
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
-import { fnmatch } from '../../util/fnmatch.ts'
-import { FileType, PathSpec, type FileStat } from '../../types.ts'
-import { rstripSlash } from '../../util/slash.ts'
+import type { PathSpec } from '../../types.ts'
+import { walkFind } from '../generic/find.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 
-interface WalkEntry {
-  path: string
-  depth: number
-  file: boolean
-}
-
-async function statEntry(
-  accessor: DropboxAccessor,
-  path: string,
-  prefix: string,
-  index: IndexCacheStore | undefined,
-): Promise<FileStat | null> {
-  const spec = new PathSpec({ original: path, directory: path, resolved: false, prefix })
-  try {
-    return await stat(accessor, spec, index)
-  } catch {
-    return null
-  }
-}
-
-async function walk(
-  accessor: DropboxAccessor,
-  spec: PathSpec,
-  index: IndexCacheStore | undefined,
-  maxDepth: number | null,
-  depth: number,
-  out: WalkEntry[],
-): Promise<void> {
-  if (maxDepth !== null && depth > maxDepth) return
-  let children: string[]
-  try {
-    children = await readdir(accessor, spec, index)
-  } catch {
-    return
-  }
-  for (const child of children) {
-    const slashed = child.endsWith('/')
-    const trimmed = slashed ? rstripSlash(child) : child
-    let isFolder = slashed
-    if (!slashed) {
-      // Cached readdir entries carry no trailing slash, so fall back to stat.
-      const s = await statEntry(accessor, trimmed, spec.prefix, index)
-      isFolder = s !== null && s.type === FileType.DIRECTORY
-    }
-    out.push({ path: trimmed, depth, file: !isFolder })
-    if (isFolder) {
-      const childSpec = new PathSpec({
-        original: trimmed,
-        directory: trimmed,
-        resolved: false,
-        prefix: spec.prefix,
-      })
-      await walk(accessor, childSpec, index, maxDepth, depth + 1, out)
-    }
-  }
+function isDirName(child: string): boolean | null {
+  // Cold reads mark folders with a trailing slash; warm index-cache hits
+  // return slash-less keys, so fall back to stat for classification.
+  return child.endsWith('/') ? true : null
 }
 
 export async function find(
@@ -84,46 +32,14 @@ export async function find(
   options: FindOptions = {},
   index?: IndexCacheStore,
 ): Promise<string[]> {
-  const collected: WalkEntry[] = []
-  await walk(accessor, path, index, options.maxDepth ?? null, 1, collected)
-  const prefix = path.prefix
-  const results: string[] = []
-  for (const entry of collected.sort((a, b) => a.path.localeCompare(b.path))) {
-    const name = entry.path.split('/').pop() ?? ''
-    if (options.minDepth != null && entry.depth < options.minDepth) continue
-    if (options.type === 'f' && !entry.file) continue
-    if (options.type === 'd' && entry.file) continue
-    if (options.orNames != null && options.orNames.length > 0) {
-      if (!options.orNames.some((pat) => fnmatch(name, pat))) continue
-    } else if (options.name != null && !fnmatch(name, options.name)) {
-      continue
-    }
-    if (options.iname != null && !fnmatch(name.toLowerCase(), options.iname.toLowerCase())) {
-      continue
-    }
-    const key =
-      prefix !== '' && entry.path.startsWith(prefix) ? entry.path.slice(prefix.length) : entry.path
-    if (options.pathPattern != null && !fnmatch(key, options.pathPattern)) continue
-    if (options.nameExclude != null && fnmatch(name, options.nameExclude)) continue
-    const needSize = entry.file && (options.minSize != null || options.maxSize != null)
-    const needMtime = options.mtimeMin != null || options.mtimeMax != null
-    if (needSize || needMtime) {
-      const st = await statEntry(accessor, entry.path, prefix, index)
-      if (st === null) continue
-      if (needSize) {
-        const size = st.size ?? 0
-        if (options.minSize != null && size < options.minSize) continue
-        if (options.maxSize != null && size > options.maxSize) continue
-      }
-      if (needMtime) {
-        if (st.modified === null || st.modified === '') continue
-        const mt = Date.parse(st.modified) / 1000
-        if (Number.isNaN(mt)) continue
-        if (options.mtimeMin != null && mt < options.mtimeMin) continue
-        if (options.mtimeMax != null && mt > options.mtimeMax) continue
-      }
-    }
-    results.push(key)
-  }
-  return results
+  return walkFind(
+    path,
+    {
+      readdir: (spec, idx) => readdir(accessor, spec, idx),
+      stat: (spec, idx) => stat(accessor, spec, idx),
+      isDirName,
+    },
+    options,
+    index,
+  )
 }

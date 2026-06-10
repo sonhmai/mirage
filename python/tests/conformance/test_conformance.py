@@ -72,8 +72,7 @@ def _params() -> list:
         for backend in case["matrix"].get("python", []):
             marks = []
             if backend == "redis" and not REDIS_URL:
-                marks.append(
-                    pytest.mark.skip(reason="REDIS_URL not set"))
+                marks.append(pytest.mark.skip(reason="REDIS_URL not set"))
             params.append(
                 pytest.param(backend,
                              case,

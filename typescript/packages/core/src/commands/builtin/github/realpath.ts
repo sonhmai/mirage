@@ -13,84 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { resolveGlob } from '../../../core/github/glob.ts'
 import { stat as githubStat } from '../../../core/github/stat.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { PathSpec, ResourceName } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { ResourceName } from '../../../types.ts'
+import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-
-const ENC = new TextEncoder()
-
-function posixNormpath(p: string): string {
-  const isAbs = p.startsWith('/')
-  const parts = p.split('/')
-  const out: string[] = []
-  for (const seg of parts) {
-    if (seg === '' || seg === '.') continue
-    if (seg === '..') {
-      if (out.length > 0 && out[out.length - 1] !== '..') {
-        out.pop()
-      } else if (!isAbs) {
-        out.push('..')
-      }
-      continue
-    }
-    out.push(seg)
-  }
-  const joined = out.join('/')
-  if (isAbs) return '/' + joined
-  return joined === '' ? '.' : joined
-}
-
-async function existsPath(
-  accessor: GitHubAccessor,
-  path: PathSpec,
-  index: IndexCacheStore | undefined,
-): Promise<boolean> {
-  try {
-    await githubStat(accessor, path, index)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function realpathCommand(
-  accessor: GitHubAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const eFlag = opts.flags.e === true
-  const mountPrefix = resolved[0]?.prefix ?? ''
-  const lines: string[] = []
-  for (const p of resolved) {
-    const normalized = posixNormpath(p.original)
-    if (eFlag) {
-      const probe = new PathSpec({
-        original: normalized,
-        directory: normalized,
-        resolved: false,
-        prefix: mountPrefix,
-      })
-      if (!(await existsPath(accessor, probe, opts.index ?? undefined))) {
-        const msg = `realpath: '${p.original}': No such file or directory\n`
-        return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(msg) })]
-      }
-    }
-    lines.push(normalized)
-  }
-  const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
-  return [out, new IOResult()]
-}
+import { realpathGeneric } from '../generic/realpath.ts'
 
 export const GITHUB_REALPATH = command({
   name: 'realpath',
   resource: ResourceName.GITHUB,
   spec: specOf('realpath'),
-  fn: realpathCommand,
+  fn: (accessor: GitHubAccessor, paths, texts, opts) =>
+    realpathGeneric(paths, texts, opts, (p) => githubStat(accessor, p, opts.index ?? undefined)),
 })

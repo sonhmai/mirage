@@ -39,7 +39,7 @@ async def test_wc_default(workspace):
     await workspace.ops.write("/f.txt", b"hello world\nfoo bar\n")
     io = await workspace.execute("wc /f.txt", session_id="default")
     assert io.exit_code == 0
-    parts = io.stdout.decode().split("\t")
+    parts = io.stdout.decode().split()
     assert parts[0] == "2"
     assert parts[1] == "4"
     assert parts[2] == "20"
@@ -50,7 +50,7 @@ async def test_wc_l(workspace):
     await workspace.ops.write("/f.txt", b"a\nb\nc\n")
     io = await workspace.execute("wc -l /f.txt", session_id="default")
     assert io.exit_code == 0
-    assert io.stdout.decode().split("\t")[0] == "3"
+    assert io.stdout.decode().split()[0] == "3"
 
 
 @pytest.mark.asyncio
@@ -58,7 +58,7 @@ async def test_wc_c(workspace):
     await workspace.ops.write("/f.txt", b"hello\n")
     io = await workspace.execute("wc -c /f.txt", session_id="default")
     assert io.exit_code == 0
-    assert io.stdout.decode().split("\t")[0] == "6"
+    assert io.stdout.decode().split()[0] == "6"
 
 
 @pytest.mark.asyncio

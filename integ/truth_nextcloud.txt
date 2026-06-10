@@ -15,8 +15,8 @@ example.parquet
 
 # ---- stat / wc ----
 15533 example.json
-5766	/nc/data/example.jsonl
-15533	/nc/data/example.json
+5766 /nc/data/example.jsonl
+15533 /nc/data/example.json
 
 # ---- cat_head (example.json) ----
 "company": "Strukto",

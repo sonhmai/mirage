@@ -194,6 +194,6 @@ describe('PostgresResource mount integration', () => {
 
   it('wc -l on rows.jsonl pushes down to COUNT(*)', async () => {
     const r = await ws.execute('wc -l /pg/public/tables/users/rows.jsonl')
-    expect(new TextDecoder().decode(r.stdout).trim()).toBe('5\t/pg/public/tables/users/rows.jsonl')
+    expect(new TextDecoder().decode(r.stdout).trim()).toBe('5 /pg/public/tables/users/rows.jsonl')
   })
 })

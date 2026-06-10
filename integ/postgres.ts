@@ -52,6 +52,7 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["head_2", `head -n 2 ${MOUNT}/public/tables/books/rows.jsonl`],
   ["tail_2", `tail -n 2 ${MOUNT}/public/tables/books/rows.jsonl`],
   ["wc_l_books", `wc -l ${MOUNT}/public/tables/books/rows.jsonl`],
+  ["wc_default_books", `wc ${MOUNT}/public/tables/books/rows.jsonl`],
   ["wc_l_authors", `wc -l ${MOUNT}/public/tables/authors/rows.jsonl`],
   ["stat_rows", `stat ${MOUNT}/public/tables/books/rows.jsonl`],
   ["grep_c_title", `grep -c title ${MOUNT}/public/tables/books/rows.jsonl`],

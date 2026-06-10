@@ -10,6 +10,8 @@
     "has_write": false,
     "resources": [
       "box",
+      "chroma",
+      "databricks_volume",
       "dropbox",
       "gdrive",
       "github",

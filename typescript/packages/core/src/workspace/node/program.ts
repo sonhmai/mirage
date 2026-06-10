@@ -85,8 +85,26 @@ export async function executeProgram(
       i += 2
     } else {
       const [s, ioResult, execNode] = await recurse(child, session, stdin, callStack)
-      stdout = await materialize(s)
+      let drainErr: string | null = null
+      try {
+        stdout = await materialize(s)
+      } catch (err) {
+        // Lazy reads can fail on the first pull (e.g. a backend size guard);
+        // surface that as a failed statement, not a crash.
+        drainErr = err instanceof Error ? err.message : String(err)
+        stdout = null
+      }
       ioResult.syncExitCode()
+      if (drainErr !== null) {
+        const existing = await materialize(ioResult.stderr)
+        const added = new TextEncoder().encode(`${drainErr}\n`)
+        const merged = new Uint8Array(existing.byteLength + added.byteLength)
+        merged.set(existing, 0)
+        merged.set(added, existing.byteLength)
+        ioResult.stderr = merged
+        ioResult.exitCode = 1
+        execNode.exitCode = 1
+      }
       session.lastExitCode = ioResult.exitCode
       io = ioResult
       lastExec = execNode

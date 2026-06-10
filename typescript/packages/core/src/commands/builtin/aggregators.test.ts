@@ -67,15 +67,15 @@ describe('aggregators', () => {
   })
 
   it('wc replaces trailing path column with canonical path', () => {
-    const out = wcAggregate([['/mnt/a', encode('1\t2\t12\t/a\n')]])
-    expect(decode(out)).toBe('1\t2\t12\t/mnt/a\n')
+    const out = wcAggregate([['/mnt/a', encode(' 1  2 12 /a\n')]])
+    expect(decode(out)).toBe(' 1  2 12 /mnt/a\n')
   })
 
   it('wc aggregates totals across multiple files', () => {
     const out = wcAggregate([
-      ['/a', encode('1\t2\t3\t/a\n')],
-      ['/b', encode('4\t5\t6\t/b\n')],
+      ['/a', encode('1 2 3 /a\n')],
+      ['/b', encode('4 5 6 /b\n')],
     ])
-    expect(decode(out)).toBe('1\t2\t3\t/a\n4\t5\t6\t/b\n5\t7\t9\ttotal\n')
+    expect(decode(out)).toBe('1 2 3 /a\n4 5 6 /b\n5 7 9 total\n')
   })
 })

@@ -19,6 +19,13 @@ from mirage.core.postgres.scope import detect_scope
 from mirage.types import PathSpec
 
 
+def is_dir_name(child: str) -> bool:
+    # Entries are recognized by extension, so classification never needs the
+    # stat fallback.
+    name = child.rsplit("/", 1)[-1]
+    return not (name.endswith(".json") or name.endswith(".jsonl"))
+
+
 async def readdir(accessor: PostgresAccessor,
                   path: PathSpec,
                   index: IndexCacheStore = None) -> list[str]:

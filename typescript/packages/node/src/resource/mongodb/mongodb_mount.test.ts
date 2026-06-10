@@ -149,6 +149,8 @@ describe('MongoDBResource mount integration', () => {
 
   it('wc -l pushes down to countDocuments', async () => {
     const r = await ws.execute('wc -l /mongo/app/collections/profiles/documents.jsonl')
-    expect(new TextDecoder().decode(r.stdout).trim()).toBe('3')
+    expect(new TextDecoder().decode(r.stdout).trim()).toBe(
+      '3 /mongo/app/collections/profiles/documents.jsonl',
+    )
   })
 })

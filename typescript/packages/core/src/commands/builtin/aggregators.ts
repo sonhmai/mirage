@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { formatWcLines, type WcRow } from './generic/wc.ts'
+
 export type AggregateResult = [path: string, data: Uint8Array]
 
 export function concatAggregate(results: AggregateResult[]): Uint8Array {
@@ -54,28 +56,28 @@ export function prefixAggregate(results: AggregateResult[]): Uint8Array {
 export function wcAggregate(results: AggregateResult[]): Uint8Array {
   const enc = new TextEncoder()
   const dec = new TextDecoder()
-  const lines: string[] = []
+  const rows: WcRow[] = []
   let totals: number[] = []
   for (const [path, data] of results) {
     const text = dec.decode(data).trim()
     if (text === '') continue
-    const parts = text.split('\t')
-    const counts = parts.length > 1 ? parts.slice(0, -1) : parts
-    const withoutPath = text.includes('\t') ? text.slice(0, text.lastIndexOf('\t')) : text
-    lines.push(`${withoutPath}\t${path}`)
+    const counts: number[] = []
+    for (const token of text.split(/\s+/)) {
+      if (!/^\d+$/.test(token)) break
+      counts.push(Number.parseInt(token, 10))
+    }
+    if (counts.length === 0) continue
+    rows.push({ values: counts, label: path })
     if (totals.length === 0) totals = new Array<number>(counts.length).fill(0)
     for (let idx = 0; idx < counts.length; idx++) {
-      const c = counts[idx]
-      if (c === undefined) continue
-      const n = Number.parseInt(c.trim(), 10)
-      if (!Number.isNaN(n)) totals[idx] = (totals[idx] ?? 0) + n
+      totals[idx] = (totals[idx] ?? 0) + (counts[idx] ?? 0)
     }
   }
   if (results.length > 1 && totals.length > 0) {
-    lines.push(totals.join('\t') + '\ttotal')
+    rows.push({ values: totals, label: 'total' })
   }
-  if (lines.length === 0) return new Uint8Array(0)
-  return enc.encode(lines.join('\n') + '\n')
+  if (rows.length === 0) return new Uint8Array(0)
+  return enc.encode(formatWcLines(rows).join('\n') + '\n')
 }
 
 function concat(chunks: Uint8Array[]): Uint8Array {

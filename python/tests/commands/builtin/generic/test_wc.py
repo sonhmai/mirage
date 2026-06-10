@@ -198,18 +198,18 @@ async def test_wc_lines_fast_path_empty():
 
 def test_format_wc_default_no_label():
     counts = WCCounts(lines=2, words=4, bytes_=20)
-    assert format_wc(counts) == "2\t4\t20"
+    assert format_wc(counts) == "      2       4      20"
 
 
 def test_format_wc_default_with_label():
     counts = WCCounts(lines=2, words=4, bytes_=20)
-    assert format_wc(counts, label="/f.txt") == "2\t4\t20\t/f.txt"
+    assert format_wc(counts, label="/f.txt") == " 2  4 20 /f.txt"
 
 
 def test_format_wc_args_l():
     counts = WCCounts(lines=2, words=4, bytes_=20)
     assert format_wc(counts, args_l=True) == "2"
-    assert format_wc(counts, args_l=True, label="/f.txt") == "2\t/f.txt"
+    assert format_wc(counts, args_l=True, label="/f.txt") == "2 /f.txt"
 
 
 def test_format_wc_w_c_m():
@@ -250,7 +250,7 @@ async def test_format_multi_single_path_emits_trailing_newline():
         return b"hello\n"
 
     out = await format_multi(paths, read=fake_read, args_l=True)
-    assert out == b"1\t/a.txt\n"
+    assert out == b"1 /a.txt\n"
 
 
 @pytest.mark.asyncio
@@ -267,7 +267,7 @@ async def test_format_multi_multi_path_emits_total_and_trailing_newline():
     out = await format_multi(paths, read=fake_read, args_l=True)
     assert out.endswith(b"\n")
     lines = out.decode().rstrip("\n").split("\n")
-    assert lines == ["1\t/a.txt", "2\t/b.txt", "3\ttotal"]
+    assert lines == ["1 /a.txt", "2 /b.txt", "3 total"]
 
 
 @pytest.mark.asyncio
@@ -278,7 +278,7 @@ async def test_format_multi_accepts_sync_read_returning_bytes():
         return b"x\n"
 
     out = await format_multi(paths, read=sync_read, args_l=True)
-    assert out == b"1\t/a.txt\n"
+    assert out == b"1 /a.txt\n"
 
 
 @pytest.mark.asyncio
@@ -301,4 +301,4 @@ async def test_format_multi_accepts_async_iterator_read():
     paths = [PathSpec.from_str_path("/a.txt")]
 
     out = await format_multi(paths, read=_async_byte_read, args_l=True)
-    assert out == b"1\t/a.txt\n"
+    assert out == b"1 /a.txt\n"

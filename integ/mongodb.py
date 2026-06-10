@@ -97,6 +97,7 @@ CASES: list[tuple[str, str]] = [
     ("head_2", f"head -n 2 {MOUNT}/{DB}/collections/books/documents.jsonl"),
     ("tail_2", f"tail -n 2 {MOUNT}/{DB}/collections/books/documents.jsonl"),
     ("wc_l_books", f"wc -l {MOUNT}/{DB}/collections/books/documents.jsonl"),
+    ("wc_default_books", f"wc {MOUNT}/{DB}/collections/books/documents.jsonl"),
     ("wc_l_authors",
      f"wc -l {MOUNT}/{DB}/collections/authors/documents.jsonl"),
     ("stat_docs", f"stat {MOUNT}/{DB}/collections/books/documents.jsonl"),

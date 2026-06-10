@@ -38,24 +38,24 @@ Welcome to Acme. This quickstart gets you running fast.
 === tail_1 ===
 Set your token in the ACME_TOKEN environment variable.
 === grep_429 ===
-/knowledge/guides/auth.md:If you exceed the limit you receive HTTP 429 and must back off.
+If you exceed the limit you receive HTTP 429 and must back off.
 === grep_c_rate ===
-/knowledge/guides/auth.md:1
+1
 === grep_r_refund ===
 /knowledge/policies/refunds.md:Email support to start a refund with your order id.
 /knowledge/policies/refunds.md:Approved refunds are processed within five business days.
 === grep_rl_encrypted ===
 /knowledge/policies/privacy.md
 === grep_v_bearer ===
-/knowledge/guides/auth.md:Requests are rate limited to 100 calls per minute per token.
-/knowledge/guides/auth.md:If you exceed the limit you receive HTTP 429 and must back off.
+Requests are rate limited to 100 calls per minute per token.
+If you exceed the limit you receive HTTP 429 and must back off.
 === grep_rE_alternation ===
 /knowledge/CHANGELOG.md:v2.0 added rate limit headers and refund automation.
 /knowledge/guides/auth.md:Requests are rate limited to 100 calls per minute per token.
 /knowledge/policies/refunds.md:Email support to start a refund with your order id.
 /knowledge/policies/refunds.md:Approved refunds are processed within five business days.
 === wc_l_auth ===
-2	/knowledge/guides/auth.md
+2 /knowledge/guides/auth.md
 === sort_auth ===
 Authentication uses bearer tokens via the Authorization header.
 If you exceed the limit you receive HTTP 429 and must back off.

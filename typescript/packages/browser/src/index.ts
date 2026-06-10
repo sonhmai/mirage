@@ -84,10 +84,6 @@ export { PostgresResource, type PostgresResourceOptions } from './resource/postg
 export { NeonPgDriver } from './resource/postgres/neon_driver.ts'
 export { MongoDBResource, type MongoDBResourceOptions } from './resource/mongodb/mongodb.ts'
 export { HttpMongoDriver, type HttpMongoDriverOptions } from './resource/mongodb/http_driver.ts'
-export { VercelResource, type VercelResourceOptions } from './resource/vercel/vercel.ts'
-export { HttpVercelDriver, type HttpVercelDriverOptions } from './resource/vercel/http_driver.ts'
-export { PostHogResource, type PostHogResourceOptions } from './resource/posthog/posthog.ts'
-export { HttpPostHogDriver, type HttpPostHogDriverOptions } from './resource/posthog/http_driver.ts'
 export { TrelloResource, type TrelloResourceState } from './resource/trello/trello.ts'
 export {
   redactTrelloConfig,

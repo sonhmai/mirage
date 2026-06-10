@@ -2,10 +2,11 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": [
       "box",
+      "databricks_volume",
       "disk",
       "dropbox",
       "email",
@@ -15,9 +16,14 @@
       "gmail",
       "gsheets",
       "gslides",
+      "hf_buckets",
+      "hf_datasets",
+      "hf_models",
+      "hf_spaces",
       "ram",
       "redis",
-      "s3"
+      "s3",
+      "ssh"
     ]
   },
   "description": null,

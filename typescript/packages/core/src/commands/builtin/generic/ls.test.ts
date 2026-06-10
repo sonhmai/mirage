@@ -64,7 +64,9 @@ async function run(flags: Record<string, string | boolean>): Promise<string[]> {
   const result = await lsGeneric([spec('/')], opts(flags), readdir, stat)
   if (result === null) return []
   const [out] = result
-  return DEC.decode(out as Uint8Array).split('\n')
+  return DEC.decode(out as Uint8Array)
+    .replace(/\n$/, '')
+    .split('\n')
 }
 
 describe('lsGeneric', () => {

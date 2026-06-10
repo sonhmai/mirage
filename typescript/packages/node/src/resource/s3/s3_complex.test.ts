@@ -165,9 +165,9 @@ describe('S3 complex scenarios (mocked)', () => {
     const jsonlBytes = objects['data/example.jsonl']
     if (jsonBytes === undefined || jsonlBytes === undefined) throw new Error('missing fixture')
     expect(lines).toEqual([
-      `/s3/data/example.json ${jsonBytes.byteLength.toString()}\t/s3/data/example.json`,
+      `/s3/data/example.json ${jsonBytes.byteLength.toString()} /s3/data/example.json`,
       '',
-      `/s3/data/example.jsonl ${jsonlBytes.byteLength.toString()}\t/s3/data/example.jsonl`,
+      `/s3/data/example.jsonl ${jsonlBytes.byteLength.toString()} /s3/data/example.jsonl`,
     ])
   })
 

@@ -32,9 +32,9 @@ Welcome to Acme. This quickstart gets you running fast.
 === tail_1 ===
 Set your token in the ACME_TOKEN environment variable.
 === wc_l ===
-2	/knowledge/guides/auth
+2 /knowledge/guides/auth
 === wc_c ===
-159	/knowledge/policies/refunds
+159 /knowledge/policies/refunds
 === grep_429 ===
 If you exceed the limit you receive HTTP 429 and must back off.
 === grep_c_rate ===

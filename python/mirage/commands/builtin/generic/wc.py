@@ -96,6 +96,73 @@ async def wc_lines(src: bytes | AsyncIterator[bytes]) -> int:
     return count
 
 
+def _selected_values(
+    counts: WCCounts,
+    *,
+    args_l: bool = False,
+    w: bool = False,
+    c: bool = False,
+    m: bool = False,
+    L: bool = False,
+) -> list[int]:
+    if L:
+        return [counts.max_line_length]
+    if args_l:
+        return [counts.lines]
+    if w:
+        return [counts.words]
+    if c:
+        return [counts.bytes_]
+    if m:
+        return [counts.chars]
+    return [counts.lines, counts.words, counts.bytes_]
+
+
+def format_wc_lines(
+    rows: list[tuple[WCCounts, str | None]],
+    *,
+    args_l: bool = False,
+    w: bool = False,
+    c: bool = False,
+    m: bool = False,
+    L: bool = False,
+) -> list[str]:
+    """Format a wc report in GNU style.
+
+    Counts are right-aligned to a shared width and space-separated; a single
+    count for a single operand prints unpadded, and a default-mode stdin read
+    uses GNU's width 7 for unknown sizes. Divergence from GNU: the width is
+    the widest printed number, while GNU derives it from operand file sizes;
+    the two are identical in the default mode, where the byte count is the
+    widest column.
+
+    Args:
+        rows (list[tuple[WCCounts, str | None]]): One entry per output row
+            (including any ``total`` row); ``None`` labels omit the name.
+        args_l (bool): Report line count only.
+        w (bool): Report word count only.
+        c (bool): Report byte count only.
+        m (bool): Report character count only.
+        L (bool): Report longest line length only.
+    """
+    values = [(_selected_values(counts, args_l=args_l, w=w, c=c, m=m,
+                                L=L), label) for counts, label in rows]
+    if len(values) == 1 and len(values[0][0]) == 1:
+        nums, label = values[0]
+        body = str(nums[0])
+        return [body if label is None else f"{body} {label}"]
+    if len(values) == 1 and values[0][1] is None:
+        width = 7
+    else:
+        width = max((len(str(n)) for nums, _ in values for n in nums),
+                    default=1)
+    out: list[str] = []
+    for nums, label in values:
+        body = " ".join(str(n).rjust(width) for n in nums)
+        out.append(body if label is None else f"{body} {label}")
+    return out
+
+
 def format_wc(
     counts: WCCounts,
     *,
@@ -106,21 +173,12 @@ def format_wc(
     L: bool = False,
     label: str | None = None,
 ) -> str:
-    if L:
-        body = str(counts.max_line_length)
-    elif args_l:
-        body = str(counts.lines)
-    elif w:
-        body = str(counts.words)
-    elif c:
-        body = str(counts.bytes_)
-    elif m:
-        body = str(counts.chars)
-    else:
-        body = f"{counts.lines}\t{counts.words}\t{counts.bytes_}"
-    if label is None:
-        return body
-    return f"{body}\t{label}"
+    return format_wc_lines([(counts, label)],
+                           args_l=args_l,
+                           w=w,
+                           c=c,
+                           m=m,
+                           L=L)[0]
 
 
 async def format_multi(
@@ -155,26 +213,18 @@ async def format_multi(
     Returns:
         bytes: Encoded wc output, or ``b""`` when ``paths`` is empty.
     """
-    outputs: list[str] = []
+    rows: list[tuple[WCCounts, str | None]] = []
     totals = WCCounts()
     for path in paths:
         source = read(accessor, path)
         if inspect.isawaitable(source):
             source = await source
         counts = await wc(source)
-        outputs.append(
-            format_wc(counts,
-                      args_l=args_l,
-                      w=w,
-                      c=c,
-                      m=m,
-                      L=L,
-                      label=path.original))
+        rows.append((counts, path.original))
         totals.merge(counts)
     if len(paths) > 1:
-        outputs.append(
-            format_wc(totals, args_l=args_l, w=w, c=c, m=m, L=L,
-                      label="total"))
-    if not outputs:
+        rows.append((totals, "total"))
+    if not rows:
         return b""
-    return format_records(outputs)
+    return format_records(
+        format_wc_lines(rows, args_l=args_l, w=w, c=c, m=m, L=L))

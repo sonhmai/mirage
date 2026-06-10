@@ -28,7 +28,7 @@ async def test_wc_counts_document(monkeypatch, dify_accessor, dify_index,
     stdout, io = await wc(dify_accessor, [guide_path], index=dify_index)
 
     assert await materialize(stdout) == (
-        b"2\t3\t16\t/knowledge/guides/quickstart.md\n")
+        b" 2  3 16 /knowledge/guides/quickstart.md\n")
     assert io.cache == [guide_path.original]
 
 
@@ -43,10 +43,10 @@ async def test_wc_supports_chars_and_max_line_length(monkeypatch,
                                m=True,
                                index=dify_index)
     assert await materialize(chars_stdout) == (
-        b"17\t/knowledge/guides/quickstart.md\n")
+        b"17 /knowledge/guides/quickstart.md\n")
 
     max_line_stdout, _ = await wc(dify_accessor, [guide_path],
                                   L=True,
                                   index=dify_index)
     assert await materialize(max_line_stdout) == (
-        b"7\t/knowledge/guides/quickstart.md\n")
+        b"7 /knowledge/guides/quickstart.md\n")

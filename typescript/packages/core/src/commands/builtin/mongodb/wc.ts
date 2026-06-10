@@ -15,72 +15,54 @@
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { countDocuments } from '../../../core/mongodb/_client.ts'
 import { resolveGlob } from '../../../core/mongodb/glob.ts'
-import { read as mongoRead } from '../../../core/mongodb/read.ts'
+import { streamAny } from '../../../core/mongodb/read.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
 import { ScopeLevel } from '../../../core/mongodb/types.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { formatRecords } from '../utils/output.ts'
+import { formatWcLines, wcGeneric, type WcRow } from '../generic/wc.ts'
 import { fileReadProvision } from './_provision.ts'
 
-const ENC = new TextEncoder()
+function documentsScope(p: PathSpec): { database: string; name: string } | null {
+  const scope = detectScope(p)
+  if (scope.level === ScopeLevel.DOCUMENTS && scope.database !== null && scope.name !== null) {
+    return { database: scope.database, name: scope.name }
+  }
+  return null
+}
 
 async function wcCommand(
   accessor: MongoDBAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const f = opts.flags
-  const lFlag = f.args_l === true
-  const wFlag = f.w === true
-  const cFlag = f.c === true
-  const mFlag = f.m === true
-  const LFlag = f.L === true
-
-  if (wFlag || mFlag || LFlag) {
-    return [
-      null,
-      new IOResult({
-        exitCode: 1,
-        stderr: ENC.encode('wc: only -l and -c supported for MongoDB'),
-      }),
-    ]
-  }
-
-  if (paths.length === 0) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('wc: missing operand\n') })]
-  }
-
-  const first = paths[0]
-  if (first === undefined) return [null, new IOResult()]
-  const scope = detectScope(first)
-
-  if (scope.level === ScopeLevel.DOCUMENTS && scope.database !== null && scope.name !== null) {
-    if (cFlag) {
-      const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-      const target = resolved[0]
-      if (target === undefined) return [null, new IOResult()]
-      const data = await mongoRead(accessor, target, opts.index ?? undefined)
-      const out: ByteSource = ENC.encode(String(data.byteLength))
-      return [out, new IOResult()]
-    }
-    if (lFlag) {
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  // Line counts on collections come from a server-side countDocuments
+  // instead of reading every document. -l only (default prints words and
+  // bytes too, which needs the content).
+  const countOnly =
+    f.args_l === true && f.w !== true && f.c !== true && f.m !== true && f.L !== true
+  if (countOnly && resolved.length > 0 && resolved.every((p) => documentsScope(p) !== null)) {
+    const rows: WcRow[] = []
+    let total = 0
+    for (const p of resolved) {
+      const scope = documentsScope(p)
+      if (scope === null) continue
       const count = await countDocuments(accessor, scope.database, scope.name)
-      return [ENC.encode(String(count)), new IOResult()]
+      rows.push({ values: [count], label: p.original })
+      total += count
     }
-    const count = await countDocuments(accessor, scope.database, scope.name)
-    return [ENC.encode(String(count)), new IOResult()]
+    if (resolved.length > 1) rows.push({ values: [total], label: 'total' })
+    const out: ByteSource = formatRecords(formatWcLines(rows))
+    return [out, new IOResult()]
   }
-
-  return [
-    null,
-    new IOResult({
-      exitCode: 1,
-      stderr: ENC.encode('wc: path must target a collection file'),
-    }),
-  ]
+  return wcGeneric(resolved, texts, opts, (p) => streamAny(accessor, p, opts.index ?? undefined))
 }
 
 export const MONGODB_WC = command({

@@ -63,8 +63,19 @@ async def execute_program(
                                                   call_stack)
             # Materialize stdout so lazy exit codes (e.g. from
             # exit_on_empty in grep) are finalized before $? is set.
-            stdout = await materialize(stdout)
+            drain_err: str | None = None
+            try:
+                stdout = await materialize(stdout)
+            except Exception as exc:
+                # Lazy reads can fail on the first pull (e.g. a backend size
+                # guard); surface that as a failed statement, not a crash.
+                drain_err = str(exc)
+                stdout = None
             io.sync_exit_code()
+            if drain_err is not None:
+                existing = await materialize(io.stderr) or b""
+                io.stderr = existing + f"{drain_err}\n".encode()
+                io.exit_code = 1
             session.last_exit_code = io.exit_code
             i += 1
 

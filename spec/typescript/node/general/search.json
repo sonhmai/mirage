@@ -5,21 +5,7 @@
     "has_provision": false,
     "has_write": false,
     "resources": [
-      "box",
-      "chroma",
-      "databricks_volume",
-      "disk",
-      "dropbox",
-      "gdrive",
-      "github",
-      "hf_buckets",
-      "hf_datasets",
-      "hf_models",
-      "hf_spaces",
-      "ram",
-      "redis",
-      "s3",
-      "ssh"
+      "lancedb"
     ]
   },
   "description": null,
@@ -27,24 +13,24 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--method",
       "numeric_shorthand": false,
-      "short": "-F",
+      "short": null,
       "value_kind": "text"
     },
     {
       "description": null,
-      "long": null,
+      "long": "--top-k",
       "numeric_shorthand": false,
-      "short": "-v",
+      "short": null,
       "value_kind": "text"
     },
     {
       "description": null,
-      "long": null,
+      "long": "--threshold",
       "numeric_shorthand": false,
-      "short": "-f",
-      "value_kind": "path"
+      "short": null,
+      "value_kind": "text"
     }
   ],
   "positional": [

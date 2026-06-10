@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.mongodb.readdir import readdir
+from mirage.core.mongodb.readdir import is_dir_name, readdir
 from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import PathSpec
 
@@ -175,3 +175,9 @@ async def test_readdir_prefix_carries_through(accessor, index):
         "/mongo/sample_mflix/collections",
         "/mongo/sample_mflix/views",
     ]
+
+
+def test_is_dir_name_classifies_by_extension():
+    assert is_dir_name("/db/collections") is True
+    assert is_dir_name("/db/database.json") is False
+    assert is_dir_name("/db/collections/books/documents.jsonl") is False

@@ -137,8 +137,6 @@ export const ResourceName = Object.freeze({
   OPFS: 'opfs',
   SUPABASE: 'supabase',
   POSTGRES: 'postgres',
-  VERCEL: 'vercel',
-  POSTHOG: 'posthog',
   LANCEDB: 'lancedb',
   CHROMA: 'chroma',
   HF_BUCKETS: 'hf_buckets',

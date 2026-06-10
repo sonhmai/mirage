@@ -13,85 +13,54 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
-import { fetchRows } from '../../../core/postgres/_client.ts'
+import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { resolveGlob } from '../../../core/postgres/glob.ts'
-import { read as postgresRead } from '../../../core/postgres/read.ts'
+import { readStream } from '../../../core/postgres/read.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
-import { type ByteSource, IOResult } from '../../../io/types.ts'
-import { type PathSpec, ResourceName } from '../../../types.ts'
-import { encodeBase64 } from '../../../utils/base64.ts'
+import { stat as postgresStat } from '../../../core/postgres/stat.ts'
+import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { headGeneric } from '../generic/head.ts'
 import { fileReadProvision } from './_provision.ts'
 
-const ENC = new TextEncoder()
-
-function jsonReplacer(_key: string, value: unknown): unknown {
-  if (value instanceof Date) return value.toISOString()
-  if (typeof value === 'bigint') return value.toString()
-  if (value instanceof Uint8Array) return encodeBase64(value)
-  return value
-}
-
-function headBytes(data: Uint8Array, lines: number, bytesMode: number | null): Uint8Array {
-  if (bytesMode !== null) {
-    return data.slice(0, bytesMode)
+// Row reads on tables/views push LIMIT into the query instead of fetching
+// the whole relation; headGeneric then trims the already-small chunk. Falls
+// back to a full read for byte mode and non-row paths.
+async function* headSource(
+  accessor: PostgresAccessor,
+  p: PathSpec,
+  index: IndexCacheStore | undefined,
+  lines: number,
+  pushdown: boolean,
+): AsyncIterable<Uint8Array> {
+  const scope = detectScope(p)
+  if (pushdown && scope.level === 'entity_rows') {
+    const limit = Math.min(lines, accessor.config.defaultRowLimit)
+    yield* readStream(accessor, p, index, { limit, offset: 0 })
+    return
   }
-  let count = 0
-  let end = data.byteLength
-  for (let i = 0; i < data.byteLength; i++) {
-    if (data[i] === 0x0a) {
-      count += 1
-      if (count >= lines) {
-        end = i
-        break
-      }
-    }
-  }
-  return data.slice(0, end)
+  yield* readStream(accessor, p, index)
 }
 
 async function headCommand(
   accessor: PostgresAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
   const nRaw = typeof opts.flags.n === 'string' ? opts.flags.n : null
-  const cRaw = typeof opts.flags.c === 'string' ? opts.flags.c : null
   const lines = nRaw !== null ? Number.parseInt(nRaw, 10) : 10
-  const bytesMode = cRaw !== null ? Number.parseInt(cRaw, 10) : null
-
-  if (paths.length > 0) {
-    const first = paths[0]
-    if (first === undefined) return [null, new IOResult()]
-    const scope = detectScope(first)
-    if (scope.level === 'entity_rows' && bytesMode === null) {
-      const limit = Math.min(lines, accessor.config.defaultRowLimit)
-      const rows = await fetchRows(accessor, scope.schema, scope.entity, {
-        limit,
-        offset: 0,
-      })
-      if (rows.length === 0) {
-        return [headBytes(new Uint8Array(0), lines, null), new IOResult()]
-      }
-      const jsonl = rows.map((r) => JSON.stringify(r, jsonReplacer)).join('\n') + '\n'
-      return [headBytes(ENC.encode(jsonl), lines, null), new IOResult()]
-    }
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const target = resolved[0]
-    if (target === undefined) return [null, new IOResult()]
-    const data = await postgresRead(accessor, target, opts.index ?? undefined)
-    const out: ByteSource = headBytes(data, lines, bytesMode)
-    return [out, new IOResult()]
-  }
-
-  const raw = await readStdinAsync(opts.stdin)
-  if (raw === null) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('head: missing operand\n') })]
-  }
-  return [headBytes(raw, lines, bytesMode), new IOResult()]
+  const pushdown = typeof opts.flags.c !== 'string' && lines > 0
+  return headGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => postgresStat(accessor, p, opts.index ?? undefined),
+    (p) => headSource(accessor, p, opts.index ?? undefined, lines, pushdown),
+  )
 }
 
 export const POSTGRES_HEAD = command({

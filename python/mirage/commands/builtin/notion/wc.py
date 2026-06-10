@@ -16,7 +16,8 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.wc import WCCounts, format_wc
+from mirage.commands.builtin.generic.wc import (WCCounts, format_wc,
+                                                format_wc_lines)
 from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.notion._provision import file_read_provision
 from mirage.commands.builtin.utils.output import format_records
@@ -58,30 +59,18 @@ async def wc(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        outputs: list[str] = []
+        rows: list[tuple[WCCounts, str | None]] = []
         totals = WCCounts()
         for p in paths:
             data = await notion_read(accessor, p, index)
             counts = await generic_wc(data)
-            outputs.append(
-                format_wc(counts,
-                          args_l=args_l,
-                          w=w,
-                          c=c,
-                          m=m,
-                          L=L,
-                          label=p.original))
+            rows.append((counts, p.original))
             totals.merge(counts)
         if len(paths) > 1:
-            outputs.append(
-                format_wc(totals,
-                          args_l=args_l,
-                          w=w,
-                          c=c,
-                          m=m,
-                          L=L,
-                          label="total"))
-        return format_records(outputs), IOResult()
+            rows.append((totals, "total"))
+        return format_records(
+            format_wc_lines(rows, args_l=args_l, w=w, c=c, m=m,
+                            L=L)), IOResult()
     data = await _read_stdin_async(stdin)
     if data is None:
         raise ValueError("wc: missing operand")

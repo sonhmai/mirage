@@ -15,18 +15,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../../core/postgres/read.ts', () => ({
-  read: vi.fn(),
+  readStream: vi.fn(),
+}))
+vi.mock('../../../core/postgres/stat.ts', () => ({
+  stat: vi.fn(),
 }))
 
 import { PostgresAccessor } from '../../../accessor/postgres.ts'
 import type { PgDriver, PgQueryResult } from '../../../core/postgres/_driver.ts'
 import * as readModule from '../../../core/postgres/read.ts'
+import * as statModule from '../../../core/postgres/stat.ts'
 import { resolvePostgresConfig } from '../../../resource/postgres/config.ts'
 import { materialize } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { FileStat, PathSpec } from '../../../types.ts'
 import { POSTGRES_CAT } from './cat.ts'
-
-const DEC = new TextDecoder()
 
 class StubDriver implements PgDriver {
   query<R = Record<string, unknown>>(): Promise<PgQueryResult<R>> {
@@ -42,17 +44,23 @@ function makeAccessor(): PostgresAccessor {
   return new PostgresAccessor(new StubDriver(), cfg)
 }
 
+async function* failingStream(message: string): AsyncIterable<Uint8Array> {
+  yield await Promise.reject(new Error(message))
+}
+
 describe('postgres cat size-guard surfacing', () => {
   beforeEach(() => {
-    vi.mocked(readModule.read).mockReset()
+    vi.mocked(readModule.readStream).mockReset()
+    vi.mocked(statModule.stat).mockReset()
   })
 
-  it('returns exitCode=1 with stderr when read() throws size-guard error', async () => {
+  it('surfaces the size-guard error when the row read throws', async () => {
     const message =
       'public/tables/users/rows.jsonl too large to read entirely: ' +
       '~50000 rows / ~5000000 bytes (thresholds: 10000 rows / 1000000 bytes); ' +
       'use head, tail, wc, grep, or pass limit/offset'
-    vi.mocked(readModule.read).mockRejectedValue(new Error(message))
+    vi.mocked(statModule.stat).mockResolvedValue(new FileStat({ name: 'rows.jsonl' }))
+    vi.mocked(readModule.readStream).mockImplementation(() => failingStream(message))
 
     const cmd = POSTGRES_CAT[0]
     if (cmd === undefined) throw new Error('cat not registered')
@@ -72,11 +80,7 @@ describe('postgres cat size-guard surfacing', () => {
     })
     expect(result).not.toBeNull()
     if (result === null) return
-    const [out, io] = result
-    expect(out).toBeNull()
-    expect(io.exitCode).toBe(1)
-    expect(io.stderr).not.toBeNull()
-    const stderrBytes = await materialize(io.stderr)
-    expect(DEC.decode(stderrBytes)).toContain('too large to read entirely')
+    const [out] = result
+    await expect(materialize(out)).rejects.toThrow('too large to read entirely')
   })
 })

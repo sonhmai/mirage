@@ -5,6 +5,10 @@
     "has_provision": false,
     "has_write": true,
     "resources": [
+      "databricks_volume",
+      "gdocs",
+      "gsheets",
+      "gslides",
       "opfs",
       "ram",
       "s3"

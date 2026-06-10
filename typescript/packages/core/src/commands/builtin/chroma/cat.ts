@@ -14,70 +14,28 @@
 
 import type { ChromaAccessor } from '../../../accessor/chroma.ts'
 import { resolveGlob } from '../../../core/chroma/glob.ts'
-import { readBytes, readStream } from '../../../core/chroma/read.ts'
-import { CachableAsyncIterator } from '../../../io/cachable_iterator.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { readStream } from '../../../core/chroma/read.ts'
+import { stat as chromaStat } from '../../../core/chroma/stat.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
-
-function numberLines(data: Uint8Array): Uint8Array {
-  const text = DEC.decode(data)
-  const lines = text.split('\n')
-  const trailing = text.endsWith('\n')
-  const limit = trailing ? lines.length - 1 : lines.length
-  const out: string[] = []
-  for (let i = 0; i < limit; i++) {
-    out.push(`     ${String(i + 1)}\t${lines[i] ?? ''}\n`)
-  }
-  return ENC.encode(out.join(''))
-}
-
-function concat(parts: readonly Uint8Array[]): Uint8Array {
-  const total = parts.reduce((sum, part) => sum + part.byteLength, 0)
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const part of parts) {
-    out.set(part, offset)
-    offset += part.byteLength
-  }
-  return out
-}
+import { catGeneric } from '../generic/cat.ts'
 
 async function catCommand(
   accessor: ChromaAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const index = opts.index ?? undefined
-  const resolved = await resolveGlob(accessor, paths, index)
-  const nFlag = opts.flags.n === true
-  const first = resolved[0]
-  let source: ByteSource
-  let io: IOResult
-  if (resolved.length === 1 && first !== undefined) {
-    const cachable = new CachableAsyncIterator(readStream(accessor, first, index))
-    io = new IOResult({ reads: { [first.original]: cachable }, cache: [first.original] })
-    source = cachable
-  } else {
-    const reads: Record<string, ByteSource> = {}
-    const parts: Uint8Array[] = []
-    for (const p of resolved) {
-      const data = await readBytes(accessor, p, index)
-      reads[p.original] = data
-      parts.push(data)
-    }
-    io = new IOResult({ reads, cache: Object.keys(reads) })
-    source = concat(parts)
-  }
-  if (nFlag) {
-    return [numberLines(await materialize(source)), io]
-  }
-  return [source, io]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return catGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => chromaStat(accessor, p, opts.index ?? undefined),
+    (p) => readStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const CHROMA_CAT = command({

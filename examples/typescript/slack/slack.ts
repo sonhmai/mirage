@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
   MountMode,
@@ -20,7 +22,8 @@ import {
   type SlackConfig,
 } from '@struktoai/mirage-node'
 
-dotenv.config({ path: '.env.development' })
+const __HERE = fileURLToPath(new URL('.', import.meta.url))
+dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
 
 function buildConfig(): SlackConfig {
   const token = process.env.SLACK_BOT_TOKEN

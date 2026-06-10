@@ -89,6 +89,16 @@ async function main(): Promise<void> {
 
     console.log(`\n=== grep -r -l bug ${teamBase}/issues/ | head -n 3 ===`)
     await run(ws, `grep -r -l bug "${teamBase}/issues/" | head -n 3`)
+
+    console.log(`\n=== stat ${i0}/issue.json ===`)
+    await run(ws, `stat "${issuePath}/issue.json"`)
+
+    console.log(`\n=== wc / tail issue.json ===`)
+    await run(ws, `wc "${issuePath}/issue.json"`)
+    await run(ws, `tail -n 3 "${issuePath}/issue.json"`)
+
+    console.log(`\n=== rg -l title ${teamBase}/issues/ | head -n 3 ===`)
+    await run(ws, `rg -l "title" "${teamBase}/issues/" | head -n 3`)
   } finally {
     await ws.close()
   }

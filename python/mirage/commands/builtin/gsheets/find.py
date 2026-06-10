@@ -22,15 +22,12 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gsheets.glob import resolve_glob
+from mirage.core.gsheets.readdir import is_dir_name
 from mirage.core.gsheets.readdir import readdir as _readdir
 from mirage.core.gsheets.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
-
-
-def _is_dir_name(child: str) -> bool | None:
-    return not child.endswith(".gsheet.json")
 
 
 async def find_provision(
@@ -87,7 +84,7 @@ async def find(
     results = await walk_find(search_spec,
                               readdir=partial(_readdir, accessor),
                               stat=partial(_stat, accessor),
-                              is_dir_name=_is_dir_name,
+                              is_dir_name=is_dir_name,
                               index=index,
                               args=args)
     output = format_records(results)

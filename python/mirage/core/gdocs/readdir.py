@@ -15,11 +15,16 @@
 from mirage.accessor.gdocs import GDocsAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.google.date_glob import glob_to_modified_range
-from mirage.core.google.drive import list_all_files
+from mirage.core.google.drive import GoogleFileSuffix, list_all_files
 from mirage.resource.gdocs.doc_entry import make_filename
 from mirage.types import PathSpec
 
 MIME = "application/vnd.google-apps.document"
+
+
+def is_dir_name(child: str) -> bool:
+    # readdir emits only folders and rendered *.gdoc.json files.
+    return not child.endswith(GoogleFileSuffix.GDOC.value)
 
 
 async def readdir(

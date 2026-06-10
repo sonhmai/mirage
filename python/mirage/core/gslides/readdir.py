@@ -15,11 +15,16 @@
 from mirage.accessor.gslides import GSlidesAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.google.date_glob import glob_to_modified_range
-from mirage.core.google.drive import list_all_files
+from mirage.core.google.drive import GoogleFileSuffix, list_all_files
 from mirage.resource.gslides.slide_entry import make_filename
 from mirage.types import PathSpec
 
 MIME = "application/vnd.google-apps.presentation"
+
+
+def is_dir_name(child: str) -> bool:
+    # readdir emits only folders and rendered *.gslide.json files.
+    return not child.endswith(GoogleFileSuffix.GSLIDE.value)
 
 
 async def readdir(

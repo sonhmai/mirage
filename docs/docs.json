@@ -216,6 +216,7 @@
               "python/agents/openhands",
               "python/agents/pydantic-ai",
               "python/agents/camel",
+              "python/agents/agno",
               "python/agents/claude-code",
               "python/agents/codex"
             ]

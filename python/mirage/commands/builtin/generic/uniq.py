@@ -1,16 +1,26 @@
 from collections.abc import AsyncIterator, Callable
 
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.builtin.utils.stream import (_open_read_stream,
+                                                  _resolve_source)
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+
+
+def _parse_count(value: str | None) -> int | None:
+    if value is None:
+        return None
+    count = int(value)
+    if count < 0:
+        raise ValueError(f"uniq: invalid count: '{value}'")
+    return count
 
 
 def _comparison_key(
     line: bytes,
     skip_fields: int,
     skip_chars: int,
-    check_chars: int,
+    check_chars: int | None,
     ignore_case: bool,
 ) -> bytes:
     text = line
@@ -21,7 +31,7 @@ def _comparison_key(
         text = " ".join(remaining).encode()
     if skip_chars > 0:
         text = text[skip_chars:]
-    if check_chars > 0:
+    if check_chars is not None:
         text = text[:check_chars]
     if ignore_case:
         text = text.lower()
@@ -45,7 +55,7 @@ async def _uniq_stream(
     skip_fields: int,
     skip_chars: int,
     ignore_case: bool,
-    check_chars: int,
+    check_chars: int | None,
 ) -> AsyncIterator[bytes]:
     prev_line: bytes | None = None
     prev_key: bytes | None = None
@@ -82,14 +92,14 @@ async def uniq(
     count: bool = False,
     duplicates_only: bool = False,
     unique_only: bool = False,
-    skip_fields: int = 0,
-    skip_chars: int = 0,
+    skip_fields: str | None = None,
+    skip_chars: str | None = None,
     ignore_case: bool = False,
-    check_chars: int = 0,
+    check_chars: str | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     cache: list[str] = []
     if paths:
-        source = read_stream(accessor, paths[0])
+        source = await _open_read_stream(read_stream, accessor, paths[0])
         cache = [paths[0].strip_prefix]
     else:
         source = _resolve_source(stdin, "uniq: missing operand")
@@ -99,10 +109,10 @@ async def uniq(
         count=count,
         duplicates_only=duplicates_only,
         unique_only=unique_only,
-        skip_fields=skip_fields,
-        skip_chars=skip_chars,
+        skip_fields=_parse_count(skip_fields) or 0,
+        skip_chars=_parse_count(skip_chars) or 0,
         ignore_case=ignore_case,
-        check_chars=check_chars,
+        check_chars=_parse_count(check_chars),
     ), IOResult(cache=cache)
 
 

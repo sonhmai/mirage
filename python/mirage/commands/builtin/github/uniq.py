@@ -13,37 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.uniq import uniq as generic_uniq
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.github.glob import resolve_glob
 from mirage.core.github.read import read as github_read
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _comparison_key(
-    line: str,
-    skip_fields: int,
-    skip_chars: int,
-    check_chars: int,
-    ignore_case: bool,
-) -> str:
-    text = line
-    if skip_fields > 0:
-        parts = text.split()
-        remaining = parts[skip_fields:] if skip_fields < len(parts) else []
-        text = " ".join(remaining)
-    if skip_chars > 0:
-        text = text[skip_chars:]
-    if check_chars > 0:
-        text = text[:check_chars]
-    if ignore_case:
-        text = text.lower()
-    return text
 
 
 @command("uniq", resource="github", spec=SPECS["uniq"])
@@ -62,43 +42,20 @@ async def uniq(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    skip_fields = int(f) if f else 0
-    skip_chars = int(s) if s else 0
-    check_chars = int(w) if w else 0
-    if paths and index is not None:
+    if paths:
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        data = await github_read(accessor, p, index)
-        raw_text = data.decode(errors="replace")
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("uniq: missing operand")
-        raw_text = raw.decode(errors="replace")
-    lines = raw_text.splitlines()
-    result: list[str] = []
-    prev_key: str | None = None
-    prev_line: str | None = None
-    prev_count = 0
-    for line in lines:
-        key = _comparison_key(line, skip_fields, skip_chars, check_chars, i)
-        if key == prev_key:
-            prev_count += 1
-        else:
-            if prev_line is not None:
-                if not (d and prev_count == 1) and not (u and prev_count > 1):
-                    if c:
-                        result.append(f"{prev_count:>7} {prev_line}")
-                    else:
-                        result.append(prev_line)
-            prev_line = line
-            prev_key = key
-            prev_count = 1
-    if prev_line is not None:
-        if not (d and prev_count == 1) and not (u and prev_count > 1):
-            if c:
-                result.append(f"{prev_count:>7} {prev_line}")
-            else:
-                result.append(prev_line)
-    output = "\n".join(result) + "\n" if result else ""
-    return output.encode(), IOResult()
+        paths = []
+    return await generic_uniq(
+        paths,
+        read_stream=partial(github_read, index=index),
+        accessor=accessor,
+        stdin=stdin,
+        count=c,
+        duplicates_only=d,
+        unique_only=u,
+        skip_fields=f,
+        skip_chars=s,
+        ignore_case=i,
+        check_chars=w,
+    )

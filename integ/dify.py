@@ -232,6 +232,8 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("grep_rl_encrypted", "grep -rl encrypted {root}"),
     ("rg_l_token", "rg -l token {root}"),
     ("pipe_sort_uniq_wc", "cat {root}guides/auth | sort | uniq | wc -l"),
+    ("pipe_sort_uniq_w0_wc",
+     "cat {root}guides/auth | sort | uniq -w 0 | wc -l"),
 ]
 
 # Dify-native semantic retrieval mirroring examples/python/dify/dify.py. The

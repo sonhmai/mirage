@@ -27,8 +27,15 @@ interface UniqOptions {
   uniqueOnly: boolean
   skipFields: number
   skipChars: number
-  checkChars: number
+  checkChars: number | null
   ignoreCase: boolean
+}
+
+function parseCount(value: string | boolean | undefined): number | null {
+  if (typeof value !== 'string') return null
+  const count = Number.parseInt(value, 10)
+  if (Number.isNaN(count) || count < 0) throw new Error(`uniq: invalid count: '${value}'`)
+  return count
 }
 
 function comparisonKey(line: Uint8Array, opts: UniqOptions): string {
@@ -39,7 +46,7 @@ function comparisonKey(line: Uint8Array, opts: UniqOptions): string {
     text = remaining.join(' ')
   }
   if (opts.skipChars > 0) text = text.slice(opts.skipChars)
-  if (opts.checkChars > 0) text = text.slice(0, opts.checkChars)
+  if (opts.checkChars !== null) text = text.slice(0, opts.checkChars)
   if (opts.ignoreCase) text = text.toLowerCase()
   return text
 }
@@ -94,15 +101,13 @@ async function* uniqStream(
 }
 
 function parseOptions(flags: Record<string, string | boolean>): UniqOptions {
-  const intFlag = (key: 'f' | 's' | 'w'): number =>
-    typeof flags[key] === 'string' ? Number.parseInt(flags[key], 10) : 0
   return {
     count: flags.c === true,
     duplicatesOnly: flags.d === true,
     uniqueOnly: flags.u === true,
-    skipFields: intFlag('f'),
-    skipChars: intFlag('s'),
-    checkChars: intFlag('w'),
+    skipFields: parseCount(flags.f) ?? 0,
+    skipChars: parseCount(flags.s) ?? 0,
+    checkChars: parseCount(flags.w),
     ignoreCase: flags.i === true,
   }
 }

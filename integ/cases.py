@@ -64,6 +64,8 @@ SEED_FILES = {
     "a,1\nb,2\nc,3\nd,4\ne,5\n",
     "/data/sorted_c.txt":
     "apple\ncherry\nelder\nfig\n",
+    "/data/prefix_dup.txt":
+    "1 apple\n2 apple\n3 banana\n",
 }
 
 CASES: list[tuple[str, str]] = [
@@ -321,6 +323,11 @@ CASES: list[tuple[str, str]] = [
     ("uniq_u", "uniq -u /data/dup.txt"),
     ("uniq_repeats", "uniq /data/repeats.txt"),
     ("uniq_c_repeats", "uniq -c /data/repeats.txt"),
+    ("uniq_f", "uniq -f 1 /data/prefix_dup.txt"),
+    ("uniq_s", "uniq -s 1 /data/prefix_dup.txt"),
+    ("uniq_w", "uniq -w 3 /data/prefix_dup.txt"),
+    ("uniq_w0", "uniq -w 0 /data/prefix_dup.txt"),
+    ("uniq_f_c", "uniq -c -f 1 /data/prefix_dup.txt"),
 
     # ----- grep more -----
     ("grep_F", "grep -F . /data/user.json"),

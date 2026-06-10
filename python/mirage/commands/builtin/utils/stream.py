@@ -12,7 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+import inspect
+from collections.abc import AsyncIterator, Callable
+
+from mirage.types import PathSpec
 
 
 async def _read_stdin_async(
@@ -40,3 +43,18 @@ def _resolve_source(
             return _wrap_bytes(stdin)
         return stdin
     raise ValueError(error_msg)
+
+
+async def _open_read_stream(
+    read_stream: Callable[..., object],
+    accessor: object,
+    path: PathSpec,
+) -> AsyncIterator[bytes]:
+    # Accept both async-generator readers and plain async readers that
+    # resolve to bytes or an AsyncIterator (e.g. gdrive, github).
+    source = read_stream(accessor, path)
+    if inspect.isawaitable(source):
+        source = await source
+    if isinstance(source, bytes):
+        return _wrap_bytes(source)
+    return source

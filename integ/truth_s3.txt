@@ -78,6 +78,10 @@ example.json
 "SRE"
 === s3:pipe_sort_uniq_wc ===
 86
+=== s3:pipe_sort_uniq_w0_wc ===
+1
+=== s3:pipe_sort_uniq_f_wc ===
+1
 === s3:md5_json ===
 f249ee110320adc2975cb6c7436c9a45  /s3/data/example.json
 === s3:sha256_json ===
@@ -204,6 +208,10 @@ example.json
 "SRE"
 === gcs:pipe_sort_uniq_wc ===
 86
+=== gcs:pipe_sort_uniq_w0_wc ===
+1
+=== gcs:pipe_sort_uniq_f_wc ===
+1
 === gcs:md5_json ===
 f249ee110320adc2975cb6c7436c9a45  /gcs/data/example.json
 === gcs:sha256_json ===
@@ -330,6 +338,10 @@ example.json
 "SRE"
 === minio:pipe_sort_uniq_wc ===
 86
+=== minio:pipe_sort_uniq_w0_wc ===
+1
+=== minio:pipe_sort_uniq_f_wc ===
+1
 === minio:md5_json ===
 f249ee110320adc2975cb6c7436c9a45  /minio/data/example.json
 === minio:sha256_json ===

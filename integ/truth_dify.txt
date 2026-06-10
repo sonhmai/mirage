@@ -50,6 +50,8 @@ If you exceed the limit you receive HTTP 429 and must back off.
 /knowledge/guides/quickstart
 === pipe_sort_uniq_wc ===
 3
+=== pipe_sort_uniq_w0_wc ===
+1
 === search_throttle ===
 /knowledge/guides/auth:0.92
 Requests are rate limited to 100 calls per minute per token.

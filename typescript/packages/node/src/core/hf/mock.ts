@@ -21,7 +21,7 @@ export interface FakeHfOperator {
   read: (key: string, options?: { offset?: bigint; size?: bigint }) => Promise<Buffer>
   reader: (key: string) => Promise<{ read: (buf: Buffer) => Promise<bigint> }>
   stat: (key: string) => Promise<FakeMetadata>
-  list: (path: string) => Promise<FakeEntry[]>
+  list: (path: string, options?: { recursive?: boolean }) => Promise<FakeEntry[]>
   write: (key: string, data: Buffer | string) => Promise<FakeMetadata>
   delete: (key: string) => Promise<void>
   createDir: (key: string) => Promise<void>
@@ -106,16 +106,33 @@ export function fakeHfOperator(initial: Record<string, string | Buffer> = {}): F
       if (hasDir(key)) return Promise.resolve(DIR_METADATA)
       return Promise.reject(notFound('stat', key))
     },
-    list: (path) => {
+    list: (path, options) => {
       const pfx = path === '/' ? '' : path
       if (pfx !== '' && !hasDir(pfx)) return Promise.reject(notFound('list', path))
+      const recursive = options?.recursive === true
       const seen = new Map<string, FakeEntry>()
       for (const [key, data] of files.entries()) {
         if (!key.startsWith(pfx)) continue
         const rest = key.slice(pfx.length)
         if (rest === '') continue
         const slash = rest.indexOf('/')
-        if (slash === -1) {
+        if (recursive) {
+          seen.set(key, {
+            path: () => key,
+            name: () => key.split('/').pop() ?? key,
+            metadata: () => fileMetadata(data),
+          })
+          let dirRel = rest
+          while (dirRel.includes('/')) {
+            dirRel = dirRel.slice(0, dirRel.lastIndexOf('/'))
+            const dirPath = `${pfx}${dirRel}/`
+            seen.set(dirPath, {
+              path: () => dirPath,
+              name: () => dirRel.split('/').pop() ?? dirRel,
+              metadata: () => DIR_METADATA,
+            })
+          }
+        } else if (slash === -1) {
           seen.set(key, { path: () => key, name: () => rest, metadata: () => fileMetadata(data) })
         } else {
           const dirRel = rest.slice(0, slash)

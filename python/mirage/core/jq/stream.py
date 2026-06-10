@@ -58,6 +58,7 @@ def is_streamable_jsonl_expr(expression: str) -> bool:
 async def eval_jsonl_stream(
     source: AsyncIterator[bytes],
     expression: str,
+    raw: bool = False,
 ) -> AsyncIterator[bytes]:
     from mirage.core.jq.eval import jq_eval
 
@@ -66,6 +67,8 @@ async def eval_jsonl_stream(
         per_item = "."
     elif expr.startswith(".[] | "):
         per_item = expr[6:]
+    elif expr.startswith(".[]."):
+        per_item = expr[3:]
     else:
         per_item = expr
 
@@ -77,4 +80,7 @@ async def eval_jsonl_stream(
         result = jq_eval(obj, per_item)
         if result is JQ_EMPTY:
             continue
-        yield orjson.dumps(result) + b"\n"
+        if raw and isinstance(result, str):
+            yield result.encode("utf-8") + b"\n"
+        else:
+            yield orjson.dumps(result) + b"\n"

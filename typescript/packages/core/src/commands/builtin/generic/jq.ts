@@ -85,7 +85,7 @@ export async function jqGeneric(
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
     if (isJsonlPath(first.original) && isStreamableJsonlExpr(expression)) {
-      return [evalJsonlStream(stream(first), expression), new IOResult()]
+      return [evalJsonlStream(stream(first), expression, raw), new IOResult()]
     }
     const outputs: Uint8Array[] = []
     const spread = expression.includes('[]')

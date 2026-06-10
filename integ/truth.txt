@@ -93,6 +93,13 @@ alice
 1
 2
 3
+=== jq_jsonl_chain ===
+1
+2
+3
+=== jq_jsonl_chain_raw ===
+hello
+world
 === sort ===
 bar
 baz
@@ -246,6 +253,7 @@ a.txt
 /data/b.txt
 /data/binary.bin
 /data/c.txt
+/data/chat.jsonl
 /data/csv.csv
 /data/data.jsonl
 /data/dup.txt
@@ -273,6 +281,7 @@ abc.csv
 b.txt
 binary.bin
 c.txt
+chat.jsonl
 csv.csv
 data.jsonl
 dup.txt
@@ -299,6 +308,7 @@ abc.csv
 b.txt
 binary.bin
 c.txt
+chat.jsonl
 csv.csv
 data.jsonl
 dup.txt
@@ -405,6 +415,7 @@ baz
 /data/b.txt
 /data/binary.bin
 /data/c.txt
+/data/chat.jsonl
 /data/csv.csv
 /data/data.jsonl
 /data/dup.txt
@@ -432,6 +443,7 @@ baz
 /data/b.txt
 /data/binary.bin
 /data/c.txt
+/data/chat.jsonl
 /data/csv.csv
 /data/data.jsonl
 /data/dup.txt
@@ -602,6 +614,7 @@ world
 /data/abc.csv
 /data/binary.bin
 /data/c.txt
+/data/chat.jsonl
 /data/csv.csv
 /data/data.jsonl
 /data/dup.txt
@@ -876,6 +889,7 @@ baz,
 /data/b.txt
 /data/binary.bin
 /data/c.txt
+/data/chat.jsonl
 /data/csv.csv
 /data/data.jsonl
 /data/dup.txt
@@ -932,6 +946,7 @@ baz,
 /data/b.txt
 /data/binary.bin
 /data/c.txt
+/data/chat.jsonl
 /data/csv.csv
 /data/data.jsonl
 /data/dup.txt
@@ -959,6 +974,7 @@ baz,
 /data/b.txt
 /data/binary.bin
 /data/c.txt
+/data/chat.jsonl
 /data/csv.csv
 /data/data.jsonl
 /data/dup.txt
@@ -1019,7 +1035,7 @@ baz,
 === du_file ===
 24	/data/a.txt
 === du_dir ===
-570	/data
+602	/data
 === du_h ===
 24B	/data/a.txt
 === tree ===

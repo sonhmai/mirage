@@ -58,12 +58,14 @@ export function isStreamableJsonlExpr(expression: string): boolean {
 export async function* evalJsonlStream(
   source: AsyncIterable<Uint8Array>,
   expression: string,
+  raw = false,
 ): AsyncIterable<Uint8Array> {
   const { jqEval } = await import('./eval.ts')
   const expr = expression.trim()
   let perItem: string
   if (expr === '.[]') perItem = '.'
   else if (expr.startsWith('.[] | ')) perItem = expr.slice(6)
+  else if (expr.startsWith('.[].')) perItem = expr.slice(3)
   else perItem = expr
 
   const iter = new AsyncLineIterator(source)
@@ -73,6 +75,7 @@ export async function* evalJsonlStream(
     const obj: unknown = JSON.parse(text)
     const result = await jqEval(obj, perItem)
     if (result === JQ_EMPTY) continue
-    yield ENC.encode(JSON.stringify(result) + '\n')
+    const line = raw && typeof result === 'string' ? result : JSON.stringify(result)
+    yield ENC.encode(line + '\n')
   }
 }

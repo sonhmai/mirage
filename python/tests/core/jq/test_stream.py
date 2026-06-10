@@ -15,7 +15,7 @@
 import orjson
 import pytest
 
-from mirage.core.jq.stream import parse_json_auto
+from mirage.core.jq.stream import eval_jsonl_stream, parse_json_auto
 
 
 def test_parse_json_auto_empty_raises_clear_error():
@@ -40,3 +40,29 @@ def test_parse_json_auto_ndjson():
 def test_parse_json_auto_single_line_garbage_propagates_error():
     with pytest.raises(orjson.JSONDecodeError):
         parse_json_auto(b"this is not json")
+
+
+async def _lines(*items: bytes):
+    for item in items:
+        yield item
+
+
+async def _collect(stream) -> list[str]:
+    out = []
+    async for chunk in stream:
+        out.append(chunk.decode().rstrip("\n"))
+    return out
+
+
+@pytest.mark.asyncio
+async def test_eval_jsonl_stream_dot_chain_maps_per_line():
+    source = _lines(b'{"msg":"hello"}\n', b'{"msg":"world"}\n')
+    out = await _collect(eval_jsonl_stream(source, ".[].msg"))
+    assert out == ['"hello"', '"world"']
+
+
+@pytest.mark.asyncio
+async def test_eval_jsonl_stream_raw_unquotes_strings():
+    source = _lines(b'{"msg":"hello"}\n', b'{"msg":"world"}\n')
+    out = await _collect(eval_jsonl_stream(source, ".[].msg", raw=True))
+    assert out == ["hello", "world"]

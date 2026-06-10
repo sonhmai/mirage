@@ -12,77 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  IOResult,
-  PathSpec,
-  ResourceName,
-  command,
-  specOf,
-  type ByteSource,
-  type CommandFnResult,
-  type CommandOpts,
-} from '@struktoai/mirage-core'
+import { ResourceName, command, realpathGeneric, specOf } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { stat as emailStat } from '../../../core/email/stat.ts'
-
-const ENC = new TextEncoder()
-
-function normalize(p: string): string {
-  const isAbs = p.startsWith('/')
-  const segments = p.split('/').filter((s) => s !== '' && s !== '.')
-  const out: string[] = []
-  for (const s of segments) {
-    if (s === '..') {
-      if (out.length > 0) out.pop()
-      else if (!isAbs) out.push('..')
-    } else {
-      out.push(s)
-    }
-  }
-  const joined = out.join('/')
-  return isAbs ? '/' + joined : joined === '' ? '.' : joined
-}
-
-async function exists(
-  accessor: EmailAccessor,
-  path: string,
-  index: CommandOpts['index'],
-  prefix: string,
-): Promise<boolean> {
-  try {
-    const spec = new PathSpec({ original: path, directory: path, prefix })
-    await emailStat(accessor, spec, index ?? undefined)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function realpathCommand(
-  accessor: EmailAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const prefix = opts.mountPrefix ?? ''
-  const e = opts.flags.e === true
-  const lines: string[] = []
-  for (const p of paths) {
-    const full = prefix !== '' ? prefix + p.original : p.original
-    const resolved = normalize(full)
-    if (e && !(await exists(accessor, resolved, opts.index, prefix))) {
-      const msg = `realpath: '${p.original}': No such file or directory\n`
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(msg) })]
-    }
-    lines.push(resolved)
-  }
-  const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
-  return [out, new IOResult()]
-}
 
 export const EMAIL_REALPATH = command({
   name: 'realpath',
   resource: ResourceName.EMAIL,
   spec: specOf('realpath'),
-  fn: realpathCommand,
+  fn: (accessor: EmailAccessor, paths, texts, opts) =>
+    realpathGeneric(paths, texts, opts, (p) => emailStat(accessor, p, opts.index ?? undefined)),
 })

@@ -14,6 +14,8 @@
 
 import { readdir, readFile } from 'node:fs/promises'
 import { createInterface } from 'node:readline/promises'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
   FuseManager,
@@ -23,7 +25,8 @@ import {
   type SlackConfig,
 } from '@struktoai/mirage-node'
 
-dotenv.config({ path: '.env.development' })
+const __HERE = fileURLToPath(new URL('.', import.meta.url))
+dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
 
 function buildConfig(): SlackConfig {
   const token = process.env.SLACK_BOT_TOKEN

@@ -23,6 +23,8 @@ SEED_FILES = {
                          '{"name": "bob", "age": 25}]}\n'),
     "/data/data.jsonl":
     '{"id":1}\n{"id":2}\n{"id":3}\n',
+    "/data/chat.jsonl":
+    '{"msg":"hello"}\n{"msg":"world"}\n',
     "/data/dup.txt":
     "a\na\nb\nb\nc\n",
     "/data/csv.csv":
@@ -104,6 +106,8 @@ CASES: list[tuple[str, str]] = [
     ("jq_raw", 'jq -r ".name" /data/user.json'),
     ("jq_array_iter", 'jq ".users[].name" /data/users.json'),
     ("jq_jsonl_id", 'jq ".id" /data/data.jsonl'),
+    ("jq_jsonl_chain", 'jq ".[].id" /data/data.jsonl'),
+    ("jq_jsonl_chain_raw", 'jq -r ".[].msg" /data/chat.jsonl'),
 
     # ----- sort / uniq / shuffle -----
     ("sort", "sort /data/a.txt"),

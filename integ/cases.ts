@@ -21,6 +21,7 @@ export const SEED_FILES: Record<string, string> = {
   "/data/users.json":
     '{"users": [{"name": "alice", "age": 30}, {"name": "bob", "age": 25}]}\n',
   "/data/data.jsonl": '{"id":1}\n{"id":2}\n{"id":3}\n',
+  "/data/chat.jsonl": '{"msg":"hello"}\n{"msg":"world"}\n',
   "/data/dup.txt": "a\na\nb\nb\nc\n",
   "/data/csv.csv": "name,age\nalice,30\nbob,25\n",
   "/data/tabbed.txt": "a\t1\nb\t2\nc\t3\n",
@@ -76,6 +77,8 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["jq_raw", 'jq -r ".name" /data/user.json'],
   ["jq_array_iter", 'jq ".users[].name" /data/users.json'],
   ["jq_jsonl_id", 'jq ".id" /data/data.jsonl'],
+  ["jq_jsonl_chain", 'jq ".[].id" /data/data.jsonl'],
+  ["jq_jsonl_chain_raw", 'jq -r ".[].msg" /data/chat.jsonl'],
 
   ["sort", "sort /data/a.txt"],
   ["sort_r", "sort -r /data/a.txt"],

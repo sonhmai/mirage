@@ -46,7 +46,10 @@ async function run(ws: Workspace, cmd: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/trello': new TrelloResource(buildConfig()) }, { mode: MountMode.READ })
+  const ws = new Workspace(
+    { '/trello': new TrelloResource(buildConfig()) },
+    { mode: MountMode.WRITE },
+  )
   try {
     console.log('=== ls /trello/ ===')
     await run(ws, 'ls /trello/')
@@ -92,8 +95,48 @@ async function main(): Promise<void> {
     console.log(`\n=== grep -l hello ${boardBase} ===`)
     await run(ws, `grep -r -l hello "${boardBase}"`)
 
-    console.log(`\n=== wc -l ${boardBase}/lists/${l0}/cards/*/card.json ===`)
-    await run(ws, `find "${boardBase}/lists/${l0}/cards" -name "card.json" | head -n 1 | xargs wc -l`)
+    console.log(`\n=== wc -l first card.json ===`)
+    const card = (await run(ws, `find "${boardBase}" -name "card.json" | head -n 1`)).trim()
+    if (card !== '') {
+      await run(ws, `wc -l "${card}"`)
+    }
+
+    console.log('\n=== card write commands (sandbox card) ===')
+    const listId = l0.replace(/\/+$/, '').split('__').pop() ?? ''
+    if (listId !== '') {
+      const created = await run(
+        ws,
+        `trello-card-create --list_id ${listId} --name "mirage example card" --desc "created by examples/typescript/trello/trello.ts"`,
+      )
+      let cardId = ''
+      try {
+        cardId = (JSON.parse(created) as { card_id?: string; id?: string }).card_id ?? ''
+        if (cardId === '') cardId = (JSON.parse(created) as { id?: string }).id ?? ''
+      } catch {
+        console.log('  could not parse created card payload, skipping write demos')
+      }
+      if (cardId !== '') {
+        await run(ws, `trello-card-update --card_id ${cardId} --name "mirage example card (updated)"`)
+        await run(ws, `trello-card-move --card_id ${cardId} --list_id ${listId}`)
+        const comment = await run(
+          ws,
+          `trello-card-comment-add --card_id ${cardId} --text "hello from mirage"`,
+        )
+        let commentId = ''
+        try {
+          commentId = (JSON.parse(comment) as { comment_id?: string; id?: string }).comment_id ?? ''
+          if (commentId === '') commentId = (JSON.parse(comment) as { id?: string }).id ?? ''
+        } catch {
+          commentId = ''
+        }
+        if (commentId !== '') {
+          await run(
+            ws,
+            `trello-card-comment-update --comment_id ${commentId} --card_id ${cardId} --text "updated comment"`,
+          )
+        }
+      }
+    }
   } finally {
     await ws.close()
   }

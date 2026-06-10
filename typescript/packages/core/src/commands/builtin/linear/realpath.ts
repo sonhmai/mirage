@@ -13,79 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LinearAccessor } from '../../../accessor/linear.ts'
-import { resolveLinearGlob } from '../../../core/linear/glob.ts'
 import { stat as linearStat } from '../../../core/linear/stat.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { PathSpec, ResourceName } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { ResourceName } from '../../../types.ts'
+import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-
-const ENC = new TextEncoder()
-
-function posixNormpath(p: string): string {
-  const isAbs = p.startsWith('/')
-  const parts = p.split('/')
-  const out: string[] = []
-  for (const seg of parts) {
-    if (seg === '' || seg === '.') continue
-    if (seg === '..') {
-      if (out.length > 0 && out[out.length - 1] !== '..') {
-        out.pop()
-      } else if (!isAbs) {
-        out.push('..')
-      }
-      continue
-    }
-    out.push(seg)
-  }
-  const joined = out.join('/')
-  if (isAbs) return '/' + joined
-  return joined === '' ? '.' : joined
-}
-
-async function existsPath(accessor: LinearAccessor, path: PathSpec): Promise<boolean> {
-  try {
-    await linearStat(accessor, path)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function realpathCommand(
-  accessor: LinearAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveLinearGlob(accessor, paths, opts.index ?? undefined) : []
-  const eFlag = opts.flags.e === true
-  const mountPrefix = resolved[0]?.prefix ?? ''
-  const lines: string[] = []
-  for (const p of resolved) {
-    const normalized = posixNormpath(p.original)
-    if (eFlag) {
-      const probe = new PathSpec({
-        original: normalized,
-        directory: normalized,
-        resolved: false,
-        prefix: mountPrefix,
-      })
-      if (!(await existsPath(accessor, probe))) {
-        const msg = `realpath: '${p.original}': No such file or directory\n`
-        return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(msg) })]
-      }
-    }
-    lines.push(normalized)
-  }
-  const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
-  return [out, new IOResult()]
-}
+import { realpathGeneric } from '../generic/realpath.ts'
 
 export const LINEAR_REALPATH = command({
   name: 'realpath',
   resource: ResourceName.LINEAR,
   spec: specOf('realpath'),
-  fn: realpathCommand,
+  fn: (accessor: LinearAccessor, paths, texts, opts) =>
+    realpathGeneric(paths, texts, opts, (p) => linearStat(accessor, p, opts.index ?? undefined)),
 })

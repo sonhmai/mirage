@@ -30,7 +30,6 @@ agent = Agent(
     tools=[MirageToolkit(ws)],
     instructions=("You have access to a virtual filesystem via shell "
                   "tools. Use them to explore and read files."),
-    show_tool_calls=True,
     markdown=True,
 )
 

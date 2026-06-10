@@ -133,7 +133,7 @@ deepagents  = ["deepagents>=0.4.12", "mirage-ai[pdf]"]
 openhands   = ["openhands-sdk>=1.18.0", "openhands-tools>=1.18.0"]
 
 # --- agno ---
-agno        = ["agno>=1.0.0"]
+agno        = ["agno>=2.4.0"]
 
 # --- camel ---
 camel       = ["camel-ai>=0.2.40,<0.3", "markitdown>=0.1.5"]

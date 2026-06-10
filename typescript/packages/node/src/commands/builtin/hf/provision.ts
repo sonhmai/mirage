@@ -83,3 +83,57 @@ export async function fileReadProvision(
     precision: Precision.EXACT,
   })
 }
+
+function parseNumFlag(value: string | boolean | undefined): number | null {
+  if (typeof value !== 'string') return null
+  const n = Number.parseInt(value, 10)
+  return Number.isFinite(n) ? n : null
+}
+
+export async function headTailProvision(
+  accessor: Accessor,
+  paths: PathSpec[],
+  _texts: string[],
+  opts: CommandOpts,
+): Promise<ProvisionResult> {
+  if (paths.length === 0) {
+    return new ProvisionResult({ precision: Precision.UNKNOWN })
+  }
+  const index = opts.index ?? undefined
+  const { resolved, missing } = await resolveSizes(accessor as HfAccessor, paths, index)
+  if (missing > 0 || resolved.length === 0) {
+    return new ProvisionResult({ precision: Precision.UNKNOWN })
+  }
+  const c = parseNumFlag(opts.flags.c)
+  if (c !== null) {
+    const total = resolved.reduce((sum, [, size]) => sum + Math.min(c, size), 0)
+    return new ProvisionResult({
+      networkReadLow: total,
+      networkReadHigh: total,
+      readOps: resolved.length,
+      precision: Precision.EXACT,
+    })
+  }
+  const full = resolved.reduce((sum, [, size]) => sum + size, 0)
+  return new ProvisionResult({
+    networkReadLow: 0,
+    networkReadHigh: full,
+    readOps: resolved.length,
+    precision: Precision.RANGE,
+  })
+}
+
+export function metadataProvision(
+  _accessor: Accessor,
+  paths: PathSpec[],
+  _texts: string[],
+  _opts: CommandOpts,
+): ProvisionResult {
+  const n = Math.max(1, paths.length > 0 ? paths.length : 1)
+  return new ProvisionResult({
+    networkReadLow: 0,
+    networkReadHigh: 0,
+    readOps: n,
+    precision: Precision.EXACT,
+  })
+}

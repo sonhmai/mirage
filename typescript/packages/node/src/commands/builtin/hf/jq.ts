@@ -13,30 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  IOResult,
-  Precision,
-  ProvisionResult,
   command,
-  evalJsonlStream,
   isJsonlPath,
   isStreamableJsonlExpr,
-  jqEval,
-  materialize,
-  parseJsonAuto,
-  parseJsonPath,
-  readStdinAsync,
+  jqGeneric,
+  Precision,
+  ProvisionResult,
   specOf,
-  type ByteSource,
   type CommandFnResult,
   type CommandOpts,
   type PathSpec,
 } from '@struktoai/mirage-core'
-import { stream as hfStream } from '../../../core/hf/stream.ts'
+import { HF_RESOURCES, type HfAccessor } from '../../../accessor/hf.ts'
+import { resolveGlob } from '../../../core/hf/glob.ts'
 import { stat as hfStat } from '../../../core/hf/stat.ts'
-import type { HfAccessor } from '../../../accessor/hf.ts'
-import { HF_RESOURCES } from '../../../accessor/hf.ts'
-
-const ENC = new TextEncoder()
+import { stream as hfStream } from '../../../core/hf/stream.ts'
 
 export async function jqProvision(
   accessor: HfAccessor,
@@ -71,91 +62,21 @@ export async function jqProvision(
   }
 }
 
-function formatResult(result: unknown, raw: boolean, compact: boolean): Uint8Array {
-  if (raw && typeof result === 'string') return ENC.encode(result + '\n')
-  const json = compact ? JSON.stringify(result) : JSON.stringify(result, null, 2)
-  return ENC.encode(json + '\n')
-}
-
-function formatResults(
-  result: unknown,
-  raw: boolean,
-  compact: boolean,
-  spread: boolean,
-): Uint8Array {
-  if (spread && Array.isArray(result)) {
-    const parts: Uint8Array[] = []
-    for (const item of result) parts.push(formatResult(item, raw, compact))
-    return concat(parts)
-  }
-  return formatResult(result, raw, compact)
-}
-
-function concat(chunks: Uint8Array[]): Uint8Array {
-  let total = 0
-  for (const c of chunks) total += c.byteLength
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const c of chunks) {
-    out.set(c, offset)
-    offset += c.byteLength
-  }
-  return out
-}
-
-async function readFile(accessor: HfAccessor, p: PathSpec): Promise<Uint8Array> {
-  return materialize(hfStream(accessor, p))
-}
-
 async function jqCommand(
   accessor: HfAccessor,
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const expression = texts[0]
-  if (expression === undefined) {
-    return [
-      null,
-      new IOResult({ exitCode: 1, stderr: ENC.encode('jq: usage: jq EXPRESSION [path]\n') }),
-    ]
-  }
-  const raw = opts.flags.r === true
-  const compact = opts.flags.c === true
-  const slurp = opts.flags.s === true
-
-  if (paths.length > 0) {
-    const first = paths[0]
-    if (first === undefined) return [null, new IOResult()]
-    if (isJsonlPath(first.original) && isStreamableJsonlExpr(expression)) {
-      return [evalJsonlStream(hfStream(accessor, first), expression), new IOResult()]
-    }
-    const outputs: Uint8Array[] = []
-    for (const p of paths) {
-      const bytes = await readFile(accessor, p)
-      let data = parseJsonPath(bytes, p.original)
-      if (slurp) data = Array.isArray(data) ? data : [data]
-      const result = await jqEval(data, expression.trim())
-      const spread = expression.includes('[]')
-      outputs.push(formatResults(result, raw, compact, spread))
-    }
-    const out: ByteSource = concat(outputs)
-    return [out, new IOResult()]
-  }
-
-  const bytes = await readStdinAsync(opts.stdin)
-  if (bytes === null) return [null, new IOResult()]
-  let data = parseJsonAuto(bytes)
-  if (slurp && !Array.isArray(data)) data = [data]
-  const result = await jqEval(data, expression.trim())
-  const spread = expression.includes('[]')
-  return [formatResults(result, raw, compact, spread), new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return jqGeneric(resolved, texts, opts, (p) => hfStream(accessor, p))
 }
 
 export const HF_JQ = command({
   name: 'jq',
   resource: [...HF_RESOURCES],
   spec: specOf('jq'),
-  fn: jqCommand,
   provision: jqProvision,
+  fn: jqCommand,
 })

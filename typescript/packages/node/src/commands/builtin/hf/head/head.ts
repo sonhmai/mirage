@@ -15,7 +15,6 @@
 import {
   command,
   headGeneric,
-  headProvisionGeneric,
   headerAggregate,
   specOf,
 } from '@struktoai/mirage-core'
@@ -23,11 +22,13 @@ import { stream as hfStream } from '../../../../core/hf/stream.ts'
 import { stat as hfStat } from '../../../../core/hf/stat.ts'
 import type { HfAccessor } from '../../../../accessor/hf.ts'
 import { HF_RESOURCES } from '../../../../accessor/hf.ts'
+import { headTailProvision } from '../provision.ts'
 
 export const HF_HEAD = command({
   name: 'head',
   resource: [...HF_RESOURCES],
   spec: specOf('head'),
+  provision: headTailProvision,
   fn: (accessor: HfAccessor, paths, texts, opts) =>
     headGeneric(
       paths,
@@ -36,7 +37,5 @@ export const HF_HEAD = command({
       (p) => hfStat(accessor, p),
       (p) => hfStream(accessor, p),
     ),
-  provision: (accessor: HfAccessor, paths, texts, opts) =>
-    headProvisionGeneric(paths, texts, opts, (p) => hfStat(accessor, p)),
   aggregate: headerAggregate,
 })

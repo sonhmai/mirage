@@ -13,108 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  FileType,
-  IOResult,
-  PathSpec,
   command,
+  lsGeneric,
   specOf,
-  type ByteSource,
   type CommandFnResult,
   type CommandOpts,
-  type FileStat,
-  rstripSlash,
+  type PathSpec,
 } from '@struktoai/mirage-core'
-import { stat as hfStat } from '../../../../core/hf/stat.ts'
+import { HF_RESOURCES, type HfAccessor } from '../../../../accessor/hf.ts'
+import { resolveGlob } from '../../../../core/hf/glob.ts'
 import { readdir as hfReaddir } from '../../../../core/hf/readdir.ts'
-import type { HfAccessor } from '../../../../accessor/hf.ts'
-import { HF_RESOURCES } from '../../../../accessor/hf.ts'
-
-function humanSize(n: number): string {
-  const units = ['B', 'K', 'M', 'G', 'T']
-  let v = n
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i += 1
-  }
-  const s = v >= 10 || i === 0 ? Math.round(v).toString() : v.toFixed(1)
-  return `${s}${units[i] ?? ''}`
-}
-
-function childSpec(entryPath: string, prefix: string): PathSpec {
-  return new PathSpec({
-    original: entryPath,
-    directory: entryPath,
-    resolved: false,
-    prefix,
-  })
-}
-
-function formatEntry(s: FileStat, long: boolean, human: boolean, classify: boolean): string {
-  if (long) {
-    const size = human ? humanSize(s.size ?? 0) : String(s.size ?? 0)
-    return `${s.type ?? '-'}\t${size}\t${s.modified ?? ''}\t${s.name}`
-  }
-  const suffix = classify && s.type === FileType.DIRECTORY ? '/' : ''
-  return `${s.name}${suffix}`
-}
-
-function sortStats(
-  stats: FileStat[],
-  sortBy: 'time' | 'size' | 'name',
-  reverse: boolean,
-): FileStat[] {
-  const sorted = [...stats].sort((a, b) => {
-    if (sortBy === 'time') return (b.modified ?? '').localeCompare(a.modified ?? '')
-    if (sortBy === 'size') return (b.size ?? 0) - (a.size ?? 0)
-    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
-  })
-  if (reverse) sorted.reverse()
-  return sorted
-}
-
-async function listDir(accessor: HfAccessor, dir: PathSpec, all: boolean): Promise<FileStat[]> {
-  const entries = await hfReaddir(accessor, dir)
-  const stats = await Promise.all(entries.map((p) => hfStat(accessor, childSpec(p, dir.prefix))))
-  return all ? stats : stats.filter((s) => !s.name.startsWith('.'))
-}
-
-interface WalkOpts {
-  all: boolean
-  long: boolean
-  human: boolean
-  classify: boolean
-  sortBy: 'time' | 'size' | 'name'
-  reverse: boolean
-}
-
-async function walkRecursive(
-  accessor: HfAccessor,
-  dir: PathSpec,
-  opts: WalkOpts,
-  header: boolean,
-  lines: string[],
-  warnings: string[],
-): Promise<void> {
-  let stats: FileStat[]
-  try {
-    stats = await listDir(accessor, dir, opts.all)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    warnings.push(`ls: cannot access '${dir.original}': ${msg}`)
-    return
-  }
-  if (header) lines.push(`${dir.stripPrefix}:`)
-  const sorted = sortStats(stats, opts.sortBy, opts.reverse)
-  for (const s of sorted) lines.push(formatEntry(s, opts.long, opts.human, opts.classify))
-  const subdirs = sorted.filter((s) => s.type === FileType.DIRECTORY)
-  for (const sub of subdirs) {
-    lines.push('')
-    const base = rstripSlash(dir.stripPrefix)
-    const childPath = `${base}/${sub.name}`
-    await walkRecursive(accessor, childSpec(childPath, dir.prefix), opts, true, lines, warnings)
-  }
-}
+import { stat as hfStat } from '../../../../core/hf/stat.ts'
+import { metadataProvision } from '../provision.ts'
 
 async function lsCommand(
   accessor: HfAccessor,
@@ -122,88 +32,14 @@ async function lsCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const targets: PathSpec[] =
-    paths.length > 0
-      ? paths
-      : [
-          new PathSpec({
-            original: opts.cwd,
-            directory: opts.cwd,
-            resolved: false,
-            prefix: opts.mountPrefix ?? '',
-          }),
-        ]
-  const long = opts.flags.args_l === true && opts.flags.args_1 !== true
-  const all = opts.flags.a === true || opts.flags.A === true
-  const human = opts.flags.h === true
-  const reverse = opts.flags.r === true
-  const classify = opts.flags.F === true
-  const recursive = opts.flags.R === true
-  const listDirItself = opts.flags.d === true
-  const sortBy: 'time' | 'size' | 'name' =
-    opts.flags.t === true ? 'time' : opts.flags.S === true ? 'size' : 'name'
-  const warnings: string[] = []
-  const lines: string[] = []
-
-  if (listDirItself) {
-    for (const p of targets) {
-      try {
-        const s = await hfStat(accessor, p)
-        lines.push(formatEntry(s, long, human, classify))
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        warnings.push(`ls: cannot access '${p.original}': ${msg}`)
-      }
-    }
-    const out: ByteSource = new TextEncoder().encode(lines.join('\n'))
-    const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
-    if (warnings.length > 0) {
-      const stderr = new TextEncoder().encode(warnings.join('\n'))
-      return [out, new IOResult({ stderr, exitCode })]
-    }
-    return [out, new IOResult({ exitCode })]
-  }
-
-  if (recursive) {
-    const walkOpts: WalkOpts = { all, long, human, classify, sortBy, reverse }
-    for (let i = 0; i < targets.length; i++) {
-      const p = targets[i]
-      if (p === undefined) continue
-      if (i > 0) lines.push('')
-      await walkRecursive(accessor, p, walkOpts, true, lines, warnings)
-    }
-    const out: ByteSource = new TextEncoder().encode(lines.join('\n'))
-    const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
-    if (warnings.length > 0) {
-      const stderr = new TextEncoder().encode(warnings.join('\n'))
-      return [out, new IOResult({ stderr, exitCode })]
-    }
-    return [out, new IOResult({ exitCode })]
-  }
-
-  for (const p of targets) {
-    let stats: FileStat[]
-    try {
-      stats = await listDir(accessor, p, all)
-    } catch (err) {
-      try {
-        stats = [await hfStat(accessor, p)]
-      } catch {
-        const msg = err instanceof Error ? err.message : String(err)
-        warnings.push(`ls: cannot access '${p.original}': ${msg}`)
-        continue
-      }
-    }
-    for (const s of sortStats(stats, sortBy, reverse))
-      lines.push(formatEntry(s, long, human, classify))
-  }
-  const out: ByteSource = new TextEncoder().encode(lines.join('\n'))
-  const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
-  if (warnings.length > 0) {
-    const stderr = new TextEncoder().encode(warnings.join('\n'))
-    return [out, new IOResult({ stderr, exitCode })]
-  }
-  return [out, new IOResult({ exitCode })]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return lsGeneric(
+    resolved,
+    opts,
+    (p) => hfReaddir(accessor, p, opts.index ?? undefined),
+    (p) => hfStat(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const HF_LS = command({
@@ -211,4 +47,5 @@ export const HF_LS = command({
   resource: [...HF_RESOURCES],
   spec: specOf('ls'),
   fn: lsCommand,
+  provision: metadataProvision,
 })

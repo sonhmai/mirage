@@ -13,54 +13,32 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  FileType,
-  IOResult,
   command,
-  detectFileType,
-  formatFileResult,
+  fileGeneric,
   specOf,
-  type ByteSource,
   type CommandFnResult,
   type CommandOpts,
   type PathSpec,
 } from '@struktoai/mirage-core'
-import { stat as hfStat } from '../../../../core/hf/stat.ts'
+import { HF_RESOURCES, type HfAccessor } from '../../../../accessor/hf.ts'
+import { resolveGlob } from '../../../../core/hf/glob.ts'
 import { read as hfRead } from '../../../../core/hf/read.ts'
-import type { HfAccessor } from '../../../../accessor/hf.ts'
-import { HF_RESOURCES } from '../../../../accessor/hf.ts'
-
-const ENC = new TextEncoder()
+import { stat as hfStat } from '../../../../core/hf/stat.ts'
 
 async function fileCommand(
   accessor: HfAccessor,
   paths: PathSpec[],
-  texts: string[],
+  _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  if (paths.length === 0) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('file: missing operand\n') })]
-  }
-  const brief = opts.flags.b === true
-  const mime = opts.flags.i === true
-  const lines: string[] = []
-  for (const p of paths) {
-    const s = await hfStat(accessor, p)
-    if (s.type === FileType.DIRECTORY) {
-      lines.push(formatFileResult(p.original, FileType.DIRECTORY, brief, mime))
-      continue
-    }
-    let header: Uint8Array
-    try {
-      const raw = await hfRead(accessor, p)
-      header = raw.subarray(0, 512)
-    } catch {
-      header = new Uint8Array(0)
-    }
-    const result = detectFileType(header, s)
-    lines.push(formatFileResult(p.original, result, brief, mime))
-  }
-  const out: ByteSource = ENC.encode(lines.join('\n'))
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return fileGeneric(
+    resolved,
+    opts,
+    (p) => hfStat(accessor, p, opts.index ?? undefined),
+    (p) => hfRead(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const HF_FILE = command({

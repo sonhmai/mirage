@@ -16,11 +16,13 @@ import { command, headerAggregate, specOf, tailGeneric } from '@struktoai/mirage
 import { stream as hfStream } from '../../../../core/hf/stream.ts'
 import type { HfAccessor } from '../../../../accessor/hf.ts'
 import { HF_RESOURCES } from '../../../../accessor/hf.ts'
+import { headTailProvision } from '../provision.ts'
 
 export const HF_TAIL = command({
   name: 'tail',
   resource: [...HF_RESOURCES],
   spec: specOf('tail'),
+  provision: headTailProvision,
   fn: (accessor: HfAccessor, paths, texts, opts) =>
     tailGeneric(paths, texts, opts, (p) => hfStream(accessor, p)),
   aggregate: headerAggregate,

@@ -13,38 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  IOResult,
-  PathSpec,
   command,
+  duGeneric,
   specOf,
-  type ByteSource,
   type CommandFnResult,
   type CommandOpts,
-  rstripSlash,
-  stripSlash,
+  type PathSpec,
 } from '@struktoai/mirage-core'
+import { HF_RESOURCES, type HfAccessor } from '../../../accessor/hf.ts'
 import { du as hfDu, duAll as hfDuAll } from '../../../core/hf/du.ts'
-import type { HfAccessor } from '../../../accessor/hf.ts'
-import { HF_RESOURCES } from '../../../accessor/hf.ts'
-
-function humanSize(n: number): string {
-  const units = ['', 'K', 'M', 'G', 'T']
-  let v = n
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i += 1
-  }
-  const s = v >= 10 || i === 0 ? Math.round(v).toString() : v.toFixed(1)
-  return `${s}${units[i] ?? ''}`
-}
-
-function depthOf(entryPath: string, basePath: string): number {
-  const base = rstripSlash(basePath)
-  const rel = rstripSlash(entryPath).slice(base.length)
-  if (!rel) return 0
-  return (stripSlash(rel).match(/\//g) ?? []).length + 1
-}
+import { resolveGlob } from '../../../core/hf/glob.ts'
 
 async function duCommand(
   accessor: HfAccessor,
@@ -52,51 +30,14 @@ async function duCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const human = opts.flags.h === true
-  const summarize = opts.flags.s === true
-  const all = opts.flags.a === true
-  const cumulative = opts.flags.c === true
-  const maxDepthRaw = opts.flags['max-depth']
-  const maxDepth = typeof maxDepthRaw === 'string' ? Number.parseInt(maxDepthRaw, 10) : null
-  const fmt = (size: number): string => (human ? humanSize(size) : String(size))
-  const targets =
-    paths.length > 0 ? paths : [new PathSpec({ original: '/', directory: '/', resolved: false })]
-  const path = targets[0]
-  if (path === undefined) return [null, new IOResult()]
-
-  if (summarize) {
-    const total = await hfDu(accessor, path)
-    let output = `${fmt(total)}\t${path.original}`
-    if (cumulative) output += `\n${fmt(total)}\ttotal`
-    return [new TextEncoder().encode(output) as ByteSource, new IOResult()]
-  }
-
-  const [allEntriesRaw, totalFromAll] = await hfDuAll(accessor, path)
-  let entries = allEntriesRaw
-  if (entries.length === 0) {
-    const total = await hfDu(accessor, path)
-    let output = `${fmt(total)}\t${path.original}`
-    if (cumulative) output += `\n${fmt(total)}\ttotal`
-    return [new TextEncoder().encode(output) as ByteSource, new IOResult()]
-  }
-  if (!all) {
-    entries = entries.filter(([p]) => p === path.original)
-  }
-  if (maxDepth !== null) {
-    entries = entries.filter(([p]) => depthOf(p, path.original) <= maxDepth)
-  }
-  if (entries.length === 0) {
-    const total = totalFromAll !== 0 ? totalFromAll : await hfDu(accessor, path)
-    let output = `${fmt(total)}\t${path.original}`
-    if (cumulative) output += `\n${fmt(total)}\ttotal`
-    return [new TextEncoder().encode(output) as ByteSource, new IOResult()]
-  }
-  const lines: string[] = entries.map(([p, sz]) => `${fmt(sz)}\t${p}`)
-  if (cumulative) {
-    const grand = entries.reduce((acc, [, sz]) => acc + sz, 0)
-    lines.push(`${fmt(grand)}\ttotal`)
-  }
-  return [new TextEncoder().encode(lines.join('\n')) as ByteSource, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return duGeneric(
+    resolved,
+    opts,
+    (p) => hfDu(accessor, p),
+    (p) => hfDuAll(accessor, p),
+  )
 }
 
 export const HF_DU = command({

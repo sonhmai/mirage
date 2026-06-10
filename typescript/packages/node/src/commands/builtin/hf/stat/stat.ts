@@ -13,86 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  FileType,
-  IOResult,
-  ProvisionResult,
   command,
   specOf,
-  type ByteSource,
+  statGeneric,
   type CommandFnResult,
   type CommandOpts,
-  type FileStat,
   type PathSpec,
 } from '@struktoai/mirage-core'
+import { HF_RESOURCES, type HfAccessor } from '../../../../accessor/hf.ts'
+import { resolveGlob } from '../../../../core/hf/glob.ts'
 import { stat as hfStat } from '../../../../core/hf/stat.ts'
-import type { HfAccessor } from '../../../../accessor/hf.ts'
-import { HF_RESOURCES } from '../../../../accessor/hf.ts'
-
-const TYPE_LABELS: Record<string, string> = {
-  [FileType.DIRECTORY]: 'directory',
-  [FileType.TEXT]: 'regular file',
-  [FileType.BINARY]: 'regular file',
-  [FileType.JSON]: 'regular file',
-  [FileType.CSV]: 'regular file',
-}
-
-function formatStat(fmt: string, s: FileStat): string {
-  return fmt.replace(/%(.)/g, (_, spec: string) => {
-    if (spec === 'n') return s.name
-    if (spec === 's') return String(s.size ?? 0)
-    if (spec === 'F') return s.type ? (TYPE_LABELS[s.type] ?? 'regular file') : 'regular file'
-    if (spec === 'y') return s.modified ?? ''
-    return '?'
-  })
-}
-
-export function statProvision(
-  accessor: HfAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  _opts: CommandOpts,
-): ProvisionResult {
-  const [first] = paths
-  return new ProvisionResult({
-    command: first !== undefined ? `stat ${first.original}` : 'stat',
-  })
-}
+import { metadataProvision } from '../provision.ts'
 
 async function statCommand(
   accessor: HfAccessor,
   paths: PathSpec[],
-  texts: string[],
+  _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  if (paths.length === 0) {
-    return [
-      null,
-      new IOResult({
-        exitCode: 1,
-        stderr: new TextEncoder().encode('stat: missing operand\n'),
-      }),
-    ]
-  }
-  const fmt =
-    typeof opts.flags.c === 'string'
-      ? opts.flags.c
-      : typeof opts.flags.f === 'string'
-        ? opts.flags.f
-        : null
-  const lines: string[] = []
-  for (const p of paths) {
-    const s = await hfStat(accessor, p)
-    if (fmt !== null) {
-      lines.push(formatStat(fmt, s))
-    } else {
-      const sizeStr = s.size === null ? 'None' : String(s.size)
-      const modStr = s.modified ?? 'None'
-      const typeStr = s.type ?? 'None'
-      lines.push(`name=${s.name} size=${sizeStr} modified=${modStr} type=${typeStr}`)
-    }
-  }
-  const out: ByteSource = new TextEncoder().encode(lines.join('\n'))
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return statGeneric(resolved, opts, (p) => hfStat(accessor, p, opts.index ?? undefined))
 }
 
 export const HF_STAT = command({
@@ -100,5 +41,5 @@ export const HF_STAT = command({
   resource: [...HF_RESOURCES],
   spec: specOf('stat'),
   fn: statCommand,
-  provision: statProvision,
+  provision: metadataProvision,
 })

@@ -57,6 +57,13 @@ The hierarchy mirrors Notion's page tree. Each page directory contains
 a `page.json` file with the page metadata and content. Child pages
 appear as nested directories.
 
+`page.json` carries the page metadata (`page_id`, `title`, `url`,
+timestamps, `parent_type`/`parent_id`, `created_by`/`last_edited_by`),
+a `markdown` field with the page body rendered as Markdown, and the raw
+`blocks`. Blocks with children embed them recursively under a
+`children` key, and the Markdown renders nested blocks with
+indentation.
+
 ## Cache
 
 Uses `IndexCacheStore` for page metadata. No separate content

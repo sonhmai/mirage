@@ -14,16 +14,24 @@
 
 PROMPT = """\
 {prefix}
-  <page-title>__<page-id>/
-    page.json
-    <child-page-title>__<child-id>/
+  pages/
+    <page-title>__<page-id>/
       page.json
-  Hierarchical page tree. cat shows page content as JSON.
+      <child-page-title>__<child-id>/
+        page.json
+  Hierarchical page tree. cat page.json shows metadata, the page body
+  rendered as markdown, and raw blocks (nested blocks under "children").
 
-  <page-title> is sanitized — don't construct it; ls the parent dir."""
+  <page-title> is sanitized; don't construct it, ls the parent dir.
+  Use the <page-id> from a path segment as page_id/block_id in write
+  commands."""
 
 WRITE_PROMPT = """\
   Write commands:
-    notion-page-create <parent-path> "title"
-    notion-block-append <page-path> "content"
-    notion-comment-add <page-path> "comment" """
+    notion-page-create --json \
+'{"parent":{"page_id":"..."},\
+"properties":{"title":[{"text":{"content":"Title"}}]}}'
+    notion-block-append --params '{"block_id":"..."}' --json \
+'{"children":[...]}'
+    notion-comment-add --json '{"parent":{"page_id":"..."},\
+"rich_text":[{"text":{"content":"Comment"}}]}'"""

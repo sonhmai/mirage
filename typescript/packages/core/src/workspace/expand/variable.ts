@@ -15,7 +15,7 @@
 import type { CallStack } from '../../shell/call_stack.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { Session } from '../session/session.ts'
-import { fnmatchCase } from '../../util/fnmatch.ts'
+import { fnmatch } from '../../util/fnmatch.ts'
 
 export interface TSNodeLike {
   type: string
@@ -91,14 +91,14 @@ function globStrip(value: string, pattern: string, greedy: boolean, prefix: bool
   const matches: number[] = []
   if (prefix) {
     for (let i = 0; i <= value.length; i++) {
-      if (fnmatchCase(value.slice(0, i), pattern)) matches.push(i)
+      if (fnmatch(value.slice(0, i), pattern)) matches.push(i)
     }
     if (matches.length === 0) return value
     const i = greedy ? Math.max(...matches) : Math.min(...matches)
     return value.slice(i)
   }
   for (let i = 0; i <= value.length; i++) {
-    if (fnmatchCase(value.slice(i), pattern)) matches.push(i)
+    if (fnmatch(value.slice(i), pattern)) matches.push(i)
   }
   if (matches.length === 0) return value
   const i = greedy ? Math.min(...matches) : Math.max(...matches)

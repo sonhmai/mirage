@@ -88,14 +88,6 @@ export { MongoDBResource, type MongoDBResourceOptions } from './resource/mongodb
 export { MongoDBStore } from './resource/mongodb/store.ts'
 export { LanceDBResource, type LanceDBResourceOptions } from './resource/lancedb/lancedb.ts'
 export { LanceDBStore } from './resource/lancedb/store.ts'
-export {
-  SSCholarPaperResource,
-  type SSCholarPaperResourceOptions,
-} from './resource/sscholar/sscholar.ts'
-export {
-  SSCholarAuthorResource,
-  type SSCholarAuthorResourceOptions,
-} from './resource/sscholar/author.ts'
 export { VercelResource, type VercelResourceOptions } from './resource/vercel/vercel.ts'
 export { PostHogResource, type PostHogResourceOptions } from './resource/posthog/posthog.ts'
 export { SlackResource, type SlackResourceState } from './resource/slack/slack.ts'

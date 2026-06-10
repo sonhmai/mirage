@@ -26,6 +26,7 @@ import {
 import { readdir as sshReaddir } from '../../../core/ssh/readdir.ts'
 import { stat as sshStat } from '../../../core/ssh/stat.ts'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
+import { fnmatch } from '@struktoai/mirage-core'
 
 interface TreeOpts {
   showHidden: boolean
@@ -33,18 +34,6 @@ interface TreeOpts {
   ignorePattern: string | null
   dirsOnly: boolean
   matchPattern: string | null
-}
-
-function fnmatch(name: string, pattern: string): boolean {
-  let re = '^'
-  for (const ch of pattern) {
-    if (ch === '*') re += '.*'
-    else if (ch === '?') re += '.'
-    else if (/[.+^${}()|[\]\\]/.test(ch)) re += '\\' + ch
-    else re += ch
-  }
-  re += '$'
-  return new RegExp(re).test(name)
 }
 
 async function walkTree(

@@ -21,21 +21,11 @@ import { ExecutionNode } from '../types.ts'
 import { resolveAcrossMounts } from '../../commands/safeguard.ts'
 import { applyFindActions } from './find_action_dispatch.ts'
 import { rstripSlash } from '../../util/slash.ts'
+import { fnmatch } from '../../util/fnmatch.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 const TRAVERSAL_CMDS: ReadonlySet<string> = new Set(['find', 'tree', 'du'])
-
-function fnmatch(name: string, pattern: string): boolean {
-  let re = ''
-  for (const ch of pattern) {
-    if (ch === '*') re += '.*'
-    else if (ch === '?') re += '.'
-    else if ('.+^$(){}|\\'.includes(ch)) re += '\\' + ch
-    else re += ch
-  }
-  return new RegExp('^' + re + '$').test(name)
-}
 
 function pathSegments(path: string): string[] {
   return path.split('/').filter((s) => s !== '')

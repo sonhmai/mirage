@@ -15,6 +15,7 @@
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { isNotFound, iterEntries, norm, resolveDirHandle } from './utils.ts'
+import { fnmatch } from '@struktoai/mirage-core'
 
 export interface FindOptions {
   name?: string | null
@@ -29,18 +30,6 @@ export interface FindOptions {
   pathPattern?: string | null
   mtimeMin?: number | null
   mtimeMax?: number | null
-}
-
-function fnmatch(name: string, pattern: string): boolean {
-  let re = '^'
-  for (const ch of pattern) {
-    if (ch === '*') re += '.*'
-    else if (ch === '?') re += '.'
-    else if (/[.+^${}()|[\]\\]/.test(ch)) re += '\\' + ch
-    else re += ch
-  }
-  re += '$'
-  return new RegExp(re).test(name)
 }
 
 interface WalkCtx {

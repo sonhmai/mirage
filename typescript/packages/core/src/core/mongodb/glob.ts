@@ -16,29 +16,9 @@ import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { readdir } from './readdir.ts'
+import { fnmatch } from '../../util/fnmatch.ts'
 
 const SCOPE_ERROR = 10000
-
-function fnmatch(name: string, pattern: string): boolean {
-  let regex = '^'
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i]
-    if (c === undefined) break
-    if (c === '*') regex += '.*'
-    else if (c === '?') regex += '.'
-    else if (c === '[') {
-      const close = pattern.indexOf(']', i)
-      if (close === -1) regex += '\\['
-      else {
-        regex += '[' + pattern.slice(i + 1, close) + ']'
-        i = close
-      }
-    } else if ('.+()|\\^$'.includes(c)) regex += '\\' + c
-    else regex += c
-  }
-  regex += '$'
-  return new RegExp(regex).test(name)
-}
 
 export async function resolveGlob(
   accessor: MongoDBAccessor,

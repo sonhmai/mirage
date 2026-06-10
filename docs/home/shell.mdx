@@ -155,7 +155,7 @@ The shell is a tree-sitter-bash parser plus a custom executor. It implements the
 - **Control flow:** `if`/`elif`/`else`/`fi`, `for`, `while`, `until`, `case`, `select`, `function name() {}`, `break`, `continue`, `return`.
 - **Grouping:** subshells `(cmd)`, compound `{ cmd; }`, negation `! cmd`.
 - **Builtins:** `cd`, `pwd`, `echo`, `printf`, `printenv`, `read`, `source`, `.`, `eval`, `export`, `unset`, `local`, `set`, `shift`, `trap` (no-op), `test`, `[`, `[[`, `true`, `false`, `sleep`, `xargs`, `timeout`, `bash`, `sh`, `python`, `python3`.
-- **Globs:** `*`, `?`, `[...]` resolved by the shell or pushed down to the resource.
+- **Globs:** `*`, `?`, `[...]` classes and `[!...]` negation (Python `fnmatch` semantics in both implementations), resolved by the shell or pushed down to the resource.
 - **Comments:** `#`.
 
 ### Unsupported (returns clear error)

@@ -187,8 +187,7 @@
                 "group": "Others",
                 "icon": "ellipsis",
                 "pages": [
-                  "home/setup/trello",
-                  "home/setup/sscholar"
+                  "home/setup/trello"
                 ]
               }
             ]
@@ -453,7 +452,6 @@
                 "icon": "ellipsis",
                 "pages": [
                   "typescript/setup/trello",
-                  "typescript/setup/sscholar",
                   "typescript/setup/posthog",
                   "typescript/setup/vercel"
                 ]

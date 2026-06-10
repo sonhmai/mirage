@@ -16,18 +16,7 @@ import { type IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { SCOPE_ERROR } from './constants.ts'
 import { readdir } from './readdir.ts'
-
-function fnmatch(name: string, pattern: string): boolean {
-  let re = '^'
-  for (const ch of pattern) {
-    if (ch === '*') re += '.*'
-    else if (ch === '?') re += '.'
-    else if (/[.+^${}()|[\]\\]/.test(ch)) re += '\\' + ch
-    else re += ch
-  }
-  re += '$'
-  return new RegExp(re).test(name)
-}
+import { fnmatch } from '@struktoai/mirage-core'
 
 function basenameOf(p: string): string {
   return p.slice(p.lastIndexOf('/') + 1)

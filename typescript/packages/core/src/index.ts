@@ -1085,76 +1085,6 @@ export {
   type CollectionMatches as MongoCollectionMatches,
 } from './core/mongodb/search.ts'
 export type {
-  SSCholarAuthor,
-  SSCholarDriver,
-  SSCholarPaper,
-  SSCholarSearchOptions,
-  SSCholarSearchResult,
-  SSCholarSnippet,
-  SSCholarSnippetMatch,
-  SSCholarSnippetSearchResult,
-  SSCholarTLDR,
-} from './core/sscholar/_driver.ts'
-export { SSCholarAccessor } from './accessor/sscholar.ts'
-export {
-  normalizeSSCholarConfig,
-  resolveSSCholarConfig,
-  type SSCholarConfig,
-  type SSCholarConfigResolved,
-} from './resource/sscholar/config.ts'
-export { SSCHOLAR_PAPER_PROMPT } from './resource/sscholar/prompt.ts'
-export { SSCHOLAR_PAPER_OPS } from './ops/sscholar/index.ts'
-export { SSCHOLAR_PAPER_COMMANDS } from './commands/builtin/sscholar/index.ts'
-export { read as sscholarPaperRead } from './core/sscholar/read.ts'
-export { readdir as sscholarPaperReaddir } from './core/sscholar/readdir.ts'
-export { stat as sscholarPaperStat } from './core/sscholar/stat.ts'
-export { resolveGlob as resolveSSCholarPaperGlob } from './core/sscholar/glob.ts'
-export {
-  detectScope as detectSSCholarPaperScope,
-  type SSCholarPaperScope,
-  type SSCholarPaperLevel,
-} from './core/sscholar/scope.ts'
-export {
-  PAPER_FILES as SSCHOLAR_PAPER_FILES,
-  SSCHOLAR_FIELDS,
-  SSCHOLAR_FIELD_SLUGS,
-  SSCHOLAR_YEARS,
-  fieldToSlug as sscholarFieldToSlug,
-  slugToField as sscholarSlugToField,
-} from './core/sscholar/fields.ts'
-export {
-  getPaper as sscholarGetPaper,
-  searchPapers as sscholarSearchPapers,
-  searchPapersByField as sscholarSearchPapersByField,
-  searchSnippets as sscholarSearchSnippets,
-} from './core/sscholar/_client.ts'
-export { HttpSSCholarDriver, type HttpSSCholarDriverOptions } from './core/sscholar/http_driver.ts'
-export type {
-  SSCholarAuthorPapersOptions,
-  SSCholarAuthorPapersResult,
-  SSCholarAuthorProfile,
-  SSCholarAuthorSearchResult,
-} from './core/sscholar/author_driver.ts'
-export { SSCHOLAR_AUTHOR_PROMPT } from './resource/sscholar/author_prompt.ts'
-export { SSCHOLAR_AUTHOR_OPS } from './ops/sscholar_author/index.ts'
-export { SSCHOLAR_AUTHOR_COMMANDS } from './commands/builtin/sscholar_author/index.ts'
-export { read as sscholarAuthorRead } from './core/sscholar/author_read.ts'
-export { readdir as sscholarAuthorReaddir } from './core/sscholar/author_readdir.ts'
-export { stat as sscholarAuthorStat } from './core/sscholar/author_stat.ts'
-export { resolveGlob as resolveSSCholarAuthorGlob } from './core/sscholar/author_glob.ts'
-export {
-  detectAuthorScope as detectSSCholarAuthorScope,
-  AUTHOR_FILES as SSCHOLAR_AUTHOR_FILES,
-  type SSCholarAuthorScope,
-  type SSCholarAuthorLevel,
-} from './core/sscholar/author_scope.ts'
-export {
-  getAuthor as sscholarGetAuthor,
-  getAuthorPapers as sscholarGetAuthorPapers,
-  searchAuthors as sscholarSearchAuthors,
-} from './core/sscholar/author_client.ts'
-
-export type {
   VercelDeployment,
   VercelDeploymentEvent,
   VercelDomain,
@@ -1247,3 +1177,4 @@ export { HttpPostHogDriver, type HttpPostHogDriverOptions } from './core/posthog
 export { setHttpProxyBase } from './commands/builtin/utils/http.ts'
 
 export { lstripSlash, rstripSlash, stripSlash } from './util/slash.ts'
+export { fnmatch } from './util/fnmatch.ts'

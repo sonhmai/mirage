@@ -24,7 +24,7 @@ import type { TSNodeLike } from '../expand/variable.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
-import { fnmatchCase } from '../../util/fnmatch.ts'
+import { fnmatch } from '../../util/fnmatch.ts'
 
 function installStdinBuffer(
   session: Session,
@@ -296,7 +296,7 @@ export async function handleCase(
   callStack: CallStack | null = null,
 ): Promise<Result> {
   for (const [patterns, body] of items) {
-    if (patterns.some((p) => fnmatchCase(word, p.trim()))) {
+    if (patterns.some((p) => fnmatch(word, p.trim()))) {
       if (body !== null) return executeNode(body, session, stdin, callStack)
       return [null, new IOResult(), new ExecutionNode({ command: 'case', exitCode: 0 })]
     }

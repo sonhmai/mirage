@@ -12,38 +12,55 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Port of CPython fnmatch.translate matching semantics. Deliberate divergences:
+// always case-sensitive (no normcase, so this equals Python fnmatchcase), and an
+// invalid class range like [z-a] becomes the never-matching (?!) instead of raising.
 export function fnmatch(name: string, pattern: string): boolean {
-  const re = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\?/g, '.')
-    .replace(/\*/g, '.*')
-  return new RegExp(`^${re}$`).test(name)
+  return translate(pattern).test(name)
 }
 
-// Shell-expansion variant: also supports [...] character classes.
-export function fnmatchCase(value: string, pattern: string): boolean {
-  let re = '^'
+function classBody(stuff: string): string {
+  let body = stuff.replace(/\\/g, '\\\\').replace(/\]/g, '\\]').replace(/\[/g, '\\[')
+  if (body.startsWith('!')) body = '^' + body.slice(1)
+  else if (body.startsWith('^')) body = '\\' + body
+  try {
+    new RegExp('[' + body + ']')
+  } catch {
+    return '(?!)'
+  }
+  return '[' + body + ']'
+}
+
+function translate(pattern: string): RegExp {
+  let re = ''
   let i = 0
-  while (i < pattern.length) {
+  const n = pattern.length
+  while (i < n) {
     const c = pattern[i]
     if (c === undefined) break
-    if (c === '*') re += '.*'
-    else if (c === '?') re += '.'
-    else if (c === '[') {
-      const end = pattern.indexOf(']', i)
-      if (end === -1) {
+    i += 1
+    if (c === '*') {
+      if (!re.endsWith('.*')) re += '.*'
+    } else if (c === '?') {
+      re += '.'
+    } else if (c === '[') {
+      let j = i
+      if (j < n && pattern[j] === '!') j += 1
+      if (j < n && pattern[j] === ']') j += 1
+      while (j < n && pattern[j] !== ']') j += 1
+      if (j >= n) {
         re += '\\['
       } else {
-        re += pattern.slice(i, end + 1)
-        i = end
+        const stuff = pattern.slice(i, j)
+        i = j + 1
+        if (stuff === '!') re += '.'
+        else re += classBody(stuff)
       }
-    } else if (/[.+^$(){}|\\]/.test(c)) {
-      re += `\\${c}`
+    } else if (/[.+^$(){}|[\]\\/]/.test(c)) {
+      re += '\\' + c
     } else {
       re += c
     }
-    i += 1
   }
-  re += '$'
-  return new RegExp(re).test(value)
+  return new RegExp('^(?:' + re + ')$', 's')
 }

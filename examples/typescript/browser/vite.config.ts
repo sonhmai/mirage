@@ -55,7 +55,6 @@ export default defineConfig({
       input: {
         main: resolve(here, 'index.html'),
         mongodb: resolve(here, 'mongodb.html'),
-        sscholar: resolve(here, 'sscholar.html'),
         gdocs_pkce: resolve(here, 'gdocs_pkce.html'),
         gdrive_pkce: resolve(here, 'gdrive_pkce.html'),
         dropbox_pkce: resolve(here, 'dropbox_pkce.html'),

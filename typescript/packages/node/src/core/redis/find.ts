@@ -16,6 +16,7 @@ import type { PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm } from './utils.ts'
 import { rstripSlash } from '@struktoai/mirage-core'
+import { fnmatch } from '@struktoai/mirage-core'
 
 export interface FindOptions {
   name?: string | null
@@ -28,18 +29,6 @@ export interface FindOptions {
   orNames?: string[] | null
   iname?: string | null
   pathPattern?: string | null
-}
-
-function fnmatch(name: string, pattern: string): boolean {
-  let re = '^'
-  for (const ch of pattern) {
-    if (ch === '*') re += '.*'
-    else if (ch === '?') re += '.'
-    else if (/[.+^${}()|[\]\\]/.test(ch)) re += '\\' + ch
-    else re += ch
-  }
-  re += '$'
-  return new RegExp(re).test(name)
 }
 
 export async function find(

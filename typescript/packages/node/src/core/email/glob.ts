@@ -16,16 +16,9 @@ import type { IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
 import { PathSpec as PathSpecCtor, rstripSlash } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { readdir } from './readdir.ts'
+import { fnmatch } from '@struktoai/mirage-core'
 
 const SCOPE_ERROR = 1000
-
-function fnmatch(name: string, pattern: string): boolean {
-  const re = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\?/g, '.')
-    .replace(/\*/g, '.*')
-  return new RegExp(`^${re}$`).test(name)
-}
 
 export async function resolveGlob(
   accessor: EmailAccessor,

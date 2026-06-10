@@ -28,16 +28,9 @@ import type { EmailAccessor } from '../../../accessor/email.ts'
 import { resolveGlob } from '../../../core/email/glob.ts'
 import { readdir as emailReaddir } from '../../../core/email/readdir.ts'
 import { metadataProvision } from './provision.ts'
+import { fnmatch } from '@struktoai/mirage-core'
 
 const ENC = new TextEncoder()
-
-function fnmatch(name: string, pattern: string): boolean {
-  const re = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\?/g, '.')
-    .replace(/\*/g, '.*')
-  return new RegExp(`^${re}$`).test(name)
-}
 
 async function walk(
   accessor: EmailAccessor,

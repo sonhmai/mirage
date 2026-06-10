@@ -14,15 +14,11 @@
 
 import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
 import { resolveGlob } from '../../../core/gdrive/glob.ts'
-import { read as gdriveRead } from '../../../core/gdrive/read.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { stream as gdriveStream } from '../../../core/gdrive/read.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { cutBytes, parseCutRanges } from '../cut_helper.ts'
-import { readStdinAsync } from '../utils/stream.ts'
-
-const ENC = new TextEncoder()
+import { cutGeneric } from '../generic/cut.ts'
 
 async function cutCommand(
   accessor: GDriveAccessor,
@@ -30,26 +26,9 @@ async function cutCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const fields = typeof opts.flags.f === 'string' ? parseCutRanges(opts.flags.f) : null
-  const chars = typeof opts.flags.c === 'string' ? parseCutRanges(opts.flags.c) : null
-  const delim = typeof opts.flags.d === 'string' ? opts.flags.d : '\t'
-  const complement = opts.flags.complement === true
-  const zero = opts.flags.z === true
-
-  let raw: Uint8Array | null = null
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    raw = await gdriveRead(accessor, first, opts.index ?? undefined)
-  } else {
-    raw = await readStdinAsync(opts.stdin)
-    if (raw === null) {
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('cut: missing operand\n') })]
-    }
-  }
-  const out: ByteSource = cutBytes(raw, delim, fields, chars, complement, zero)
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return cutGeneric(resolved, opts, (p) => gdriveStream(accessor, p, opts.index ?? undefined))
 }
 
 export const GDRIVE_CUT = command({

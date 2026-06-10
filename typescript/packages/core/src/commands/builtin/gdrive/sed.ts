@@ -14,16 +14,14 @@
 
 import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
 import { resolveGlob } from '../../../core/gdrive/glob.ts'
-import { read as gdriveRead } from '../../../core/gdrive/read.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { stream as gdriveStream } from '../../../core/gdrive/read.ts'
+import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { executeProgram, parseOneCommand, parseProgram } from '../sed_helper.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { sedGeneric } from '../generic/sed.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
 async function sedCommand(
   accessor: GDriveAccessor,
@@ -40,37 +38,13 @@ async function sedCommand(
       }),
     ]
   }
-  if (texts.length === 0 || texts[0] === undefined) {
-    return [
-      null,
-      new IOResult({ exitCode: 2, stderr: ENC.encode('sed: usage: sed EXPRESSION [path]\n') }),
-    ]
-  }
-  const expression = texts[0]
-  const cmds =
-    expression.includes(';') || expression.includes('{')
-      ? parseProgram(expression)
-      : [parseOneCommand(expression)[0]]
-  const suppress = opts.flags.n === true
-
-  let text: string
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    text = DEC.decode(await gdriveRead(accessor, first, opts.index ?? undefined))
-  } else {
-    const raw = await readStdinAsync(opts.stdin)
-    if (raw === null) {
-      return [
-        null,
-        new IOResult({ exitCode: 2, stderr: ENC.encode('sed: usage: sed EXPRESSION path\n') }),
-      ]
-    }
-    text = DEC.decode(raw)
-  }
-  const out: ByteSource = ENC.encode(executeProgram(text, cmds, suppress))
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  const stream = (p: PathSpec): AsyncIterable<Uint8Array> =>
+    gdriveStream(accessor, p, opts.index ?? undefined)
+  return sedGeneric(resolved, texts, opts, stream, () =>
+    Promise.reject(new Error('sed: gdrive mount is read-only')),
+  )
 }
 
 export const GDRIVE_SED = command({

@@ -23,6 +23,7 @@ import {
   type CommandOpts,
   rstripSlash,
   stripSlash,
+  formatRecords,
 } from '@struktoai/mirage-core'
 import { du as sshDu, duAll as sshDuAll } from '../../../core/ssh/du.ts'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
@@ -96,7 +97,7 @@ async function duCommand(
     const grand = entries.reduce((acc, [, sz]) => acc + sz, 0)
     lines.push(`${fmt(grand)}\ttotal`)
   }
-  return [new TextEncoder().encode(lines.join('\n')) as ByteSource, new IOResult()]
+  return [formatRecords(lines) as ByteSource, new IOResult()]
 }
 
 export const SSH_DU = command({

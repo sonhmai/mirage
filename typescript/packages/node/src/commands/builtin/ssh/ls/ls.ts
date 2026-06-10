@@ -24,6 +24,7 @@ import {
   type CommandOpts,
   type FileStat,
   rstripSlash,
+  formatRecords,
 } from '@struktoai/mirage-core'
 import { stat as sshStat } from '../../../../core/ssh/stat.ts'
 import { readdir as sshReaddir } from '../../../../core/ssh/readdir.ts'
@@ -155,10 +156,10 @@ async function lsCommand(
         warnings.push(`ls: cannot access '${p.original}': ${msg}`)
       }
     }
-    const out: ByteSource = new TextEncoder().encode(lines.join('\n'))
+    const out: ByteSource = formatRecords(lines)
     const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
     if (warnings.length > 0) {
-      const stderr = new TextEncoder().encode(warnings.join('\n'))
+      const stderr = formatRecords(warnings)
       return [out, new IOResult({ stderr, exitCode })]
     }
     return [out, new IOResult({ exitCode })]
@@ -172,10 +173,10 @@ async function lsCommand(
       if (i > 0) lines.push('')
       await walkRecursive(accessor, p, walkOpts, true, lines, warnings)
     }
-    const out: ByteSource = new TextEncoder().encode(lines.join('\n'))
+    const out: ByteSource = formatRecords(lines)
     const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
     if (warnings.length > 0) {
-      const stderr = new TextEncoder().encode(warnings.join('\n'))
+      const stderr = formatRecords(warnings)
       return [out, new IOResult({ stderr, exitCode })]
     }
     return [out, new IOResult({ exitCode })]
@@ -197,10 +198,10 @@ async function lsCommand(
     for (const s of sortStats(stats, sortBy, reverse))
       lines.push(formatEntry(s, long, human, classify))
   }
-  const out: ByteSource = new TextEncoder().encode(lines.join('\n'))
+  const out: ByteSource = formatRecords(lines)
   const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
   if (warnings.length > 0) {
-    const stderr = new TextEncoder().encode(warnings.join('\n'))
+    const stderr = formatRecords(warnings)
     return [out, new IOResult({ stderr, exitCode })]
   }
   return [out, new IOResult({ exitCode })]

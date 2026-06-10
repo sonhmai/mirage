@@ -19,6 +19,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 
@@ -48,7 +49,7 @@ async function rmCommand(
     writes[p.stripPrefix] = new Uint8Array()
     if (verbose) verboseParts.push(`removed '${p.original}'`)
   }
-  const output: ByteSource | null = verbose ? ENC.encode(verboseParts.join('\n')) : null
+  const output: ByteSource | null = verbose ? formatRecords(verboseParts) : null
   return [output, new IOResult({ writes })]
 }
 

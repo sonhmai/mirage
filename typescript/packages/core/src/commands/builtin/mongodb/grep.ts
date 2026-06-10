@@ -33,6 +33,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { compilePattern, grepFilesOnly, grepRecursive, grepStream } from '../grep_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { fileReadProvision } from './_provision.ts'
+import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 
@@ -108,14 +109,14 @@ async function grepCommand(
       }
       const allLines = formatGrepResults(results)
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      return [ENC.encode(allLines.join('\n')), new IOResult()]
+      return [formatRecords(allLines), new IOResult()]
     }
 
     if (scope.level === ScopeLevel.DATABASE && scope.database !== null) {
       const results = await searchDatabase(accessor, scope.database, pattern, limit)
       const allLines = formatGrepResults(results)
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      return [ENC.encode(allLines.join('\n')), new IOResult()]
+      return [formatRecords(allLines), new IOResult()]
     }
 
     if (scope.level === ScopeLevel.ENTITY && scope.database !== null && scope.name !== null) {
@@ -123,7 +124,7 @@ async function grepCommand(
       if (docs.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       const results = [{ database: scope.database, collection: scope.name, docs }]
       const allLines = formatGrepResults(results)
-      return [ENC.encode(allLines.join('\n')), new IOResult()]
+      return [formatRecords(allLines), new IOResult()]
     }
 
     const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
@@ -161,7 +162,7 @@ async function grepCommand(
         },
         warnings,
       )
-      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : undefined
+      const stderr = warnings.length > 0 ? formatRecords(warnings) : undefined
       if (results.length === 0) {
         return [
           new Uint8Array(0),
@@ -212,11 +213,11 @@ async function grepCommand(
         },
         warnings,
       )
-      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : null
+      const stderr = warnings.length > 0 ? formatRecords(warnings) : null
       if (results.length === 0) {
         return [new Uint8Array(0), new IOResult({ exitCode: 1, stderr })]
       }
-      return [ENC.encode(results.join('\n')), new IOResult({ stderr })]
+      return [formatRecords(results), new IOResult({ stderr })]
     }
 
     const data = await mongoRead(accessor, target, opts.index ?? undefined)

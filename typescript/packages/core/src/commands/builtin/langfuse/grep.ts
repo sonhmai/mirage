@@ -32,6 +32,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { compilePattern, grepFilesOnly, grepRecursive, grepStream } from '../grep_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { fileReadProvision } from './_provision.ts'
+import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 
@@ -95,7 +96,7 @@ function filterTraces(
     lines.push(`traces/${traceId}.json:${lineJson}`)
   }
   if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-  return [ENC.encode(lines.join('\n')), new IOResult()]
+  return [formatRecords(lines), new IOResult()]
 }
 
 function filterSessions(
@@ -110,7 +111,7 @@ function filterSessions(
     lines.push(`sessions/${sessionId}:${lineJson}`)
   }
   if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-  return [ENC.encode(lines.join('\n')), new IOResult()]
+  return [formatRecords(lines), new IOResult()]
 }
 
 function filterPrompts(
@@ -128,7 +129,7 @@ function filterPrompts(
     lines.push(`prompts/${promptName}:${lineJson}`)
   }
   if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-  return [ENC.encode(lines.join('\n')), new IOResult()]
+  return [formatRecords(lines), new IOResult()]
 }
 
 function filterDatasets(
@@ -143,7 +144,7 @@ function filterDatasets(
     lines.push(`datasets/${datasetName}:${lineJson}`)
   }
   if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-  return [ENC.encode(lines.join('\n')), new IOResult()]
+  return [formatRecords(lines), new IOResult()]
 }
 
 async function grepCommand(
@@ -220,7 +221,7 @@ async function grepCommand(
         },
         warnings,
       )
-      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : undefined
+      const stderr = warnings.length > 0 ? formatRecords(warnings) : undefined
       if (results.length === 0) {
         return [
           new Uint8Array(0),
@@ -270,11 +271,11 @@ async function grepCommand(
         },
         warnings,
       )
-      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : null
+      const stderr = warnings.length > 0 ? formatRecords(warnings) : null
       if (results.length === 0) {
         return [new Uint8Array(0), new IOResult({ exitCode: 1, stderr })]
       }
-      return [ENC.encode(results.join('\n')), new IOResult({ stderr })]
+      return [formatRecords(results), new IOResult({ stderr })]
     }
 
     const data = await langfuseRead(accessor, target, opts.index ?? undefined)

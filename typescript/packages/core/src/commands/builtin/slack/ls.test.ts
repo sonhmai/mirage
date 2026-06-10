@@ -75,7 +75,7 @@ describe('slack ls', () => {
       {},
       { index: idx },
     )
-    expect(out.stdout.split('\n').sort()).toEqual(['channels', 'dms', 'users'])
+    expect(out.stdout.trimEnd().split('\n').sort()).toEqual(['channels', 'dms', 'users'])
   })
 
   it('lists channel directory entries from cached index', async () => {
@@ -96,7 +96,7 @@ describe('slack ls', () => {
       {},
       { index: idx, transport },
     )
-    expect(out.stdout).toBe('general__C1')
+    expect(out.stdout).toBe('general__C1\n')
     expect(transport.calls).toHaveLength(0)
   })
 
@@ -118,6 +118,6 @@ describe('slack ls', () => {
       {},
       { index: idx, transport },
     )
-    expect(out.stdout).toBe('alice__U1.json')
+    expect(out.stdout).toBe('alice__U1.json\n')
   })
 })

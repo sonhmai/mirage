@@ -17,8 +17,7 @@ import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { formatLsLong } from '../utils/formatting.ts'
 import { rstripSlash } from '../../../util/slash.ts'
-
-const ENC = new TextEncoder()
+import { formatRecords } from '../utils/output.ts'
 
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
@@ -149,10 +148,10 @@ export async function lsGeneric(
       }
     }
     appendListing(collected, long, human, classify, lines)
-    const out: ByteSource = ENC.encode(lines.join('\n'))
+    const out: ByteSource = formatRecords(lines)
     const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
     if (warnings.length > 0) {
-      const stderr = ENC.encode(warnings.join('\n'))
+      const stderr = formatRecords(warnings)
       return [out, new IOResult({ stderr, exitCode })]
     }
     return [out, new IOResult({ exitCode })]
@@ -172,10 +171,10 @@ export async function lsGeneric(
       lines.push(`${dirSpec.original}:`)
       appendListing(entries, long, human, classify, lines)
     }
-    const out: ByteSource = ENC.encode(lines.join('\n'))
+    const out: ByteSource = formatRecords(lines)
     const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
     if (warnings.length > 0) {
-      const stderr = ENC.encode(warnings.join('\n'))
+      const stderr = formatRecords(warnings)
       return [out, new IOResult({ stderr, exitCode })]
     }
     return [out, new IOResult({ exitCode })]
@@ -196,10 +195,10 @@ export async function lsGeneric(
     }
     appendListing(sortStats(stats, sortBy, reverse), long, human, classify, lines)
   }
-  const out: ByteSource = ENC.encode(lines.join('\n'))
+  const out: ByteSource = formatRecords(lines)
   const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
   if (warnings.length > 0) {
-    const stderr = ENC.encode(warnings.join('\n'))
+    const stderr = formatRecords(warnings)
     return [out, new IOResult({ stderr, exitCode })]
   }
   return [out, new IOResult({ exitCode })]

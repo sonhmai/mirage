@@ -33,6 +33,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { compilePattern, grepFilesOnly, grepRecursive, grepStream } from '../grep_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { fileReadProvision } from './_provision.ts'
+import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 
@@ -104,21 +105,21 @@ async function grepCommand(
       const results = await searchDatabase(accessor, pattern, limit)
       const allLines = formatGrepResults(results)
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      return [ENC.encode(allLines.join('\n')), new IOResult()]
+      return [formatRecords(allLines), new IOResult()]
     }
 
     if (scope.level === 'schema') {
       const results = await searchSchema(accessor, scope.schema, pattern, limit)
       const allLines = formatGrepResults(results)
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      return [ENC.encode(allLines.join('\n')), new IOResult()]
+      return [formatRecords(allLines), new IOResult()]
     }
 
     if (scope.level === 'kind') {
       const results = await searchKind(accessor, scope.schema, scope.kind, pattern, limit)
       const allLines = formatGrepResults(results)
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      return [ENC.encode(allLines.join('\n')), new IOResult()]
+      return [formatRecords(allLines), new IOResult()]
     }
 
     if (scope.level === 'entity' || scope.level === 'entity_rows') {
@@ -133,7 +134,7 @@ async function grepCommand(
       if (rows.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       const results = [{ schema: scope.schema, kind: scope.kind, entity: scope.entity, rows }]
       const allLines = formatGrepResults(results)
-      return [ENC.encode(allLines.join('\n')), new IOResult()]
+      return [formatRecords(allLines), new IOResult()]
     }
 
     const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
@@ -171,7 +172,7 @@ async function grepCommand(
         },
         warnings,
       )
-      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : undefined
+      const stderr = warnings.length > 0 ? formatRecords(warnings) : undefined
       if (results.length === 0) {
         return [
           new Uint8Array(0),
@@ -221,11 +222,11 @@ async function grepCommand(
         },
         warnings,
       )
-      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : null
+      const stderr = warnings.length > 0 ? formatRecords(warnings) : null
       if (results.length === 0) {
         return [new Uint8Array(0), new IOResult({ exitCode: 1, stderr })]
       }
-      return [ENC.encode(results.join('\n')), new IOResult({ stderr })]
+      return [formatRecords(results), new IOResult({ stderr })]
     }
 
     const data = await postgresRead(accessor, target, opts.index ?? undefined)

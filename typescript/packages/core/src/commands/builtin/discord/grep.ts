@@ -29,6 +29,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { compilePattern, grepFilesOnly, grepLines, grepStream } from '../grep_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { fileReadProvision } from './_provision.ts'
+import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -209,7 +210,7 @@ async function grepCommand(
           new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) }),
         ]
       }
-      const out: ByteSource = ENC.encode(allResults.join('\n'))
+      const out: ByteSource = formatRecords(allResults)
       return [out, new IOResult({ ...(stderr !== undefined ? { stderr } : {}) })]
     }
 

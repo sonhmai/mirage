@@ -24,6 +24,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { compilePattern, grepFilesOnly, grepRecursive, grepStream } from '../grep_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 
@@ -121,7 +122,7 @@ async function grepCommand(
         },
         warnings,
       )
-      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : undefined
+      const stderr = warnings.length > 0 ? formatRecords(warnings) : undefined
       if (results.length === 0) {
         return [
           new Uint8Array(0),
@@ -171,11 +172,11 @@ async function grepCommand(
         },
         warnings,
       )
-      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : null
+      const stderr = warnings.length > 0 ? formatRecords(warnings) : null
       if (results.length === 0) {
         return [new Uint8Array(0), new IOResult({ exitCode: 1, stderr })]
       }
-      return [ENC.encode(results.join('\n')), new IOResult({ stderr })]
+      return [formatRecords(results), new IOResult({ stderr })]
     }
 
     const data = await rb(target.original)

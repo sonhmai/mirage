@@ -20,6 +20,7 @@ import { type FileStat, FileType, type PathSpec, ResourceName } from '../../../t
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { metadataProvision } from './_provision.ts'
+import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 
@@ -69,7 +70,7 @@ async function statCommand(
       )
     }
   }
-  const out: ByteSource = ENC.encode(lines.join('\n'))
+  const out: ByteSource = formatRecords(lines)
   return [out, new IOResult()]
 }
 

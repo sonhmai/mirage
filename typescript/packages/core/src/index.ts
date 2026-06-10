@@ -328,6 +328,11 @@ export { countNewlines, parseN, tailBytes } from './commands/builtin/tail_helper
 export { AsyncLineIterator } from './io/async_line_iterator.ts'
 export { readStdinAsync, resolveSource, wrapBytes } from './commands/builtin/utils/stream.ts'
 export { formatLsLong, humanSize } from './commands/builtin/utils/formatting.ts'
+export {
+  formatOptionalRecords,
+  formatRecordText,
+  formatRecords,
+} from './commands/builtin/utils/output.ts'
 export { grepFilesOnly, grepRecursive } from './commands/builtin/grep_helper.ts'
 export { interpretEscapes } from './commands/builtin/utils/escapes.ts'
 export { deflateRaw, gunzip, gzip, inflateRaw } from './utils/compress.ts'

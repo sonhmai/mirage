@@ -59,12 +59,12 @@ describe('ssh ls', () => {
   it('sorts names by ASCII byte order, uppercase before lowercase', async () => {
     const accessor = mixedCaseAccessor()
     const out = await runLs(accessor, [PathSpec.fromStrPath('/data')])
-    expect(out.split('\n')).toEqual(['Banana.txt', 'CHERRY.txt', 'apple.txt'])
+    expect(out.trimEnd().split('\n')).toEqual(['Banana.txt', 'CHERRY.txt', 'apple.txt'])
   })
 
   it('-r reverses the ASCII order', async () => {
     const accessor = mixedCaseAccessor()
     const out = await runLs(accessor, [PathSpec.fromStrPath('/data')], { r: true })
-    expect(out.split('\n')).toEqual(['apple.txt', 'CHERRY.txt', 'Banana.txt'])
+    expect(out.trimEnd().split('\n')).toEqual(['apple.txt', 'CHERRY.txt', 'Banana.txt'])
   })
 })

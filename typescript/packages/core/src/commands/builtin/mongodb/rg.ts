@@ -31,6 +31,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { compilePattern, grepLines } from '../grep_helper.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -129,20 +130,20 @@ async function rgCommand(
       }
       const allLines = formatGrepResults(results)
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      return [ENC.encode(allLines.join('\n')), new IOResult()]
+      return [formatRecords(allLines), new IOResult()]
     }
     if (scope.level === ScopeLevel.DATABASE && scope.database !== null) {
       const results = await searchDatabase(accessor, scope.database, exprText, limit)
       const allLines = formatGrepResults(results)
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      return [ENC.encode(allLines.join('\n')), new IOResult()]
+      return [formatRecords(allLines), new IOResult()]
     }
     if (scope.level === ScopeLevel.ENTITY && scope.database !== null && scope.name !== null) {
       const docs = await searchCollection(accessor, scope.database, scope.name, exprText, limit)
       if (docs.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       const results = [{ database: scope.database, collection: scope.name, docs }]
       const allLines = formatGrepResults(results)
-      return [ENC.encode(allLines.join('\n')), new IOResult()]
+      return [formatRecords(allLines), new IOResult()]
     }
 
     const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
@@ -188,7 +189,7 @@ async function rgCommand(
       }
     }
     if (!anyMatch) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-    const out: ByteSource = ENC.encode(allResults.join('\n'))
+    const out: ByteSource = formatRecords(allResults)
     return [out, new IOResult()]
   }
 
@@ -203,7 +204,7 @@ async function rgCommand(
   const matched = grepLines('<stdin>', lines, pat, f)
   if (matched.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
   if (f.countOnly) return [ENC.encode(String(matched.length)), new IOResult()]
-  return [ENC.encode(matched.join('\n')), new IOResult()]
+  return [formatRecords(matched), new IOResult()]
 }
 
 export const MONGODB_RG = command({

@@ -16,6 +16,7 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { md5Hex } from '../../../utils/hash.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { formatRecords } from '../utils/output.ts'
 
 export async function md5Generic(
   paths: PathSpec[],
@@ -32,6 +33,6 @@ export async function md5Generic(
     const data = await materialize(opts.stdin)
     lines.push(`${md5Hex(data)}  -`)
   }
-  const out: ByteSource = new TextEncoder().encode(lines.join('\n'))
+  const out: ByteSource = formatRecords(lines)
   return [out, new IOResult()]
 }

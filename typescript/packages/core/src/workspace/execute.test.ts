@@ -156,7 +156,7 @@ describe('Workspace.execute', () => {
     ram.store.files.set('/b.txt', new Uint8Array([2]))
     const res = await ws.execute('ls /ram/')
     expect(res.exitCode).toBe(0)
-    expect(new TextDecoder().decode(res.stdout)).toBe('a.txt\nb.txt')
+    expect(new TextDecoder().decode(res.stdout)).toBe('a.txt\nb.txt\n')
     await ws.close()
   })
 

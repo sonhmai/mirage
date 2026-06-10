@@ -61,7 +61,7 @@ describe('discord tree', () => {
       { L: '1' },
       { index: idx },
     )
-    const lines = out.split('\n')
+    const lines = out.trimEnd().split('\n')
     expect(lines).toHaveLength(2)
     expect(lines[0]).toContain('channels')
     expect(lines[1]).toContain('members')

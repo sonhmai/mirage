@@ -18,15 +18,13 @@ import { BOX_TOKEN_URL, BoxTokenManager } from './_client.ts'
 const CCG_CONFIG = { clientId: 'cid', clientSecret: 'csec', enterpriseId: '123456' }
 
 function stubToken(token: string, expiresIn: number): ReturnType<typeof vi.fn> {
-  const fetchMock = vi
-    .fn()
-    .mockImplementation(() =>
-      Promise.resolve(
-        new Response(JSON.stringify({ access_token: token, expires_in: expiresIn }), {
-          status: 200,
-        }),
-      ),
-    )
+  const fetchMock = vi.fn().mockImplementation(() =>
+    Promise.resolve(
+      new Response(JSON.stringify({ access_token: token, expires_in: expiresIn }), {
+        status: 200,
+      }),
+    ),
+  )
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
 }

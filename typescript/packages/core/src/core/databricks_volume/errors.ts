@@ -40,6 +40,24 @@ export function notADirectoryError(path: string): Error {
   return e
 }
 
+export function alreadyExistsError(path: string): Error {
+  const e = new Error(`databricks_volume: file exists: ${path}`) as Error & { code: string }
+  e.code = 'EEXIST'
+  return e
+}
+
+export function isADirectoryError(path: string): Error {
+  const e = new Error(`databricks_volume: is a directory: ${path}`) as Error & { code: string }
+  e.code = 'EISDIR'
+  return e
+}
+
+export function notEmptyError(path: string): Error {
+  const e = new Error(`directory not empty: ${path}`) as Error & { code: string }
+  e.code = 'ENOTEMPTY'
+  return e
+}
+
 export function isNotFound(exc: unknown): boolean {
   if (!(exc instanceof Error)) return false
   const statusCode = (exc as { statusCode?: unknown }).statusCode

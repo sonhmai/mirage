@@ -13,6 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createServer, type Server } from "node:http";
+import { Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { NotionResource as BrowserNotionResource } from "@struktoai/mirage-browser";
+import { MemoryOAuthClientProvider } from "@struktoai/mirage-core";
 import { MountMode, NotionResource, Workspace } from "@struktoai/mirage-node";
 
 const MOUNT = "/notion";
@@ -141,6 +146,64 @@ function startMockServer(): Promise<{ server: Server; port: number }> {
   });
 }
 
+function toolPayload(name: string, args: Record<string, unknown>): unknown {
+  if (name === "API-post-search") {
+    return { object: "list", results: Object.values(PAGES), has_more: false, next_cursor: null };
+  }
+  if (name === "API-retrieve-a-page") {
+    const found = PAGES[String(args.page_id)];
+    if (found === undefined) throw new Error(`mock notion: unknown page ${String(args.page_id)}`);
+    return found;
+  }
+  if (name === "API-retrieve-block-children") {
+    return {
+      object: "list",
+      results: BLOCKS[String(args.block_id)] ?? [],
+      has_more: false,
+      next_cursor: null,
+    };
+  }
+  throw new Error(`mock notion: unsupported tool ${name}`);
+}
+
+function buildMcpServer(): McpServer {
+  const server = new McpServer(
+    { name: "mock-notion-mcp", version: "0.0.0" },
+    { capabilities: { tools: {} } },
+  );
+  server.setRequestHandler(ListToolsRequestSchema, () => Promise.resolve({ tools: [] }));
+  server.setRequestHandler(CallToolRequestSchema, (req) => {
+    const payload = toolPayload(req.params.name, req.params.arguments ?? {});
+    return Promise.resolve({ content: [{ type: "text", text: JSON.stringify(payload) }] });
+  });
+  return server;
+}
+
+function startMockMcpServer(): Promise<{ server: Server; port: number }> {
+  const server = createServer((req, res) => {
+    void (async () => {
+      const mcp = buildMcpServer();
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      res.on("close", () => {
+        void transport.close();
+        void mcp.close();
+      });
+      await mcp.connect(transport);
+      await transport.handleRequest(req, res);
+    })().catch((err: unknown) => {
+      res.writeHead(500);
+      res.end(String(err));
+    });
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("no port");
+      resolve({ server, port: address.port });
+    });
+  });
+}
+
 const CASES: ReadonlyArray<readonly [string, string]> = [
   ["ls_root", `ls ${MOUNT}/`],
   ["ls_pages", `ls ${MOUNT}/pages/`],
@@ -157,27 +220,53 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["pipe_grep", `cat ${DIR_B}/page.json | grep -c alpha`],
 ];
 
-async function run(ws: Workspace, name: string, cmd: string): Promise<void> {
+async function runCase(ws: Workspace, name: string, cmd: string): Promise<string> {
   const result = await ws.execute(cmd);
   const out = DEC.decode(result.stdout);
-  process.stdout.write(`=== ${name} ===\n`);
-  process.stdout.write(out.endsWith("\n") ? out : out + "\n");
+  return `=== ${name} ===\n` + (out.endsWith("\n") ? out : out + "\n");
 }
 
 async function main(): Promise<void> {
   const { server, port } = await startMockServer();
-  const resource = new NotionResource({
+  const { server: mcpServer, port: mcpPort } = await startMockMcpServer();
+  const restResource = new NotionResource({
     apiKey: "integ-test",
     baseUrl: `http://127.0.0.1:${String(port)}/v1`,
   });
-  const ws = new Workspace({ [MOUNT]: resource }, { mode: MountMode.READ });
+  const restWs = new Workspace({ [MOUNT]: restResource }, { mode: MountMode.READ });
+  const authProvider = new MemoryOAuthClientProvider({
+    clientMetadata: { redirect_uris: ["http://127.0.0.1/cb"] },
+    redirect: () => {},
+  });
+  const mcpResource = new BrowserNotionResource({
+    authProvider,
+    serverUrl: `http://127.0.0.1:${String(mcpPort)}/mcp`,
+  });
+  const mcpWs = new Workspace({ [MOUNT]: mcpResource }, { mode: MountMode.READ });
   try {
+    let mismatches = 0;
     for (const [name, cmd] of CASES) {
-      await run(ws, name, cmd);
+      const restOut = await runCase(restWs, name, cmd);
+      process.stdout.write(restOut);
+      const mcpOut = await runCase(mcpWs, name, cmd);
+      if (mcpOut !== restOut) {
+        mismatches += 1;
+        process.stderr.write(
+          `MCP/REST MISMATCH in ${name}:\n--- rest ---\n${restOut}--- mcp ---\n${mcpOut}`,
+        );
+      }
+    }
+    if (mismatches > 0) {
+      process.exitCode = 1;
+    } else {
+      const n = String(CASES.length);
+      process.stderr.write(`mcp parity: ${n}/${n} cases byte-identical\n`);
     }
   } finally {
-    await ws.close();
+    await restWs.close();
+    await mcpWs.close();
     server.close();
+    mcpServer.close();
   }
 }
 

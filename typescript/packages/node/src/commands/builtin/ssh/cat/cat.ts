@@ -13,54 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  numberLines,
-  CachableAsyncIterator,
-  IOResult,
-  ProvisionResult,
   ResourceName,
+  catGeneric,
+  catProvisionGeneric,
   command,
   concatAggregate,
-  resolveSource,
   specOf,
-  type ByteSource,
   type CommandFnResult,
   type CommandOpts,
   type PathSpec,
 } from '@struktoai/mirage-core'
+import { resolveGlob } from '../../../../core/ssh/glob.ts'
 import { stream as sshStream } from '../../../../core/ssh/stream.ts'
 import { stat as sshStat } from '../../../../core/ssh/stat.ts'
 import type { SSHAccessor } from '../../../../accessor/ssh.ts'
-
-const ENC = new TextEncoder()
-
-export async function catProvision(
-  accessor: SSHAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  _opts: CommandOpts,
-): Promise<ProvisionResult> {
-  const [first] = paths
-  if (first === undefined) return new ProvisionResult({ command: 'cat' })
-  try {
-    const s = await sshStat(accessor, first)
-    return new ProvisionResult({
-      command: `cat ${first.original}`,
-      networkReadLow: s.size ?? 0,
-      networkReadHigh: s.size ?? 0,
-      readOps: 1,
-    })
-  } catch {
-    return new ProvisionResult({ command: 'cat' })
-  }
-}
-
-async function* chainStreams(
-  streams: readonly AsyncIterable<Uint8Array>[],
-): AsyncIterable<Uint8Array> {
-  for (const s of streams) {
-    for await (const chunk of s) yield chunk
-  }
-}
 
 async function catCommand(
   accessor: SSHAccessor,
@@ -68,30 +34,14 @@ async function catCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const nFlag = opts.flags.n === true
-  if (paths.length > 0) {
-    for (const p of paths) await sshStat(accessor, p)
-    const reads: Record<string, ByteSource> = {}
-    const cacheKeys: string[] = []
-    const outputs: AsyncIterable<Uint8Array>[] = []
-    for (const p of paths) {
-      const cachable = new CachableAsyncIterator(sshStream(accessor, p))
-      reads[p.stripPrefix] = cachable
-      cacheKeys.push(p.stripPrefix)
-      outputs.push(cachable)
-    }
-    const merged = chainStreams(outputs)
-    const out: ByteSource = nFlag ? numberLines(merged) : merged
-    return [out, new IOResult({ reads, cache: cacheKeys })]
-  }
-  try {
-    const source = resolveSource(opts.stdin, 'cat: missing operand')
-    const out: ByteSource = nFlag ? numberLines(source) : source
-    return [out, new IOResult()]
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
-  }
+  const resolved = paths.length > 0 ? await resolveGlob(accessor, paths) : []
+  return catGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => sshStat(accessor, p),
+    (p) => sshStream(accessor, p),
+  )
 }
 
 export const SSH_CAT = command({
@@ -99,6 +49,7 @@ export const SSH_CAT = command({
   resource: ResourceName.SSH,
   spec: specOf('cat'),
   fn: catCommand,
-  provision: catProvision,
+  provision: (accessor: SSHAccessor, paths: PathSpec[]) =>
+    catProvisionGeneric(paths, (p) => sshStat(accessor, p)),
   aggregate: concatAggregate,
 })

@@ -60,6 +60,7 @@ function matches(
   depth: number,
   opts: FindOptions,
 ): boolean {
+  if (opts.maxDepth !== null && opts.maxDepth !== undefined && depth > opts.maxDepth) return false
   if (opts.minDepth !== null && opts.minDepth !== undefined && depth < opts.minDepth) return false
   if (isFileType(opts.type) && isDir) return false
   if (isDirType(opts.type) && !isDir) return false
@@ -90,9 +91,11 @@ function matches(
   ) {
     return false
   }
-  const size = entry.attrs.size
-  if (opts.minSize !== null && opts.minSize !== undefined && size < opts.minSize) return false
-  if (opts.maxSize !== null && opts.maxSize !== undefined && size > opts.maxSize) return false
+  if (!isDir) {
+    const size = entry.attrs.size
+    if (opts.minSize !== null && opts.minSize !== undefined && size < opts.minSize) return false
+    if (opts.maxSize !== null && opts.maxSize !== undefined && size > opts.maxSize) return false
+  }
   if (
     (opts.mtimeMin !== null && opts.mtimeMin !== undefined) ||
     (opts.mtimeMax !== null && opts.mtimeMax !== undefined)

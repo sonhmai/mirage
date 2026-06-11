@@ -136,6 +136,9 @@ class MockSFTPClient:
         self.dirs.discard(path)
 
     async def mkdir(self, path):
+        parent = path.rstrip("/").rsplit("/", 1)[0] or "/"
+        if parent != "/" and parent not in self.dirs:
+            raise asyncssh.SFTPNoSuchFile("not found")
         self.dirs.add(path)
 
     async def makedirs(self, path, exist_ok=False):
@@ -346,6 +349,26 @@ def test_find_type_d(env):
     env.create_file("sub/f.txt", b"hi")
     result = env.run("find /ssh/ -type d")
     assert "sub" in result
+
+
+def test_find_maxdepth(env):
+    env.create_file("a.txt", b"a")
+    env.create_file("sub/nested.txt", b"n")
+    env.create_file("sub/deep/deeper.txt", b"d")
+    result = env.run("find /ssh/ -maxdepth 1 -type f")
+    assert "a.txt" in result
+    assert "nested.txt" not in result
+    assert "deeper.txt" not in result
+
+
+def test_find_size_skips_dirs(env):
+    env.create_file("one.txt", b"x")
+    env.create_file("big.txt", b"x" * 100)
+    env.create_file("sub/f.txt", b"x" * 100)
+    result = env.run("find /ssh/ -size -5c")
+    assert "one.txt" in result
+    assert "big.txt" not in result
+    assert "/ssh/sub" in result
 
 
 # ── du ─────────────────────────────────────────

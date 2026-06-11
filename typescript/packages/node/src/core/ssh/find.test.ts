@@ -81,8 +81,25 @@ describe('core/ssh/find', () => {
         ['/sub', {}],
       ]),
     })
-    const out = await find(accessor, spec('/'), { maxDepth: 0, type: 'f' })
+    const out = await find(accessor, spec('/'), { maxDepth: 1, type: 'f' })
     expect(out).toEqual(['/a.json', '/b.txt'])
+    expect(await find(accessor, spec('/'), { maxDepth: 0, type: 'f' })).toEqual([])
+  })
+
+  it('size filters apply to files only, directories pass', async () => {
+    const accessor = makeFakeAccessor({
+      files: new Map([
+        ['/one.txt', { data: new Uint8Array(1) }],
+        ['/big.txt', { data: new Uint8Array(100) }],
+        ['/sub/f.txt', { data: new Uint8Array(100) }],
+      ]),
+      dirs: new Map([
+        ['/', {}],
+        ['/sub', { size: 4096 }],
+      ]),
+    })
+    const out = await find(accessor, spec('/'), { maxSize: 5 })
+    expect(out).toEqual(['/one.txt', '/sub'])
   })
 
   it('returns empty for missing root', async () => {

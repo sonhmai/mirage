@@ -65,8 +65,8 @@ async def _walk(sftp, config, path, results, depth, maxdepth, mindepth, name,
             continue
         child = f"{path.rstrip('/')}/{entry.filename}"
         is_dir = entry.attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
-        if _matches(entry, child, is_dir, depth + 1, mindepth, name, iname,
-                    type, min_size, max_size, name_exclude, or_names,
+        if _matches(entry, child, is_dir, depth + 1, maxdepth, mindepth, name,
+                    iname, type, min_size, max_size, name_exclude, or_names,
                     mtime_min, mtime_max, path_pattern):
             results.append(child)
         if is_dir:
@@ -76,9 +76,11 @@ async def _walk(sftp, config, path, results, depth, maxdepth, mindepth, name,
                         path_pattern)
 
 
-def _matches(entry, path, is_dir, depth, mindepth, name, iname, type, min_size,
-             max_size, name_exclude, or_names, mtime_min, mtime_max,
+def _matches(entry, path, is_dir, depth, maxdepth, mindepth, name, iname, type,
+             min_size, max_size, name_exclude, or_names, mtime_min, mtime_max,
              path_pattern):
+    if maxdepth is not None and depth > maxdepth:
+        return False
     if mindepth is not None and depth < mindepth:
         return False
     if type in ("f", "file") and is_dir:
@@ -96,11 +98,12 @@ def _matches(entry, path, is_dir, depth, mindepth, name, iname, type, min_size,
         return False
     if path_pattern and not fnmatch.fnmatch(path, path_pattern):
         return False
-    size = entry.attrs.size or 0
-    if min_size is not None and size < min_size:
-        return False
-    if max_size is not None and size > max_size:
-        return False
+    if not is_dir:
+        size = entry.attrs.size or 0
+        if min_size is not None and size < min_size:
+            return False
+        if max_size is not None and size > max_size:
+            return False
     if mtime_min is not None or mtime_max is not None:
         mtime = entry.attrs.mtime
         if mtime is not None:

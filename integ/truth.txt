@@ -846,7 +846,9 @@ Jan
 Feb
 Mar
 === sort_b ===
-
+  both  
+  leading
+trailing  
 === uniq_u ===
 c
 === uniq_repeats ===
@@ -1110,11 +1112,19 @@ foo
 bar
 baz
 === cat_E ===
-
+hello
+world
+foo
+bar
+baz
 === cat_T ===
-
+a	1
+b	2
+c	3
 === cat_A ===
-
+a	1
+b	2
+c	3
 === nl_d_pipe ===
 
 === nl_w3 ===

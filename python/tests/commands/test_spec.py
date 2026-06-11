@@ -154,13 +154,11 @@ def test_parse_combined_bool_and_value():
     assert parsed.args == [("/file.txt", OperandKind.PATH)]
 
 
-def test_clustered_flags_with_unknown_short_falls_through_misclassifying_args(
-):
+def test_clustered_flags_with_unknown_short_dropped_with_warning():
     # Regression: a real user ran `grep -RIl "Base3\|base3" /r2/Review` and
     # the pattern + path got swapped because `-I` was missing from the spec.
-    # The parser walks each char in `-RIl`, finds `-I` not registered, and
-    # bails on the whole cluster — pushing `-RIl` itself as the first
-    # positional and shifting everything after.
+    # Unknown dash tokens are now dropped with a warning instead of becoming
+    # the pattern and shifting the real pattern into the paths.
     spec_missing_I = CommandSpec(
         options=(Option(short="-R"),
                  Option(short="-l")),  # -I deliberately missing
@@ -170,8 +168,9 @@ def test_clustered_flags_with_unknown_short_falls_through_misclassifying_args(
     parsed = parse_command(spec_missing_I,
                            ["-RIl", "Base3\\|base3", "/r2/Review"],
                            cwd="/")
-    assert parsed.texts() == ["-RIl"]
-    assert parsed.paths() == ["/Base3\\|base3", "/r2/Review"]
+    assert parsed.texts() == ["Base3\\|base3"]
+    assert parsed.paths() == ["/r2/Review"]
+    assert any("-RIl" in w for w in parsed.warnings)
 
 
 def test_clustered_flags_with_all_known_short_classifies_correctly():

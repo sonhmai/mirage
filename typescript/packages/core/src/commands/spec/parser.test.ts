@@ -199,11 +199,13 @@ describe('parseCommand — clustered flags shift positionals when one is missing
     rest: new Operand({ kind: OperandKind.PATH }),
   })
 
-  it('reproduces the misclassification when -I is missing from the spec', () => {
+  it('drops the cluster with a warning when -I is missing from the spec', () => {
     const p = parseCommand(grepLikeMissingI, ['-RIl', 'Base3\\|base3', '/r2/Review'], '/')
-    // -RIl falls through, becomes the pattern, real pattern shifts to path[0]
-    expect(p.texts()).toEqual(['-RIl'])
-    expect(p.paths()).toEqual(['/Base3\\|base3', '/r2/Review'])
+    // -RIl can't fully resolve; it is dropped with a warning instead of
+    // becoming the pattern and shifting the real pattern into the paths.
+    expect(p.texts()).toEqual(['Base3\\|base3'])
+    expect(p.paths()).toEqual(['/r2/Review'])
+    expect(p.warnings.some((w) => w.includes('-RIl'))).toBe(true)
   })
 
   it('correctly assigns pattern + path once -I is registered', () => {
@@ -328,10 +330,38 @@ describe('parseCommand — GNU long flag =value syntax', () => {
     expect(p.paths()).toEqual(['/x'])
   })
 
-  it('unknown long flag with = stays positional', () => {
+  it('unknown long flag with = is dropped with a warning', () => {
     const p = parseCommand(specOf('grep'), ['--color=auto', 'pat', '/a.txt'], '/')
     expect(p.flags['--color']).toBeUndefined()
-    expect(p.texts()).toEqual(['--color=auto'])
+    expect(p.texts()).toEqual(['pat'])
+    expect(p.paths()).toEqual(['/a.txt'])
+    expect(p.warnings.some((w) => w.includes('--color=auto'))).toBe(true)
+  })
+})
+
+describe('parseCommand — unknown dash tokens warn and drop', () => {
+  it('drops unknown long flags from operands', () => {
+    const p = parseCommand(specOf('grep'), ['--bogus', 'pat', '/a.txt'], '/')
+    expect(p.texts()).toEqual(['pat'])
+    expect(p.paths()).toEqual(['/a.txt'])
+    expect(p.warnings.some((w) => w.includes('--bogus'))).toBe(true)
+  })
+
+  it('keeps dash tokens for TEXT-rest commands', () => {
+    const p = parseCommand(specOf('python'), ['-x', 'hello'], '/')
+    expect(p.texts()).toEqual(['-x', 'hello'])
+    expect(p.warnings).toEqual([])
+  })
+
+  it('keeps numeric dash tokens as operands', () => {
+    const p = parseCommand(specOf('grep'), ['-5', 'pat'], '/')
+    expect(p.texts()).toEqual(['-5'])
+    expect(p.warnings).toEqual([])
+  })
+
+  it('known flags produce no warnings', () => {
+    const p = parseCommand(specOf('grep'), ['-n', '-e', 'pat', '/a.txt'], '/')
+    expect(p.warnings).toEqual([])
   })
 })
 
@@ -358,10 +388,11 @@ describe('parseCommand — clusters ending in a value flag (getopt)', () => {
     expect(p.texts()).toEqual(['pat'])
   })
 
-  it('unknown char in cluster falls through to positional', () => {
+  it('unknown char in cluster drops the token with a warning', () => {
     const p = parseCommand(specOf('grep'), ['-nx', 'pat', '/a.txt'], '/')
     expect(p.flags['-n']).toBeUndefined()
-    expect(p.texts()).toEqual(['-nx'])
+    expect(p.texts()).toEqual(['pat'])
+    expect(p.warnings.some((w) => w.includes('-nx'))).toBe(true)
   })
 
   it('find multi-char short flags still work', () => {

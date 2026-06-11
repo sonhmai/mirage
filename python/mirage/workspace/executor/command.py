@@ -111,12 +111,13 @@ def _parse_flags(
     mount: object,
     cmd_name: str,
     cwd: str,
-) -> tuple[list[PathSpec], list[str], dict]:
+) -> tuple[list[PathSpec], list[str], dict, list[str]]:
     """Parse flags from classified parts, recovering PathSpec for PATH values.
 
     Returns:
-        (paths, texts, flag_kwargs) — positional paths, positional texts,
-        and parsed flag dict with PathSpec for PATH flag values.
+        (paths, texts, flag_kwargs, warnings) — positional paths, positional
+        texts, parsed flag dict with PathSpec for PATH flag values, and
+        parser warnings (e.g. unknown options that were ignored).
     """
     # Build string argv and PathSpec lookup
     argv = [
@@ -172,12 +173,12 @@ def _parse_flags(
                 paths.append(scope)
             else:
                 texts.append(value)
-        return paths, texts, flag_kwargs
+        return paths, texts, flag_kwargs, parsed.warnings
 
     # No spec: separate by type
     paths = [item for item in parts if isinstance(item, PathSpec)]
     texts = [item for item in parts if not isinstance(item, PathSpec)]
-    return paths, texts, {}
+    return paths, texts, {}, []
 
 
 async def handle_command(
@@ -336,13 +337,23 @@ async def handle_command(
                                                          stderr=err)
 
     # Parse flags upstream — mount receives clean args
-    paths, texts, flag_kwargs = _parse_flags(parts[1:], mount, cmd_name,
-                                             session.cwd)
+    paths, texts, flag_kwargs, parse_warnings = _parse_flags(
+        parts[1:], mount, cmd_name, session.cwd)
+
+    warn_bytes = ("".join(
+        f"{cmd_name}: {w}\n"
+        for w in parse_warnings).encode() if parse_warnings else b"")
 
     if _should_fan_out(cmd_name, paths, flag_kwargs, registry):
-        return await _fan_out_traversal(cmd_name, paths, texts, flag_kwargs,
-                                        registry, mount, session.cwd, cmd_str,
-                                        stdin)
+        stdout, io, node = await _fan_out_traversal(cmd_name, paths, texts,
+                                                    flag_kwargs, registry,
+                                                    mount, session.cwd,
+                                                    cmd_str, stdin)
+        if warn_bytes:
+            existing = await materialize(io.stderr) if io.stderr else b""
+            io.stderr = warn_bytes + existing
+            node.stderr = warn_bytes + (node.stderr or b"")
+        return stdout, io, node
 
     try:
         stdout, io = await mount.execute_cmd(
@@ -384,6 +395,10 @@ async def handle_command(
         io.writes = {prefix + k: v for k, v in io.writes.items()}
         io.cache = [prefix + p for p in io.cache]
     stdout, io = wrap_cachable_streams(stdout, io)
+
+    if warn_bytes:
+        existing = await materialize(io.stderr) if io.stderr else b""
+        io.stderr = warn_bytes + existing
 
     stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
     io.stderr = maybe_with_timeout(io.stderr, io.safeguard, cmd_name)

@@ -113,6 +113,16 @@ describe('grep -e pattern flag', () => {
     await ws.close()
   })
 
+  it('unknown flag warns on stderr but the command still works', async () => {
+    const ws = await makeWs()
+    const io = await ws.execute('grep --color=auto orange /data/a.txt')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('orange line\n')
+    const stderr = io.stderr instanceof Uint8Array ? new TextDecoder().decode(io.stderr) : ''
+    expect(stderr).toContain('--color=auto')
+    await ws.close()
+  })
+
   it('rg -e and repeated rg -e work like grep', async () => {
     const ws = await makeWs()
     const single = await ws.execute('rg -e orange /data/a.txt')

@@ -122,6 +122,11 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
 
   const flags: Record<string, string | boolean> = {}
   const rawArgs: string[] = []
+  const warnings: string[] = []
+  // Free-text commands (echo/python/bash-style TEXT rest) keep unknown dash
+  // tokens verbatim; elsewhere they are dropped with a warning so a stray
+  // flag never corrupts pattern/path classification.
+  const lenientDashOperands = restKind === OperandKind.TEXT
   i = 0
   let endOfFlags = false
 
@@ -152,8 +157,10 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         const eq = tok.indexOf('=')
         if (eq !== -1 && longValueFlags.has(tok.slice(0, eq))) {
           setValueFlag(flags, tok.slice(0, eq), tok.slice(eq + 1), repeatFlags)
-        } else {
+        } else if (lenientDashOperands) {
           rawArgs.push(tok)
+        } else {
+          warnings.push(`unknown option '${tok}' ignored`)
         }
         i += 1
       }
@@ -218,7 +225,11 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         }
       }
 
-      rawArgs.push(tok)
+      if (lenientDashOperands || /^-\d+$/.test(tok)) {
+        rawArgs.push(tok)
+      } else {
+        warnings.push(`unknown option '${tok}' ignored`)
+      }
       i += 1
       continue
     }
@@ -286,6 +297,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     pathFlagValues,
     rawOperands,
     textFlagValues,
+    warnings,
   })
 }
 

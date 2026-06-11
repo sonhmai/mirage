@@ -114,6 +114,19 @@ async def test_grep_dash_e_and_repeated_dash_f_union(workspace):
 
 
 @pytest.mark.asyncio
+async def test_grep_unknown_flag_warns_but_works(workspace):
+    await workspace.ops.mkdir("/data")
+    await workspace.ops.write("/data/a.txt", b"orange line\nplain line\n")
+
+    io = await workspace.execute("grep --color=auto orange /data/a.txt",
+                                 session_id="default")
+    assert io.exit_code == 0
+    assert (io.stdout or b"").decode() == "orange line\n"
+    stderr = io.stderr if isinstance(io.stderr, bytes) else b""
+    assert b"--color=auto" in stderr
+
+
+@pytest.mark.asyncio
 async def test_grep_dash_f_empty_file_matches_nothing(workspace):
     # GNU semantics: an empty -f file contains zero patterns and matches
     # nothing (BSD grep diverges and matches everything).

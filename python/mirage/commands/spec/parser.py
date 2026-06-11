@@ -122,6 +122,11 @@ def parse_command(
 
     flags: dict[str, str | bool] = {}
     raw_args: list[str] = []
+    warnings: list[str] = []
+    # Free-text commands (echo/python/bash-style TEXT rest) keep unknown
+    # dash tokens verbatim; elsewhere they are dropped with a warning so a
+    # stray flag never corrupts pattern/path classification.
+    lenient_dash_operands = rest_kind == OperandKind.TEXT
     i = 0
     end_of_flags = False
 
@@ -150,8 +155,10 @@ def parse_command(
                 if eq != -1 and tok[:eq] in long_value_flags:
                     _set_value_flag(flags, tok[:eq], tok[eq + 1:],
                                     repeat_flags)
-                else:
+                elif lenient_dash_operands:
                     raw_args.append(tok)
+                else:
+                    warnings.append(f"unknown option '{tok}' ignored")
                 i += 1
             continue
 
@@ -210,7 +217,10 @@ def parse_command(
                     i += 2
                     continue
 
-            raw_args.append(tok)
+            if lenient_dash_operands or _NUMERIC_SHORT.match(tok):
+                raw_args.append(tok)
+            else:
+                warnings.append(f"unknown option '{tok}' ignored")
             i += 1
             continue
 
@@ -265,6 +275,7 @@ def parse_command(
         path_flag_values=path_flag_values,
         raw_operands=raw_operands,
         text_flag_values=text_flag_values,
+        warnings=warnings,
     )
 
 

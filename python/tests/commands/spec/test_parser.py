@@ -130,11 +130,13 @@ def test_long_value_flag_equals_syntax_rg():
     assert parsed.paths() == ["/x"]
 
 
-def test_unknown_long_flag_with_equals_stays_positional():
+def test_unknown_long_flag_dropped_with_warning():
     parsed = parse_command(SPECS["grep"], ["--color=auto", "pat", "/a.txt"],
                            "/")
     assert "--color" not in parsed.flags
-    assert parsed.texts() == ["--color=auto"]
+    assert parsed.texts() == ["pat"]
+    assert parsed.paths() == ["/a.txt"]
+    assert any("--color=auto" in w for w in parsed.warnings)
 
 
 def test_cluster_ending_in_value_flag_consumes_next_arg():
@@ -160,11 +162,36 @@ def test_cluster_bool_then_count_flag_value():
     assert parsed.paths() == ["/a.txt"]
 
 
-def test_cluster_with_unknown_char_stays_positional():
+def test_cluster_with_unknown_char_dropped_with_warning():
     parsed = parse_command(SPECS["grep"], ["-nx", "pat", "/a.txt"], "/")
     assert "-n" not in parsed.flags
-    assert parsed.texts() == ["-nx"]
-    assert parsed.paths() == ["/pat", "/a.txt"]
+    assert parsed.texts() == ["pat"]
+    assert parsed.paths() == ["/a.txt"]
+    assert any("-nx" in w for w in parsed.warnings)
+
+
+def test_unknown_short_flag_dropped_with_warning():
+    parsed = parse_command(SPECS["grep"], ["--bogus", "pat", "/a.txt"], "/")
+    assert parsed.texts() == ["pat"]
+    assert parsed.paths() == ["/a.txt"]
+    assert any("--bogus" in w for w in parsed.warnings)
+
+
+def test_text_rest_keeps_unknown_dash_tokens():
+    parsed = parse_command(SPECS["python"], ["-x", "hello"], "/")
+    assert parsed.texts() == ["-x", "hello"]
+    assert parsed.warnings == []
+
+
+def test_numeric_dash_token_stays_operand():
+    parsed = parse_command(SPECS["grep"], ["-5", "pat"], "/")
+    assert parsed.texts() == ["-5"]
+    assert parsed.warnings == []
+
+
+def test_known_flags_produce_no_warnings():
+    parsed = parse_command(SPECS["grep"], ["-n", "-e", "pat", "/a.txt"], "/")
+    assert parsed.warnings == []
 
 
 def test_find_multichar_short_flag_still_works():

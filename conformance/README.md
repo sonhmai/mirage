@@ -30,7 +30,7 @@ empty output, and binary output are all part of the contract.
       "matrix": { "python": ["ram", "disk", "redis"], "typescript": ["ram"] },
       "expect": {
         "exit": 0,
-        "stdout_text": "5\t5\t24\t/data/a.txt\n",
+        "stdout_text": " 5  5 24 /data/a.txt\n",
         "stderr_text": ""
       }
     }

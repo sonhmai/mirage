@@ -16,7 +16,7 @@
       },
       "expect": {
         "exit": 0,
-        "stdout_text": "5\t5\t24\t/data/a.txt\n",
+        "stdout_text": " 5  5 24 /data/a.txt\n",
         "stderr_text": ""
       }
     },
@@ -35,7 +35,7 @@
       },
       "expect": {
         "exit": 0,
-        "stdout_text": "5\t/data/a.txt\n",
+        "stdout_text": "5 /data/a.txt\n",
         "stderr_text": ""
       }
     },
@@ -54,7 +54,7 @@
       },
       "expect": {
         "exit": 0,
-        "stdout_text": "5\t/data/a.txt\n",
+        "stdout_text": "5 /data/a.txt\n",
         "stderr_text": ""
       }
     },
@@ -73,7 +73,7 @@
       },
       "expect": {
         "exit": 0,
-        "stdout_text": "24\t/data/a.txt\n",
+        "stdout_text": "24 /data/a.txt\n",
         "stderr_text": ""
       }
     },
@@ -92,7 +92,7 @@
       },
       "expect": {
         "exit": 0,
-        "stdout_text": "0\t3\t19\t/data/no_nl.txt\n",
+        "stdout_text": " 0  3 19 /data/no_nl.txt\n",
         "stderr_text": ""
       }
     },
@@ -112,7 +112,7 @@
       },
       "expect": {
         "exit": 0,
-        "stdout_text": "2\t2\t4\n",
+        "stdout_text": "      2       2       4\n",
         "stderr_text": ""
       }
     },

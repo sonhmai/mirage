@@ -27,6 +27,10 @@ from mirage.resource.redis import RedisResource
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONFORMANCE_DIR = REPO_ROOT / "conformance"
 REDIS_URL = os.environ.get("REDIS_URL", "")
+SUPPORTED_MATRIX = {
+    "python": {"ram", "disk", "redis"},
+    "typescript": {"ram"},
+}
 
 
 def _decode_bytes(record: dict, text_key: str, base64_key: str) -> bytes:
@@ -49,15 +53,34 @@ def _load_seeds() -> dict[str, bytes]:
     }
 
 
+def _validate_matrix(case: dict, spec_name: str) -> None:
+    matrix = case["matrix"]
+    unknown_languages = set(matrix) - set(SUPPORTED_MATRIX)
+    if unknown_languages:
+        names = ", ".join(sorted(unknown_languages))
+        raise ValueError(
+            f"case {case['id']} in {spec_name} has unknown matrix "
+            f"language(s): {names}")
+
+    for language, backends in matrix.items():
+        unsupported = set(backends) - SUPPORTED_MATRIX[language]
+        if unsupported:
+            names = ", ".join(sorted(unsupported))
+            raise ValueError(
+                f"case {case['id']} in {spec_name} has unsupported "
+                f"{language} backend(s): {names}")
+
+    if not any(matrix.values()):
+        raise ValueError(
+            f"case {case['id']} in {spec_name} applies to no backend")
+
+
 def _load_cases() -> list[dict]:
     cases = []
     for spec_path in sorted((CONFORMANCE_DIR / "cases").glob("*.json")):
         doc = json.loads(spec_path.read_text())
         for case in doc["cases"]:
-            if not any(case["matrix"].values()):
-                raise ValueError(
-                    f"case {case['id']} in {spec_path.name} applies to "
-                    "no backend")
+            _validate_matrix(case, spec_path.name)
             cases.append(case)
     return cases
 
@@ -129,3 +152,36 @@ async def test_conformance(backend: str, case: dict, tmp_path: Path) -> None:
         if resource is not None:
             await resource._store.clear()
             await resource._store.close()
+
+
+@pytest.mark.parametrize(
+    ("matrix", "message"),
+    [
+        ({
+            "pyhton": ["ram"]
+        }, "unknown matrix language"),
+        ({
+            "typescript": ["disk"]
+        }, "unsupported typescript backend"),
+        ({
+            "python": [],
+            "typescript": []
+        }, "applies to no backend"),
+    ],
+)
+def test_validate_matrix_rejects_invalid_targets(matrix: dict,
+                                                 message: str) -> None:
+    case = {"id": "invalid_matrix", "matrix": matrix}
+    with pytest.raises(ValueError, match=message):
+        _validate_matrix(case, "invalid.json")
+
+
+def test_validate_matrix_accepts_supported_targets() -> None:
+    case = {
+        "id": "valid_matrix",
+        "matrix": {
+            "python": ["ram", "disk", "redis"],
+            "typescript": ["ram"],
+        },
+    }
+    _validate_matrix(case, "valid.json")

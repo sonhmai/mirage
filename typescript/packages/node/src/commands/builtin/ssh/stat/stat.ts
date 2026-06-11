@@ -24,6 +24,7 @@ import {
   type CommandOpts,
   type FileStat,
   type PathSpec,
+  formatRecords,
 } from '@struktoai/mirage-core'
 import { stat as sshStat } from '../../../../core/ssh/stat.ts'
 import type { SSHAccessor } from '../../../../accessor/ssh.ts'
@@ -91,7 +92,7 @@ async function statCommand(
       lines.push(`name=${s.name} size=${sizeStr} modified=${modStr} type=${typeStr}`)
     }
   }
-  const out: ByteSource = new TextEncoder().encode(lines.join('\n'))
+  const out: ByteSource = formatRecords(lines)
   return [out, new IOResult()]
 }
 

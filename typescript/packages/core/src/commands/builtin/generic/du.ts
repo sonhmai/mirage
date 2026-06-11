@@ -16,8 +16,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rstripSlash, stripSlash } from '../../../util/slash.ts'
-
-const ENC = new TextEncoder()
+import { formatRecords } from '../utils/output.ts'
 
 function humanSize(n: number): string {
   const units = ['B', 'K', 'M', 'G', 'T']
@@ -83,6 +82,6 @@ export async function duGeneric(
   if (cumulative) {
     lines.push(`${fmt(grand)}\ttotal`)
   }
-  const out: ByteSource = ENC.encode(lines.join('\n'))
+  const out: ByteSource = formatRecords(lines)
   return [out, new IOResult()]
 }

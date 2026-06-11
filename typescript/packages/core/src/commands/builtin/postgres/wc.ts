@@ -15,71 +15,53 @@
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import { countRows } from '../../../core/postgres/_client.ts'
 import { resolveGlob } from '../../../core/postgres/glob.ts'
-import { read as postgresRead } from '../../../core/postgres/read.ts'
+import { readStream } from '../../../core/postgres/read.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { formatRecords } from '../utils/output.ts'
+import { formatWcLines, wcGeneric, type WcRow } from '../generic/wc.ts'
 import { fileReadProvision } from './_provision.ts'
 
-const ENC = new TextEncoder()
+function rowsScope(p: PathSpec): { schema: string; entity: string } | null {
+  const scope = detectScope(p)
+  if (scope.level === 'entity_rows') {
+    return { schema: scope.schema, entity: scope.entity }
+  }
+  return null
+}
 
 async function wcCommand(
   accessor: PostgresAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const f = opts.flags
-  const lFlag = f.args_l === true
-  const wFlag = f.w === true
-  const cFlag = f.c === true
-  const mFlag = f.m === true
-  const LFlag = f.L === true
-
-  if (wFlag || mFlag || LFlag) {
-    return [
-      null,
-      new IOResult({
-        exitCode: 1,
-        stderr: ENC.encode('wc: only -l and -c supported for Postgres'),
-      }),
-    ]
-  }
-
-  if (paths.length === 0) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('wc: missing operand\n') })]
-  }
-
-  const first = paths[0]
-  if (first === undefined) return [null, new IOResult()]
-  const scope = detectScope(first)
-
-  if (scope.level === 'entity_rows') {
-    if (cFlag) {
-      const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-      const target = resolved[0]
-      if (target === undefined) return [null, new IOResult()]
-      const data = await postgresRead(accessor, target, opts.index ?? undefined)
-      const out: ByteSource = ENC.encode(String(data.byteLength))
-      return [out, new IOResult()]
-    }
-    if (lFlag) {
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  // Line counts on tables/views come from a server-side COUNT(*) instead of
+  // reading every row. -l only (default prints words and bytes too, which
+  // needs the content).
+  const countOnly =
+    f.args_l === true && f.w !== true && f.c !== true && f.m !== true && f.L !== true
+  if (countOnly && resolved.length > 0 && resolved.every((p) => rowsScope(p) !== null)) {
+    const rows: WcRow[] = []
+    let total = 0
+    for (const p of resolved) {
+      const scope = rowsScope(p)
+      if (scope === null) continue
       const count = await countRows(accessor, scope.schema, scope.entity)
-      return [ENC.encode(`${String(count)}\t${first.original}`), new IOResult()]
+      rows.push({ values: [count], label: p.original })
+      total += count
     }
-    const count = await countRows(accessor, scope.schema, scope.entity)
-    return [ENC.encode(`${String(count)}\t${first.original}`), new IOResult()]
+    if (resolved.length > 1) rows.push({ values: [total], label: 'total' })
+    const out: ByteSource = formatRecords(formatWcLines(rows))
+    return [out, new IOResult()]
   }
-
-  return [
-    null,
-    new IOResult({
-      exitCode: 1,
-      stderr: ENC.encode('wc: path must target an entity rows.jsonl file'),
-    }),
-  ]
+  return wcGeneric(resolved, texts, opts, (p) => readStream(accessor, p, opts.index ?? undefined))
 }
 
 export const POSTGRES_WC = command({

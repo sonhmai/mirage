@@ -124,6 +124,9 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["tree", "tree {root}"],
   ["find_md", "find {root} -name '*.md'"],
   ["find_type_f", "find {root} -type f | sort"],
+  // cold (bespoke) then warm (cache-mount generic) must be identical
+  ["grep_cold_single", "grep bearer {root}guides/auth.md"],
+  ["grep_warm_single", "grep bearer {root}guides/auth.md"],
   ["cat_auth", "cat {root}guides/auth.md"],
   ["cat_quickstart", "cat {root}guides/quickstart.md"],
   ["head_1", "head -n 1 {root}guides/quickstart.md"],
@@ -131,6 +134,8 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["grep_429", "grep 429 {root}guides/auth.md"],
   ["grep_c_rate", "grep -c rate {root}guides/auth.md"],
   ["grep_r_refund", "grep -r refund {root}policies/"],
+  ["grep_cold_count", "grep -c sell {root}policies/privacy.md"],
+  ["grep_warm_count", "grep -c sell {root}policies/privacy.md"],
   ["grep_rl_encrypted", "grep -rl encrypted {root}"],
   ["grep_v_bearer", "grep -v bearer {root}guides/auth.md"],
   ["grep_rE_alternation", 'grep -rE "rate limited|refund" {root}'],
@@ -145,6 +150,11 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["rg_l_token", "rg -l token {root}"],
   ["pipe_cat_wc", "cat {root}guides/auth.md | wc -l"],
   ["pipe_sort_uniq_wc", "cat {root}policies/refunds.md | sort | uniq | wc -l"],
+  // cat cache poisoning: per-file cache keys after a concat cat
+  ["poison_concat", "cat {root}guides/quickstart.md {root}guides/auth.md"],
+  ["poison_first_intact", "cat {root}guides/quickstart.md"],
+  ["poison_second_intact", "cat {root}guides/auth.md"],
+  ["pipe_concat_head", "cat {root}guides/quickstart.md {root}guides/auth.md | head -n 1"],
 ];
 
 function encodedPathTree(): string {

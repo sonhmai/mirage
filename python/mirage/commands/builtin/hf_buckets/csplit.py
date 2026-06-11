@@ -59,7 +59,7 @@ async def csplit(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    f: str | None = None,
+    f: str | PathSpec | None = None,
     n: str | None = None,
     b: str | None = None,
     k: bool = False,
@@ -67,7 +67,7 @@ async def csplit(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    prefix = f or "xx"
+    prefix = f.strip_prefix if isinstance(f, PathSpec) else (f or "xx")
     digits = int(n) if n else 2
     suffix_fmt = b if b else f"%0{digits}d"
     if paths:

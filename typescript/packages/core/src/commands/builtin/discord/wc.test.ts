@@ -74,10 +74,11 @@ describe('discord wc', () => {
       {},
       { index: idx, transport },
     )
-    const parts = out.split('\t')
-    expect(parts).toHaveLength(4)
+    const parts = out.trim().split(/\s+/)
     expect(parts[0]).toBe('3')
-    expect(parts[3]).toBe('/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl')
+    expect(parts.slice(3).join(' ')).toBe(
+      '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
+    )
   })
 
   it('supports -l flag (line count)', async () => {
@@ -107,6 +108,6 @@ describe('discord wc', () => {
       { args_l: true },
       { index: idx, transport },
     )
-    expect(out).toBe('2\t/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl')
+    expect(out).toBe('2 /mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl\n')
   })
 })

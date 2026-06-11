@@ -50,14 +50,17 @@ async function grepOggCommand(
     const re = new RegExp(pattern, flags)
     if (re.test(text)) {
       const out: ByteSource = ENC.encode(text)
-      return [out, new IOResult({ reads: { [first.original]: raw }, cache: [first.original] })]
+      return [
+        out,
+        new IOResult({ reads: { [first.stripPrefix]: raw }, cache: [first.stripPrefix] }),
+      ]
     }
     return [
       null,
       new IOResult({
         exitCode: 1,
-        reads: { [first.original]: raw },
-        cache: [first.original],
+        reads: { [first.stripPrefix]: raw },
+        cache: [first.stripPrefix],
       }),
     ]
   } catch (err) {

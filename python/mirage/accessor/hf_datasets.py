@@ -53,6 +53,7 @@ class HfDatasetsConfig(BaseModel):
 
 class HfDatasetsAccessor(_HfAccessor):
     REPO_TYPE = "dataset"
+    RESOURCE_NAME = "hf_datasets"
 
     @property
     def bucket_uri(self) -> str:

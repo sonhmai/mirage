@@ -22,6 +22,7 @@ import {
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
+  formatRecords,
 } from '@struktoai/mirage-core'
 import { readdir as sshReaddir } from '../../../core/ssh/readdir.ts'
 import { stat as sshStat } from '../../../core/ssh/stat.ts'
@@ -118,7 +119,7 @@ async function treeCommand(
   for (const p of targets) {
     await walkTree(accessor, p, '', lines, treeOpts, 0)
   }
-  const out: ByteSource = new TextEncoder().encode(lines.join('\n'))
+  const out: ByteSource = formatRecords(lines)
   return [out, new IOResult()]
 }
 

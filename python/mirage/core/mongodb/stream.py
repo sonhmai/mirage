@@ -18,7 +18,8 @@ from bson.json_util import RELAXED_JSON_OPTIONS, dumps
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.core.mongodb._client import iter_documents, iter_inserts
+from mirage.core.mongodb._client import (find_documents, iter_documents,
+                                         iter_inserts)
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.types import PRIMARY_KEY, ScopeLevel
 from mirage.types import PathSpec
@@ -47,6 +48,46 @@ def _apply_elision(value: dict, paths: set[str]) -> dict:
 def _elision_paths(config, database: str, name: str) -> set[str]:
     key = f"{database}.{name}"
     return set(config.elide_fields.get(key, []))
+
+
+async def read_tail(
+    accessor: MongoDBAccessor,
+    path: PathSpec,
+    n: int,
+    index: IndexCacheStore = None,
+) -> bytes:
+    """Read only the last ``n`` documents of a collection.
+
+    Pushes the tail into MongoDB (sort by primary key descending + limit)
+    instead of streaming the whole collection.
+
+    Args:
+        accessor (MongoDBAccessor): Backend accessor.
+        path (PathSpec): A documents.jsonl path; other scopes raise.
+        n (int): Number of trailing documents to fetch.
+        index (IndexCacheStore): Unused; kept for reader-signature parity.
+    """
+    scope = detect_scope(path)
+    if scope.level != ScopeLevel.DOCUMENTS:
+        raise FileNotFoundError(path.original)
+    limit = min(n, accessor.config.max_doc_limit)
+    docs = await find_documents(
+        accessor.client,
+        scope.database,
+        scope.name,
+        sort=[(PRIMARY_KEY, -1)],
+        limit=limit,
+    )
+    docs.reverse()
+    if not docs:
+        return b""
+    elide = _elision_paths(accessor.config, scope.database, scope.name)
+    lines = []
+    for doc in docs:
+        if elide:
+            doc = _apply_elision(doc, elide)
+        lines.append(dumps(doc, json_options=RELAXED_JSON_OPTIONS))
+    return ("\n".join(lines) + "\n").encode()
 
 
 async def read_stream(

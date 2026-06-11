@@ -22,14 +22,14 @@ async def cat(
     if len(paths) == 1:
         p = paths[0]
         cachable = CachableAsyncIterator(read_stream(accessor, p, index))
-        io = IOResult(reads={p.original: cachable}, cache=[p.original])
+        io = IOResult(reads={p.strip_prefix: cachable}, cache=[p.strip_prefix])
         source: ByteSource = cachable
     else:
         reads: dict[str, ByteSource] = {}
         parts: list[bytes] = []
         for p in paths:
             data = await read_bytes(accessor, p, index)
-            reads[p.original] = data
+            reads[p.strip_prefix] = data
             parts.append(data)
         io = IOResult(reads=reads, cache=list(reads))
         source = async_chain(*parts)

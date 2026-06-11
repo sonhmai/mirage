@@ -14,13 +14,15 @@
 
 import type { ChromaAccessor } from '../../../accessor/chroma.ts'
 import { resolveGlob } from '../../../core/chroma/glob.ts'
-import { grepBytes } from '../../../core/chroma/grep.ts'
+import { coarseFilterSlugs, targetSlugs } from '../../../core/chroma/grep.ts'
+import { readStream } from '../../../core/chroma/read.ts'
+import { readdir as chromaReaddir } from '../../../core/chroma/readdir.ts'
+import { statLight } from '../../../core/chroma/stat.ts'
 import { IOResult } from '../../../io/types.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
+import { type FileStat, PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-
-const ENC = new TextEncoder()
+import { grepGeneric } from '../generic/grep.ts'
 
 async function grepCommand(
   accessor: ChromaAccessor,
@@ -30,40 +32,49 @@ async function grepCommand(
 ): Promise<CommandFnResult> {
   const index = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlob(accessor, paths, index) : []
-  let pattern: string
-  if (typeof opts.flags.e === 'string') {
-    pattern = opts.flags.e
-  } else if (texts.length > 0 && texts[0] !== undefined) {
-    pattern = texts[0]
-  } else {
-    return [
-      null,
-      new IOResult({
-        exitCode: 2,
-        stderr: ENC.encode('grep: usage: grep [flags] pattern [path]\n'),
+  const pattern =
+    typeof opts.flags.e === 'string' ? opts.flags.e : texts.length > 0 ? texts[0] : undefined
+  let files = resolved
+  let showFilename = false
+  let grepOpts = opts
+  if (resolved.length > 0 && pattern !== undefined) {
+    // Pushdown: expand the scope to files and let ChromaDB pre-filter
+    // which documents can contain the pattern, so only candidate
+    // documents are fetched. The generic grep owns flag handling and
+    // output formatting on the surviving files.
+    const targets = await targetSlugs(accessor, resolved, index)
+    const matched = new Set(
+      await coarseFilterSlugs(accessor, pattern, targets, {
+        ignoreCase: opts.flags.i === true,
+        invert: opts.flags.v === true,
+        fixedString: opts.flags.F === true,
       }),
-    ]
+    )
+    const prefix = resolved[0]?.prefix ?? ''
+    files = [...targets.entries()]
+      .filter(([, slug]) => matched.has(slug))
+      .map(([p]) => PathSpec.fromStrPath(p, prefix))
+    if (files.length === 0) {
+      return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+    }
+    showFilename =
+      opts.flags.r === true || opts.flags.R === true || resolved.length > 1 || targets.size > 1
+    // Paths are pre-expanded to files, so the generic must not recurse.
+    grepOpts = { ...opts, flags: { ...opts.flags, r: false, R: false } }
   }
-  const [output, reads] = await grepBytes(accessor, resolved, pattern, index, {
-    ignoreCase: opts.flags.i === true,
-    invert: opts.flags.v === true,
-    lineNumbers: opts.flags.n === true,
-    countOnly: opts.flags.c === true,
-    filesOnly: opts.flags.args_l === true || opts.flags.l === true,
-    wholeWord: opts.flags.w === true,
-    fixedString: opts.flags.F === true,
-    onlyMatching: opts.flags.o === true,
-    maxCount: typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null,
-  })
-  const io = new IOResult({
-    reads,
-    cache: Object.keys(reads),
-    exitCode: output.byteLength > 0 ? 0 : 1,
-  })
-  if (opts.flags.q === true) {
-    return [new Uint8Array(0), io]
-  }
-  return [output, io]
+  const stat = (p: PathSpec): Promise<FileStat> => statLight(accessor, p, index)
+  const readdir = (p: PathSpec): Promise<string[]> => chromaReaddir(accessor, p, index)
+  return grepGeneric(
+    'grep',
+    files,
+    texts,
+    grepOpts,
+    stat,
+    readdir,
+    (p) => readStream(accessor, p, index),
+    undefined,
+    showFilename,
+  )
 }
 
 export const CHROMA_GREP = command({

@@ -1,0 +1,127 @@
+---
+title: Backblaze B2
+icon: /images/backblaze-logo.svg
+description: Set up Backblaze B2 as a MIRAGE resource from Node or the browser.
+---
+
+Backblaze B2 uses the S3 API with AWS Signature V4 against `https://s3.<region>.backblazeb2.com`. MIRAGE derives this endpoint from your region automatically.
+
+Credentials (B2 application key, the `keyID` is the access key and the `applicationKey` is the secret) are created the same way in both runtimes, see [Backblaze B2 Credentials](/home/setup/backblaze).
+
+## Node (server-side)
+
+```bash
+pnpm add @struktoai/mirage-node
+```
+
+```ts
+import { BackblazeResource, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const b2 = new BackblazeResource({
+  bucket: process.env.B2_BUCKET!,
+  region: process.env.B2_REGION!,
+  accessKeyId: process.env.B2_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.B2_SECRET_ACCESS_KEY!,
+})
+
+const ws = new Workspace({ '/bucket/': b2 }, { mode: MountMode.READ })
+const res = await ws.execute('ls /bucket/')
+console.log(res.stdoutText)
+```
+
+## Browser (presigned URLs)
+
+```bash
+pnpm add @struktoai/mirage-browser
+```
+
+The browser `BackblazeResource` is secret-free, your backend signs each operation using your B2 application key and returns a URL. B2 accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the B2 endpoint.
+
+### 1. Server: sign URLs with the B2 endpoint
+
+```ts
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+
+const REGION = process.env.B2_REGION!
+
+const client = new S3Client({
+  region: REGION,
+  endpoint: `https://s3.${REGION}.backblazeb2.com`,
+  credentials: {
+    accessKeyId: process.env.B2_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.B2_SECRET_ACCESS_KEY!,
+  },
+})
+const BUCKET = process.env.B2_BUCKET!
+
+app.post('/presign/b2', async (req, res) => {
+  const { path, op, opts } = req.body
+  const key = path.replace(/^\/+/, '')
+  const ttl = typeof opts?.ttlSec === 'number' ? opts.ttlSec : 300
+  let cmd
+  switch (op) {
+    case 'GET':    cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType }); break
+    case 'HEAD':   cmd = new HeadObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'DELETE': cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'LIST':   cmd = new ListObjectsV2Command({
+      Bucket: BUCKET,
+      Prefix: opts?.listPrefix,
+      Delimiter: opts?.listDelimiter,
+      ContinuationToken: opts?.listContinuationToken,
+    }); break
+    case 'COPY':   cmd = new CopyObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      CopySource: `${BUCKET}/${opts?.copySource}`,
+    }); break
+  }
+  res.json({ url: await getSignedUrl(client, cmd, { expiresIn: ttl }) })
+})
+```
+
+### 2. Browser: wire it up
+
+```ts
+import { BackblazeResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const b2 = new BackblazeResource({
+  bucket: 'my-bucket',
+  region: 'us-west-004',
+  presignedUrlProvider: async (path, op, opts) => {
+    const r = await fetch('/presign/b2', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, op, opts }),
+    })
+    const { url } = await r.json()
+    return url
+  },
+})
+
+const ws = new Workspace({ '/bucket/': b2 }, { mode: MountMode.READ })
+```
+
+<Tip>
+`region` on the browser config is only used for display/logging; the actual endpoint is baked into the presigned URLs your backend returns.
+</Tip>
+
+### 3. CORS
+
+B2 manages CORS through its **native API**, not the S3 `PutBucketCors` call. Set CORS rules in the Backblaze web console (Bucket Settings -> CORS Rules) or with the `b2` CLI:
+
+```bash
+b2 bucket update my-bucket \
+  --cors-rules '[{"corsRuleName":"mirage","allowedOrigins":["http://localhost:5173","https://app.example.com"],"allowedOperations":["s3_get","s3_put","s3_head","s3_delete","s3_post"],"allowedHeaders":["*"],"exposeHeaders":["etag","content-length","content-type","last-modified"],"maxAgeSeconds":3000}]'
+```
+
+See the [Backblaze resource](/python/resource/backblaze) docs for the equivalent Python wiring.

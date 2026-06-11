@@ -21,6 +21,7 @@ import {
   type CommandFnResult,
   type CommandOpts,
   type PathSpec,
+  formatRecords,
 } from '@struktoai/mirage-core'
 import { rmdir as sshRmdir } from '../../../core/ssh/rmdir.ts'
 import { stat as sshStat } from '../../../core/ssh/stat.ts'
@@ -67,7 +68,7 @@ async function rmCommand(
     }
     if (verbose) lines.push(`removed '${p.original}'`)
   }
-  const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n')) : null
+  const out = lines.length > 0 ? formatRecords(lines) : null
   return [out, new IOResult()]
 }
 

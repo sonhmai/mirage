@@ -1,0 +1,62 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import dotenv from 'dotenv'
+import {
+  MountMode,
+  AliyunResource,
+  Workspace,
+  resolvedAliyunEndpoint,
+  type AliyunConfig,
+} from '@struktoai/mirage-node'
+
+dotenv.config({ path: '.env.development' })
+
+function configFromEnv(): AliyunConfig {
+  const bucket = process.env.OSS_BUCKET
+  const region = process.env.OSS_REGION
+  const accessKeyId = process.env.OSS_ACCESS_KEY_ID
+  const secretAccessKey = process.env.OSS_ACCESS_KEY_SECRET
+  if (bucket === undefined || region === undefined || accessKeyId === undefined || secretAccessKey === undefined) {
+    throw new Error('OSS_BUCKET, OSS_REGION, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET must be set (e.g. in .env.development)')
+  }
+  return { bucket, region, accessKeyId, secretAccessKey }
+}
+
+async function main(): Promise<void> {
+  const config = configFromEnv()
+  const ws = new Workspace({ '/oss/': new AliyunResource(config) }, { mode: MountMode.READ })
+  try {
+    console.log(`=== Alibaba OSS at ${resolvedAliyunEndpoint(config)} ===`)
+
+    let r = await ws.execute('ls /oss/')
+    console.log('ls /oss/:\n' + r.stdoutText)
+
+    r = await ws.execute("find /oss/ -name '*.json' | head -n 5")
+    console.log('find *.json:\n' + r.stdoutText)
+
+    const plan = await ws.execute('grep -m 1 mirage /oss/data/example.jsonl', { provision: true })
+    console.log(`plan grep -m 1: network_read=${plan.networkRead} precision=${plan.precision}`)
+
+    const bytes = ws.records.reduce((acc, rec) => acc + rec.bytes, 0)
+    console.log(`\nStats: ${String(ws.records.length)} ops, ${String(bytes)} bytes`)
+  } finally {
+    await ws.close()
+  }
+}
+
+main().catch((err: unknown) => {
+  console.error(err)
+  process.exit(1)
+})

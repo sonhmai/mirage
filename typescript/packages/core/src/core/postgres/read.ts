@@ -25,6 +25,15 @@ export interface ReadOptions {
   offset?: number | null
 }
 
+export async function* readStream(
+  accessor: PostgresAccessor,
+  path: PathSpec | string,
+  index?: IndexCacheStore,
+  options: ReadOptions = {},
+): AsyncIterable<Uint8Array> {
+  yield await read(accessor, path, index, options)
+}
+
 export async function read(
   accessor: PostgresAccessor,
   path: PathSpec | string,

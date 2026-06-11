@@ -292,8 +292,8 @@ async def test_wc_report_through_redirect_chain(ws):
         json_size = len(objects["data/example.json"])
         jsonl_size = len(objects["data/example.jsonl"])
         assert (await io.stdout_str()).strip().splitlines() == [
-            f"/s3/data/example.json {json_size}\t/s3/data/example.json",
-            f"/s3/data/example.jsonl {jsonl_size}\t/s3/data/example.jsonl",
+            f"/s3/data/example.json {json_size} /s3/data/example.json",
+            f"/s3/data/example.jsonl {jsonl_size} /s3/data/example.jsonl",
         ]
 
 

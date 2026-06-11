@@ -6,6 +6,7 @@
     "has_write": false,
     "resources": [
       "box",
+      "discord",
       "disk",
       "dropbox",
       "email",
@@ -15,6 +16,10 @@
       "gmail",
       "gsheets",
       "gslides",
+      "hf_buckets",
+      "hf_datasets",
+      "hf_models",
+      "hf_spaces",
       "linear",
       "notion",
       "ram",

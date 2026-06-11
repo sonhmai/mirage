@@ -56,7 +56,7 @@ describe('md5', () => {
     const expected = md5Hex(data)
     const r = await runMd5(resource, [PathSpec.fromStrPath('/tmp/f.txt')])
     expect(r.exitCode).toBe(0)
-    expect(r.out).toBe(`${expected}  /tmp/f.txt`)
+    expect(r.out).toBe(`${expected}  /tmp/f.txt\n`)
   })
 
   it('handles empty file', async () => {
@@ -67,13 +67,13 @@ describe('md5', () => {
     const expected = md5Hex(data)
     const r = await runMd5(resource, [PathSpec.fromStrPath('/tmp/empty.txt')])
     expect(r.exitCode).toBe(0)
-    expect(r.out).toBe(`${expected}  /tmp/empty.txt`)
+    expect(r.out).toBe(`${expected}  /tmp/empty.txt\n`)
   })
 
   it('hashes stdin when no paths', async () => {
     const resource = new RAMResource()
     const data = ENC.encode('disk content')
-    const expected = `${md5Hex(data)}  -`
+    const expected = `${md5Hex(data)}  -\n`
     const r = await runMd5(resource, [], data)
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe(expected)
@@ -90,6 +90,6 @@ describe('md5', () => {
       PathSpec.fromStrPath('/b.txt'),
     ])
     expect(r.exitCode).toBe(0)
-    expect(r.out).toBe(`${md5Hex(d1)}  /a.txt\n${md5Hex(d2)}  /b.txt`)
+    expect(r.out).toBe(`${md5Hex(d1)}  /a.txt\n${md5Hex(d2)}  /b.txt\n`)
   })
 })

@@ -27,11 +27,11 @@ async def test_wc_default(workspace):
     await workspace.ops.write("/f.txt", b"hello world\nfoo bar\n")
     io = await workspace.execute("wc /f.txt", session_id="default")
     assert io.exit_code == 0
-    parts = io.stdout.decode().split("\t")
+    parts = io.stdout.decode().split()
     assert parts[0] == "2"
     assert parts[1] == "4"
     assert parts[2] == "20"
-    assert parts[3] == "/f.txt\n"
+    assert parts[3] == "/f.txt"
 
 
 @pytest.mark.asyncio
@@ -39,7 +39,7 @@ async def test_wc_l(workspace):
     await workspace.ops.write("/f.txt", b"a\nb\nc\n")
     io = await workspace.execute("wc -l /f.txt", session_id="default")
     assert io.exit_code == 0
-    assert io.stdout.decode().split("\t")[0] == "3"
+    assert io.stdout.decode().split()[0] == "3"
 
 
 @pytest.mark.asyncio
@@ -47,7 +47,7 @@ async def test_wc_w(workspace):
     await workspace.ops.write("/f.txt", b"hello world\nfoo\n")
     io = await workspace.execute("wc -w /f.txt", session_id="default")
     assert io.exit_code == 0
-    assert io.stdout.decode().split("\t")[0] == "3"
+    assert io.stdout.decode().split()[0] == "3"
 
 
 @pytest.mark.asyncio
@@ -55,7 +55,7 @@ async def test_wc_c(workspace):
     await workspace.ops.write("/f.txt", b"hello\n")
     io = await workspace.execute("wc -c /f.txt", session_id="default")
     assert io.exit_code == 0
-    assert io.stdout.decode().split("\t")[0] == "6"
+    assert io.stdout.decode().split()[0] == "6"
 
 
 @pytest.mark.asyncio
@@ -64,7 +64,7 @@ async def test_wc_m_multibyte(workspace):
     await workspace.ops.write("/f.txt", "café".encode())
     io = await workspace.execute("wc -m /f.txt", session_id="default")
     assert io.exit_code == 0
-    assert io.stdout.decode().split("\t")[0] == "4"
+    assert io.stdout.decode().split()[0] == "4"
 
 
 @pytest.mark.asyncio
@@ -72,7 +72,7 @@ async def test_wc_L(workspace):
     await workspace.ops.write("/f.txt", b"short\na much longer line\nmed\n")
     io = await workspace.execute("wc -L /f.txt", session_id="default")
     assert io.exit_code == 0
-    assert io.stdout.decode().split("\t")[0] == str(len("a much longer line"))
+    assert io.stdout.decode().split()[0] == str(len("a much longer line"))
 
 
 @pytest.mark.asyncio
@@ -80,7 +80,7 @@ async def test_wc_empty_file(workspace):
     await workspace.ops.write("/f.txt", b"")
     io = await workspace.execute("wc /f.txt", session_id="default")
     assert io.exit_code == 0
-    parts = io.stdout.decode().split("\t")
+    parts = io.stdout.decode().split()
     assert parts[:3] == ["0", "0", "0"]
 
 
@@ -99,7 +99,7 @@ async def test_wc_default_stdin(workspace):
                                  session_id="default",
                                  stdin=b"one two\nthree\n")
     assert io.exit_code == 0
-    parts = io.stdout.decode().strip().split("\t")
+    parts = io.stdout.decode().strip().split()
     assert parts == ["2", "3", "14"]
 
 
@@ -139,7 +139,7 @@ async def test_wc_multi_file_emits_total(workspace):
     assert any(line.endswith("/a.txt") for line in lines)
     assert any(line.endswith("/b.txt") for line in lines)
     assert lines[-1].endswith("total")
-    total_parts = lines[-1].split("\t")
+    total_parts = lines[-1].split()
     assert total_parts[0] == "3"
     assert total_parts[1] == "3"
     assert total_parts[2] == "16"

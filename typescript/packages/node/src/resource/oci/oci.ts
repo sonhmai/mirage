@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName, type RegisteredCommand, type RegisteredOp } from '@struktoai/mirage-core'
+import {
+  remapCommandsResource,
+  remapOpsResource,
+  ResourceName,
+  type RegisteredCommand,
+  type RegisteredOp,
+} from '@struktoai/mirage-core'
 import { S3Resource } from '../s3/s3.ts'
 import { ociToS3Config, redactOciConfig, type OCIConfig, type OCIConfigRedacted } from './config.ts'
 import { OCI_PROMPT } from './prompt.ts'
@@ -20,23 +26,6 @@ import { OCI_PROMPT } from './prompt.ts'
 export interface OCIResourceState {
   type: string
   config: OCIConfigRedacted
-}
-
-function remapOpsResource(ops: readonly RegisteredOp[], to: string): RegisteredOp[] {
-  return ops.map((op) => (op.resource === ResourceName.S3 ? { ...op, resource: to } : op))
-}
-
-function remapCommandsResource(
-  commands: readonly RegisteredCommand[],
-  to: string,
-): RegisteredCommand[] {
-  return commands.map((cmd) => {
-    if (cmd.resource !== ResourceName.S3) return cmd
-    const proto = Object.getPrototypeOf(cmd) as object
-    const copy = Object.assign(Object.create(proto) as RegisteredCommand, cmd)
-    Object.assign(copy, { resource: to })
-    return copy
-  })
 }
 
 export class OCIResource extends S3Resource {

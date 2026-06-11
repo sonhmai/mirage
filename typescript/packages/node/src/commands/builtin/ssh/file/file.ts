@@ -24,6 +24,7 @@ import {
   type CommandFnResult,
   type CommandOpts,
   type PathSpec,
+  formatRecords,
 } from '@struktoai/mirage-core'
 import { stat as sshStat } from '../../../../core/ssh/stat.ts'
 import { read as sshRead } from '../../../../core/ssh/read.ts'
@@ -59,7 +60,7 @@ async function fileCommand(
     const result = detectFileType(header, s)
     lines.push(formatFileResult(p.original, result, brief, mime))
   }
-  const out: ByteSource = ENC.encode(lines.join('\n'))
+  const out: ByteSource = formatRecords(lines)
   return [out, new IOResult()]
 }
 

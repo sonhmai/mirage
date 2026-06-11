@@ -821,8 +821,19 @@ export class Workspace {
     }
     const [[materialized, io], opRecords] = execResult
     targetSession.lastExitCode = io.exitCode
-    await this.dispatcher.applyIo(io)
-    const stdoutBytes = materialized === null ? new Uint8Array() : await materialize(materialized)
+    let stdoutBytes: Uint8Array
+    try {
+      await this.dispatcher.applyIo(io)
+      stdoutBytes = materialized === null ? new Uint8Array() : await materialize(materialized)
+    } catch (err) {
+      // Lazy reads can fail while draining (e.g. a backend size guard thrown
+      // on the first pull); surface that as a failed command, not a crash.
+      const msg = err instanceof Error ? err.message : String(err)
+      io.exitCode = 1
+      io.stderr = new TextEncoder().encode(`${msg}\n`)
+      targetSession.lastExitCode = 1
+      stdoutBytes = new Uint8Array()
+    }
     const stderrBytes = await materialize(io.stderr)
 
     this.records.push(...opRecords)

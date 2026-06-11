@@ -15,32 +15,11 @@
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { resolveGlob } from '../../../core/mongodb/glob.ts'
 import { stat as mongoStat } from '../../../core/mongodb/stat.ts'
-import { type ByteSource, IOResult } from '../../../io/types.ts'
-import { type FileStat, FileType, type PathSpec, ResourceName } from '../../../types.ts'
+import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { statGeneric } from '../generic/stat.ts'
 import { metadataProvision } from './_provision.ts'
-
-const ENC = new TextEncoder()
-
-const TYPE_LABELS: Record<string, string> = {
-  [FileType.DIRECTORY]: 'directory',
-  [FileType.TEXT]: 'regular file',
-  [FileType.BINARY]: 'regular file',
-  [FileType.JSON]: 'regular file',
-  [FileType.CSV]: 'regular file',
-}
-
-function formatStat(fmt: string, s: FileStat): string {
-  return fmt.replace(/%(.)/g, (_, spec: string) => {
-    if (spec === 'n') return s.name
-    if (spec === 's') return String(s.size ?? 0)
-    if (spec === 'F')
-      return s.type !== null ? (TYPE_LABELS[s.type] ?? 'regular file') : 'regular file'
-    if (spec === 'y') return s.modified ?? ''
-    return '?'
-  })
-}
 
 async function statCommand(
   accessor: MongoDBAccessor,
@@ -48,29 +27,9 @@ async function statCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  if (paths.length === 0) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('stat: missing operand\n') })]
-  }
-  const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  const fmt =
-    typeof opts.flags.c === 'string'
-      ? opts.flags.c
-      : typeof opts.flags.f === 'string'
-        ? opts.flags.f
-        : null
-  const lines: string[] = []
-  for (const p of resolved) {
-    const s = await mongoStat(accessor, p, opts.index ?? undefined)
-    if (fmt !== null) {
-      lines.push(formatStat(fmt, s))
-    } else {
-      lines.push(
-        `name=${s.name} size=${String(s.size)} modified=${String(s.modified)} type=${String(s.type)}`,
-      )
-    }
-  }
-  const out: ByteSource = ENC.encode(lines.join('\n'))
-  return [out, new IOResult()]
+  const resolved =
+    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  return statGeneric(resolved, opts, (p) => mongoStat(accessor, p, opts.index ?? undefined))
 }
 
 export const MONGODB_STAT = command({

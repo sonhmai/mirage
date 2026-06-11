@@ -8,7 +8,8 @@
       "disk",
       "ram",
       "redis",
-      "s3"
+      "s3",
+      "ssh"
     ]
   },
   "description": null,

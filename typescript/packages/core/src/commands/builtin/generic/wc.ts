@@ -16,6 +16,7 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -36,6 +37,37 @@ function countChar(text: string, ch: string): number {
   return n
 }
 
+export interface WcRow {
+  values: number[]
+  label: string | null
+}
+
+// GNU wc layout: counts right-aligned to a shared width and space-separated;
+// a single count for a single operand prints unpadded, and a default-mode
+// stdin read uses GNU's width 7 for unknown sizes. Divergence from GNU: the
+// width is the widest printed number, while GNU derives it from operand file
+// sizes; the two are identical in the default mode, where the byte count is
+// the widest column.
+export function formatWcLines(rows: WcRow[]): string[] {
+  const first = rows[0]
+  if (rows.length === 1 && first?.values.length === 1) {
+    const body = String(first.values[0])
+    return [first.label === null ? body : `${body} ${first.label}`]
+  }
+  let width = 1
+  if (rows.length === 1 && first?.label === null) {
+    width = 7
+  } else {
+    for (const row of rows) {
+      for (const n of row.values) width = Math.max(width, String(n).length)
+    }
+  }
+  return rows.map((row) => {
+    const body = row.values.map((n) => String(n).padStart(width)).join(' ')
+    return row.label === null ? body : `${body} ${row.label}`
+  })
+}
+
 export async function wcGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -49,10 +81,11 @@ export async function wcGeneric(
   const mFlag = f.m === true
   const LFlag = f.L === true
   if (paths.length > 0) {
-    const outputs: string[] = []
+    const rows: WcRow[] = []
     let totalLines = 0
     let totalWords = 0
     let totalBytes = 0
+    let totalMax = 0
     for (const p of paths) {
       const data = await materialize(stream(p))
       const text = DEC.decode(data)
@@ -61,38 +94,36 @@ export async function wcGeneric(
       const byteCount = data.byteLength
       if (LFlag) {
         const maxLen = text.split(/\r?\n/).reduce((m, l) => Math.max(m, l.length), 0)
-        outputs.push(`${String(maxLen)}\t${p.original}`)
+        rows.push({ values: [maxLen], label: p.original })
+        totalMax = Math.max(totalMax, maxLen)
       } else if (lFlag) {
-        outputs.push(`${String(lineCount)}\t${p.original}`)
+        rows.push({ values: [lineCount], label: p.original })
         totalLines += lineCount
       } else if (wFlag) {
-        outputs.push(`${String(wordCount)}\t${p.original}`)
+        rows.push({ values: [wordCount], label: p.original })
         totalWords += wordCount
       } else if (cFlag) {
-        outputs.push(`${String(byteCount)}\t${p.original}`)
+        rows.push({ values: [byteCount], label: p.original })
         totalBytes += byteCount
       } else if (mFlag) {
         const charCount = text.length
-        outputs.push(`${String(charCount)}\t${p.original}`)
+        rows.push({ values: [charCount], label: p.original })
         totalBytes += charCount
       } else {
-        outputs.push(
-          `${String(lineCount)}\t${String(wordCount)}\t${String(byteCount)}\t${p.original}`,
-        )
+        rows.push({ values: [lineCount, wordCount, byteCount], label: p.original })
         totalLines += lineCount
         totalWords += wordCount
         totalBytes += byteCount
       }
     }
     if (paths.length > 1) {
-      if (lFlag) outputs.push(`${String(totalLines)}\ttotal`)
-      else if (wFlag) outputs.push(`${String(totalWords)}\ttotal`)
-      else if (cFlag) outputs.push(`${String(totalBytes)}\ttotal`)
-      else if (mFlag) outputs.push(`${String(totalBytes)}\ttotal`)
-      else
-        outputs.push(`${String(totalLines)}\t${String(totalWords)}\t${String(totalBytes)}\ttotal`)
+      if (LFlag) rows.push({ values: [totalMax], label: 'total' })
+      else if (lFlag) rows.push({ values: [totalLines], label: 'total' })
+      else if (wFlag) rows.push({ values: [totalWords], label: 'total' })
+      else if (cFlag || mFlag) rows.push({ values: [totalBytes], label: 'total' })
+      else rows.push({ values: [totalLines, totalWords, totalBytes], label: 'total' })
     }
-    const out: ByteSource = ENC.encode(outputs.join('\n'))
+    const out: ByteSource = formatRecords(formatWcLines(rows))
     return [out, new IOResult()]
   }
   let source: AsyncIterable<Uint8Array>
@@ -116,5 +147,6 @@ export async function wcGeneric(
   if (wFlag) return [ENC.encode(String(wcVal)), new IOResult()]
   if (mFlag) return [ENC.encode(String(cc)), new IOResult()]
   if (cFlag) return [ENC.encode(String(bc)), new IOResult()]
-  return [ENC.encode(`${String(lc)}\t${String(wcVal)}\t${String(bc)}`), new IOResult()]
+  const line = formatWcLines([{ values: [lc, wcVal, bc], label: null }])[0] ?? ''
+  return [ENC.encode(line), new IOResult()]
 }

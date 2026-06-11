@@ -1,0 +1,128 @@
+---
+title: Scaleway
+icon: /images/scaleway-logo.svg
+description: Set up Scaleway Object Storage as a MIRAGE resource from Node or the browser.
+---
+
+Scaleway Object Storage uses the S3 API with AWS Signature V4 against `https://s3.<region>.scw.cloud`. MIRAGE derives this endpoint from your region automatically.
+
+Credentials (IAM API key, the access key + secret key pair) are created the same way in both runtimes, see [Scaleway Credentials](/home/setup/scaleway).
+
+## Node (server-side)
+
+```bash
+pnpm add @struktoai/mirage-node
+```
+
+```ts
+import { MountMode, ScalewayResource, Workspace } from '@struktoai/mirage-node'
+
+const scw = new ScalewayResource({
+  bucket: process.env.SCW_BUCKET!,
+  region: process.env.SCW_REGION!,
+  accessKeyId: process.env.SCW_ACCESS_KEY!,
+  secretAccessKey: process.env.SCW_SECRET_KEY!,
+})
+
+const ws = new Workspace({ '/bucket/': scw }, { mode: MountMode.READ })
+const res = await ws.execute('ls /bucket/')
+console.log(res.stdoutText)
+```
+
+## Browser (presigned URLs)
+
+```bash
+pnpm add @struktoai/mirage-browser
+```
+
+The browser `ScalewayResource` is secret-free, your backend signs each operation using your Scaleway keys and returns a URL. Scaleway accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the Scaleway endpoint.
+
+### 1. Server: sign URLs with the Scaleway endpoint
+
+```ts
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+
+const REGION = process.env.SCW_REGION!
+
+const client = new S3Client({
+  region: REGION,
+  endpoint: `https://s3.${REGION}.scw.cloud`,
+  credentials: {
+    accessKeyId: process.env.SCW_ACCESS_KEY!,
+    secretAccessKey: process.env.SCW_SECRET_KEY!,
+  },
+})
+const BUCKET = process.env.SCW_BUCKET!
+
+app.post('/presign/scw', async (req, res) => {
+  const { path, op, opts } = req.body
+  const key = path.replace(/^\/+/, '')
+  const ttl = typeof opts?.ttlSec === 'number' ? opts.ttlSec : 300
+  let cmd
+  switch (op) {
+    case 'GET':    cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType }); break
+    case 'HEAD':   cmd = new HeadObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'DELETE': cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'LIST':   cmd = new ListObjectsV2Command({
+      Bucket: BUCKET,
+      Prefix: opts?.listPrefix,
+      Delimiter: opts?.listDelimiter,
+      ContinuationToken: opts?.listContinuationToken,
+    }); break
+    case 'COPY':   cmd = new CopyObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      CopySource: `${BUCKET}/${opts?.copySource}`,
+    }); break
+  }
+  res.json({ url: await getSignedUrl(client, cmd, { expiresIn: ttl }) })
+})
+```
+
+### 2. Browser: wire it up
+
+```ts
+import { MountMode, ScalewayResource, Workspace } from '@struktoai/mirage-browser'
+
+const scw = new ScalewayResource({
+  bucket: 'my-bucket',
+  region: 'fr-par',
+  presignedUrlProvider: async (path, op, opts) => {
+    const r = await fetch('/presign/scw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, op, opts }),
+    })
+    const { url } = await r.json()
+    return url
+  },
+})
+
+const ws = new Workspace({ '/bucket/': scw }, { mode: MountMode.READ })
+```
+
+<Tip>
+`region` on the browser config is only used for display/logging; the actual endpoint is baked into the presigned URLs your backend returns.
+</Tip>
+
+### 3. CORS
+
+Scaleway supports the S3 `PutBucketCors` call, so the AWS CLI works against the Scaleway endpoint:
+
+```bash
+aws s3api put-bucket-cors --bucket "$SCW_BUCKET" \
+  --endpoint-url "https://s3.$SCW_REGION.scw.cloud" \
+  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","https://app.example.com"],"AllowedMethods":["GET","PUT","HEAD","DELETE","POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type","Last-Modified"]}]}'
+```
+
+See the [Scaleway resource](/python/resource/scaleway) docs for the equivalent Python wiring.

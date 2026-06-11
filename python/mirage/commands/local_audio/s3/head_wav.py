@@ -80,8 +80,8 @@ async def head_wav(
         end_byte = min(int(end_byte * 1.2), st.size)
         raw = await read_bytes(accessor, paths[0], offset=0, size=end_byte)
         stream = transcribe(raw, end_sec=float(seconds))
-        return stream, IOResult(reads={paths[0].original: raw},
-                                cache=[paths[0].original])
+        return stream, IOResult(reads={paths[0].strip_prefix: raw},
+                                cache=[paths[0].strip_prefix])
     except Exception as e:
         return None, IOResult(
             exit_code=1,

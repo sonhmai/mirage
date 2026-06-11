@@ -6,6 +6,7 @@
     "has_write": false,
     "resources": [
       "box",
+      "databricks_volume",
       "dropbox",
       "gdrive",
       "github",

@@ -51,6 +51,7 @@ CASES: list[tuple[str, str]] = [
     ("head_2", f"head -n 2 {MOUNT}/public/tables/books/rows.jsonl"),
     ("tail_2", f"tail -n 2 {MOUNT}/public/tables/books/rows.jsonl"),
     ("wc_l_books", f"wc -l {MOUNT}/public/tables/books/rows.jsonl"),
+    ("wc_default_books", f"wc {MOUNT}/public/tables/books/rows.jsonl"),
     ("wc_l_authors", f"wc -l {MOUNT}/public/tables/authors/rows.jsonl"),
     ("stat_rows", f"stat {MOUNT}/public/tables/books/rows.jsonl"),
     ("grep_c_title", f"grep -c title {MOUNT}/public/tables/books/rows.jsonl"),

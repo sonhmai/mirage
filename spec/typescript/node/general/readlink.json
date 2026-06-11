@@ -6,9 +6,15 @@
     "has_write": false,
     "resources": [
       "disk",
+      "gdrive",
+      "hf_buckets",
+      "hf_datasets",
+      "hf_models",
+      "hf_spaces",
       "ram",
       "redis",
-      "s3"
+      "s3",
+      "ssh"
     ]
   },
   "description": null,

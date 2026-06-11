@@ -79,7 +79,12 @@ export async function csplitGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
-  const prefix = typeof opts.flags.f === 'string' ? opts.flags.f : 'xx'
+  const rawPrefix = typeof opts.flags.f === 'string' ? opts.flags.f : 'xx'
+  const prefix = new PathSpec({
+    original: rawPrefix,
+    directory: rawPrefix,
+    prefix: opts.mountPrefix ?? '',
+  }).stripPrefix
   const digits = typeof opts.flags.n === 'string' ? Number.parseInt(opts.flags.n, 10) : 2
   const quiet = opts.flags.s === true
   const keep = opts.flags.k === true

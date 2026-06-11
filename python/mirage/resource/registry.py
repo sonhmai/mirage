@@ -77,6 +77,15 @@ REGISTRY: dict[str, ResourceEntry] = {
     "hf_buckets":
     ResourceEntry("mirage.resource.hf_buckets:HfBucketsResource",
                   "mirage.resource.hf_buckets:HfBucketsConfig"),
+    "hf_datasets":
+    ResourceEntry("mirage.resource.hf_datasets:HfDatasetsResource",
+                  "mirage.resource.hf_datasets:HfDatasetsConfig"),
+    "hf_models":
+    ResourceEntry("mirage.resource.hf_models:HfModelsResource",
+                  "mirage.resource.hf_models:HfModelsConfig"),
+    "hf_spaces":
+    ResourceEntry("mirage.resource.hf_spaces:HfSpacesResource",
+                  "mirage.resource.hf_spaces:HfSpacesConfig"),
     "github":
     ResourceEntry("mirage.resource.github:GitHubResource",
                   "mirage.resource.github:GitHubConfig"),

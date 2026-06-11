@@ -184,9 +184,9 @@ page.json
   "title": "Project Roadmap",
   "url": "https://notion.example/aaaa1111222233334444555566667777",
 === wc_l_two ===
-125	/notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json
-51	/notion/pages/Notes__bbbb2222-3333-4444-5555-666677778888/page.json
-176	total
+125 /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json
+ 51 /notion/pages/Notes__bbbb2222-3333-4444-5555-666677778888/page.json
+176 total
 === stat_page_json ===
 name=page.json size=2979 modified=None type=json
 === find_json ===

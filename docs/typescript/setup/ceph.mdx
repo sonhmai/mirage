@@ -1,0 +1,131 @@
+---
+title: Ceph
+icon: /images/ceph-logo.svg
+description: Set up Ceph Rados Gateway as a MIRAGE resource from Node or the browser.
+---
+
+Ceph Rados Gateway (RGW) speaks the S3 API with AWS Signature V4 against your own gateway endpoint (e.g. `https://ceph.example.com`). RGW is self-hosted, so the endpoint is required and path-style addressing is used by default.
+
+Credentials (RGW user access key + secret key) are created the same way in both runtimes, see [Ceph Credentials](/home/setup/ceph).
+
+## Node (server-side)
+
+```bash
+pnpm add @struktoai/mirage-node
+```
+
+```ts
+import { CephResource, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const ceph = new CephResource({
+  bucket: process.env.CEPH_BUCKET!,
+  endpoint: process.env.CEPH_ENDPOINT_URL!,
+  accessKeyId: process.env.CEPH_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.CEPH_SECRET_ACCESS_KEY!,
+})
+
+const ws = new Workspace({ '/bucket/': ceph }, { mode: MountMode.READ })
+const res = await ws.execute('ls /bucket/')
+console.log(res.stdoutText)
+```
+
+## Browser (presigned URLs)
+
+```bash
+pnpm add @struktoai/mirage-browser
+```
+
+The browser `CephResource` is secret-free, your backend signs each operation using your RGW keys and returns a URL. RGW accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at your gateway endpoint.
+
+### 1. Server: sign URLs with the RGW endpoint
+
+```ts
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+
+const client = new S3Client({
+  region: 'us-east-1',
+  endpoint: process.env.CEPH_ENDPOINT_URL,
+  forcePathStyle: true,
+  credentials: {
+    accessKeyId: process.env.CEPH_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.CEPH_SECRET_ACCESS_KEY!,
+  },
+})
+const BUCKET = process.env.CEPH_BUCKET!
+
+app.post('/presign/ceph', async (req, res) => {
+  const { path, op, opts } = req.body
+  const key = path.replace(/^\/+/, '')
+  const ttl = typeof opts?.ttlSec === 'number' ? opts.ttlSec : 300
+  let cmd
+  switch (op) {
+    case 'GET':    cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType }); break
+    case 'HEAD':   cmd = new HeadObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'DELETE': cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'LIST':   cmd = new ListObjectsV2Command({
+      Bucket: BUCKET,
+      Prefix: opts?.listPrefix,
+      Delimiter: opts?.listDelimiter,
+      ContinuationToken: opts?.listContinuationToken,
+    }); break
+    case 'COPY':   cmd = new CopyObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      CopySource: `${BUCKET}/${opts?.copySource}`,
+    }); break
+  }
+  res.json({ url: await getSignedUrl(client, cmd, { expiresIn: ttl }) })
+})
+```
+
+<Warning>
+RGW uses **path-style** URLs (`forcePathStyle: true`), virtual-hosted style requires wildcard DNS on the gateway.
+</Warning>
+
+### 2. Browser: wire it up
+
+```ts
+import { CephResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const ceph = new CephResource({
+  bucket: 'my-bucket',
+  endpoint: 'https://ceph.example.com',
+  presignedUrlProvider: async (path, op, opts) => {
+    const r = await fetch('/presign/ceph', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, op, opts }),
+    })
+    const { url } = await r.json()
+    return url
+  },
+})
+
+const ws = new Workspace({ '/bucket/': ceph }, { mode: MountMode.READ })
+```
+
+<Tip>
+`endpoint` on the browser config is only used for display/logging; the actual endpoint is baked into the presigned URLs your backend returns.
+</Tip>
+
+### 3. CORS
+
+RGW supports the S3 `PutBucketCors` call, so the AWS CLI works against your gateway:
+
+```bash
+aws s3api put-bucket-cors --bucket "$CEPH_BUCKET" \
+  --endpoint-url "$CEPH_ENDPOINT_URL" \
+  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","https://app.example.com"],"AllowedMethods":["GET","PUT","HEAD","DELETE","POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type","Last-Modified"]}]}'
+```
+
+See the [Ceph resource](/python/resource/ceph) docs for the equivalent Python wiring.

@@ -1,13 +1,12 @@
 ---
 title: Databricks Volume
 icon: folder-open
-description: Mount a Databricks Unity Catalog volume as a read-only filesystem.
+description: Mount a Databricks Unity Catalog volume as a filesystem.
 ---
 
 `DatabricksVolumeResource` exposes files from a Unity Catalog volume through
-Mirage's standard filesystem interface. The current branch is read-only:
-agents can list, stat, read, stream, and glob files under the configured
-volume root.
+Mirage's standard filesystem interface. Agents can list, stat, read, stream,
+glob, and write files under the configured volume root.
 
 For auth and environment setup, see [Databricks Volume Setup](/python/setup/databricks).
 
@@ -42,7 +41,7 @@ ws = Workspace({"/dbx": resource}, mode=MountMode.READ)
 
 ## Mount mode
 
-`read` only.
+`read` or `write`.
 
 ## Filesystem layout
 
@@ -76,18 +75,15 @@ would escape above that configured subtree.
 
 ## Supported operations
 
-This branch wires the core read surface:
-
-- `readdir`
-- `stat`
-- `exists`
-- `read_bytes`
-- `read_stream`
-- `range_read`
-- glob resolution
+Reads: `readdir`, `stat`, `exists`, `read_bytes`, `read_stream`,
+`range_read`, and glob resolution. Writes: `write`, `create`, `mkdir`,
+`rmdir`, `unlink`, recursive `rm`, `cp`, and `mv`.
 
 Standard shell commands like `ls`, `cat`, `head`, `tail`, `grep`, `rg`,
-`find`, and `tree` work through those primitives.
+`find`, `tree`, `touch`, `mkdir`, `rm`, `cp`, and `mv` work through those
+primitives. `mv`/`cp` are non-atomic download + upload (the Files API has no
+server-side rename); moving a path onto itself is a no-op and never deletes
+the file.
 
 ## Snapshot behavior
 

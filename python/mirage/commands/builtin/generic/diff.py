@@ -108,8 +108,9 @@ async def diff(
         output = await _diff_pair(accessor, paths[0], paths[1], read_bytes, i,
                                   w, b, e, u, q)
     exit_code = 1 if output else 0
-    return output, IOResult(exit_code=exit_code,
-                            cache=[paths[0].original, paths[1].original])
+    return output, IOResult(
+        exit_code=exit_code,
+        cache=[paths[0].strip_prefix, paths[1].strip_prefix])
 
 
 __all__ = ["diff"]

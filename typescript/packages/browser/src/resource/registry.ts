@@ -62,6 +62,10 @@ type SupabaseBrowserCtorConfig = S3BrowserCtorConfig & {
   region?: string
   endpoint?: string
 }
+type S3AliasBrowserCtorConfig = S3BrowserCtorConfig & {
+  region?: string
+  endpoint?: string
+}
 interface SlackBrowserCtorConfig {
   proxyUrl: string
   getHeaders?: () => Promise<Record<string, string>> | Record<string, string>
@@ -148,6 +152,69 @@ const REGISTRY: Record<string, ResourceFactory> = {
       rename: { project_ref: 'projectRef', endpoint_url: 'endpoint' },
     })
     return new SupabaseResource(norm as unknown as SupabaseBrowserCtorConfig)
+  },
+  minio: async (config) => {
+    const { MinIOResource } = await import('./minio/minio.ts')
+    const norm = normalizeFields(config, {
+      rename: { endpoint_url: 'endpoint' },
+    })
+    return new MinIOResource(norm as unknown as S3AliasBrowserCtorConfig)
+  },
+  ceph: async (config) => {
+    const { CephResource } = await import('./ceph/ceph.ts')
+    const norm = normalizeFields(config, {
+      rename: { endpoint_url: 'endpoint' },
+    })
+    return new CephResource(norm as unknown as S3AliasBrowserCtorConfig)
+  },
+  wasabi: async (config) => {
+    const { WasabiResource } = await import('./wasabi/wasabi.ts')
+    const norm = normalizeFields(config, {
+      rename: { endpoint_url: 'endpoint' },
+    })
+    return new WasabiResource(norm as unknown as S3AliasBrowserCtorConfig)
+  },
+  backblaze: async (config) => {
+    const { BackblazeResource } = await import('./backblaze/backblaze.ts')
+    const norm = normalizeFields(config, {
+      rename: { endpoint_url: 'endpoint' },
+    })
+    return new BackblazeResource(norm as unknown as S3AliasBrowserCtorConfig)
+  },
+  digitalocean: async (config) => {
+    const { DigitalOceanResource } = await import('./digitalocean/digitalocean.ts')
+    const norm = normalizeFields(config, {
+      rename: { endpoint_url: 'endpoint' },
+    })
+    return new DigitalOceanResource(norm as unknown as S3AliasBrowserCtorConfig)
+  },
+  tencent: async (config) => {
+    const { TencentResource } = await import('./tencent/tencent.ts')
+    const norm = normalizeFields(config, {
+      rename: { endpoint_url: 'endpoint' },
+    })
+    return new TencentResource(norm as unknown as S3AliasBrowserCtorConfig)
+  },
+  aliyun: async (config) => {
+    const { AliyunResource } = await import('./aliyun/aliyun.ts')
+    const norm = normalizeFields(config, {
+      rename: { endpoint_url: 'endpoint' },
+    })
+    return new AliyunResource(norm as unknown as S3AliasBrowserCtorConfig)
+  },
+  scaleway: async (config) => {
+    const { ScalewayResource } = await import('./scaleway/scaleway.ts')
+    const norm = normalizeFields(config, {
+      rename: { endpoint_url: 'endpoint' },
+    })
+    return new ScalewayResource(norm as unknown as S3AliasBrowserCtorConfig)
+  },
+  qingstor: async (config) => {
+    const { QingStorResource } = await import('./qingstor/qingstor.ts')
+    const norm = normalizeFields(config, {
+      rename: { endpoint_url: 'endpoint' },
+    })
+    return new QingStorResource(norm as unknown as S3AliasBrowserCtorConfig)
   },
   slack: async (config) => {
     const { SlackResource } = await import('./slack/slack.ts')

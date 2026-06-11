@@ -12,48 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import fnmatch
+from functools import partial
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.find import parse_find_args, walk_find
 from mirage.commands.builtin.postgres._provision import metadata_provision
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.postgres.glob import resolve_glob
+from mirage.core.postgres.readdir import is_dir_name
 from mirage.core.postgres.readdir import readdir as _readdir
+from mirage.core.postgres.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
-
-
-async def _walk(
-    accessor: PostgresAccessor,
-    path: PathSpec,
-    index: IndexCacheStore | None,
-    maxdepth: int | None,
-    depth: int = 0,
-) -> list[str]:
-    if maxdepth is not None and depth > maxdepth:
-        return []
-    try:
-        children = await _readdir(accessor, path, index)
-    except FileNotFoundError:
-        return []
-    results: list[str] = []
-    for child in children:
-        results.append(child)
-        if not child.endswith(".json") and not child.endswith(".jsonl"):
-            child_spec = PathSpec(original=child,
-                                  directory=child,
-                                  resolved=False,
-                                  prefix=path.prefix)
-            results.extend(await _walk(accessor,
-                                       child_spec,
-                                       index,
-                                       maxdepth,
-                                       depth=depth + 1))
-    return results
 
 
 async def find_provision(
@@ -91,26 +65,24 @@ async def find(
     p0 = paths[0] if paths else None
     search_path = p0.original if p0 else "/"
     search_prefix = p0.prefix if p0 else ""
-    md = int(maxdepth) if maxdepth is not None else None
-    md_min = int(mindepth) if mindepth is not None else None
-
+    args = parse_find_args(texts,
+                           name=name,
+                           type=type,
+                           size=size,
+                           mtime=mtime,
+                           maxdepth=maxdepth,
+                           iname=iname,
+                           path=path,
+                           mindepth=mindepth)
     search_spec = PathSpec(original=search_path,
                            directory=search_path,
                            resolved=False,
                            prefix=search_prefix)
-    all_paths = await _walk(accessor, search_spec, index, md)
-    results: list[str] = []
-    base_depth = search_path.strip("/").count("/") if search_path.strip(
-        "/") else -1
-    for p in sorted(all_paths):
-        entry_name = p.rsplit("/", 1)[-1]
-        depth = p.strip("/").count("/") - (base_depth + 1)
-        if md_min is not None and depth < md_min:
-            continue
-        if name and not fnmatch.fnmatch(entry_name, name):
-            continue
-        if iname and not fnmatch.fnmatch(entry_name.lower(), iname.lower()):
-            continue
-        results.append(p)
+    results = await walk_find(search_spec,
+                              readdir=partial(_readdir, accessor),
+                              stat=partial(_stat, accessor),
+                              is_dir_name=is_dir_name,
+                              index=index,
+                              args=args)
     output = format_records(results)
     return output, IOResult()

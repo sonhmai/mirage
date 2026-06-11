@@ -328,6 +328,11 @@ export { countNewlines, parseN, tailBytes } from './commands/builtin/tail_helper
 export { AsyncLineIterator } from './io/async_line_iterator.ts'
 export { readStdinAsync, resolveSource, wrapBytes } from './commands/builtin/utils/stream.ts'
 export { formatLsLong, humanSize } from './commands/builtin/utils/formatting.ts'
+export {
+  formatOptionalRecords,
+  formatRecordText,
+  formatRecords,
+} from './commands/builtin/utils/output.ts'
 export { grepFilesOnly, grepRecursive } from './commands/builtin/grep_helper.ts'
 export { interpretEscapes } from './commands/builtin/utils/escapes.ts'
 export { deflateRaw, gunzip, gzip, inflateRaw } from './utils/compress.ts'
@@ -553,6 +558,7 @@ export {
   type S3Config,
   type S3ConfigRedacted,
 } from './resource/s3/config.ts'
+export { remapCommandsResource, remapOpsResource } from './resource/s3/remap.ts'
 export { S3_PROMPT } from './resource/s3/prompt.ts'
 export { SCOPE_ERROR as S3_SCOPE_ERROR } from './core/s3/constants.ts'
 export { S3IndexEntry, type S3IndexEntryInit, type S3Object } from './core/s3/entry.ts'
@@ -1063,7 +1069,6 @@ export { readBytes as chromaRead, readStream as chromaReadStream } from './core/
 export { readdir as chromaReaddir } from './core/chroma/readdir.ts'
 export { stat as chromaStat } from './core/chroma/stat.ts'
 export { resolveGlob as resolveChromaGlob } from './core/chroma/glob.ts'
-export { grepBytes as chromaGrep } from './core/chroma/grep.ts'
 export { searchSegments as chromaSearch } from './core/chroma/search.ts'
 export { scoreFromDistance } from './util/score.ts'
 export {
@@ -1084,97 +1089,48 @@ export {
   searchDatabase as mongoSearchDatabase,
   type CollectionMatches as MongoCollectionMatches,
 } from './core/mongodb/search.ts'
-export type {
-  VercelDeployment,
-  VercelDeploymentEvent,
-  VercelDomain,
-  VercelDriver,
-  VercelEnvVar,
-  VercelListOptions,
-  VercelProject,
-  VercelTeam,
-  VercelTeamMember,
-  VercelUser,
-} from './core/vercel/_driver.ts'
-export { VercelAccessor } from './accessor/vercel.ts'
-export {
-  normalizeVercelConfig,
-  resolveVercelConfig,
-  type VercelConfig,
-  type VercelConfigResolved,
-} from './resource/vercel/config.ts'
-export { VERCEL_PROMPT } from './resource/vercel/prompt.ts'
-export { VERCEL_OPS } from './ops/vercel/index.ts'
-export { VERCEL_COMMANDS } from './commands/builtin/vercel/index.ts'
-export { read as vercelRead } from './core/vercel/read.ts'
-export { readdir as vercelReaddir } from './core/vercel/readdir.ts'
-export { stat as vercelStat } from './core/vercel/stat.ts'
-export { resolveGlob as resolveVercelGlob } from './core/vercel/glob.ts'
-export {
-  detectScope as detectVercelScope,
-  type VercelScope,
-  type VercelLevel,
-  ROOT_ENTRIES as VERCEL_ROOT_ENTRIES,
-  TEAM_FILES as VERCEL_TEAM_FILES,
-  PROJECT_FILES as VERCEL_PROJECT_FILES,
-  PROJECT_SUBDIRS as VERCEL_PROJECT_SUBDIRS,
-  DEPLOYMENT_FILES as VERCEL_DEPLOYMENT_FILES,
-} from './core/vercel/scope.ts'
-export {
-  getUser as vercelGetUser,
-  listTeams as vercelListTeams,
-  getTeam as vercelGetTeam,
-  listTeamMembers as vercelListTeamMembers,
-  listProjects as vercelListProjects,
-  getProject as vercelGetProject,
-  listProjectDomains as vercelListProjectDomains,
-  listProjectEnv as vercelListProjectEnv,
-  listProjectDeployments as vercelListProjectDeployments,
-  getDeployment as vercelGetDeployment,
-  listDeploymentEvents as vercelListDeploymentEvents,
-} from './core/vercel/_client.ts'
-export { HttpVercelDriver, type HttpVercelDriverOptions } from './core/vercel/http_driver.ts'
-
-export type {
-  PostHogDriver,
-  PostHogPaged,
-  PostHogProject,
-  PostHogUser,
-} from './core/posthog/_driver.ts'
-export { PostHogAccessor } from './accessor/posthog.ts'
-export {
-  normalizePostHogConfig,
-  resolvePostHogConfig,
-  type PostHogConfig,
-  type PostHogConfigResolved,
-} from './resource/posthog/config.ts'
-export { POSTHOG_PROMPT } from './resource/posthog/prompt.ts'
-export { POSTHOG_OPS } from './ops/posthog/index.ts'
-export { POSTHOG_COMMANDS } from './commands/builtin/posthog/index.ts'
-export { read as posthogRead } from './core/posthog/read.ts'
-export { readdir as posthogReaddir } from './core/posthog/readdir.ts'
-export { stat as posthogStat } from './core/posthog/stat.ts'
-export { resolveGlob as resolvePostHogGlob } from './core/posthog/glob.ts'
-export {
-  detectScope as detectPostHogScope,
-  type PostHogScope,
-  type PostHogLevel,
-  ROOT_ENTRIES as POSTHOG_ROOT_ENTRIES,
-  PROJECT_FILES as POSTHOG_PROJECT_FILES,
-} from './core/posthog/scope.ts'
-export {
-  getUser as posthogGetUser,
-  getProject as posthogGetProject,
-  listProjects as posthogListProjects,
-  listFeatureFlags as posthogListFeatureFlags,
-  listCohorts as posthogListCohorts,
-  listDashboards as posthogListDashboards,
-  listInsights as posthogListInsights,
-  listPersons as posthogListPersons,
-} from './core/posthog/_client.ts'
-export { HttpPostHogDriver, type HttpPostHogDriverOptions } from './core/posthog/http_driver.ts'
-
 export { setHttpProxyBase } from './commands/builtin/utils/http.ts'
 
 export { lstripSlash, rstripSlash, stripSlash } from './util/slash.ts'
 export { fnmatch } from './util/fnmatch.ts'
+
+export {
+  DatabricksVolumeAccessor,
+  type DatabricksVolumeResourceLike,
+} from './accessor/databricks_volume.ts'
+export {
+  DatabricksVolumeConfigSchema,
+  normalizeDatabricksVolumeConfig,
+  redactDatabricksVolumeConfig,
+  type DatabricksVolumeConfig,
+  type DatabricksVolumeConfigRedacted,
+} from './resource/databricks_volume/config.ts'
+export { DATABRICKS_VOLUME_PROMPT } from './resource/databricks_volume/prompt.ts'
+export { DATABRICKS_VOLUME_OPS } from './ops/databricks_volume/index.ts'
+export { DATABRICKS_VOLUME_COMMANDS } from './commands/builtin/databricks_volume/index.ts'
+export {
+  DatabricksVolumeApiError,
+  isNotFound as isDatabricksVolumeNotFound,
+} from './core/databricks_volume/errors.ts'
+export { readBytes as databricksVolumeRead } from './core/databricks_volume/read.ts'
+export {
+  readStream as databricksVolumeReadStream,
+  rangeRead as databricksVolumeRangeRead,
+} from './core/databricks_volume/stream.ts'
+export { readdir as databricksVolumeReaddir } from './core/databricks_volume/readdir.ts'
+export { stat as databricksVolumeStat } from './core/databricks_volume/stat.ts'
+export { exists as databricksVolumeExists } from './core/databricks_volume/exists.ts'
+export { find as databricksVolumeFind } from './core/databricks_volume/find.ts'
+export { resolveGlob as resolveDatabricksVolumeGlob } from './core/databricks_volume/glob.ts'
+export { writeBytes as databricksVolumeWrite } from './core/databricks_volume/write.ts'
+export { create as databricksVolumeCreate } from './core/databricks_volume/create.ts'
+export { mkdir as databricksVolumeMkdir } from './core/databricks_volume/mkdir.ts'
+export { rmdir as databricksVolumeRmdir } from './core/databricks_volume/rmdir.ts'
+export { unlink as databricksVolumeUnlink } from './core/databricks_volume/unlink.ts'
+export { rmRecursive as databricksVolumeRmRecursive } from './core/databricks_volume/rm.ts'
+export { copy as databricksVolumeCopy } from './core/databricks_volume/copy.ts'
+export { rename as databricksVolumeRename } from './core/databricks_volume/rename.ts'
+export {
+  backendPath as databricksVolumeBackendPath,
+  virtualPath as databricksVolumeVirtualPath,
+} from './core/databricks_volume/path.ts'

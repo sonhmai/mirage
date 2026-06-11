@@ -40,9 +40,12 @@ recent_books
 {"id":5,"title":"epsilon","author":"ben","year":2024
 
 # ---- wc (warm via cache -> count<TAB>path; cold pushdown also labeled) ----
-5	/pg/public/tables/books/rows.jsonl
-3	/pg/public/tables/authors/rows.jsonl
-3	/pg/public/views/recent_books/rows.jsonl
+5 /pg/public/tables/books/rows.jsonl
+# default mode pads to the byte-count width; byte total differs per
+# language (float rendering), so match the stable prefix
+  5   5 32
+3 /pg/public/tables/authors/rows.jsonl
+3 /pg/public/views/recent_books/rows.jsonl
 
 # ---- stat ----
 name=rows.jsonl
@@ -62,4 +65,4 @@ public/tables/books/rows.jsonl:{"id":4,"title":"delta","author":"ada"
 {"id":2,"title":"beta","author":"ben","year":2021
 output truncated at safeguard limit (2 lines)
 === safeguard_cat_pipe_uncapped ===
-5	/pg/public/tables/books/rows.jsonl
+5 /pg/public/tables/books/rows.jsonl

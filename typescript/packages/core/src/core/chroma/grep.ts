@@ -14,84 +14,10 @@
 
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { compilePattern, grepLines } from '../../commands/builtin/grep_helper.ts'
 import { PathSpec } from '../../types.ts'
-import { fetchPageChunks, queryContains } from './_client.ts'
+import { queryContains } from './_client.ts'
 import { resolvePath } from './path.ts'
 import { walk } from './walk.ts'
-
-const ENC = new TextEncoder()
-
-export interface GrepBytesOptions {
-  ignoreCase?: boolean
-  invert?: boolean
-  lineNumbers?: boolean
-  countOnly?: boolean
-  filesOnly?: boolean
-  wholeWord?: boolean
-  fixedString?: boolean
-  onlyMatching?: boolean
-  maxCount?: number | null
-}
-
-function splitLines(text: string): string[] {
-  const lines = text.split('\n')
-  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-  return lines
-}
-
-export async function grepBytes(
-  accessor: ChromaAccessor,
-  paths: readonly PathSpec[],
-  pattern: string,
-  index?: IndexCacheStore,
-  options: GrepBytesOptions = {},
-): Promise<[Uint8Array, Record<string, Uint8Array>]> {
-  const ignoreCase = options.ignoreCase ?? false
-  const invert = options.invert ?? false
-  const lineNumbers = options.lineNumbers ?? false
-  const countOnly = options.countOnly ?? false
-  const filesOnly = options.filesOnly ?? false
-  const wholeWord = options.wholeWord ?? false
-  const fixedString = options.fixedString ?? false
-  const onlyMatching = options.onlyMatching ?? false
-  const maxCount = options.maxCount ?? null
-
-  const regex = compilePattern(pattern, ignoreCase, fixedString, wholeWord)
-  const targets = await targetSlugs(accessor, paths, index)
-  const matchedSlugs = await coarseFilterSlugs(accessor, pattern, targets, {
-    ignoreCase,
-    invert,
-    fixedString,
-  })
-  const lines: string[] = []
-  const reads: Record<string, Uint8Array> = {}
-  const slugToPath = new Map<string, string>()
-  for (const [path, slug] of targets) {
-    slugToPath.set(slug, path)
-  }
-  for (const slug of matchedSlugs) {
-    const content = await fetchPageChunks(accessor, slug)
-    const path = slugToPath.get(slug) ?? '/' + slug
-    reads[path] = ENC.encode(content)
-    const hits = grepLines(path, splitLines(content), regex, {
-      invert,
-      lineNumbers,
-      countOnly,
-      filesOnly,
-      onlyMatching,
-      maxCount,
-    })
-    if (countOnly) {
-      if (hits.length > 0) lines.push(`${path}:${hits[0] ?? ''}`)
-    } else if (filesOnly) {
-      lines.push(...hits)
-    } else {
-      lines.push(...hits.map((hit) => `${path}:${hit}`))
-    }
-  }
-  return [ENC.encode(lines.join('\n')), reads]
-}
 
 export async function coarseFilterSlugs(
   accessor: ChromaAccessor,

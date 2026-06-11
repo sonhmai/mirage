@@ -54,7 +54,7 @@ describe('ls', () => {
     const resource = new RAMResource()
     seed(resource, ['/tmp'], { '/tmp/a.txt': 'hello' })
     const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')])
-    expect(out.split('\n')).toEqual(['a.txt'])
+    expect(out.trimEnd().split('\n')).toEqual(['a.txt'])
   })
 
   it('empty directory', async () => {
@@ -72,7 +72,7 @@ describe('ls', () => {
       '/tmp/banana.txt': 'b',
     })
     const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')])
-    expect(out.split('\n')).toEqual(['apple.txt', 'banana.txt', 'cherry.txt'])
+    expect(out.trimEnd().split('\n')).toEqual(['apple.txt', 'banana.txt', 'cherry.txt'])
   })
 
   it('-l long format includes size and standard mode string', async () => {
@@ -93,7 +93,7 @@ describe('ls', () => {
       '/tmp/visible.txt': 'hi',
     })
     const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')])
-    expect(out.split('\n')).toEqual(['visible.txt'])
+    expect(out.trimEnd().split('\n')).toEqual(['visible.txt'])
   })
 
   it('-a shows dotfiles', async () => {
@@ -103,7 +103,7 @@ describe('ls', () => {
       '/tmp/visible.txt': 'hi',
     })
     const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { a: true })
-    expect(out.split('\n').sort()).toEqual(['.hidden', 'visible.txt'])
+    expect(out.trimEnd().split('\n').sort()).toEqual(['.hidden', 'visible.txt'])
   })
 
   it('-r reverses name sort', async () => {
@@ -114,7 +114,7 @@ describe('ls', () => {
       '/tmp/c.txt': 'c',
     })
     const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { r: true })
-    expect(out.split('\n')).toEqual(['c.txt', 'b.txt', 'a.txt'])
+    expect(out.trimEnd().split('\n')).toEqual(['c.txt', 'b.txt', 'a.txt'])
   })
 
   it('-S sorts by size descending', async () => {
@@ -125,7 +125,7 @@ describe('ls', () => {
       '/tmp/medium.txt': 'x'.repeat(50),
     })
     const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { S: true })
-    expect(out.split('\n')).toEqual(['big.txt', 'medium.txt', 'small.txt'])
+    expect(out.trimEnd().split('\n')).toEqual(['big.txt', 'medium.txt', 'small.txt'])
   })
 
   it('-S -r sorts by size ascending', async () => {
@@ -136,7 +136,7 @@ describe('ls', () => {
       '/tmp/medium.txt': 'x'.repeat(50),
     })
     const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { S: true, r: true })
-    expect(out.split('\n')).toEqual(['small.txt', 'medium.txt', 'big.txt'])
+    expect(out.trimEnd().split('\n')).toEqual(['small.txt', 'medium.txt', 'big.txt'])
   })
 
   it('-a with -r reverses all entries', async () => {
@@ -147,7 +147,7 @@ describe('ls', () => {
       '/tmp/m.txt': 'm',
     })
     const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { a: true, r: true })
-    expect(out.split('\n')).toEqual(['m.txt', 'a.txt', '.z_hidden'])
+    expect(out.trimEnd().split('\n')).toEqual(['m.txt', 'a.txt', '.z_hidden'])
   })
 
   it('recursive listing (-R) walks subdirectories with headers', async () => {
@@ -167,7 +167,7 @@ describe('ls', () => {
     const resource = new RAMResource()
     seed(resource, ['/tmp'], { '/tmp/a.txt': 'a' })
     const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { d: true })
-    expect(out).toBe('tmp')
+    expect(out).toBe('tmp\n')
   })
 
   it('-1 overrides -l: forces short (one-per-line) format', async () => {

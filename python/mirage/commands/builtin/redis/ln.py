@@ -50,4 +50,4 @@ async def ln(
     await _write_bytes(accessor, dest_path, data)
     output = f"'{source_path.original}' -> '{dest_path.original}'\n".encode(
     ) if v else None
-    return output, IOResult(writes={dest_path.original: data})
+    return output, IOResult(writes={dest_path.strip_prefix: data})

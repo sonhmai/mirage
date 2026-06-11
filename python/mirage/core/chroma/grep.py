@@ -22,22 +22,47 @@ async def grep_bytes(
     only_matching: bool = False,
     max_count: int | None = None,
 ) -> tuple[bytes, dict[str, bytes]]:
+    """Filename-prefixed grep used by the FUSE ops layer.
+
+    The grep command does not use this; it delegates to the generic
+    grep with the same pushdown (see commands/builtin/chroma/grep.py).
+
+    Args:
+        accessor: Chroma accessor.
+        paths (list[PathSpec]): Files or directories to search.
+        pattern (str): Pattern text.
+        index (IndexCacheStore): Cache index for path resolution.
+        ignore_case (bool): `-i`, case-insensitive matching.
+        invert (bool): `-v`, select non-matching lines.
+        line_numbers (bool): `-n`, prefix line numbers.
+        count_only (bool): `-c`, output match counts.
+        files_only (bool): `-l`, output only matching file paths.
+        whole_word (bool): `-w`, match whole words.
+        fixed_string (bool): `-F`, treat pattern as a literal string.
+        only_matching (bool): `-o`, output only matched text.
+        max_count (int | None): `-m`, stop after this many matches.
+
+    Returns:
+        tuple[bytes, dict[str, bytes]]: Output and per-file reads keyed
+            by mount-relative path.
+    """
     regex = compile_pattern(pattern, ignore_case, fixed_string, whole_word)
     targets = await target_slugs(accessor, paths, index)
+    mount_prefix = paths[0].prefix if paths else ""
+    lines: list[str] = []
+    reads: dict[str, bytes] = {}
+    slug_to_path = {slug: path for path, slug in targets.items()}
     matched_slugs = await coarse_filter_slugs(accessor,
                                               pattern,
                                               targets,
                                               ignore_case=ignore_case,
                                               invert=invert,
                                               fixed_string=fixed_string)
-    lines: list[str] = []
-    reads: dict[str, bytes] = {}
-    slug_to_path = {slug: path for path, slug in targets.items()}
     for slug in matched_slugs:
         content = await fetch_page_chunks(accessor, slug)
         path = slug_to_path.get(slug, "/" + slug)
         data = content.encode()
-        reads[path] = data
+        reads[PathSpec.from_str_path(path, mount_prefix).strip_prefix] = data
         hits = grep_lines(path, split_lines(content), regex, invert,
                           line_numbers, count_only, files_only, only_matching,
                           max_count)

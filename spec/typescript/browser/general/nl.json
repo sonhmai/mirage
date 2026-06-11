@@ -2,10 +2,11 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": [
       "box",
+      "databricks_volume",
       "dropbox",
       "gdocs",
       "gdrive",

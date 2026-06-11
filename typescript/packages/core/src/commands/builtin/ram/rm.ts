@@ -21,6 +21,7 @@ import { IOResult } from '../../../io/types.ts'
 import { FileType, ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { formatRecords } from '../utils/output.ts'
 
 async function rmCommand(
   accessor: RAMAccessor,
@@ -61,7 +62,7 @@ async function rmCommand(
     }
     if (verbose) lines.push(`removed '${p.original}'`)
   }
-  const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n')) : null
+  const out = lines.length > 0 ? formatRecords(lines) : null
   return [out, new IOResult()]
 }
 

@@ -6,13 +6,20 @@
     "has_write": false,
     "resources": [
       "box",
+      "chroma",
+      "databricks_volume",
       "disk",
       "dropbox",
       "gdrive",
       "github",
+      "hf_buckets",
+      "hf_datasets",
+      "hf_models",
+      "hf_spaces",
       "ram",
       "redis",
-      "s3"
+      "s3",
+      "ssh"
     ]
   },
   "description": null,

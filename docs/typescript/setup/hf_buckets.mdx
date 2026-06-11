@@ -1,0 +1,100 @@
+---
+title: HF Buckets
+icon: /images/huggingface-logo.svg
+description: Mount Hugging Face Buckets as a Mirage filesystem in TypeScript with lazy reads and writes.
+---
+
+`HfBucketsResource` mounts a [Hugging Face Bucket](https://huggingface.co/docs/buckets)
+at a prefix such as `/hf/`. The TypeScript backend mirrors the
+[Python one](/python/resource/hf_buckets) and returns identical results.
+
+For credential setup, see [HF Buckets Setup](/home/setup/hf_buckets).
+
+<Note>
+Node only. The backend uses the native [opendal](https://www.npmjs.com/package/opendal)
+binding, which does not run in the browser.
+</Note>
+
+## Node
+
+```bash
+pnpm add @struktoai/mirage-node
+```
+
+```ts
+import { HfBucketsResource, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const bucket = new HfBucketsResource({
+  bucket: process.env.HF_BUCKET_NAME!, // "namespace/bucket-name"
+  token: process.env.HF_TOKEN,
+  // Optional:
+  // endpoint: 'https://huggingface.co',
+  // keyPrefix: 'data/',
+})
+
+const ws = new Workspace({ '/hf/': bucket }, { mode: MountMode.READ })
+
+console.log((await ws.execute('ls /hf/')).stdoutText)
+console.log((await ws.execute('tree /hf/')).stdoutText)
+console.log((await ws.execute("find /hf/ -name '*.json'")).stdoutText)
+console.log((await ws.execute('stat /hf/data/file.txt')).stdoutText)
+```
+
+`HfBucketsResource` takes the bucket in `namespace/bucket-name` form plus an
+optional access token. Both `READ` and `WRITE` modes are supported out of the box.
+
+## Filesystem Layout
+
+Bucket object keys map to virtual paths under the mount prefix: virtual
+`/hf/data/file.txt` maps to bucket key `data/file.txt`.
+
+## Cache
+
+Directory listings are cached with `indexTtl = 600` (10 minutes) and populate
+file-size/type entries that `stat` reads via a fast path, so a `readdir`
+followed by per-entry `stat` calls (what `ls` and most shell commands trigger)
+costs one HTTP request instead of N.
+
+## Shell Commands
+
+The same command set as the Python backend, operating on real file content.
+Large files benefit from range reads to avoid downloading entire objects.
+
+### Read Commands
+
+| Command         | Notes                                      |
+| --------------- | ------------------------------------------ |
+| `cat`           | Read file content                          |
+| `head` / `tail` | First/last N lines                         |
+| `grep` / `rg`   | Pattern search (file or directory level)   |
+| `jq`            | Query JSON fields                          |
+| `wc`            | Line/word/byte counts                      |
+| `stat`          | File metadata (name, size, type, modified) |
+| `find`          | Recursive search with `-name`, `-maxdepth` |
+| `tree`          | Directory tree view                        |
+| `nl`            | Number lines                               |
+| `du`            | Disk usage summary                         |
+| `file`          | Detect file type                           |
+| `strings`       | Extract printable strings from binary      |
+| `xxd`           | Hex dump                                   |
+| `md5`           | MD5 checksum                               |
+| `sha256sum`     | SHA-256 checksum                           |
+
+### Text Processing
+
+`awk`, `sed`, `tr`, `sort`, `uniq`, `cut`, `join`, `paste`, `column`, `fold`,
+`expand`, `unexpand`, `fmt`, `rev`, `tac`, `look`, `shuf`, `tsort`, `comm`,
+`cmp`, `diff`, `iconv`, `base64`.
+
+### File Operations
+
+`rm`, `touch`, `mktemp`, `split`, `csplit`. Object stores have no real
+directories, so `rm` is file-only (no `-r`).
+
+### Path Utilities
+
+`ls`, `basename`, `dirname`, `realpath`, `readlink`.
+
+### Compression
+
+`gzip`, `gunzip`, `zcat`, `zgrep`, `tar`, `zip`, `unzip`.

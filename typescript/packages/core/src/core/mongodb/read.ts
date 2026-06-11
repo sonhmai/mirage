@@ -27,6 +27,19 @@ function notFound(p: string): Error {
   return err
 }
 
+export async function* streamAny(
+  accessor: MongoDBAccessor,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  const scope = detectScope(path)
+  if (scope.level === ScopeLevel.DOCUMENTS && scope.database !== null && scope.name !== null) {
+    yield* readStream(accessor, path)
+    return
+  }
+  yield await read(accessor, path, index)
+}
+
 export async function read(
   accessor: MongoDBAccessor,
   path: PathSpec | string,

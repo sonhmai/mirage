@@ -27,7 +27,37 @@ describe('browser resource registry', () => {
     expect(names).toContain('oci')
     expect(names).toContain('supabase')
     expect(names).toContain('slack')
+    expect(names).toContain('minio')
+    expect(names).toContain('ceph')
+    expect(names).toContain('wasabi')
+    expect(names).toContain('backblaze')
+    expect(names).toContain('digitalocean')
+    expect(names).toContain('tencent')
+    expect(names).toContain('aliyun')
+    expect(names).toContain('scaleway')
+    expect(names).toContain('qingstor')
     expect(names).toEqual([...names].sort())
+  })
+
+  it('builds each S3-compatible alias with bucket and presignedUrlProvider', async () => {
+    const provider = (): Promise<string> => Promise.resolve('https://example.com/signed')
+    for (const name of [
+      'minio',
+      'ceph',
+      'wasabi',
+      'backblaze',
+      'digitalocean',
+      'tencent',
+      'aliyun',
+      'scaleway',
+      'qingstor',
+    ]) {
+      const r = await buildResource(name, {
+        bucket: 'test-bucket',
+        presignedUrlProvider: provider,
+      })
+      expect(r.kind).toBe(name)
+    }
   })
 
   it('builds RAM with no config', async () => {

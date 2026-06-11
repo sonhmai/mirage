@@ -76,7 +76,7 @@ describe('discord ls', () => {
       {},
       { index: idx },
     )
-    expect(out.stdout.split('\n').sort()).toEqual(['channels', 'members'])
+    expect(out.stdout.trimEnd().split('\n').sort()).toEqual(['channels', 'members'])
   })
 
   it('lists channels under a guild from cached index', async () => {
@@ -98,7 +98,7 @@ describe('discord ls', () => {
       {},
       { index: idx, transport },
     )
-    expect(out.stdout).toBe('general__C1')
+    expect(out.stdout).toBe('general__C1\n')
     expect(transport.calls).toHaveLength(0)
   })
 
@@ -123,7 +123,7 @@ describe('discord ls', () => {
       {},
       { index: idx, transport },
     )
-    const lines = out.stdout.split('\n').sort()
+    const lines = out.stdout.trimEnd().split('\n').sort()
     expect(lines).toEqual(['2024-01-01', '2024-01-02'])
   })
 })

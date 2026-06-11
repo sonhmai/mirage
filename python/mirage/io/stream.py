@@ -137,6 +137,38 @@ async def async_chain(*streams: ByteSource | None, ) -> AsyncIterator[bytes]:
                 yield chunk
 
 
+async def chain_cachables(
+        *iters: CachableAsyncIterator) -> AsyncIterator[bytes]:
+    """Chain cachable iterators, replaying already-buffered chunks.
+
+    Pulls each iterator live so a downstream early exit (e.g. head)
+    stops the walk without opening later files. If apply_io drained an
+    iterator for caching first, its buffered chunks are replayed
+    instead of being lost.
+
+    Args:
+        iters (CachableAsyncIterator): Per-file cachable iterators in
+            output order.
+
+    Yields:
+        bytes: Chunks of each iterator in order.
+    """
+    for it in iters:
+        idx = 0
+        while True:
+            buf = it.buffered_chunks
+            while idx < len(buf):
+                chunk = buf[idx]
+                idx += 1
+                yield chunk
+            if it.exhausted:
+                break
+            try:
+                await it.__anext__()
+            except StopAsyncIteration:
+                break
+
+
 async def yield_bytes(data: bytes) -> AsyncIterator[bytes]:
     yield data
 

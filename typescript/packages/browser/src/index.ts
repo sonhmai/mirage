@@ -68,6 +68,88 @@ export {
   type SupabaseConfig,
   type SupabaseConfigRedacted,
 } from './resource/supabase/config.ts'
+export { MinIOResource, type MinIOResourceState } from './resource/minio/minio.ts'
+export { MINIO_BROWSER_PROMPT } from './resource/minio/prompt.ts'
+export {
+  redactMinIOConfig,
+  minioToS3Config,
+  type MinIOConfig,
+  type MinIOConfigRedacted,
+} from './resource/minio/config.ts'
+export { CephResource, type CephResourceState } from './resource/ceph/ceph.ts'
+export { CEPH_BROWSER_PROMPT } from './resource/ceph/prompt.ts'
+export {
+  redactCephConfig,
+  cephToS3Config,
+  type CephConfig,
+  type CephConfigRedacted,
+} from './resource/ceph/config.ts'
+export { WasabiResource, type WasabiResourceState } from './resource/wasabi/wasabi.ts'
+export { WASABI_BROWSER_PROMPT } from './resource/wasabi/prompt.ts'
+export {
+  redactWasabiConfig,
+  wasabiToS3Config,
+  resolvedWasabiEndpoint,
+  type WasabiConfig,
+  type WasabiConfigRedacted,
+} from './resource/wasabi/config.ts'
+export { BackblazeResource, type BackblazeResourceState } from './resource/backblaze/backblaze.ts'
+export { BACKBLAZE_BROWSER_PROMPT } from './resource/backblaze/prompt.ts'
+export {
+  redactBackblazeConfig,
+  backblazeToS3Config,
+  resolvedBackblazeEndpoint,
+  type BackblazeConfig,
+  type BackblazeConfigRedacted,
+} from './resource/backblaze/config.ts'
+export {
+  DigitalOceanResource,
+  type DigitalOceanResourceState,
+} from './resource/digitalocean/digitalocean.ts'
+export { DIGITALOCEAN_BROWSER_PROMPT } from './resource/digitalocean/prompt.ts'
+export {
+  redactDigitalOceanConfig,
+  digitalOceanToS3Config,
+  resolvedDigitalOceanEndpoint,
+  type DigitalOceanConfig,
+  type DigitalOceanConfigRedacted,
+} from './resource/digitalocean/config.ts'
+export { TencentResource, type TencentResourceState } from './resource/tencent/tencent.ts'
+export { TENCENT_BROWSER_PROMPT } from './resource/tencent/prompt.ts'
+export {
+  redactTencentConfig,
+  tencentToS3Config,
+  resolvedTencentEndpoint,
+  type TencentConfig,
+  type TencentConfigRedacted,
+} from './resource/tencent/config.ts'
+export { AliyunResource, type AliyunResourceState } from './resource/aliyun/aliyun.ts'
+export { ALIYUN_BROWSER_PROMPT } from './resource/aliyun/prompt.ts'
+export {
+  redactAliyunConfig,
+  aliyunToS3Config,
+  resolvedAliyunEndpoint,
+  type AliyunConfig,
+  type AliyunConfigRedacted,
+} from './resource/aliyun/config.ts'
+export { ScalewayResource, type ScalewayResourceState } from './resource/scaleway/scaleway.ts'
+export { SCALEWAY_BROWSER_PROMPT } from './resource/scaleway/prompt.ts'
+export {
+  redactScalewayConfig,
+  scalewayToS3Config,
+  resolvedScalewayEndpoint,
+  type ScalewayConfig,
+  type ScalewayConfigRedacted,
+} from './resource/scaleway/config.ts'
+export { QingStorResource, type QingStorResourceState } from './resource/qingstor/qingstor.ts'
+export { QINGSTOR_BROWSER_PROMPT } from './resource/qingstor/prompt.ts'
+export {
+  redactQingStorConfig,
+  qingStorToS3Config,
+  resolvedQingStorEndpoint,
+  type QingStorConfig,
+  type QingStorConfigRedacted,
+} from './resource/qingstor/config.ts'
 export { SlackResource, type SlackResourceState } from './resource/slack/slack.ts'
 export {
   redactSlackConfig,
@@ -84,10 +166,6 @@ export { PostgresResource, type PostgresResourceOptions } from './resource/postg
 export { NeonPgDriver } from './resource/postgres/neon_driver.ts'
 export { MongoDBResource, type MongoDBResourceOptions } from './resource/mongodb/mongodb.ts'
 export { HttpMongoDriver, type HttpMongoDriverOptions } from './resource/mongodb/http_driver.ts'
-export { VercelResource, type VercelResourceOptions } from './resource/vercel/vercel.ts'
-export { HttpVercelDriver, type HttpVercelDriverOptions } from './resource/vercel/http_driver.ts'
-export { PostHogResource, type PostHogResourceOptions } from './resource/posthog/posthog.ts'
-export { HttpPostHogDriver, type HttpPostHogDriverOptions } from './resource/posthog/http_driver.ts'
 export { TrelloResource, type TrelloResourceState } from './resource/trello/trello.ts'
 export {
   redactTrelloConfig,

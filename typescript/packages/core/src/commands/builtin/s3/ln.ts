@@ -49,7 +49,7 @@ async function lnCommand(
   await s3Write(accessor, dest, data)
   const out: ByteSource | null =
     opts.flags.v === true ? ENC.encode(`'${source.original}' -> '${dest.original}'\n`) : null
-  return [out, new IOResult({ writes: { [dest.original]: data } })]
+  return [out, new IOResult({ writes: { [dest.stripPrefix]: data } })]
 }
 
 export const S3_LN = command({

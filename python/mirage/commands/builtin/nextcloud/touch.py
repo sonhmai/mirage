@@ -44,5 +44,5 @@ async def touch(
             continue
         if not await exists(accessor, p):
             await write_bytes(accessor, p, b"")
-            writes[p.original] = b""
+            writes[p.strip_prefix] = b""
     return None, IOResult(writes=writes)

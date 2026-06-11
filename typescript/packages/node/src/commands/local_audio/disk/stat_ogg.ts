@@ -46,7 +46,7 @@ async function statOggCommand(
     const meta = await metadata(raw)
     const fs = await diskStat(accessor, first)
     const out: ByteSource = ENC.encode(formatMetadata(meta, first.original, fs.size ?? null))
-    return [out, new IOResult({ reads: { [first.original]: raw }, cache: [first.original] })]
+    return [out, new IOResult({ reads: { [first.stripPrefix]: raw }, cache: [first.stripPrefix] })]
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return [

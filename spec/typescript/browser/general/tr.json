@@ -2,9 +2,11 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": [
+      "databricks_volume",
+      "gdrive",
       "github",
       "opfs",
       "ram",

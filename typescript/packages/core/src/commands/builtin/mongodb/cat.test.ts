@@ -15,77 +15,72 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../../core/mongodb/read.ts', () => ({
-  read: vi.fn(),
+  streamAny: vi.fn(),
+}))
+vi.mock('../../../core/mongodb/stat.ts', () => ({
+  stat: vi.fn(),
 }))
 
 import { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { stubMongoDriver } from '../../../core/mongodb/_test_util.ts'
 import * as readModule from '../../../core/mongodb/read.ts'
+import * as statModule from '../../../core/mongodb/stat.ts'
 import { resolveMongoDBConfig } from '../../../resource/mongodb/config.ts'
 import { materialize } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { FileStat, PathSpec } from '../../../types.ts'
 import { MONGODB_CAT } from './cat.ts'
 
 const DEC = new TextDecoder()
-
+const ENC = new TextEncoder()
 const STUB_DRIVER = stubMongoDriver()
 
 function makeAccessor(): MongoDBAccessor {
   return new MongoDBAccessor(STUB_DRIVER, resolveMongoDBConfig({ uri: 'mongodb://h' }))
 }
 
+function mk(name: string): PathSpec {
+  return new PathSpec({
+    original: `/mongo/app/${name}`,
+    directory: '/mongo/app/',
+    resolved: true,
+    prefix: '/mongo',
+  })
+}
+
+async function* bytesFor(path: PathSpec | string): AsyncIterable<Uint8Array> {
+  const original = typeof path === 'string' ? path : path.original
+  yield await Promise.resolve(ENC.encode(original.endsWith('a.jsonl') ? 'AAA\n' : 'BBB\n'))
+}
+
 describe('mongodb cat error surfacing', () => {
   beforeEach(() => {
-    vi.mocked(readModule.read).mockReset()
+    vi.mocked(readModule.streamAny).mockReset()
+    vi.mocked(statModule.stat).mockReset()
   })
 
-  it('returns exitCode=1 with stderr when read() throws', async () => {
+  it('rejects with the backend error when stat() throws', async () => {
     const message = 'simulated mongo failure'
-    vi.mocked(readModule.read).mockRejectedValue(new Error(message))
-
+    vi.mocked(statModule.stat).mockRejectedValue(new Error(message))
     const cmd = MONGODB_CAT[0]
     if (cmd === undefined) throw new Error('cat not registered')
     const accessor = makeAccessor()
-    const path = new PathSpec({
-      original: '/mongo/app/users.jsonl',
-      directory: '/mongo/app/',
-      resolved: true,
-      prefix: '/mongo',
-    })
-    const result = await cmd.fn(accessor, [path], [], {
-      stdin: null,
-      flags: {},
-      filetypeFns: null,
-      cwd: '/',
-      resource: { kind: 'mongodb' } as never,
-    })
-    expect(result).not.toBeNull()
-    if (result === null) return
-    const [out, io] = result
-    expect(out).toBeNull()
-    expect(io.exitCode).toBe(1)
-    expect(io.stderr).not.toBeNull()
-    const stderrBytes = await materialize(io.stderr)
-    expect(DEC.decode(stderrBytes)).toContain(message)
+    await expect(
+      cmd.fn(accessor, [mk('users.jsonl')], [], {
+        stdin: null,
+        flags: {},
+        filetypeFns: null,
+        cwd: '/',
+        resource: { kind: 'mongodb' } as never,
+      }),
+    ).rejects.toThrow(message)
   })
 
   it('concatenates all files when multiple paths are given', async () => {
-    const ENC = new TextEncoder()
-    vi.mocked(readModule.read).mockImplementation((_accessor, path) => {
-      const original = typeof path === 'string' ? path : path.original
-      return Promise.resolve(ENC.encode(original.endsWith('a.jsonl') ? 'AAA\n' : 'BBB\n'))
-    })
-
+    vi.mocked(statModule.stat).mockResolvedValue(new FileStat({ name: 'documents.jsonl' }))
+    vi.mocked(readModule.streamAny).mockImplementation((_accessor, path) => bytesFor(path))
     const cmd = MONGODB_CAT[0]
     if (cmd === undefined) throw new Error('cat not registered')
     const accessor = makeAccessor()
-    const mk = (name: string): PathSpec =>
-      new PathSpec({
-        original: `/mongo/app/${name}`,
-        directory: '/mongo/app/',
-        resolved: true,
-        prefix: '/mongo',
-      })
     const result = await cmd.fn(accessor, [mk('a.jsonl'), mk('b.jsonl')], [], {
       stdin: null,
       flags: {},

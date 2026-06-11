@@ -41,7 +41,7 @@ async def apply_io(
             await cache.set(path, data)
         elif isinstance(data, CachableAsyncIterator):
             if data.exhausted:
-                await cache.set(path, b"".join(data._buffer))
+                await cache.set(path, b"".join(data.buffered_chunks))
             else:
                 if (hasattr(cache, "_drain_tasks")
                         and path not in cache._drain_tasks

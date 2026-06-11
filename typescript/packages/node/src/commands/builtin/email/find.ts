@@ -23,14 +23,13 @@ import {
   type CommandOpts,
   rstripSlash,
   stripSlash,
+  formatRecords,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { resolveGlob } from '../../../core/email/glob.ts'
 import { readdir as emailReaddir } from '../../../core/email/readdir.ts'
 import { metadataProvision } from './provision.ts'
 import { fnmatch } from '@struktoai/mirage-core'
-
-const ENC = new TextEncoder()
 
 async function walk(
   accessor: EmailAccessor,
@@ -101,7 +100,7 @@ async function findCommand(
     if (inameFlag !== null && !fnmatch(entryName.toLowerCase(), inameFlag.toLowerCase())) continue
     results.push(p)
   }
-  const out: ByteSource = ENC.encode(results.join('\n'))
+  const out: ByteSource = formatRecords(results)
   return [out, new IOResult()]
 }
 

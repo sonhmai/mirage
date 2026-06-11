@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName, type RegisteredCommand, type RegisteredOp } from '@struktoai/mirage-core'
+import {
+  remapCommandsResource,
+  remapOpsResource,
+  ResourceName,
+  type RegisteredCommand,
+  type RegisteredOp,
+} from '@struktoai/mirage-core'
 import { S3Resource } from '../s3/s3.ts'
 import { r2ToS3Config, redactR2Config, type R2Config, type R2ConfigRedacted } from './config.ts'
 import { R2_PROMPT } from './prompt.ts'
@@ -20,23 +26,6 @@ import { R2_PROMPT } from './prompt.ts'
 export interface R2ResourceState {
   type: string
   config: R2ConfigRedacted
-}
-
-function remapOpsResource(ops: readonly RegisteredOp[], to: string): RegisteredOp[] {
-  return ops.map((op) => (op.resource === ResourceName.S3 ? { ...op, resource: to } : op))
-}
-
-function remapCommandsResource(
-  commands: readonly RegisteredCommand[],
-  to: string,
-): RegisteredCommand[] {
-  return commands.map((cmd) => {
-    if (cmd.resource !== ResourceName.S3) return cmd
-    const proto = Object.getPrototypeOf(cmd) as object
-    const copy = Object.assign(Object.create(proto) as RegisteredCommand, cmd)
-    Object.assign(copy, { resource: to })
-    return copy
-  })
 }
 
 export class R2Resource extends S3Resource {

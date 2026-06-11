@@ -53,7 +53,7 @@ async function tailOggCommand(
     const duration = meta.duration ?? 0
     const start = Math.max(0, duration - n)
     const out: ByteSource = transcribe(raw, start)
-    return [out, new IOResult({ reads: { [first.original]: raw }, cache: [first.original] })]
+    return [out, new IOResult({ reads: { [first.stripPrefix]: raw }, cache: [first.stripPrefix] })]
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return [

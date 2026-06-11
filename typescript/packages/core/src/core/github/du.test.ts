@@ -57,4 +57,22 @@ describe('github core du', () => {
     const [, total] = await duAll(makeAccessor(), PathSpec.fromStrPath('/'))
     expect(total).toBe(157)
   })
+
+  it('duAll sorts paths by ASCII byte order, uppercase before lowercase', async () => {
+    const tree: Record<string, TreeEntry> = {
+      'apple.md': { path: 'apple.md', type: 'blob', sha: 't1', size: 1 },
+      'Banana.md': { path: 'Banana.md', type: 'blob', sha: 't2', size: 2 },
+      'CHERRY.md': { path: 'CHERRY.md', type: 'blob', sha: 't3', size: 3 },
+    }
+    const accessor = new GitHubAccessor({
+      transport: {} as GitHubTransport,
+      owner: 'o',
+      repo: 'r',
+      ref: 'main',
+      defaultBranch: 'main',
+      tree,
+    })
+    const [entries] = await duAll(accessor, PathSpec.fromStrPath('/'))
+    expect(entries.map((e) => e[0])).toEqual(['/Banana.md', '/CHERRY.md', '/apple.md'])
+  })
 })

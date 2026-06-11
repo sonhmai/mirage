@@ -16,87 +16,10 @@ import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import { resolveGlob } from '../../../core/postgres/glob.ts'
 import { readdir as postgresReaddir } from '../../../core/postgres/readdir.ts'
 import { stat as postgresStat } from '../../../core/postgres/stat.ts'
-import { type ByteSource, IOResult } from '../../../io/types.ts'
-import { type FileStat, FileType, PathSpec, ResourceName } from '../../../types.ts'
+import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { fnmatch } from '../../../util/fnmatch.ts'
-
-const ENC = new TextEncoder()
-
-interface TreeOpts {
-  maxDepth: number | null
-  showHidden: boolean
-  ignorePattern: string | null
-  dirsOnly: boolean
-  matchPattern: string | null
-}
-
-async function treeRecurse(
-  accessor: PostgresAccessor,
-  path: PathSpec,
-  prefix: string,
-  depth: number,
-  treeOpts: TreeOpts,
-  warnings: string[],
-  indexCache: CommandOpts['index'],
-): Promise<string[]> {
-  const lines: string[] = []
-  let entries: string[]
-  try {
-    entries = await postgresReaddir(accessor, path, indexCache ?? undefined)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    warnings.push(`tree: '${path.original}': ${msg}`)
-    return lines
-  }
-  entries.sort()
-  const filtered: [PathSpec, FileStat][] = []
-  for (const entry of entries) {
-    try {
-      const entrySpec = new PathSpec({
-        original: entry,
-        directory: entry,
-        resolved: false,
-        prefix: path.prefix,
-      })
-      const s = await postgresStat(accessor, entrySpec, indexCache ?? undefined)
-      if (!treeOpts.showHidden && s.name.startsWith('.')) continue
-      if (treeOpts.ignorePattern !== null && fnmatch(s.name, treeOpts.ignorePattern)) continue
-      if (treeOpts.dirsOnly && s.type !== FileType.DIRECTORY) continue
-      const notDir = s.type !== FileType.DIRECTORY
-      if (treeOpts.matchPattern !== null && notDir && !fnmatch(s.name, treeOpts.matchPattern))
-        continue
-      filtered.push([entrySpec, s])
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      warnings.push(`tree: '${entry}': ${msg}`)
-    }
-  }
-  for (let i = 0; i < filtered.length; i++) {
-    const pair = filtered[i]
-    if (pair === undefined) continue
-    const [entrySpec, s] = pair
-    const isLast = i === filtered.length - 1
-    const connector = isLast ? '\u2514\u2500\u2500 ' : '\u251c\u2500\u2500 '
-    lines.push(prefix + connector + s.name)
-    if (s.type === FileType.DIRECTORY) {
-      if (treeOpts.maxDepth !== null && depth >= treeOpts.maxDepth) continue
-      const extension = isLast ? '    ' : '\u2502   '
-      const sub = await treeRecurse(
-        accessor,
-        entrySpec,
-        prefix + extension,
-        depth + 1,
-        treeOpts,
-        warnings,
-        indexCache,
-      )
-      lines.push(...sub)
-    }
-  }
-  return lines
-}
+import { treeGeneric } from '../generic/tree.ts'
 
 async function treeCommand(
   accessor: PostgresAccessor,
@@ -105,27 +28,12 @@ async function treeCommand(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  const p0 =
-    resolved[0] ??
-    new PathSpec({
-      original: opts.cwd,
-      directory: opts.cwd,
-      resolved: false,
-      prefix: opts.mountPrefix ?? '',
-    })
-  const maxDepth = typeof opts.flags.L === 'string' ? Number.parseInt(opts.flags.L, 10) : null
-  const treeOpts: TreeOpts = {
-    maxDepth,
-    showHidden: opts.flags.a === true,
-    ignorePattern: typeof opts.flags.args_I === 'string' ? opts.flags.args_I : null,
-    dirsOnly: opts.flags.d === true,
-    matchPattern: typeof opts.flags.P === 'string' ? opts.flags.P : null,
-  }
-  const warnings: string[] = []
-  const results = await treeRecurse(accessor, p0, '', 0, treeOpts, warnings, opts.index)
-  const out: ByteSource = ENC.encode(results.join('\n'))
-  const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : null
-  return [out, new IOResult({ stderr })]
+  return treeGeneric(
+    resolved,
+    opts,
+    (p) => postgresReaddir(accessor, p, opts.index ?? undefined),
+    (p) => postgresStat(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const POSTGRES_TREE = command({

@@ -38,8 +38,11 @@ recent_books
 "title": "epsilon", "author": "ben"
 {"_id": 1, "name": "ada", "books": 2}
 
-# ---- wc (content cached by prior cat -> generic count<TAB>name) ----
-5	/mongodb/mirage_integ/collections/books/documents.jsonl
+# ---- wc (GNU layout: right-aligned space-separated counts) ----
+5 /mongodb/mirage_integ/collections/books/documents.jsonl
+# default mode pads to the byte-count width; byte total differs per
+# language (python renders 4.0, JS renders 4), so match the stable prefix
+  5  57 4
 
 # ---- stat ----
 name=documents.jsonl
@@ -59,4 +62,4 @@ mirage_integ/collections/books/documents.jsonl:
 "title": "beta"
 output truncated at safeguard limit (2 lines)
 === safeguard_cat_pipe_uncapped ===
-5	/mongodb/mirage_integ/collections/books/documents.jsonl
+5 /mongodb/mirage_integ/collections/books/documents.jsonl

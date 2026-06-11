@@ -59,7 +59,7 @@ async function teeCommand(
   return [
     out,
     new IOResult({
-      writes: { [first.original]: writeData },
+      writes: { [first.stripPrefix]: writeData },
       cache: [first.stripPrefix],
     }),
   ]

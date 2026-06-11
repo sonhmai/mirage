@@ -38,8 +38,8 @@ async def stat_wav(
         raw = await read_bytes(accessor, paths[0])
         meta = metadata(raw)
         result = format_metadata(meta, paths[0].original, file_size=None)
-        return result.encode(), IOResult(reads={paths[0].original: raw},
-                                         cache=[paths[0].original])
+        return result.encode(), IOResult(reads={paths[0].strip_prefix: raw},
+                                         cache=[paths[0].strip_prefix])
     except Exception as e:
         return None, IOResult(
             exit_code=1,

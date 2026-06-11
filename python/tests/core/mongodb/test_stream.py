@@ -14,14 +14,14 @@
 
 import datetime as dt
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from bson import Decimal128, ObjectId
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.mongodb.stream import read_stream, watch_stream
+from mirage.core.mongodb.stream import read_stream, read_tail, watch_stream
 from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import PathSpec
 
@@ -268,6 +268,61 @@ async def test_watch_stream_directory_path_raises(accessor, index):
         with pytest.raises(FileNotFoundError):
             async for _ in watch_stream(accessor, _path("/db1"), index):
                 pass
+
+
+@pytest.mark.asyncio
+async def test_read_tail_returns_docs_in_ascending_order(accessor):
+    docs = [{"_id": 5, "name": "e"}, {"_id": 4, "name": "d"}]
+    with patch(
+            "mirage.core.mongodb.stream.find_documents",
+            new_callable=AsyncMock,
+            return_value=list(docs),
+    ) as fake:
+        data = await read_tail(accessor, _path(DOCS_PATH), 2)
+    lines = data.decode().splitlines()
+    assert '"_id": 4' in lines[0]
+    assert '"_id": 5' in lines[1]
+    assert data.endswith(b"\n")
+    assert fake.await_args.kwargs["limit"] == 2
+    assert fake.await_args.kwargs["sort"] == [("_id", -1)]
+
+
+@pytest.mark.asyncio
+async def test_read_tail_caps_limit_at_max_doc_limit(accessor):
+    with patch(
+            "mirage.core.mongodb.stream.find_documents",
+            new_callable=AsyncMock,
+            return_value=[],
+    ) as fake:
+        data = await read_tail(accessor, _path(DOCS_PATH), 10**9)
+    assert data == b""
+    assert fake.await_args.kwargs["limit"] == accessor.config.max_doc_limit
+
+
+@pytest.mark.asyncio
+async def test_read_tail_applies_elision(index):
+    cfg = MongoDBConfig(
+        uri="mongodb://localhost:27017",
+        elide_fields={"db1.coll1": ["vector"]},
+    )
+    acc = MongoDBAccessor(config=cfg)
+    docs = [{"_id": 1, "title": "hi", "vector": [0.1, 0.2]}]
+    with patch(
+            "mirage.core.mongodb.stream.find_documents",
+            new_callable=AsyncMock,
+            return_value=docs,
+    ):
+        data = await read_tail(acc, _path(DOCS_PATH), 1)
+    parsed = json.loads(data.decode().strip())
+    assert parsed["title"] == "hi"
+    assert "vector" not in parsed
+
+
+@pytest.mark.asyncio
+async def test_read_tail_rejects_non_documents_path(accessor):
+    with pytest.raises(FileNotFoundError):
+        await read_tail(accessor, _path("/db1/collections/coll1/schema.json"),
+                        5)
 
 
 @pytest.mark.asyncio

@@ -137,7 +137,7 @@ describe('Workspace.execute', () => {
     ram.store.files.set('/x.txt', new TextEncoder().encode('a\nb\nc\n'))
     const res = await ws.execute('wc -l /ram/x.txt')
     expect(res.exitCode).toBe(0)
-    expect(new TextDecoder().decode(res.stdout)).toMatch(/^3\t/)
+    expect(new TextDecoder().decode(res.stdout)).toMatch(/^3 /)
     await ws.close()
   })
 
@@ -156,7 +156,7 @@ describe('Workspace.execute', () => {
     ram.store.files.set('/b.txt', new Uint8Array([2]))
     const res = await ws.execute('ls /ram/')
     expect(res.exitCode).toBe(0)
-    expect(new TextDecoder().decode(res.stdout)).toBe('a.txt\nb.txt')
+    expect(new TextDecoder().decode(res.stdout)).toBe('a.txt\nb.txt\n')
     await ws.close()
   })
 

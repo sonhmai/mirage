@@ -1,0 +1,129 @@
+---
+title: MinIO
+icon: /images/minio-logo.svg
+description: Set up MinIO as a MIRAGE resource from Node or the browser.
+---
+
+MinIO speaks the S3 API with AWS Signature V4 against your own server endpoint (e.g. `http://localhost:9000`). MinIO is self-hosted, so the endpoint is required and path-style addressing is used by default.
+
+Credentials (access key + secret key from the MinIO Console) are created the same way in both runtimes, see [MinIO Credentials](/home/setup/minio).
+
+## Node (server-side)
+
+```bash
+pnpm add @struktoai/mirage-node
+```
+
+```ts
+import { MinIOResource, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const minio = new MinIOResource({
+  bucket: process.env.MINIO_BUCKET!,
+  endpoint: process.env.MINIO_ENDPOINT!,
+  accessKeyId: process.env.MINIO_ACCESS_KEY!,
+  secretAccessKey: process.env.MINIO_SECRET_KEY!,
+})
+
+const ws = new Workspace({ '/bucket/': minio }, { mode: MountMode.READ })
+const res = await ws.execute('ls /bucket/')
+console.log(res.stdoutText)
+```
+
+## Browser (presigned URLs)
+
+```bash
+pnpm add @struktoai/mirage-browser
+```
+
+The browser `MinIOResource` is secret-free, your backend signs each operation using your MinIO keys and returns a URL. MinIO accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at your MinIO endpoint.
+
+### 1. Server: sign URLs with the MinIO endpoint
+
+```ts
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+
+const client = new S3Client({
+  region: 'us-east-1',
+  endpoint: process.env.MINIO_ENDPOINT,
+  forcePathStyle: true,
+  credentials: {
+    accessKeyId: process.env.MINIO_ACCESS_KEY!,
+    secretAccessKey: process.env.MINIO_SECRET_KEY!,
+  },
+})
+const BUCKET = process.env.MINIO_BUCKET!
+
+app.post('/presign/minio', async (req, res) => {
+  const { path, op, opts } = req.body
+  const key = path.replace(/^\/+/, '')
+  const ttl = typeof opts?.ttlSec === 'number' ? opts.ttlSec : 300
+  let cmd
+  switch (op) {
+    case 'GET':    cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType }); break
+    case 'HEAD':   cmd = new HeadObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'DELETE': cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'LIST':   cmd = new ListObjectsV2Command({
+      Bucket: BUCKET,
+      Prefix: opts?.listPrefix,
+      Delimiter: opts?.listDelimiter,
+      ContinuationToken: opts?.listContinuationToken,
+    }); break
+    case 'COPY':   cmd = new CopyObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      CopySource: `${BUCKET}/${opts?.copySource}`,
+    }); break
+  }
+  res.json({ url: await getSignedUrl(client, cmd, { expiresIn: ttl }) })
+})
+```
+
+<Warning>
+MinIO uses **path-style** URLs (`forcePathStyle: true`), virtual-hosted style requires extra DNS setup on a self-hosted server.
+</Warning>
+
+### 2. Browser: wire it up
+
+```ts
+import { MinIOResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const minio = new MinIOResource({
+  bucket: 'my-bucket',
+  endpoint: 'http://localhost:9000',
+  presignedUrlProvider: async (path, op, opts) => {
+    const r = await fetch('/presign/minio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, op, opts }),
+    })
+    const { url } = await r.json()
+    return url
+  },
+})
+
+const ws = new Workspace({ '/bucket/': minio }, { mode: MountMode.READ })
+```
+
+<Tip>
+`endpoint` on the browser config is only used for display/logging; the actual endpoint is baked into the presigned URLs your backend returns.
+</Tip>
+
+### 3. CORS
+
+MinIO answers CORS preflights for **all origins by default**, so local dev typically works without configuration. To restrict origins, set the server environment variable and restart MinIO:
+
+```bash
+MINIO_API_CORS_ALLOW_ORIGIN=http://localhost:5173,https://app.example.com
+```
+
+See the [MinIO resource](/python/resource/minio) docs for the equivalent Python wiring.

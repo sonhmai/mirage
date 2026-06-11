@@ -189,7 +189,7 @@ async function zipCommand(
   await s3Write(accessor, archivePath, archive)
   const stdout: ByteSource | null =
     outputLines.length > 0 ? ENC.encode(outputLines.join('\n') + '\n') : null
-  return [stdout, new IOResult({ writes: { [archivePath.original]: archive } })]
+  return [stdout, new IOResult({ writes: { [archivePath.stripPrefix]: archive } })]
 }
 
 export const S3_ZIP = command({

@@ -47,8 +47,8 @@ async def head_wav(
         seconds = int(n) if n is not None else 10
         raw = await read_bytes(accessor, paths[0])
         stream = transcribe(raw, end_sec=float(seconds))
-        return stream, IOResult(reads={paths[0].original: raw},
-                                cache=[paths[0].original])
+        return stream, IOResult(reads={paths[0].strip_prefix: raw},
+                                cache=[paths[0].strip_prefix])
     except Exception as e:
         return None, IOResult(
             exit_code=1,

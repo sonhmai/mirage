@@ -75,6 +75,22 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("du_multi", "du {m}/data/example.json {m}/data/example.jsonl"),
     ("file_multi", "file {m}/data/example.json {m}/data/example.jsonl"),
 
+    # ----- writes-key regression: a warm dir index must see touch/rm -----
+    ("inv_ls_warm", "ls -1 {m}/data"),
+    ("inv_touch", "touch {m}/data/inv_late.txt"),
+    ("inv_ls_after_touch", "ls -1 {m}/data"),
+    ("inv_rm", "rm {m}/data/inv_late.txt"),
+    ("inv_gone", "cat {m}/data/inv_late.txt | wc -c"
+     " | sed s/^/inv_gone_bytes=/"),
+
+    # ----- cat cache poisoning: per-file cache keys after a concat cat -----
+    ("poison_concat", "cat {m}/data/example.json {m}/data/example.jsonl"
+     " | wc -l"),
+    ("poison_first_intact", "wc -l {m}/data/example.json"),
+    ("poison_second_intact", "wc -l {m}/data/example.jsonl"),
+    ("pipe_concat_head", "cat {m}/data/example.jsonl {m}/data/example.json"
+     " | head -n 1"),
+
     # ----- safeguard: per-mount cap on cat (set to 20 lines below) -----
     ("safeguard_cat_truncates", "cat {m}/data/example.jsonl"),
     ("safeguard_cat_pipe_uncapped", "cat {m}/data/example.jsonl | wc -l"),

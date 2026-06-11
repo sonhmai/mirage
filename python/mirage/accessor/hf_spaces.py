@@ -53,6 +53,7 @@ class HfSpacesConfig(BaseModel):
 
 class HfSpacesAccessor(_HfAccessor):
     REPO_TYPE = "space"
+    RESOURCE_NAME = "hf_spaces"
 
     @property
     def bucket_uri(self) -> str:

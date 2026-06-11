@@ -216,6 +216,7 @@
               "python/agents/openhands",
               "python/agents/pydantic-ai",
               "python/agents/camel",
+              "python/agents/agno",
               "python/agents/claude-code",
               "python/agents/codex"
             ]
@@ -389,7 +390,26 @@
                   "typescript/setup/r2",
                   "typescript/setup/gcs",
                   "typescript/setup/oci",
-                  "typescript/setup/supabase"
+                  "typescript/setup/supabase",
+                  "typescript/setup/minio",
+                  "typescript/setup/ceph",
+                  "typescript/setup/wasabi",
+                  "typescript/setup/backblaze",
+                  "typescript/setup/digitalocean",
+                  "typescript/setup/tencent",
+                  "typescript/setup/aliyun",
+                  "typescript/setup/scaleway",
+                  "typescript/setup/qingstor"
+                ]
+              },
+              {
+                "group": "Hugging Face",
+                "icon": "/images/huggingface-logo.svg",
+                "pages": [
+                  "typescript/setup/hf_buckets",
+                  "typescript/setup/hf_datasets",
+                  "typescript/setup/hf_models",
+                  "typescript/setup/hf_spaces"
                 ]
               },
               {
@@ -408,7 +428,8 @@
                 "icon": "folder-open",
                 "pages": [
                   "typescript/dropbox",
-                  "typescript/box"
+                  "typescript/box",
+                  "typescript/setup/databricks_volume"
                 ]
               },
               {
@@ -451,9 +472,7 @@
                 "group": "Others",
                 "icon": "ellipsis",
                 "pages": [
-                  "typescript/setup/trello",
-                  "typescript/setup/posthog",
-                  "typescript/setup/vercel"
+                  "typescript/setup/trello"
                 ]
               }
             ]
@@ -481,7 +500,7 @@
       },
       {
         "label": "strukto-ai/mirage",
-      "icon": "github",
+        "icon": "github",
         "href": "https://github.com/strukto-ai/mirage"
       }
     ]

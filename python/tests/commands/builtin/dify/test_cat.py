@@ -31,8 +31,8 @@ async def test_cat_reads_stream_and_records_cache(monkeypatch, dify_accessor,
     stdout, io = await cat(dify_accessor, [guide_path], index=dify_index)
 
     assert await materialize(stdout) == b"alpha\nbeta\ngamma"
-    assert guide_path.original in io.reads
-    assert io.cache == [guide_path.original]
+    assert guide_path.strip_prefix in io.reads
+    assert io.cache == [guide_path.strip_prefix]
 
 
 async def get_two_doc_segments(config, document_id):
@@ -51,7 +51,7 @@ async def test_cat_multifile_caches_materialized_bytes_per_file(
     stdout, io = await cat(dify_accessor, [guide_path, readme_path],
                            index=dify_index)
 
-    assert io.reads[guide_path.original] == b"alpha\nbeta\ngamma"
-    assert io.reads[readme_path.original] == b"readme"
+    assert io.reads[guide_path.strip_prefix] == b"alpha\nbeta\ngamma"
+    assert io.reads[readme_path.strip_prefix] == b"readme"
     assert all(isinstance(v, bytes) for v in io.reads.values())
     assert await materialize(stdout) == b"alpha\nbeta\ngammareadme"

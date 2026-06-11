@@ -1,0 +1,44 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "resources": [
+      "lancedb"
+    ]
+  },
+  "description": null,
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": null,
+      "long": "--method",
+      "numeric_shorthand": false,
+      "short": null,
+      "value_kind": "text"
+    },
+    {
+      "description": null,
+      "long": "--top-k",
+      "numeric_shorthand": false,
+      "short": null,
+      "value_kind": "text"
+    },
+    {
+      "description": null,
+      "long": "--threshold",
+      "numeric_shorthand": false,
+      "short": null,
+      "value_kind": "text"
+    }
+  ],
+  "positional": [
+    {
+      "kind": "text"
+    }
+  ],
+  "rest": {
+    "kind": "path"
+  }
+}

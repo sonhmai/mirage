@@ -29,7 +29,7 @@ async def wc(
     totals = WCCounts()
     for path in paths:
         data = await read_bytes(accessor, path, index)
-        reads[path.original] = data
+        reads[path.strip_prefix] = data
         counts = await generic_wc(data)
         totals.merge(counts)
         output.append(

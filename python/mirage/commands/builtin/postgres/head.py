@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
@@ -59,8 +60,16 @@ async def head(
     c_int = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index)
+        # Row reads push LIMIT into the query instead of fetching the whole
+        # relation; non-row scopes ignore the limit kwarg.
+        n_eff = n_int if n_int is not None else 10
+        read_fn = postgres_read
+        if c_int is None and n_eff > 0:
+            read_fn = partial(postgres_read,
+                              limit=min(n_eff,
+                                        accessor.config.default_row_limit))
         return head_multi(paths,
-                          read=postgres_read,
+                          read=read_fn,
                           accessor=accessor,
                           index=index,
                           n=n_int,

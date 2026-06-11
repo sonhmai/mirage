@@ -43,7 +43,7 @@ async function catWavCommand(
   try {
     const raw = await materialize(diskStream(accessor, first))
     const out: ByteSource = transcribe(raw)
-    return [out, new IOResult({ reads: { [first.original]: raw }, cache: [first.original] })]
+    return [out, new IOResult({ reads: { [first.stripPrefix]: raw }, cache: [first.stripPrefix] })]
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return [

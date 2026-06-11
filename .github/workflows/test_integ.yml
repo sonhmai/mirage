@@ -155,6 +155,11 @@ jobs:
           ./python/.venv/bin/python integ/s3_cases.py > /tmp/s3_cases.out
           diff integ/truth.txt /tmp/s3_cases.out
 
+      - name: Run lancedb integ (embedded) and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/lancedb.py > /tmp/lancedb.out
+          diff integ/truth_lancedb.txt /tmp/lancedb.out
+
   integ-ts:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ts == 'true') }}
@@ -276,6 +281,12 @@ jobs:
         run: |
           pnpm exec tsx notion.ts > /tmp/notion_ts.out
           diff truth_notion.txt /tmp/notion_ts.out
+
+      - name: Run lancedb integ (TS, embedded) and diff against truth
+        working-directory: integ
+        run: |
+          pnpm exec tsx lancedb.ts > /tmp/ts-lancedb.out
+          diff truth_lancedb.txt /tmp/ts-lancedb.out
 
   integ-database:
     needs: changes

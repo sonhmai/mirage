@@ -13,18 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from functools import partial
 
 from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.grep_helper import (compile_pattern, grep_lines,
-                                                 grep_recursive)
+from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.lancedb._provision import metadata_provision
-from mirage.commands.builtin.utils.output import (format_optional_records,
-                                                  format_records)
-from mirage.commands.builtin.utils.stream import _resolve_source
-from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
-                                                call_stat)
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.lancedb.glob import resolve_glob
@@ -65,8 +58,15 @@ async def grep(
     args_l: bool = False,
     w: bool = False,
     F: bool = False,
+    E: bool = False,
     o: bool = False,
     m: str | None = None,
+    q: bool = False,
+    H: bool = False,
+    args_h: bool = False,
+    A: str | None = None,
+    B: str | None = None,
+    C: str | None = None,
     e: str | None = None,
     prefix: str = "",
     index: IndexCacheStore = None,
@@ -78,51 +78,32 @@ async def grep(
         pattern = texts[0]
     else:
         raise ValueError("grep: usage: grep [flags] pattern [path]")
-    if not paths:
-        _resolve_source(stdin, "grep: missing operand")
-        raise ValueError("grep: missing operand")
-
     max_count = int(m) if m is not None else None
-    paths = await resolve_glob(accessor, paths, index=index)
-    file_prefix = paths[0].prefix if paths else ""
-    compiled = compile_pattern(pattern, i, F, w)
-    rd = partial(call_readdir,
-                 _readdir,
-                 accessor,
-                 index=index,
-                 prefix=file_prefix)
-    st = partial(call_stat, _stat, accessor, index=index, prefix=file_prefix)
-    rb = partial(call_read_bytes,
-                 lancedb_read,
-                 accessor,
-                 index=index,
-                 prefix=file_prefix)
-
-    if r or R:
-        warnings: list[str] = []
-        results = await grep_recursive(rd, st, rb, paths[0].original, compiled,
-                                       v, n, c, args_l, o, max_count, warnings)
-        stderr = format_optional_records(warnings)
-        if not results:
-            return b"", IOResult(exit_code=1, stderr=stderr)
-        return format_records(results), IOResult(stderr=stderr)
-
-    all_results: list[str] = []
-    multi = len(paths) > 1
-    for p in paths:
-        data = (await rb(p.original)).decode(errors="replace").splitlines()
-        hits = grep_lines(p.original, data, compiled, v, n, c, args_l, o,
-                          max_count)
-        if c:
-            if hits:
-                all_results.append(
-                    f"{p.original}:{hits[0]}" if multi else hits[0])
-        elif args_l:
-            all_results.extend(hits)
-        elif multi:
-            all_results.extend(f"{p.original}:{hit}" for hit in hits)
-        else:
-            all_results.extend(hits)
-    if not all_results:
-        return b"", IOResult(exit_code=1)
-    return format_records(all_results), IOResult()
+    after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
+    before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
+    resolved = await resolve_glob(accessor, paths,
+                                  index=index) if paths else []
+    return await generic_grep(
+        resolved,
+        pattern=pattern,
+        readdir=_readdir,
+        stat=_stat,
+        read_bytes=lancedb_read,
+        read_stream=None,
+        accessor=accessor,
+        stdin=stdin,
+        ignore_case=i,
+        invert=v,
+        line_numbers=n,
+        count_only=c,
+        files_only=args_l,
+        whole_word=w,
+        fixed_string=F,
+        only_matching=o,
+        quiet=q,
+        recursive=r or R,
+        max_count=max_count,
+        after_context=after_ctx,
+        before_context=before_ctx,
+        index=index,
+    )

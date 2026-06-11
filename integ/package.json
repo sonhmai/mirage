@@ -15,10 +15,12 @@
     "postgres": "tsx postgres.ts",
     "safeguard": "tsx safeguard.ts",
     "chroma": "tsx chroma.ts",
+    "lancedb": "tsx lancedb.ts",
     "ssh": "tsx ssh.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
+    "@lancedb/lancedb": "^0.30.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "chromadb": "^3.4.3",
     "@struktoai/mirage-browser": "workspace:*",

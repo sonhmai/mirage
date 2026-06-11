@@ -1,0 +1,107 @@
+=== ls_root ===
+animals
+=== ls_table ===
+cat
+dog
+=== ls_group ===
+big
+small
+=== tree_table ===
+├── cat
+│   ├── big
+│   │   └── 1.md
+│   └── small
+│       └── 2.md
+└── dog
+    ├── big
+    │   └── 3.md
+    └── small
+        └── 4.md
+=== find_md ===
+/db/animals/cat/big/1.md
+/db/animals/cat/small/2.md
+/db/animals/dog/big/3.md
+/db/animals/dog/small/4.md
+=== cat_card ===
+# a big orange cat
+
+id: 1
+label: cat
+kind: big
+name: a big orange cat
+=== wc_c_card ===
+70 /db/animals/cat/big/1.md
+=== grep_cold_single ===
+# a big orange cat
+name: a big orange cat
+=== grep_warm_single ===
+# a big orange cat
+name: a big orange cat
+=== grep_i ===
+# a big orange cat
+name: a big orange cat
+=== grep_n ===
+4:label: cat
+=== grep_v ===
+
+id: 1
+kind: big
+=== grep_c ===
+3
+=== grep_o ===
+cat
+cat
+cat
+=== grep_w ===
+# a big orange cat
+label: cat
+name: a big orange cat
+=== grep_F_literal ===
+id: 1
+=== grep_m1 ===
+# a big orange cat
+=== grep_A1 ===
+id: 1
+label: cat
+=== grep_B1 ===
+id: 1
+label: cat
+=== grep_C1 ===
+id: 1
+label: cat
+kind: big
+=== grep_multi ===
+/db/animals/cat/small/2.md:# a small grey cat
+/db/animals/cat/small/2.md:kind: small
+/db/animals/cat/small/2.md:name: a small grey cat
+/db/animals/dog/small/4.md:# a small white dog
+/db/animals/dog/small/4.md:kind: small
+/db/animals/dog/small/4.md:name: a small white dog
+=== grep_r_table ===
+/db/animals/cat/big/1.md:# a big orange cat
+/db/animals/cat/big/1.md:name: a big orange cat
+=== grep_r_multipath ===
+/db/animals/cat/small/2.md:# a small grey cat
+/db/animals/cat/small/2.md:kind: small
+/db/animals/cat/small/2.md:name: a small grey cat
+/db/animals/dog/small/4.md:# a small white dog
+/db/animals/dog/small/4.md:kind: small
+/db/animals/dog/small/4.md:name: a small white dog
+=== grep_rl ===
+/db/animals/cat/big/1.md
+/db/animals/cat/small/2.md
+=== grep_E_alt ===
+# a big orange cat
+name: a big orange cat
+=== pipe_grep_stdin ===
+# a big orange cat
+name: a big orange cat
+=== rg_basic ===
+# a big orange cat
+name: a big orange cat
+=== grep_q_match ===
+exit=0
+=== grep_q_no_match ===
+exit=1
+=== grep_no_match ===
+exit=1

@@ -371,6 +371,39 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["rg_l_multi_file", "rg -l hello /data/rgm/d1/f1.txt /data/rgm/d2/f2.txt"],
   ["rg_col_seed_parquet", "cp /data/a.txt /data/rgm/d1/skip.parquet"],
   ["rg_columnar_skip", "rg world /data/rgm/d1"],
+  // ----- archive file modes (generic gzip/tar/zip/split wrappers) -----
+  [
+    'arch_gzip_roundtrip',
+    'mkdir -p /data/arch && echo gz-data | tee /data/arch/g.txt > /dev/null' +
+      ' && gzip /data/arch/g.txt && gunzip /data/arch/g.txt.gz' +
+      ' && cat /data/arch/g.txt && ls /data/arch',
+  ],
+  ['arch_tar_create_verbose', 'tar -c -v -z -f /data/arch/a.tgz /data/arch/g.txt'],
+  ['arch_tar_list', 'tar -t -z -f /data/arch/a.tgz'],
+  [
+    'arch_tar_extract_strip',
+    'tar -x -z -f /data/arch/a.tgz --strip-components 2 -C /data/arch/out' +
+      ' && cat /data/arch/out/g.txt',
+  ],
+  [
+    'arch_tar_exclude',
+    'echo noise | tee /data/arch/skip.log > /dev/null' +
+      " && tar -c -v -f /data/arch/b.tar --exclude '*.log'" +
+      ' /data/arch/g.txt /data/arch/skip.log',
+  ],
+  ['arch_zip_unzip', 'zip -q /data/arch/z.zip /data/arch/g.txt && unzip -p /data/arch/z.zip'],
+  [
+    'arch_split_roundtrip',
+    'split -b 4 /data/arch/g.txt /data/arch/pt_ && cat /data/arch/pt_aa /data/arch/pt_ab',
+  ],
+  [
+    'arch_csplit',
+    'cat /data/a.txt | tee /data/arch/c.txt > /dev/null' +
+      ' && csplit -s -f /data/arch/cs_ /data/arch/c.txt /foo/' +
+      ' && cat /data/arch/cs_00',
+  ],
+  ['arch_iconv_file', 'iconv -f utf-8 -t utf-8 /data/arch/g.txt'],
+  ['arch_mktemp', 'mktemp -p /data/arch | wc -l'],
 ];
 
 export const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [

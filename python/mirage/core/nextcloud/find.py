@@ -42,6 +42,8 @@ async def find(
             is_dir = (rel.endswith("/") or getattr(entry.metadata, "mode",
                                                    None) == EntryMode.Dir)
             entry_path = "/" + rel.rstrip("/").lstrip("/")
+            if entry_path == base:
+                continue
             kind = "d" if is_dir else "f"
 
             file_entries: list[tuple[str, str]] = [(entry_path, kind)]

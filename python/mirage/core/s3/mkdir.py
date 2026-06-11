@@ -17,7 +17,10 @@ from mirage.core.s3._client import _client_kwargs, _prefix, async_session
 from mirage.types import PathSpec
 
 
-async def mkdir(accessor: S3Accessor, path: PathSpec) -> None:
+async def mkdir(accessor: S3Accessor,
+                path: PathSpec,
+                parents: bool = False) -> None:
+    # Object stores have no real directories; parents is implicit.
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
     if isinstance(path, PathSpec):

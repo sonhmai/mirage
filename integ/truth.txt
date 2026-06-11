@@ -1210,6 +1210,28 @@ baz
 
 === rg_columnar_skip ===
 /data/rgm/d1/f1.txt:world
+=== arch_gzip_roundtrip ===
+gz-data
+g.txt
+=== arch_tar_create_verbose ===
+data/arch/g.txt
+=== arch_tar_list ===
+data/arch/g.txt
+=== arch_tar_extract_strip ===
+gz-data
+=== arch_tar_exclude ===
+data/arch/g.txt
+=== arch_zip_unzip ===
+gz-data
+=== arch_split_roundtrip ===
+gz-data
+=== arch_csplit ===
+hello
+world
+=== arch_iconv_file ===
+gz-data
+=== arch_mktemp ===
+1
 === lazy_exit_grep_match ===
 exit=0
 hello

@@ -19,6 +19,7 @@ from mirage.types import PathSpec
 
 async def mkdir(accessor: HfBucketsAccessor,
                 path: PathSpec,
-                index: IndexCacheStore | None = None) -> None:
+                index: IndexCacheStore | None = None,
+                parents: bool = False) -> None:
     # Object stores don't have real directories; mkdir is a no-op.
     return None

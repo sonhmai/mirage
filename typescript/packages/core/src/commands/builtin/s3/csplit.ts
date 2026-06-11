@@ -13,115 +13,28 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Accessor } from '../../../accessor/s3.ts'
-import { read as s3Read } from '../../../core/s3/read.ts'
 import { resolveGlob } from '../../../core/s3/glob.ts'
+import { stream as s3Stream } from '../../../core/s3/stream.ts'
 import { write as s3Write } from '../../../core/s3/write.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { PathSpec, ResourceName } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { ResourceName } from '../../../types.ts'
+import { command } from '../../config.ts'
+import { csplitGeneric } from '../generic/csplit.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { readStdinAsync } from '../utils/stream.ts'
-
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
-
-function splitLinesNoTrailing(text: string): string[] {
-  const stripped = text.endsWith('\n') ? text.slice(0, -1) : text
-  return stripped === '' ? [] : stripped.split('\n')
-}
-
-function splitByPatterns(lines: readonly string[], patterns: readonly string[]): string[][] {
-  const parts: string[][] = []
-  let currentStart = 0
-  for (const pat of patterns) {
-    if (pat.startsWith('/') && pat.endsWith('/')) {
-      const regex = new RegExp(pat.slice(1, -1))
-      for (let idx = currentStart; idx < lines.length; idx++) {
-        if (regex.test(lines[idx] ?? '')) {
-          parts.push(lines.slice(currentStart, idx))
-          currentStart = idx
-          break
-        }
-      }
-    } else {
-      const lineNum = Number.parseInt(pat, 10)
-      const splitAt = lineNum - 1
-      if (splitAt > currentStart) {
-        parts.push(lines.slice(currentStart, splitAt))
-        currentStart = splitAt
-      }
-    }
-  }
-  if (currentStart < lines.length) {
-    parts.push(lines.slice(currentStart))
-  }
-  return parts
-}
-
-function padNum(n: number, digits: number): string {
-  const s = String(n)
-  return s.length >= digits ? s : '0'.repeat(digits - s.length) + s
-}
-
-function makePathSpec(original: string, prefix: string): PathSpec {
-  return new PathSpec({ original, directory: original, resolved: false, prefix })
-}
-
-async function csplitCommand(
-  accessor: S3Accessor,
-  paths: PathSpec[],
-  texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const prefix = typeof opts.flags.f === 'string' ? opts.flags.f : 'xx'
-  const digits = typeof opts.flags.n === 'string' ? Number.parseInt(opts.flags.n, 10) : 2
-  const quiet = opts.flags.s === true
-  const keep = opts.flags.k === true
-  let raw: Uint8Array
-  let mountPrefix = ''
-  if (paths.length > 0) {
-    const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    mountPrefix = first.prefix
-    raw = await s3Read(accessor, first)
-  } else {
-    const stdinData = await readStdinAsync(opts.stdin)
-    if (stdinData === null) {
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('csplit: missing input\n') })]
-    }
-    raw = stdinData
-  }
-  const text = DEC.decode(raw)
-  const lines = splitLinesNoTrailing(text)
-  const parts = splitByPatterns(lines, texts)
-  const writes: Record<string, Uint8Array> = {}
-  const sizes: string[] = []
-  try {
-    for (let idx = 0; idx < parts.length; idx++) {
-      const part = parts[idx] ?? []
-      const filename = prefix + padNum(idx, digits)
-      const data = part.length > 0 ? ENC.encode(part.join('\n') + '\n') : new Uint8Array(0)
-      const spec = makePathSpec(filename, mountPrefix)
-      await s3Write(accessor, spec, data)
-      writes[spec.stripPrefix] = data
-      sizes.push(String(data.byteLength))
-    }
-  } catch (err) {
-    if (!keep) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`csplit: ${msg}\n`) })]
-    }
-  }
-  const output = quiet ? '' : sizes.join('\n') + '\n'
-  const result: ByteSource = ENC.encode(output)
-  return [result, new IOResult({ writes })]
-}
 
 export const S3_CSPLIT = command({
   name: 'csplit',
   resource: ResourceName.S3,
   spec: specOf('csplit'),
-  fn: csplitCommand,
+  fn: async (accessor: S3Accessor, paths, texts, opts) => {
+    const resolved =
+      paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+    return csplitGeneric(
+      resolved,
+      texts,
+      opts,
+      (p) => s3Stream(accessor, p),
+      (p, d) => s3Write(accessor, p, d),
+    )
+  },
   write: true,
 })

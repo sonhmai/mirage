@@ -354,6 +354,8 @@ CASES: list[tuple[str, str]] = [
     ("grep_e_f_union", "grep -e hello -f /data/patterns.txt /data/a.txt"),
     ("grep_f_multi",
      "grep -f /data/patterns.txt -f /data/patterns2.txt /data/a.txt"),
+    ("grep_cluster_ne", "grep -ne world /data/a.txt"),
+    ("du_max_depth_eq", "du --max-depth=1 /data/sub"),
     ("rg_e_flag", "rg -e world /data/a.txt"),
     ("rg_e_multi", "rg -e world -e bar /data/a.txt"),
 

@@ -115,3 +115,58 @@ def test_rg_dash_e_frees_positional_and_accumulates():
     assert parsed.flags["-e"] == "foo\nbar"
     assert parsed.texts() == []
     assert parsed.paths() == ["/x"]
+
+
+def test_long_value_flag_equals_syntax():
+    parsed = parse_command(SPECS["du"], ["--max-depth=1", "/data"], "/")
+    assert parsed.flags["--max-depth"] == "1"
+    assert parsed.paths() == ["/data"]
+
+
+def test_long_value_flag_equals_syntax_rg():
+    parsed = parse_command(SPECS["rg"], ["--type=md", "pat", "/x"], "/")
+    assert parsed.flags["--type"] == "md"
+    assert parsed.texts() == ["pat"]
+    assert parsed.paths() == ["/x"]
+
+
+def test_unknown_long_flag_with_equals_stays_positional():
+    parsed = parse_command(SPECS["grep"], ["--color=auto", "pat", "/a.txt"],
+                           "/")
+    assert "--color" not in parsed.flags
+    assert parsed.texts() == ["--color=auto"]
+
+
+def test_cluster_ending_in_value_flag_consumes_next_arg():
+    parsed = parse_command(SPECS["grep"], ["-ne", "pat", "/a.txt"], "/")
+    assert parsed.flags["-n"] is True
+    assert parsed.flags["-e"] == "pat"
+    assert parsed.texts() == []
+    assert parsed.paths() == ["/a.txt"]
+
+
+def test_cluster_ending_in_value_flag_with_attached_value():
+    parsed = parse_command(SPECS["grep"], ["-nepat", "/a.txt"], "/")
+    assert parsed.flags["-n"] is True
+    assert parsed.flags["-e"] == "pat"
+    assert parsed.paths() == ["/a.txt"]
+
+
+def test_cluster_bool_then_count_flag_value():
+    parsed = parse_command(SPECS["grep"], ["-im1", "pat", "/a.txt"], "/")
+    assert parsed.flags["-i"] is True
+    assert parsed.flags["-m"] == "1"
+    assert parsed.texts() == ["pat"]
+    assert parsed.paths() == ["/a.txt"]
+
+
+def test_cluster_with_unknown_char_stays_positional():
+    parsed = parse_command(SPECS["grep"], ["-nx", "pat", "/a.txt"], "/")
+    assert "-n" not in parsed.flags
+    assert parsed.texts() == ["-nx"]
+    assert parsed.paths() == ["/pat", "/a.txt"]
+
+
+def test_find_multichar_short_flag_still_works():
+    parsed = parse_command(SPECS["find"], ["/data", "-name", "*.txt"], "/")
+    assert parsed.flags["-name"] == "*.txt"

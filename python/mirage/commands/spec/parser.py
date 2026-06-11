@@ -40,6 +40,38 @@ def _set_value_flag(
         flags[name] = value
 
 
+def _match_mixed_cluster(
+    tok: str,
+    bool_flags: set[str],
+    value_flags: set[str],
+) -> tuple[list[str], str, str | None] | None:
+    """Match a getopt-style cluster of bool flags ending in a value flag.
+
+    Args:
+        tok (str): token like "-ne" or "-nepat".
+        bool_flags (set[str]): single-dash boolean flag names.
+        value_flags (set[str]): single-dash value flag names.
+
+    Returns:
+        tuple[list[str], str, str | None] | None: (bool flag names, value
+            flag name, attached value or None when the value comes from the
+            next token), or None when any character is unknown or no value
+            flag terminates the cluster.
+    """
+    bools: list[str] = []
+    chars = tok[1:]
+    for idx, ch in enumerate(chars):
+        name = f"-{ch}"
+        if name in bool_flags:
+            bools.append(name)
+            continue
+        if name in value_flags:
+            rest = chars[idx + 1:]
+            return bools, name, (rest if rest else None)
+        return None
+    return None
+
+
 def parse_command(
     spec: CommandSpec,
     argv: list[str],
@@ -58,8 +90,7 @@ def parse_command(
                 bool_flags.add(opt.short)
             else:
                 value_flags.add(opt.short)
-                if opt.value_kind == OperandKind.PATH:
-                    value_flag_kinds[opt.short] = OperandKind.PATH
+                value_flag_kinds[opt.short] = opt.value_kind
                 if opt.repeatable:
                     repeat_flags.add(opt.short)
                 if opt.numeric_shorthand:
@@ -69,8 +100,7 @@ def parse_command(
                 long_bool_flags.add(opt.long)
             else:
                 long_value_flags.add(opt.long)
-                if opt.value_kind == OperandKind.PATH:
-                    value_flag_kinds[opt.long] = OperandKind.PATH
+                value_flag_kinds[opt.long] = opt.value_kind
                 if opt.repeatable:
                     repeat_flags.add(opt.long)
 
@@ -116,7 +146,12 @@ def parse_command(
                 _set_value_flag(flags, tok, filtered_argv[i + 1], repeat_flags)
                 i += 2
             else:
-                raw_args.append(tok)
+                eq = tok.find("=")
+                if eq != -1 and tok[:eq] in long_value_flags:
+                    _set_value_flag(flags, tok[:eq], tok[eq + 1:],
+                                    repeat_flags)
+                else:
+                    raw_args.append(tok)
                 i += 1
             continue
 
@@ -158,6 +193,23 @@ def parse_command(
                 i += 1
                 continue
 
+            mixed = _match_mixed_cluster(tok, bool_flags, value_flags)
+            if mixed is not None:
+                cluster_bools, vflag, attached = mixed
+                if attached is not None:
+                    for name in cluster_bools:
+                        flags[name] = True
+                    _set_value_flag(flags, vflag, attached, repeat_flags)
+                    i += 1
+                    continue
+                if i + 1 < len(filtered_argv):
+                    for name in cluster_bools:
+                        flags[name] = True
+                    _set_value_flag(flags, vflag, filtered_argv[i + 1],
+                                    repeat_flags)
+                    i += 2
+                    continue
+
             raw_args.append(tok)
             i += 1
             continue
@@ -171,6 +223,7 @@ def parse_command(
                                               for name in op.provided_by))
 
     classified: list[tuple[str, OperandKind]] = []
+    raw_operands: list[tuple[str, OperandKind]] = []
     for j, arg in enumerate(raw_args):
         if j < len(positional):
             kind = positional[j]
@@ -180,8 +233,10 @@ def parse_command(
             continue
         if kind == OperandKind.PATH:
             classified.append((_resolve(cwd, arg), OperandKind.PATH))
+            raw_operands.append((arg, OperandKind.PATH))
         else:
             classified.append((arg, OperandKind.TEXT))
+            raw_operands.append((arg, OperandKind.TEXT))
 
     path_flag_values: list[str] = []
     for flag_name, kind in value_flag_kinds.items():
@@ -197,11 +252,19 @@ def parse_command(
                 flags[flag_name] = resolved
                 path_flag_values.append(resolved)
 
+    text_flag_values: list[str] = []
+    for flag_name, kind in value_flag_kinds.items():
+        if (kind == OperandKind.TEXT and flag_name in flags
+                and isinstance(flags[flag_name], str)):
+            text_flag_values.extend(flags[flag_name].split("\n"))
+
     return ParsedArgs(
         flags=flags,
         args=classified,
         cache_paths=cache_paths,
         path_flag_values=path_flag_values,
+        raw_operands=raw_operands,
+        text_flag_values=text_flag_values,
     )
 
 

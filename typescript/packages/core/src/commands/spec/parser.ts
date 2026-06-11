@@ -36,6 +36,38 @@ function setValueFlag(
   }
 }
 
+interface MixedCluster {
+  bools: string[]
+  valueFlag: string
+  attached: string | null
+}
+
+// getopt-style cluster of bool flags ending in a value flag, e.g. -ne / -nepat.
+// Returns null when any character is unknown or no value flag terminates it.
+function matchMixedCluster(
+  tok: string,
+  boolFlags: ReadonlySet<string>,
+  valueFlags: ReadonlySet<string>,
+): MixedCluster | null {
+  const bools: string[] = []
+  const chars = tok.slice(1)
+  for (let idx = 0; idx < chars.length; idx++) {
+    const ch = chars[idx]
+    if (ch === undefined) break
+    const name = `-${ch}`
+    if (boolFlags.has(name)) {
+      bools.push(name)
+      continue
+    }
+    if (valueFlags.has(name)) {
+      const rest = chars.slice(idx + 1)
+      return { bools, valueFlag: name, attached: rest.length > 0 ? rest : null }
+    }
+    return null
+  }
+  return null
+}
+
 export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): ParsedArgs {
   const boolFlags = new Set<string>()
   const valueFlags = new Set<string>()
@@ -51,9 +83,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         boolFlags.add(opt.short)
       } else {
         valueFlags.add(opt.short)
-        if (opt.valueKind === OperandKind.PATH) {
-          valueFlagKinds.set(opt.short, OperandKind.PATH)
-        }
+        valueFlagKinds.set(opt.short, opt.valueKind)
         if (opt.repeatable) repeatFlags.add(opt.short)
         if (opt.numericShorthand) numericShorthandFlag = opt.short
       }
@@ -63,9 +93,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         longBoolFlags.add(opt.long)
       } else {
         longValueFlags.add(opt.long)
-        if (opt.valueKind === OperandKind.PATH) {
-          valueFlagKinds.set(opt.long, OperandKind.PATH)
-        }
+        valueFlagKinds.set(opt.long, opt.valueKind)
         if (opt.repeatable) repeatFlags.add(opt.long)
       }
     }
@@ -121,7 +149,12 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         setValueFlag(flags, tok, filteredArgv[i + 1] ?? '', repeatFlags)
         i += 2
       } else {
-        rawArgs.push(tok)
+        const eq = tok.indexOf('=')
+        if (eq !== -1 && longValueFlags.has(tok.slice(0, eq))) {
+          setValueFlag(flags, tok.slice(0, eq), tok.slice(eq + 1), repeatFlags)
+        } else {
+          rawArgs.push(tok)
+        }
         i += 1
       }
       continue
@@ -169,6 +202,22 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         continue
       }
 
+      const mixed = matchMixedCluster(tok, boolFlags, valueFlags)
+      if (mixed !== null) {
+        if (mixed.attached !== null) {
+          for (const name of mixed.bools) flags[name] = true
+          setValueFlag(flags, mixed.valueFlag, mixed.attached, repeatFlags)
+          i += 1
+          continue
+        }
+        if (i + 1 < filteredArgv.length) {
+          for (const name of mixed.bools) flags[name] = true
+          setValueFlag(flags, mixed.valueFlag, filteredArgv[i + 1] ?? '', repeatFlags)
+          i += 2
+          continue
+        }
+      }
+
       rawArgs.push(tok)
       i += 1
       continue
@@ -183,6 +232,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     .map((op) => op.kind)
 
   const classified: [string, OperandKind][] = []
+  const rawOperands: [string, OperandKind][] = []
   for (let j = 0; j < rawArgs.length; j++) {
     const arg = rawArgs[j]
     if (arg === undefined) continue
@@ -196,8 +246,10 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     }
     if (kind === OperandKind.PATH) {
       classified.push([resolvePath(cwd, arg), OperandKind.PATH])
+      rawOperands.push([arg, OperandKind.PATH])
     } else {
       classified.push([arg, OperandKind.TEXT])
+      rawOperands.push([arg, OperandKind.TEXT])
     }
   }
 
@@ -219,7 +271,22 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     }
   }
 
-  return new ParsedArgs({ flags, args: classified, cachePaths, pathFlagValues })
+  const textFlagValues: string[] = []
+  for (const [flagName, kind] of valueFlagKinds) {
+    if (kind === OperandKind.TEXT && flagName in flags) {
+      const val = flags[flagName]
+      if (typeof val === 'string') textFlagValues.push(...val.split('\n'))
+    }
+  }
+
+  return new ParsedArgs({
+    flags,
+    args: classified,
+    cachePaths,
+    pathFlagValues,
+    rawOperands,
+    textFlagValues,
+  })
 }
 
 export function parseToKwargs(parsed: ParsedArgs): Record<string, string | boolean> {

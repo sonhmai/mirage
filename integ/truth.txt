@@ -914,6 +914,10 @@ bar
 world
 bar
 baz
+=== grep_cluster_ne ===
+2:world
+=== du_max_depth_eq ===
+20	/data/sub
 === rg_e_flag ===
 world
 === rg_e_multi ===

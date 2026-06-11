@@ -314,6 +314,62 @@ describe('parseCommand — grep -f pattern file', () => {
   })
 })
 
+describe('parseCommand — GNU long flag =value syntax', () => {
+  it('parses --max-depth=1', () => {
+    const p = parseCommand(specOf('du'), ['--max-depth=1', '/data'], '/')
+    expect(p.flags['--max-depth']).toBe('1')
+    expect(p.paths()).toEqual(['/data'])
+  })
+
+  it('parses rg --type=md', () => {
+    const p = parseCommand(specOf('rg'), ['--type=md', 'pat', '/x'], '/')
+    expect(p.flags['--type']).toBe('md')
+    expect(p.texts()).toEqual(['pat'])
+    expect(p.paths()).toEqual(['/x'])
+  })
+
+  it('unknown long flag with = stays positional', () => {
+    const p = parseCommand(specOf('grep'), ['--color=auto', 'pat', '/a.txt'], '/')
+    expect(p.flags['--color']).toBeUndefined()
+    expect(p.texts()).toEqual(['--color=auto'])
+  })
+})
+
+describe('parseCommand — clusters ending in a value flag (getopt)', () => {
+  it('-ne pat: bools then value flag consuming the next arg', () => {
+    const p = parseCommand(specOf('grep'), ['-ne', 'pat', '/a.txt'], '/')
+    expect(p.flags['-n']).toBe(true)
+    expect(p.flags['-e']).toBe('pat')
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/a.txt'])
+  })
+
+  it('-nepat: bools then value flag with attached value', () => {
+    const p = parseCommand(specOf('grep'), ['-nepat', '/a.txt'], '/')
+    expect(p.flags['-n']).toBe(true)
+    expect(p.flags['-e']).toBe('pat')
+    expect(p.paths()).toEqual(['/a.txt'])
+  })
+
+  it('-im1: bool then numeric value attached', () => {
+    const p = parseCommand(specOf('grep'), ['-im1', 'pat', '/a.txt'], '/')
+    expect(p.flags['-i']).toBe(true)
+    expect(p.flags['-m']).toBe('1')
+    expect(p.texts()).toEqual(['pat'])
+  })
+
+  it('unknown char in cluster falls through to positional', () => {
+    const p = parseCommand(specOf('grep'), ['-nx', 'pat', '/a.txt'], '/')
+    expect(p.flags['-n']).toBeUndefined()
+    expect(p.texts()).toEqual(['-nx'])
+  })
+
+  it('find multi-char short flags still work', () => {
+    const p = parseCommand(specOf('find'), ['/data', '-name', '*.txt'], '/')
+    expect(p.flags['-name']).toBe('*.txt')
+  })
+})
+
 describe('parseToKwargs', () => {
   it('strips leading dashes and converts kebab to snake', () => {
     const parsed = new ParsedArgs({

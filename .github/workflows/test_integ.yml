@@ -495,6 +495,11 @@ jobs:
           ./python/.venv/bin/python integ/nextcloud.py 2>&1 \
             | bash integ/check_lines.sh integ/truth_nextcloud.txt
 
+      - name: Run shared cases on Nextcloud and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/nextcloud_cases.py > /tmp/nextcloud_cases.out
+          diff integ/truth.txt /tmp/nextcloud_cases.out
+
   gate:
     name: integ-gate
     runs-on: ubuntu-latest

@@ -57,3 +57,34 @@ empty output, and binary output are all part of the contract.
 - `spec/` (command definitions exported from the registries) is a different
   artifact: it describes the command *surface*; this folder describes command
   *behavior*.
+
+## Adding a backend
+
+Add a backend when its command behavior should be compared against the same
+expectations as the existing implementations:
+
+1. Add its name to `SUPPORTED_MATRIX` in the Python and/or TypeScript runner.
+
+2. Add runner setup that constructs a fresh workspace and resets backend state
+   between cases.
+
+3. For API-backed resources, use mocked clients with payloads shaped like real
+   provider responses. Do not call live APIs from this suite.
+
+4. Add the backend to the applicable case matrices:
+
+   ```json
+   "matrix": {
+     "python": ["ram", "disk", "redis", "github"],
+     "typescript": ["ram", "github"]
+   }
+   ```
+
+5. Run the focused Python and TypeScript conformance tests.
+
+Both runners are discovered by the existing Python and TypeScript CI test jobs;
+no workflow change is required.
+
+Only add a backend to a case when both should produce the same exact stdout,
+stderr, and exit code. Keep provider-specific API calls, cache behavior, error
+injection, and concurrency in backend tests.

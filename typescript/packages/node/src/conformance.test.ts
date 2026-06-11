@@ -30,6 +30,10 @@ const CONFORMANCE_DIR = join(
 )
 
 const ENC = new TextEncoder()
+const SUPPORTED_MATRIX: Record<string, ReadonlySet<string>> = {
+  python: new Set(['ram', 'disk', 'redis']),
+  typescript: new Set(['ram']),
+}
 
 interface ConformanceExpect {
   exit: number
@@ -78,6 +82,32 @@ function loadSeeds(): Map<string, Uint8Array> {
   return seeds
 }
 
+function validateMatrix(c: ConformanceCase, specName: string): void {
+  const unknownLanguages = Object.keys(c.matrix).filter(
+    (language) => !(language in SUPPORTED_MATRIX),
+  )
+  if (unknownLanguages.length > 0) {
+    throw new Error(
+      `case ${c.id} in ${specName} has unknown matrix language(s): ${unknownLanguages.sort().join(', ')}`,
+    )
+  }
+
+  for (const [language, backends] of Object.entries(c.matrix)) {
+    const supported = SUPPORTED_MATRIX[language]
+    if (supported === undefined) continue
+    const unsupported = backends.filter((backend) => !supported.has(backend))
+    if (unsupported.length > 0) {
+      throw new Error(
+        `case ${c.id} in ${specName} has unsupported ${language} backend(s): ${unsupported.sort().join(', ')}`,
+      )
+    }
+  }
+
+  if (!Object.values(c.matrix).some((backends) => backends.length > 0)) {
+    throw new Error(`case ${c.id} in ${specName} applies to no backend`)
+  }
+}
+
 function loadCases(): ConformanceCase[] {
   const cases: ConformanceCase[] = []
   const casesDir = join(CONFORMANCE_DIR, 'cases')
@@ -87,9 +117,7 @@ function loadCases(): ConformanceCase[] {
       cases: ConformanceCase[]
     }
     for (const c of doc.cases) {
-      if (!Object.values(c.matrix).some((backends) => backends.length > 0)) {
-        throw new Error(`case ${c.id} in ${name} applies to no backend`)
-      }
+      validateMatrix(c, name)
       cases.push(c)
     }
   }
@@ -141,4 +169,37 @@ describe('command conformance spec (ram)', () => {
       await runCase(c)
     })
   }
+})
+
+describe('command conformance matrix validation', () => {
+  it.each([
+    [{ pyhton: ['ram'] }, 'unknown matrix language'],
+    [{ typescript: ['disk'] }, 'unsupported typescript backend'],
+    [{ python: [], typescript: [] }, 'applies to no backend'],
+  ])('rejects invalid targets', (matrix, message) => {
+    const c = {
+      id: 'invalid_matrix',
+      cmd: 'true',
+      matrix,
+      expect: { exit: 0, stdout_text: '', stderr_text: '' },
+    }
+    expect(() => {
+      validateMatrix(c, 'invalid.json')
+    }).toThrow(message)
+  })
+
+  it('accepts supported targets', () => {
+    const c = {
+      id: 'valid_matrix',
+      cmd: 'true',
+      matrix: {
+        python: ['ram', 'disk', 'redis'],
+        typescript: ['ram'],
+      },
+      expect: { exit: 0, stdout_text: '', stderr_text: '' },
+    }
+    expect(() => {
+      validateMatrix(c, 'valid.json')
+    }).not.toThrow()
+  })
 })

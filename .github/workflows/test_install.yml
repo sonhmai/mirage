@@ -1,0 +1,237 @@
+name: Test (Install)
+
+permissions:
+  contents: read
+
+"on":
+  push:
+    branches: [main]
+    paths:
+      - python/**
+      - typescript/**
+      - .github/workflows/test_install.yml
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: read
+    outputs:
+      hit: ${{ steps.filter.outputs.hit }}
+    steps:
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            hit:
+              - 'python/**'
+              - 'typescript/**'
+              - '.github/workflows/test_install.yml'
+
+  python-minimal:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install base package only (no extras)
+        working-directory: python
+        run: |
+          uv venv .venv-min
+          uv pip install --python .venv-min/bin/python .
+
+      - name: Verify optional dependencies stay out of the base install
+        working-directory: python
+        run: |
+          .venv-min/bin/python - <<'PY'
+          import importlib.util
+          banned = ["numpy", "pypdfium2", "PIL", "mfusepy", "opendal", "aioboto3",
+                    "pandas", "redis", "asyncssh", "motor", "asyncpg", "av"]
+          present = [m for m in banned if importlib.util.find_spec(m) is not None]
+          assert not present, f"optional deps leaked into base install: {present}"
+          print("OK: no optional deps in base install")
+          PY
+
+      - name: Core workspace smoke test on base install
+        working-directory: python
+        run: |
+          .venv-min/bin/python - <<'PY'
+          import asyncio
+
+          import mirage
+
+          async def main():
+              ws = mirage.Workspace({"/ram": mirage.RAMResource()},
+                                    mode=mirage.MountMode.WRITE)
+              out = await ws.execute("echo hello | wc -c")
+              assert out.exit_code == 0 and out.stdout == b"6\n", out
+              out = await ws.execute("echo hi > /ram/a.txt")
+              assert out.exit_code == 0, out
+              out = await ws.execute("cat /ram/a.txt")
+              assert out.exit_code == 0 and out.stdout == b"hi\n", out
+              print("OK: core smoke passed on base install")
+
+          asyncio.run(main())
+          PY
+
+      - name: CLI entry point works on base install
+        working-directory: python
+        run: .venv-min/bin/mirage --help > /dev/null
+
+  python-extra:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { extra: s3, module: mirage.resource.s3 }
+          - { extra: ssh, module: mirage.resource.ssh }
+          - { extra: mongodb, module: mirage.resource.mongodb }
+          - { extra: postgres, module: mirage.resource.postgres }
+          - { extra: redis, module: mirage.resource.redis }
+          - { extra: email, module: mirage.resource.email }
+          - { extra: fuse, module: mirage.fuse.mount }
+          - { extra: pdf, module: mirage.core.filetype.pdf }
+          - { extra: parquet, module: mirage.core.filetype.parquet }
+          - { extra: hdf5, module: mirage.core.filetype.hdf5 }
+          - { extra: audio, module: mirage.commands.local_audio }
+          - { extra: nextcloud, module: mirage.resource.nextcloud }
+          - { extra: hf, module: mirage.resource.hf_buckets }
+          - { extra: langfuse, module: mirage.resource.langfuse }
+          - { extra: chroma, module: mirage.resource.chroma }
+          - { extra: lancedb, module: mirage.resource.lancedb }
+          - { extra: databricks, module: mirage.resource.databricks_volume }
+          - { extra: pydantic-ai, module: mirage.agents.pydantic_ai }
+          - { extra: openai, module: mirage.agents.openai_agents }
+          - { extra: agno, module: mirage.agents.agno }
+          - { extra: deepagents, module: mirage.agents.langchain }
+          - { extra: openhands, module: mirage.agents.openhands, python: "3.12" }
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python || '3.11' }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install base package + single extra
+        working-directory: python
+        run: |
+          uv venv .venv-x
+          uv pip install --python .venv-x/bin/python ".[${{ matrix.extra }}]"
+
+      - name: Import the extra's entry module
+        working-directory: python
+        run: |
+          .venv-x/bin/python -c "import importlib; importlib.import_module('${{ matrix.module }}'); print('OK: ${{ matrix.module }}')"
+
+  ts-minimal:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.32.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: typescript/pnpm-lock.yaml
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile
+
+      - name: Build core and node packages
+        working-directory: typescript
+        run: pnpm -r --filter ./packages/core --filter ./packages/node build
+
+      - name: Pack tarballs
+        working-directory: typescript
+        run: |
+          mkdir -p "$RUNNER_TEMP/minimal"
+          pnpm --filter @struktoai/mirage-core pack --pack-destination "$RUNNER_TEMP/minimal"
+          pnpm --filter @struktoai/mirage-node pack --pack-destination "$RUNNER_TEMP/minimal"
+
+      - name: Install as a bare consumer (no optional peers)
+        run: |
+          cd "$RUNNER_TEMP/minimal"
+          npm init -y > /dev/null
+          npm install ./struktoai-mirage-core-*.tgz ./struktoai-mirage-node-*.tgz
+
+      - name: Verify optional peers stay out of the bare install
+        run: |
+          cd "$RUNNER_TEMP/minimal"
+          for dep in @lancedb opendal mongodb pg redis ssh2 imapflow mailparser nodemailer music-metadata wavefile sherpa-onnx-node @zkochan; do
+            if [ -e "node_modules/$dep" ]; then
+              echo "FAIL: optional peer $dep leaked into bare install"
+              exit 1
+            fi
+          done
+          echo "OK: no optional peers in bare install"
+
+      - name: Core workspace smoke test on bare install
+        run: |
+          cd "$RUNNER_TEMP/minimal"
+          node --input-type=module - <<'JS'
+          import { Workspace, RAMResource, MountMode } from '@struktoai/mirage-node'
+          const dec = new TextDecoder()
+          const ws = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.WRITE })
+          let out = await ws.execute('echo hello | wc -c')
+          if (out.exitCode !== 0 || dec.decode(out.stdout).trim() !== '6') throw new Error('pipe smoke failed')
+          out = await ws.execute('echo hi > /ram/a.txt')
+          if (out.exitCode !== 0) throw new Error('write smoke failed')
+          out = await ws.execute('cat /ram/a.txt')
+          if (out.exitCode !== 0 || dec.decode(out.stdout) !== 'hi\n') throw new Error('read smoke failed')
+          console.log('OK: core smoke passed on bare install')
+          JS
+
+  gate:
+    name: test-install-gate
+    runs-on: ubuntu-latest
+    needs: [changes, python-minimal, python-extra, ts-minimal]
+    if: always()
+    steps:
+      - name: Check required jobs
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "$results"
+          case "$results" in
+            *failure*|*cancelled*) exit 1 ;;
+          esac

@@ -16,10 +16,12 @@ from pathlib import Path
 
 import pytest
 
-from mirage.agents.openhands import MirageWorkspace
-from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
-from mirage.workspace import Workspace
+pytest.importorskip("openhands")
+
+from mirage.agents.openhands import MirageWorkspace  # noqa: E402
+from mirage.resource.ram import RAMResource  # noqa: E402
+from mirage.types import MountMode  # noqa: E402
+from mirage.workspace import Workspace  # noqa: E402
 
 
 def _make_backing() -> Workspace:

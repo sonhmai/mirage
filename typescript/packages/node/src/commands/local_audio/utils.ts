@@ -14,7 +14,7 @@
 
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
-import { parseBuffer } from 'music-metadata'
+import { loadOptionalPeer } from '@struktoai/mirage-core'
 
 export interface LocalAudioMetadata {
   duration: number | null
@@ -174,6 +174,10 @@ export async function* transcribe(
 }
 
 export async function metadata(raw: Uint8Array): Promise<LocalAudioMetadata> {
+  const { parseBuffer } = await loadOptionalPeer(() => import('music-metadata'), {
+    feature: 'Audio metadata parsing',
+    packageName: 'music-metadata',
+  })
   const parsed = await parseBuffer(raw, undefined, { duration: true })
   const f = parsed.format
   return {

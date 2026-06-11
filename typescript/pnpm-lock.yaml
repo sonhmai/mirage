@@ -390,9 +390,6 @@ importers:
 
   packages/node:
     dependencies:
-      '@lancedb/lancedb':
-        specifier: ^0.30.0
-        version: 0.30.0(apache-arrow@21.1.0)
       '@struktoai/mirage-core':
         specifier: workspace:*
         version: link:../core
@@ -402,42 +399,12 @@ importers:
       fs-monkey:
         specifier: ^1.1.0
         version: 1.1.0
-      imapflow:
-        specifier: ^1.0.0
-        version: 1.3.2
-      mailparser:
-        specifier: ^3.6.0
-        version: 3.9.8
-      mongodb:
-        specifier: ^6.10.0
-        version: 6.21.0(socks@2.8.7)
-      music-metadata:
-        specifier: ^11.12.3
-        version: 11.12.3
-      nodemailer:
-        specifier: ^8.0.0
-        version: 8.0.7
-      opendal:
-        specifier: ^0.49.4
-        version: 0.49.4
-      pg:
-        specifier: ^8.13.0
-        version: 8.20.0
-      redis:
-        specifier: ^5.0.0
-        version: 5.12.1(@opentelemetry/api@1.9.0)
       sherpa-onnx-node:
         specifier: ^1.12.0
         version: 1.12.39
-      ssh2:
-        specifier: ^1.16.0
-        version: 1.17.0
       tree-sitter-bash:
         specifier: ^0.25.1
         version: 0.25.1
-      wavefile:
-        specifier: ^11.0.0
-        version: 11.0.0
       web-tree-sitter:
         specifier: ^0.26.8
         version: 0.26.8
@@ -445,6 +412,9 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.0.0
         version: 3.1033.0
+      '@lancedb/lancedb':
+        specifier: ^0.30.0
+        version: 0.30.0(apache-arrow@21.1.0)
       '@types/mailparser':
         specifier: ^3.4.6
         version: 3.4.6
@@ -457,6 +427,33 @@ importers:
       '@types/ssh2':
         specifier: ^1.15.0
         version: 1.15.5
+      imapflow:
+        specifier: ^1.3.2
+        version: 1.3.2
+      mailparser:
+        specifier: ^3.9.8
+        version: 3.9.8
+      mongodb:
+        specifier: ^6.10.0
+        version: 6.21.0(socks@2.8.7)
+      music-metadata:
+        specifier: ^11.12.3
+        version: 11.12.3
+      nodemailer:
+        specifier: ^8.0.7
+        version: 8.0.7
+      opendal:
+        specifier: ^0.49.4
+        version: 0.49.4
+      pg:
+        specifier: ^8.13.0
+        version: 8.20.0
+      redis:
+        specifier: ^5.0.0
+        version: 5.12.1(@opentelemetry/api@1.9.0)
+      ssh2:
+        specifier: ^1.16.0
+        version: 1.17.0
       tsup:
         specifier: ^8.5.0
         version: 8.5.1(postcss@8.5.10)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.3)
@@ -466,6 +463,9 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(tsx@4.21.0)(yaml@2.8.3)
+      wavefile:
+        specifier: ^11.0.0
+        version: 11.0.0
 
   packages/server:
     dependencies:

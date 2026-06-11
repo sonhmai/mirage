@@ -341,3 +341,37 @@ def test_mv_cross(cross):
         assert code != 0, (
             f"mv with read-only end ({cross.src_type}->{cross.dst_type}) "
             "should have failed")
+
+
+def test_cp_recursive_cross(cross):
+    if cross.src_type == "gdrive":
+        pytest.skip("gdrive recursive-source listing tracked as a follow-up")
+    cross.create_file(1, "tree/a.txt", b"aaa\n")
+    cross.create_file(1, "tree/sub/b.txt", b"bbb\n")
+    code = cross.exit("cp -r /m1/tree /m2/copied")
+    if _supports_write(cross.dst_type):
+        assert code == 0, (
+            f"cp -r failed for {cross.src_type}->{cross.dst_type}")
+        assert cross.run("cat /m2/copied/a.txt") == "aaa\n"
+        assert cross.run("cat /m2/copied/sub/b.txt") == "bbb\n"
+    else:
+        assert code != 0, (
+            f"cp -r into read-only {cross.dst_type} should have failed")
+
+
+def test_mv_recursive_cross(cross):
+    if cross.src_type == "gdrive":
+        pytest.skip("gdrive recursive-source listing tracked as a follow-up")
+    cross.create_file(1, "tree/a.txt", b"aaa\n")
+    cross.create_file(1, "tree/sub/b.txt", b"bbb\n")
+    code = cross.exit("mv /m1/tree /m2/moved")
+    if _supports_write(cross.dst_type) and _supports_delete(cross.src_type):
+        assert code == 0, (
+            f"mv -r failed for {cross.src_type}->{cross.dst_type}")
+        assert cross.run("cat /m2/moved/a.txt") == "aaa\n"
+        assert cross.run("cat /m2/moved/sub/b.txt") == "bbb\n"
+        assert cross.exit("cat /m1/tree/a.txt") != 0
+    else:
+        assert code != 0, (
+            f"mv -r with read-only end ({cross.src_type}->{cross.dst_type}) "
+            "should have failed")

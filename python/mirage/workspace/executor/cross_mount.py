@@ -49,8 +49,10 @@ async def handle_cross_mount(
     Copy and move follow POSIX operand semantics: every path except the final
     path is a source, and the final path is the destination. An existing
     destination directory maps each source to ``destination/basename``;
-    multiple sources require that directory form. Source data is read before
-    mutation so validation or read failures do not partially modify targets.
+    multiple sources require that directory form. Flat-file sources are read
+    before mutation so a read failure does not partially modify targets;
+    directory sources (``cp -r``, directory ``mv``) walk the tree, create
+    destination directories, and copy per file.
 
     Examples:
         ``cp /ram/a.txt /disk/a.txt`` produces scopes
@@ -134,34 +136,123 @@ async def _cross_target_exists(target: PathSpec, dispatch) -> bool:
     return True
 
 
+def _cross_result(cmd_str, errors):
+    if errors:
+        err = ("\n".join(errors) + "\n").encode()
+        return None, IOResult(exit_code=1,
+                              stderr=err), ExecutionNode(command=cmd_str,
+                                                         exit_code=1,
+                                                         stderr=err)
+    return None, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
+
+
+async def _partition_sources(cmd, sources, targets, recursive, dispatch):
+    # Split sources into files and directories. cp without -r omits
+    # directories (coreutils prints an error and still copies the files);
+    # mv always moves directories.
+    file_srcs: list[PathSpec] = []
+    file_targets: list[PathSpec] = []
+    dir_pairs: list[tuple[PathSpec, PathSpec]] = []
+    errors: list[str] = []
+    for src, target in zip(sources, targets):
+        src_stat, _ = await dispatch("stat", src)
+        if src_stat.type == FileType.DIRECTORY:
+            if cmd == "cp" and not recursive:
+                errors.append("cp: -r not specified; omitting directory "
+                              f"'{src.original}'")
+                continue
+            dir_pairs.append((src, target))
+        else:
+            file_srcs.append(src)
+            file_targets.append(target)
+    return file_srcs, file_targets, dir_pairs, errors
+
+
+async def _copy_tree(src_dir, dst_dir, dispatch, no_clobber):
+    # Recreate the source subtree under the destination. Directories are
+    # created top-down so each parent exists before its children; an
+    # already-present destination directory is merged into (coreutils cp
+    # -r), so a FileExistsError from mkdir is expected, not a failure.
+    try:
+        await dispatch("mkdir", dst_dir)
+    except FileExistsError:
+        pass
+    children, _ = await dispatch("readdir", src_dir)
+    for child in children:
+        name = child.rstrip("/").rsplit("/", 1)[-1]
+        child_src = PathSpec.from_str_path(child, src_dir.prefix)
+        child_dst = PathSpec.from_str_path(dst_dir.child(name), dst_dir.prefix)
+        child_stat, _ = await dispatch("stat", child_src)
+        if child_stat.type == FileType.DIRECTORY:
+            await _copy_tree(child_src, child_dst, dispatch, no_clobber)
+            continue
+        if no_clobber and await _cross_target_exists(child_dst, dispatch):
+            continue
+        data, _ = await dispatch("read", child_src)
+        await dispatch("write", child_dst, data=data)
+
+
+async def _remove_tree(src_dir, dispatch):
+    # Delete a source directory after a cross-mount move. Walks bottom-up
+    # (children before the dir) using ops every backend exposes, since
+    # rm_recursive is not registered on all of them.
+    children, _ = await dispatch("readdir", src_dir)
+    for child in children:
+        child_src = PathSpec.from_str_path(child, src_dir.prefix)
+        child_stat, _ = await dispatch("stat", child_src)
+        if child_stat.type == FileType.DIRECTORY:
+            await _remove_tree(child_src, dispatch)
+        else:
+            await dispatch("unlink", child_src)
+    await dispatch("rmdir", src_dir)
+
+
 async def _cross_cp(scopes, flag_kwargs, dispatch, cmd_str):
     sources, targets = await _cross_targets(scopes, dispatch)
-    source_data = await _read_cross_sources(sources, dispatch)
+    recursive = bool(
+        flag_kwargs.get("r") or flag_kwargs.get("R") or flag_kwargs.get("a"))
     no_clobber = flag_kwargs.get("n") is True
-    for target, data in zip(targets, source_data):
+    file_srcs, file_targets, dir_pairs, errors = await _partition_sources(
+        "cp", sources, targets, recursive, dispatch)
+    # Pre-read flat-file sources before writing so a read failure cannot
+    # leave partial writes; directory trees stream per file during the walk.
+    source_data = await _read_cross_sources(file_srcs, dispatch)
+    for target, data in zip(file_targets, source_data):
         # Check immediately before writing: earlier sources may share this
         # basename and create the target during the same command.
         if no_clobber and await _cross_target_exists(target, dispatch):
             continue
         await dispatch("write", target, data=data)
-    return None, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
+    for src, target in dir_pairs:
+        await _copy_tree(src, target, dispatch, no_clobber)
+    return _cross_result(cmd_str, errors)
 
 
 async def _cross_mv(scopes, flag_kwargs, dispatch, cmd_str):
     sources, targets = await _cross_targets(scopes, dispatch)
-    source_data = await _read_cross_sources(sources, dispatch)
     no_clobber = flag_kwargs.get("n") is True
-    moved_sources = []
-    for src, target, data in zip(sources, targets, source_data):
+    file_srcs, file_targets, dir_pairs, errors = await _partition_sources(
+        "mv", sources, targets, True, dispatch)
+    source_data = await _read_cross_sources(file_srcs, dispatch)
+    moved_files: list[PathSpec] = []
+    for src, target, data in zip(file_srcs, file_targets, source_data):
         # A skipped no-clobber target must also preserve its source.
         if no_clobber and await _cross_target_exists(target, dispatch):
             continue
         await dispatch("write", target, data=data)
-        moved_sources.append(src)
-    # Delete only sources whose destination write completed.
-    for src in moved_sources:
+        moved_files.append(src)
+    moved_dirs: list[PathSpec] = []
+    for src, target in dir_pairs:
+        if no_clobber and await _cross_target_exists(target, dispatch):
+            continue
+        await _copy_tree(src, target, dispatch, no_clobber)
+        moved_dirs.append(src)
+    # Delete only sources whose destination copy completed.
+    for src in moved_files:
         await dispatch("unlink", src)
-    return None, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
+    for src in moved_dirs:
+        await _remove_tree(src, dispatch)
+    return _cross_result(cmd_str, errors)
 
 
 async def _cross_diff(scopes, dispatch, cmd_str):

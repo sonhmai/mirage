@@ -210,7 +210,7 @@ async def _paste_cross(
     return output.encode(), IOResult()
 
 
-RESOURCES = ["ram", "s3", "disk"]
+RESOURCES = ["ram", "s3", "disk", "databricks_volume"]
 _RESOURCE_PAIRS = list(product(RESOURCES, repeat=2))
 
 _CROSS_FNS = [

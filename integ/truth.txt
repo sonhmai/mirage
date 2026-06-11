@@ -1306,3 +1306,27 @@ nested.txt
 exit=0
 nested
 content
+=== nl_pin_du ===
+exit=0
+14
+=== nl_pin_stat ===
+exit=0
+6
+=== nl_pin_file ===
+exit=0
+18
+=== nl_pin_tree ===
+exit=0
+145
+=== nl_pin_ls ===
+exit=0
+34
+=== nl_pin_wc ===
+exit=0
+14
+=== nl_pin_md5 ===
+exit=0
+46
+=== nl_pin_cmp ===
+exit=0
+47

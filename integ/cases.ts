@@ -426,6 +426,16 @@ export const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
   ["zip_create", "zip /data/sub/arch.zip /data/sub/nested.txt"],
   ["lnzip_ls_after", "ls -1 /data/sub"],
   ["ln_read_back", "cat /data/sub/link.txt"],
+
+  // ----- trailing-newline pins (wc -c counts the final \n) -----
+  ["nl_pin_du", "du /data/b.txt | wc -c"],
+  ["nl_pin_stat", "stat -c %n /data/b.txt | wc -c"],
+  ["nl_pin_file", "file /data/b.txt | wc -c"],
+  ["nl_pin_tree", "tree /data/sub | wc -c"],
+  ["nl_pin_ls", "ls /data/sub | wc -c"],
+  ["nl_pin_wc", "wc -l /data/b.txt | wc -c"],
+  ["nl_pin_md5", "md5 /data/b.txt | wc -c"],
+  ["nl_pin_cmp", "cmp /data/a.txt /data/b.txt | wc -c"],
 ];
 
 const ENC = new TextEncoder();

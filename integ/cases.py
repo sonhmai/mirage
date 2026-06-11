@@ -340,6 +340,9 @@ CASES: list[tuple[str, str]] = [
     ("grep_only_match_multi", "grep -o o /data/a.txt"),
     ("grep_recursive_dir", 'grep -r hello /data/sub'),
     ("grep_empty_pattern", "grep '' /data/b.txt"),
+    ("grep_e_flag", "grep -e world /data/a.txt"),
+    ("grep_e_n", "grep -n -e bar /data/a.txt"),
+    ("grep_e_multi_file", "grep -e hello /data/mixed.txt /data/a.txt"),
 
     # ----- paste advanced -----
     ("paste_s", "paste -s /data/b.txt"),
@@ -410,6 +413,7 @@ CASES: list[tuple[str, str]] = [
 
     # ----- gzip / zcat / zgrep -----
     ("zgrep_pipe", "cat /data/a.txt | gzip | zgrep world"),
+    ("zgrep_e_pipe", "cat /data/a.txt | gzip | zgrep -e world"),
     ("gzip_c_pipe", "cat /data/b.txt | gzip -c | zcat"),
 
     # ----- jq more -----

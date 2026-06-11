@@ -871,6 +871,13 @@ o
 
 === grep_empty_pattern ===
 
+=== grep_e_flag ===
+world
+=== grep_e_n ===
+4:bar
+=== grep_e_multi_file ===
+/data/mixed.txt:hello WORLD
+/data/a.txt:hello
 === paste_s ===
 1	2	3
 === paste_d_comma ===
@@ -1142,6 +1149,8 @@ deeper.txt
 === ls_sub_deep ===
 deeper.txt
 === zgrep_pipe ===
+world
+=== zgrep_e_pipe ===
 world
 === gzip_c_pipe ===
 1

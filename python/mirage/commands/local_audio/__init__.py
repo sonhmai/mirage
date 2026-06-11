@@ -14,10 +14,10 @@
 
 from mirage.commands.local_audio.disk import COMMANDS as DISK_COMMANDS
 from mirage.commands.local_audio.ram import COMMANDS as RAM_COMMANDS
-from mirage.commands.local_audio.s3 import COMMANDS as S3_COMMANDS
 
+# S3 audio commands need the s3 extra (aioboto3); import them via
+# mirage.commands.local_audio.s3 so the audio extra stays s3-free.
 AUDIO_COMMANDS = {
     "disk": DISK_COMMANDS,
     "ram": RAM_COMMANDS,
-    "s3": S3_COMMANDS,
 }

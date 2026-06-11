@@ -12,23 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
+from functools import partial
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.realpath import \
+    realpath as generic_realpath
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.github.stat import stat as stat_impl
+from mirage.core.github.glob import resolve_glob
+from mirage.core.github.stat import stat as github_stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _exists(accessor, path: str, index) -> bool:
-    try:
-        await stat_impl(accessor, path, index)
-        return True
-    except (FileNotFoundError, ValueError, Exception):
-        return False
 
 
 @command("realpath", resource="github", spec=SPECS["realpath"])
@@ -43,14 +38,10 @@ async def realpath(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if index is None:
-        raise ValueError("realpath: no tree loaded")
-    full = [prefix + p if prefix else p for p in (paths or [])]
-    lines: list[str] = []
-    for p in full:
-        resolved = posixpath.normpath(p)
-        if e and not await _exists(accessor, resolved, index):
-            raise FileNotFoundError(
-                f"realpath: '{p.original}': No such file or directory")
-        lines.append(resolved)
-    return ("\n".join(lines) + "\n").encode(), IOResult()
+    if paths and index is not None:
+        paths = await resolve_glob(accessor, paths, index)
+    return await generic_realpath(paths or [],
+                                  stat_fn=partial(github_stat, index=index),
+                                  accessor=accessor,
+                                  e=e,
+                                  m=m)

@@ -32,6 +32,7 @@ async def readdir(accessor, path: PathSpec,
         rest = path[len(prefix):]
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
             path = rest or "/"
+    path = path.rstrip("/") or "/"
     listing = await index.list_dir(path)
     if listing.entries is not None:
         if prefix and listing.entries and not listing.entries[0].startswith(

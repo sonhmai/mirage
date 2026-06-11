@@ -214,8 +214,9 @@ async def test_diff_two_files(github_env):
     )
     data = await materialize(stdout)
     text = data.decode()
-    assert "---" in text
-    assert "+++" in text
+    assert "4,6c4,6" in text
+    assert "< class User:" in text
+    assert "> class Item:" in text
     assert io.exit_code == 1
 
 

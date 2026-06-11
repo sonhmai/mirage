@@ -203,6 +203,28 @@ async def main() -> None:
     r = await ws.execute("dirname /github/python/mirage/core/s3/read.py")
     print(await r.stdout_str())
 
+    print("=== realpath ===")
+    r = await ws.execute("realpath /github/python/mirage/../mirage/types.py")
+    print(await r.stdout_str())
+
+    print("=== sed -n (line range) ===")
+    r = await ws.execute("sed -n '1,3p' /github/python/mirage/types.py")
+    print(await r.stdout_str())
+
+    print("=== sed s/// (file) ===")
+    r = await ws.execute(
+        "sed 's/import/IMPORT/' /github/python/mirage/core/s3/read.py")
+    print(await r.stdout_str())
+
+    print("=== awk (file) ===")
+    r = await ws.execute(
+        "awk '{print $1}' /github/python/mirage/core/s3/read.py")
+    print(await r.stdout_str())
+
+    print("=== cut -c (file) ===")
+    r = await ws.execute("cut -c1-10 /github/python/mirage/types.py")
+    print(await r.stdout_str())
+
     print("=== tree -L ===")
     r = await ws.execute("tree -L 2 /github/python/mirage/")
     print(await r.stdout_str())

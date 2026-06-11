@@ -218,7 +218,22 @@ export async function grepGeneric(
 
     if (paths.length > 1) {
       const allResults: string[] = []
+      const multiWarnings: string[] = []
       for (const p of paths) {
+        let s: FileStat
+        try {
+          s = await statFn(p.original)
+        } catch (err) {
+          if ((err as { code?: string }).code === 'ENOENT') {
+            multiWarnings.push(`grep: ${p.original}: No such file or directory`)
+            continue
+          }
+          throw err
+        }
+        if (s.type === FileType.DIRECTORY) {
+          multiWarnings.push(`grep: ${p.original}: Is a directory`)
+          continue
+        }
         const data = splitLinesNoTrailing(DEC.decode(await materialize(stream(p))))
         const hits = grepLines(p.original, data, pat, f)
         if (f.countOnly) {
@@ -227,9 +242,18 @@ export async function grepGeneric(
           for (const h of hits) allResults.push(`${p.original}:${h}`)
         }
       }
-      if (allResults.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+      const multiStderr =
+        multiWarnings.length > 0 ? ENC.encode(multiWarnings.join('\n') + '\n') : undefined
+      if (allResults.length === 0)
+        return [
+          new Uint8Array(0),
+          new IOResult({
+            exitCode: 1,
+            ...(multiStderr !== undefined ? { stderr: multiStderr } : {}),
+          }),
+        ]
       const out: ByteSource = ENC.encode(allResults.join('\n') + '\n')
-      return [out, new IOResult()]
+      return [out, new IOResult(multiStderr !== undefined ? { stderr: multiStderr } : {})]
     }
 
     await stat(first)

@@ -14,6 +14,7 @@
 
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import { PathSpec } from '../../types.ts'
+import { lstripSlash, stripSlash } from '../../util/slash.ts'
 import { type GitHubCodeSearchResult, searchCode } from './_client.ts'
 
 export type { GitHubCodeSearchResult } from './_client.ts'
@@ -40,15 +41,24 @@ export async function narrowPaths(
   pattern: string,
   paths: readonly PathSpec[],
 ): Promise<PathSpec[]> {
+  const mountPrefix = paths[0]?.prefix ?? ''
   const narrowed: string[] = []
   for (const p of paths) {
-    const raw = stripPrefix(p)
+    const pathFilter = stripSlash(stripPrefix(p))
     try {
-      const results = await search(accessor, pattern, raw === '/' ? undefined : raw)
+      const results = await search(accessor, pattern, pathFilter === '' ? undefined : pathFilter)
       for (const r of results) narrowed.push(r.path)
     } catch {
       // ignore — search is best-effort
     }
   }
-  return narrowed.map((n) => new PathSpec({ original: n, directory: '' }))
+  return narrowed.map(
+    (n) =>
+      new PathSpec({
+        original: `${mountPrefix}/${lstripSlash(n)}`,
+        directory: '',
+        prefix: mountPrefix,
+        resolved: true,
+      }),
+  )
 }

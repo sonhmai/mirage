@@ -140,6 +140,11 @@ async function main(): Promise<void> {
   await header(ws, 'file', 'file /github/python/mirage/types.py')
   await header(ws, 'basename', 'basename /github/python/mirage/core/s3/read.py')
   await header(ws, 'dirname', 'dirname /github/python/mirage/core/s3/read.py')
+  await header(ws, 'realpath', 'realpath /github/python/mirage/../mirage/types.py')
+  await header(ws, 'sed -n (line range)', "sed -n '1,3p' /github/python/mirage/types.py")
+  await header(ws, 'sed s/// (file)', "sed 's/import/IMPORT/' /github/python/mirage/core/s3/read.py")
+  await header(ws, 'awk (file)', "awk '{print $1}' /github/python/mirage/core/s3/read.py")
+  await header(ws, 'cut -c (file)', 'cut -c1-10 /github/python/mirage/types.py')
   await header(ws, 'tree -L', 'tree -L 2 /github/python/mirage/')
   await header(ws, 'rg', "rg 'BaseResource' /github/python/mirage/resource/")
 

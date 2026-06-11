@@ -13,7 +13,39 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { fnmatch } from '../../util/fnmatch.ts'
+import { stripSlash } from '../../util/slash.ts'
+import type { PathSpec } from '../../types.ts'
 import type { TreeEntry } from './entry.ts'
+
+export function scopeRelativeKey(path: PathSpec): string {
+  const prefix = path.prefix
+  let key = path.original
+  if (prefix !== '' && key.startsWith(prefix)) {
+    key = key.slice(prefix.length) || '/'
+  }
+  return key
+}
+
+export function isRepoRoot(key: string): boolean {
+  return key === '' || key === '/'
+}
+
+export function countScopeFiles(tree: Record<string, TreeEntry>, key: string): number {
+  // tree keys are repo-relative without a leading slash
+  if (isRepoRoot(key)) {
+    let count = 0
+    for (const entry of Object.values(tree)) if (entry.type === 'blob') count += 1
+    return count
+  }
+  const norm = stripSlash(key)
+  const prefix = `${norm}/`
+  let count = 0
+  for (const [p, entry] of Object.entries(tree)) {
+    if (entry.type !== 'blob') continue
+    if (p === norm || p.startsWith(prefix)) count += 1
+  }
+  return count
+}
 
 export function shouldUseSearch(
   isRegex: boolean,

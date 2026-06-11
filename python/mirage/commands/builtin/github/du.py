@@ -27,8 +27,8 @@ from mirage.types import PathSpec
 
 
 async def _du_total(index: IndexCacheStore, path: PathSpec) -> int:
-    key = path.original
-    du_prefix = key + "/" if key else ""
+    key = "/" + path.key if path.key else "/"
+    du_prefix = key.rstrip("/") + "/"
     total = 0
     for ep, entry in index._entries.items():
         if (ep == key or ep.startswith(du_prefix)) and entry.size is not None:

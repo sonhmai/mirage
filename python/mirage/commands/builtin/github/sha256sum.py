@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import hashlib
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.sha256sum import \
+    sha256sum as generic_sha256sum
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.github.glob import resolve_glob
@@ -37,19 +40,11 @@ async def sha256sum(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths and index is not None:
         paths = await resolve_glob(accessor, paths, index)
-        lines: list[str] = []
-        for p in paths:
-            data = await github_read(accessor, p, index)
-            h = hashlib.sha256(data).hexdigest()
-            lines.append(h + "  " + p.original)
-        return ("\n".join(lines) + "\n").encode(), IOResult()
-    if stdin is not None:
-        if isinstance(stdin, bytes):
-            raw = stdin
-        else:
-            raw = b""
-            async for chunk in stdin:
-                raw += chunk
-        h = hashlib.sha256(raw).hexdigest()
-        return (h + "  -\n").encode(), IOResult()
-    raise ValueError("sha256sum: missing input")
+    return await generic_sha256sum(
+        paths,
+        read_bytes=partial(github_read, index=index),
+        read_stream=partial(stream_from_bytes, github_read, index=index),
+        accessor=accessor,
+        stdin=stdin,
+        check=c,
+    )

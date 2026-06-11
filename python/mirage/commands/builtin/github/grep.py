@@ -13,54 +13,25 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from functools import partial
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.constants import PatternType
-from mirage.commands.builtin.grep_helper import (classify_pattern,
-                                                 compile_pattern,
-                                                 grep_files_only, grep_lines,
-                                                 grep_recursive, grep_stream)
-from mirage.commands.builtin.utils.output import (format_optional_records,
-                                                  format_records)
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.grep_helper import classify_pattern
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.github.constants import SCOPE_ERROR, SCOPE_WARN
 from mirage.core.github.glob import resolve_glob
 from mirage.core.github.read import read as github_read
-from mirage.core.github.readdir import readdir as _readdir
+from mirage.core.github.readdir import readdir as github_readdir
 from mirage.core.github.scope import (count_scope_files, is_repo_root,
                                       scope_relative_key, should_use_search)
 from mirage.core.github.search import narrow_paths
-from mirage.core.github.stat import stat as _stat
-from mirage.io.stream import exit_on_empty, quiet_match
+from mirage.core.github.stat import stat as github_stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision import ProvisionResult
-from mirage.types import FileType, PathSpec
-
-
-async def _rb(accessor, index, prefix, path) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(original=path, directory=path, prefix=prefix)
-    return await github_read(accessor, path, index)
-
-
-async def _rd(accessor, index, prefix, path) -> list[str]:
-    if index is None:
-        raise FileNotFoundError(path)
-    if isinstance(path, str):
-        path = PathSpec(original=path, directory=path, prefix=prefix)
-    return await _readdir(accessor, path, index)
-
-
-async def _st(accessor, index, prefix, path):
-    if index is None:
-        raise FileNotFoundError(path)
-    if isinstance(path, str):
-        path = PathSpec(original=path, directory=path, prefix=prefix)
-    return await _stat(accessor, path, index)
+from mirage.types import PathSpec
 
 
 async def _estimate_recursive(index, path: str) -> tuple[int, int]:
@@ -156,12 +127,8 @@ async def grep(
     after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
     before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
 
+    resolved: list[PathSpec] = []
     if paths and index is not None:
-        mount_prefix = paths[0].prefix if paths else ""
-        rd = partial(_rd, accessor, index, mount_prefix)
-        st = partial(_st, accessor, index, mount_prefix)
-        rb = partial(_rb, accessor, index, mount_prefix)
-
         key = scope_relative_key(paths[0])
         file_count = count_scope_files(index._entries, key)
         pt = classify_pattern(pattern, F)
@@ -174,139 +141,37 @@ async def grep(
             narrowed = await narrow_paths(accessor.config, accessor.owner,
                                           accessor.repo, pattern, paths)
             if narrowed:
-                paths = narrowed
+                resolved = narrowed
                 file_count = len(narrowed)
             else:
-                paths = await resolve_glob(accessor, paths, index)
+                resolved = await resolve_glob(accessor, paths, index)
         else:
-            paths = await resolve_glob(accessor, paths, index)
+            resolved = await resolve_glob(accessor, paths, index)
         if file_count > SCOPE_ERROR:
             msg = f"grep: {file_count} files in scope, narrow the path\n"
             return b"", IOResult(exit_code=1, stderr=msg.encode())
 
-        multi = len(paths) > 1 or r or R
-
-        if args_l:
-            all_results: list[str] = []
-            warnings_l: list[str] = []
-            for p in paths:
-                s = await st(p)
-                if s.type == FileType.DIRECTORY:
-                    if r or R:
-                        res = await grep_files_only(
-                            rd,
-                            st,
-                            rb,
-                            p.original,
-                            pattern,
-                            recursive=True,
-                            ignore_case=i,
-                            invert=v,
-                            line_numbers=n,
-                            count_only=c,
-                            fixed_string=F,
-                            only_matching=o,
-                            max_count=max_count,
-                            whole_word=w,
-                            warnings=warnings_l,
-                        )
-                        all_results.extend(res)
-                    else:
-                        warnings_l.append(
-                            f"grep: {p.original}: Is a directory")
-                    continue
-                res = await grep_files_only(
-                    rd,
-                    st,
-                    rb,
-                    p.original,
-                    pattern,
-                    recursive=False,
-                    ignore_case=i,
-                    invert=v,
-                    line_numbers=n,
-                    count_only=c,
-                    fixed_string=F,
-                    only_matching=o,
-                    max_count=max_count,
-                    whole_word=w,
-                    warnings=warnings_l,
-                )
-                all_results.extend(res)
-            stderr = format_optional_records(warnings_l)
-            if not all_results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            return format_records(all_results), IOResult(stderr=stderr)
-
-        pat = compile_pattern(pattern, i, F, w)
-        all_results = []
-        warnings_g: list[str] = []
-        for p in paths:
-            s = await st(p)
-            if s.type == FileType.DIRECTORY:
-                if r or R:
-                    res = await grep_recursive(
-                        rd,
-                        st,
-                        rb,
-                        p.original,
-                        pat,
-                        invert=v,
-                        line_numbers=n,
-                        count_only=c,
-                        files_only=False,
-                        only_matching=o,
-                        max_count=max_count,
-                        warnings=warnings_g,
-                    )
-                    all_results.extend(res)
-                else:
-                    warnings_g.append(f"grep: {p.original}: Is a directory")
-                continue
-            try:
-                data = await rb(p.original)
-            except FileNotFoundError:
-                warnings_g.append(
-                    f"grep: {p.original}: No such file or directory")
-                continue
-            text = data.decode(errors="replace")
-            file_lines = grep_lines(p.original,
-                                    text.splitlines(),
-                                    pat,
-                                    invert=v,
-                                    line_numbers=n,
-                                    count_only=c,
-                                    files_only=False,
-                                    only_matching=o,
-                                    max_count=max_count)
-            if multi:
-                if c and file_lines:
-                    all_results.append(f"{p.original}:{file_lines[0]}")
-                else:
-                    all_results.extend(f"{p.original}:{line}"
-                                       for line in file_lines)
-            else:
-                all_results.extend(file_lines)
-        stderr = format_optional_records(warnings_g)
-        if not all_results:
-            return b"", IOResult(exit_code=1, stderr=stderr)
-        return format_records(all_results), IOResult(stderr=stderr)
-
-    source = _resolve_source(stdin, "grep: usage: grep [flags] pattern [path]")
-    pat = compile_pattern(pattern, i, F, w)
-    stream = grep_stream(
-        source,
-        pat,
+    return await generic_grep(
+        resolved,
+        pattern=pattern,
+        readdir=github_readdir,
+        stat=github_stat,
+        read_bytes=github_read,
+        read_stream=None,
+        accessor=accessor,
+        stdin=stdin,
+        ignore_case=i,
         invert=v,
         line_numbers=n,
-        only_matching=o,
-        max_count=max_count,
         count_only=c,
+        files_only=args_l,
+        whole_word=w,
+        fixed_string=F,
+        only_matching=o,
+        quiet=q,
+        recursive=r or R,
+        max_count=max_count,
         after_context=after_ctx,
         before_context=before_ctx,
+        index=index,
     )
-    if q:
-        io = IOResult(exit_code=1)
-        return quiet_match(stream, io), io
-    io = IOResult()
-    return exit_on_empty(stream, io), io

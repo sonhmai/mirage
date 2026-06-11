@@ -42,6 +42,11 @@ export function compilePattern(
   return new RegExp(patStr, ignoreCase ? 'i' : '')
 }
 
+export function isRegexPattern(pattern: string, fixedString: boolean): boolean {
+  if (fixedString) return false
+  return !/^[\w\s\-.]+$/.test(pattern)
+}
+
 export interface GrepLinesOptions {
   invert: boolean
   lineNumbers: boolean

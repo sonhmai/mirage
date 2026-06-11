@@ -184,7 +184,18 @@ async def grep(
 
         if len(paths) > 1:
             all_results = []
+            multi_warnings: list[str] = []
             for p in paths:
+                try:
+                    s = await st(p.original)
+                except FileNotFoundError:
+                    multi_warnings.append(
+                        f"grep: {p.original}: No such file or directory")
+                    continue
+                if s.type == FileType.DIRECTORY:
+                    multi_warnings.append(
+                        f"grep: {p.original}: Is a directory")
+                    continue
                 data = split_lines((await
                                     rb(p.original)).decode(errors="replace"))
                 hits = grep_lines(p.original, data, pat, invert, line_numbers,
@@ -197,9 +208,10 @@ async def grep(
                     all_results.extend(hits)
                 else:
                     all_results.extend(f"{p.original}:{r}" for r in hits)
+            stderr = format_optional_records(multi_warnings)
             if not all_results:
-                return b"", IOResult(exit_code=1)
-            return format_records(all_results), IOResult()
+                return b"", IOResult(exit_code=1, stderr=stderr)
+            return format_records(all_results), IOResult(stderr=stderr)
 
         if read_stream is not None:
             source: AsyncIterator[bytes] = read_stream(accessor, paths[0])

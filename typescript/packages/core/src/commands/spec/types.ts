@@ -47,13 +47,16 @@ export class Option {
 
 export interface OperandInit {
   kind?: OperandKind
+  providedBy?: string | null
 }
 
 export class Operand {
   readonly kind: OperandKind
+  readonly providedBy: string | null
 
   constructor(init: OperandInit = {}) {
     this.kind = init.kind ?? OperandKind.PATH
+    this.providedBy = init.providedBy ?? null
     Object.freeze(this)
   }
 }

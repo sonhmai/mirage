@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { specOf } from './builtins.ts'
 import { parseCommand, parseToKwargs, resolvePath } from './parser.ts'
 import { CommandSpec, Operand, OperandKind, Option, ParsedArgs } from './types.ts'
 
@@ -210,6 +211,53 @@ describe('parseCommand — clustered flags shift positionals when one is missing
     expect(p.flags).toEqual({ '-R': true, '-I': true, '-l': true })
     expect(p.texts()).toEqual(['Base3\\|base3'])
     expect(p.paths()).toEqual(['/r2/Review'])
+  })
+})
+
+describe('parseCommand — providedBy frees the positional slot', () => {
+  // POSIX: `grep -e pat file` must behave like `grep pat file`. Without
+  // providedBy, the pattern positional still consumed the first raw arg, so
+  // the file path was classified as TEXT and paths() came back empty.
+  const grepLike = new CommandSpec({
+    options: [
+      new Option({ short: '-n' }),
+      new Option({ short: '-e', valueKind: OperandKind.TEXT }),
+    ],
+    positional: [new Operand({ kind: OperandKind.TEXT, providedBy: '-e' })],
+    rest: new Operand({ kind: OperandKind.PATH }),
+  })
+
+  it('classifies remaining args as rest paths when the flag is present', () => {
+    const p = parseCommand(grepLike, ['-e', 'orange', '/data/a.txt'], '/')
+    expect(p.flags['-e']).toBe('orange')
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/data/a.txt'])
+  })
+
+  it('keeps the positional slot when the flag is absent', () => {
+    const p = parseCommand(grepLike, ['orange', '/data/a.txt'], '/')
+    expect(p.texts()).toEqual(['orange'])
+    expect(p.paths()).toEqual(['/data/a.txt'])
+  })
+
+  it('handles extra flags and multiple paths', () => {
+    const p = parseCommand(grepLike, ['-n', '-e', 'pat', '/a.txt', '/b.txt'], '/')
+    expect(p.flags['-n']).toBe(true)
+    expect(p.paths()).toEqual(['/a.txt', '/b.txt'])
+  })
+
+  it('fixes `grep -e pat file` with the real builtin spec', () => {
+    const p = parseCommand(specOf('grep'), ['-e', 'orange', '/data/a.txt'], '/')
+    expect(p.flags['-e']).toBe('orange')
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/data/a.txt'])
+  })
+
+  it('fixes `zgrep -e pat file` with the real builtin spec', () => {
+    const p = parseCommand(specOf('zgrep'), ['-e', 'orange', '/data/a.gz'], '/')
+    expect(p.flags['-e']).toBe('orange')
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/data/a.gz'])
   })
 })
 

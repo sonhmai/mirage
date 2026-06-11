@@ -181,7 +181,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-C', valueKind: OperandKind.TEXT }),
       new Option({ short: '-e', valueKind: OperandKind.TEXT }),
     ],
-    positional: [new Operand({ kind: OperandKind.TEXT })],
+    positional: [new Operand({ kind: OperandKind.TEXT, providedBy: '-e' })],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
   rg: new CommandSpec({
@@ -636,7 +636,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-q' }),
       new Option({ short: '-w' }),
     ],
-    positional: [new Operand({ kind: OperandKind.TEXT })],
+    positional: [new Operand({ kind: OperandKind.TEXT, providedBy: '-e' })],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
   mktemp: new CommandSpec({

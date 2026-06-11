@@ -40,7 +40,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-C", value_kind=OperandKind.TEXT),
             Option(short="-e", value_kind=OperandKind.TEXT),
         ),
-        positional=(Operand(kind=OperandKind.TEXT), ),
+        positional=(Operand(kind=OperandKind.TEXT, provided_by="-e"), ),
         rest=Operand(kind=OperandKind.PATH),
     ),
     'search':
@@ -129,7 +129,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-q"),
             Option(short="-w"),
         ),
-        positional=(Operand(kind=OperandKind.TEXT), ),
+        positional=(Operand(kind=OperandKind.TEXT, provided_by="-e"), ),
         rest=Operand(kind=OperandKind.PATH),
     ),
 }

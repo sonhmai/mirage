@@ -56,8 +56,6 @@ def parse_command(
                 if opt.value_kind == OperandKind.PATH:
                     value_flag_kinds[opt.long] = OperandKind.PATH
 
-    positional: tuple[OperandKind,
-                      ...] = tuple(op.kind for op in spec.positional)
     rest_kind: OperandKind | None = (spec.rest.kind
                                      if spec.rest is not None else None)
 
@@ -147,6 +145,10 @@ def parse_command(
 
         raw_args.append(tok)
         i += 1
+
+    positional: tuple[OperandKind, ...] = tuple(
+        op.kind for op in spec.positional
+        if op.provided_by is None or op.provided_by not in flags)
 
     classified: list[tuple[str, OperandKind]] = []
     for j, arg in enumerate(raw_args):

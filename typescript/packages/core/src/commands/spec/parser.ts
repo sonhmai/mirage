@@ -54,7 +54,6 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     }
   }
 
-  const positional: OperandKind[] = spec.positional.map((op) => op.kind)
   const restKind: OperandKind | null = spec.rest !== null ? spec.rest.kind : null
 
   const cachePaths: string[] = []
@@ -161,6 +160,10 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     rawArgs.push(tok)
     i += 1
   }
+
+  const positional: OperandKind[] = spec.positional
+    .filter((op) => op.providedBy === null || !(op.providedBy in flags))
+    .map((op) => op.kind)
 
   const classified: [string, OperandKind][] = []
   for (let j = 0; j < rawArgs.length; j++) {

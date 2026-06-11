@@ -39,6 +39,9 @@ Set your token in the ACME_TOKEN environment variable.
 If you exceed the limit you receive HTTP 429 and must back off.
 === grep_c_rate ===
 1
+=== grep_e_multi ===
+Requests are rate limited to 100 calls per minute per token.
+If you exceed the limit you receive HTTP 429 and must back off.
 === grep_r_refund ===
 /knowledge/policies/refunds:Email support to start a refund with your order id.
 /knowledge/policies/refunds:Approved refunds are processed within five business days.

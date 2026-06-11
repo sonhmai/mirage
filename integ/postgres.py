@@ -56,6 +56,8 @@ CASES: list[tuple[str, str]] = [
     ("stat_rows", f"stat {MOUNT}/public/tables/books/rows.jsonl"),
     ("grep_c_title", f"grep -c title {MOUNT}/public/tables/books/rows.jsonl"),
     ("grep_ada", f"grep ada {MOUNT}/public/tables/books/rows.jsonl"),
+    ("grep_e_multi",
+     f"grep -n -e ada -e ben {MOUNT}/public/tables/books/rows.jsonl"),
     ("grep_schema_scope", f"grep ada {MOUNT}/public/tables/"),
     ("rg_schema_scope", f"rg ben {MOUNT}/public/"),
     ("find_rows", f"find {MOUNT}/public/ -name rows.jsonl"),

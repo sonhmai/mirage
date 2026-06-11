@@ -132,6 +132,7 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["head_1", "head -n 1 {root}guides/quickstart.md"],
   ["tail_1", "tail -n 1 {root}guides/quickstart.md"],
   ["grep_429", "grep 429 {root}guides/auth.md"],
+  ["grep_e_multi", "grep -e bearer -e 429 {root}guides/auth.md"],
   ["grep_c_rate", "grep -c rate {root}guides/auth.md"],
   ["grep_r_refund", "grep -r refund {root}policies/"],
   ["grep_cold_count", "grep -c sell {root}policies/privacy.md"],

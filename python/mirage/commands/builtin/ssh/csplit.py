@@ -32,7 +32,7 @@ async def csplit(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    f: str | None = None,
+    f: str | PathSpec | None = None,
     n: str | None = None,
     b: str | None = None,
     k: bool = False,

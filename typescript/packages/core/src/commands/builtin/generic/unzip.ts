@@ -154,7 +154,7 @@ export async function unzipGeneric(
     await ensureParents(mkdir, outPath)
     await write(makePathSpec(outPath), e.data)
     const reportPath = mountPrefix !== '' ? mountPrefix + outPath : outPath
-    writes[reportPath] = e.data
+    writes[outPath] = e.data
     if (!quiet) outputLines.push(`  inflating: ${reportPath}`)
   }
   const stdout: ByteSource | null =

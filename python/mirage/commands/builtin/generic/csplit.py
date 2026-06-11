@@ -40,12 +40,14 @@ async def csplit(
     write_bytes: Callable[..., Awaitable[None]],
     accessor: object = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    prefix: str = "xx",
+    prefix: str | PathSpec = "xx",
     digits: int = 2,
     suffix_format: str | None = None,
     keep_on_error: bool = False,
     silent: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
+    if isinstance(prefix, PathSpec):
+        prefix = prefix.strip_prefix
     suffix_fmt = suffix_format if suffix_format else f"%0{digits}d"
     if paths:
         raw = await read_bytes(accessor, paths[0])

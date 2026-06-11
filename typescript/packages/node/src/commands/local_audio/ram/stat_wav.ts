@@ -43,7 +43,7 @@ async function statWavCommand(
     const raw = readRam(accessor, first)
     const meta = await metadata(raw)
     const out: ByteSource = ENC.encode(formatMetadata(meta, first.original, null))
-    return [out, new IOResult({ reads: { [first.original]: raw }, cache: [first.original] })]
+    return [out, new IOResult({ reads: { [first.stripPrefix]: raw }, cache: [first.stripPrefix] })]
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return [

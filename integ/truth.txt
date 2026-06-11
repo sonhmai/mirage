@@ -1217,3 +1217,70 @@ hello
 exit=1
 === cp_reject_multi_nondir ===
 exit=1
+=== inv_ls_warm ===
+exit=0
+deep
+nested.txt
+=== inv_touch ===
+exit=0
+=== inv_rm ===
+exit=0
+=== inv_gone ===
+exit=1
+=== poison_concat ===
+exit=0
+apple
+banana
+cherry
+banana
+date
+elder
+=== poison_first_intact ===
+exit=0
+apple
+banana
+cherry
+=== poison_second_intact ===
+exit=0
+banana
+date
+elder
+=== pipe_concat_head_first ===
+exit=0
+apple
+banana
+=== pipe_concat_head_span ===
+exit=0
+apple
+banana
+cherry
+banana
+=== pipe_after_first ===
+exit=0
+apple
+banana
+cherry
+=== pipe_after_second ===
+exit=0
+banana
+date
+elder
+=== lnzip_ls_warm ===
+exit=0
+deep
+nested.txt
+=== ln_create ===
+exit=0
+=== zip_create ===
+exit=0
+  adding: data/sub/nested.txt
+=== lnzip_ls_after ===
+exit=0
+arch.zip
+deep
+link.txt
+nested.txt
+=== ln_read_back ===
+exit=0
+nested
+content

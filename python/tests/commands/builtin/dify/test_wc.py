@@ -29,7 +29,7 @@ async def test_wc_counts_document(monkeypatch, dify_accessor, dify_index,
 
     assert await materialize(stdout) == (
         b" 2  3 16 /knowledge/guides/quickstart.md\n")
-    assert io.cache == [guide_path.original]
+    assert io.cache == [guide_path.strip_prefix]
 
 
 @pytest.mark.asyncio

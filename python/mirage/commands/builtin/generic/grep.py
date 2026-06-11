@@ -41,6 +41,7 @@ async def grep(
     after_context: int = 0,
     before_context: int = 0,
     scope_check: Callable[..., Awaitable[str | None]] | None = None,
+    show_filename: bool = False,
     index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run grep-style fallback search over backend paths or stdin.
@@ -73,6 +74,8 @@ async def grep(
         before_context (int): `-B`, leading context lines.
         scope_check (Callable[..., Awaitable[str | None]] | None): Optional
             backend warning hook.
+        show_filename (bool): Force filename prefixes on a single path,
+            for callers that pre-expanded a multi-file scope.
         index (IndexCacheStore | None): Optional cache index for wrapped
             backend calls.
 
@@ -182,7 +185,7 @@ async def grep(
 
         pat = compile_pattern(pattern, ignore_case, fixed_string, whole_word)
 
-        if len(paths) > 1:
+        if len(paths) > 1 or show_filename:
             all_results = []
             for p in paths:
                 data = split_lines((await

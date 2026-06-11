@@ -35,7 +35,7 @@ async def zip_cmd(
     await write_bytes(accessor, archive_path, archive)
     stdout = ("\n".join(output_lines) +
               "\n").encode() if output_lines else None
-    return stdout, IOResult(writes={archive_path.original: archive})
+    return stdout, IOResult(writes={archive_path.strip_prefix: archive})
 
 
 __all__ = ["zip_cmd"]

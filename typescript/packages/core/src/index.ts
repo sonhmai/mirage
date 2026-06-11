@@ -1069,7 +1069,6 @@ export { readBytes as chromaRead, readStream as chromaReadStream } from './core/
 export { readdir as chromaReaddir } from './core/chroma/readdir.ts'
 export { stat as chromaStat } from './core/chroma/stat.ts'
 export { resolveGlob as resolveChromaGlob } from './core/chroma/glob.ts'
-export { grepBytes as chromaGrep } from './core/chroma/grep.ts'
 export { searchSegments as chromaSearch } from './core/chroma/search.ts'
 export { scoreFromDistance } from './util/score.ts'
 export {

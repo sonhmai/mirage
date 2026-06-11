@@ -102,8 +102,9 @@ async function csplitCommand(
       const part = parts[idx] ?? []
       const filename = prefix + padNum(idx, digits)
       const data = part.length > 0 ? ENC.encode(part.join('\n') + '\n') : new Uint8Array(0)
-      await s3Write(accessor, makePathSpec(filename, mountPrefix), data)
-      writes[filename] = data
+      const spec = makePathSpec(filename, mountPrefix)
+      await s3Write(accessor, spec, data)
+      writes[spec.stripPrefix] = data
       sizes.push(String(data.byteLength))
     }
   } catch (err) {

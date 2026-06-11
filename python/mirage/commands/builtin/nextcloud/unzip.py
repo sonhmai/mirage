@@ -35,7 +35,7 @@ async def unzip(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     o: bool = False,
     args_l: bool = False,
-    d: str | None = None,
+    d: str | PathSpec | None = None,
     q: bool = False,
     p: bool = False,
     t: bool = False,
@@ -66,7 +66,7 @@ async def unzip(
                 if not info.is_dir():
                     chunks.append(zf.read(info.filename))
             return b"".join(chunks), IOResult()
-        dest = d if d else "/"
+        dest = d.strip_prefix if isinstance(d, PathSpec) else (d if d else "/")
         writes: dict[str, bytes] = {}
         output_lines: list[str] = []
         for info in zf.infolist():

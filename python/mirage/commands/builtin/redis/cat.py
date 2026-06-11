@@ -25,6 +25,7 @@ from mirage.core.redis.glob import resolve_glob
 from mirage.core.redis.stat import stat as _stat_async
 from mirage.core.redis.stream import stream as _stream_core
 from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.stream import chain_cachables
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision import ProvisionResult
 from mirage.types import PathSpec
@@ -47,13 +48,6 @@ async def cat_provision(
     )
 
 
-async def _chain_streams(accessor: RedisAccessor,
-                         paths: list[PathSpec]) -> AsyncIterator[bytes]:
-    for p in paths:
-        async for chunk in _stream_core(accessor, p):
-            yield chunk
-
-
 @command("cat",
          resource="redis",
          spec=SPECS["cat"],
@@ -72,14 +66,31 @@ async def cat(
         paths = await resolve_glob(accessor, paths, index)
         for p in paths:
             await _stat_async(accessor, p)
-        source = _chain_streams(accessor, paths)
-        cachable = CachableAsyncIterator(source)
-        io = IOResult(reads={p.strip_prefix: cachable
-                             for p in paths},
-                      cache=[p.strip_prefix for p in paths])
+        # One path: stream lazily and record the same cachable so the
+        # cache captures exactly this file's bytes. Multiple paths: a
+        # shared cachable of the joined stream would cache the full
+        # concatenation under every key, so record one cachable per
+        # file and chain them with buffer replay (lazy, early-stop
+        # safe, and apply_io drains attribute correctly per file).
+        if len(paths) == 1:
+            p = paths[0]
+            cachable = CachableAsyncIterator(_stream_core(accessor, p))
+            io = IOResult(reads={p.strip_prefix: cachable},
+                          cache=[p.strip_prefix])
+            source: ByteSource = cachable
+        else:
+            cachables = [
+                CachableAsyncIterator(_stream_core(accessor, p)) for p in paths
+            ]
+            io = IOResult(reads={
+                p.strip_prefix: c
+                for p, c in zip(paths, cachables)
+            },
+                          cache=[p.strip_prefix for p in paths])
+            source = chain_cachables(*cachables)
         if n:
-            return generic_cat(cachable, number_lines=True), io
-        return cachable, io
+            return generic_cat(source, number_lines=True), io
+        return source, io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
         return generic_cat(source, number_lines=True), IOResult()

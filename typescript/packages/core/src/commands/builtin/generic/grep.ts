@@ -114,6 +114,7 @@ export async function grepGeneric(
   readdir: Readdir,
   stream: Stream,
   scopeCheck?: ScopeCheck,
+  showFilename = false,
 ): Promise<CommandFnResult> {
   let pattern: string
   try {
@@ -216,7 +217,7 @@ export async function grepGeneric(
       ]
     }
 
-    if (paths.length > 1) {
+    if (paths.length > 1 || showFilename) {
       const allResults: string[] = []
       for (const p of paths) {
         const data = splitLinesNoTrailing(DEC.decode(await materialize(stream(p))))

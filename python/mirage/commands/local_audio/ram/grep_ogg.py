@@ -58,11 +58,12 @@ async def grep_ogg(
         full_text = b"".join(chunks).decode()
         flags = re.IGNORECASE if i else 0
         if re.search(pattern, full_text, flags):
-            return full_text.encode(), IOResult(reads={paths[0].original: raw},
-                                                cache=[paths[0].original])
+            return full_text.encode(), IOResult(
+                reads={paths[0].strip_prefix: raw},
+                cache=[paths[0].strip_prefix])
         return None, IOResult(exit_code=1,
-                              reads={paths[0].original: raw},
-                              cache=[paths[0].original])
+                              reads={paths[0].strip_prefix: raw},
+                              cache=[paths[0].strip_prefix])
     except Exception as e:
         return None, IOResult(
             exit_code=1,

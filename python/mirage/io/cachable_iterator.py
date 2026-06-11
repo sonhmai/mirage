@@ -36,6 +36,11 @@ class CachableAsyncIterator:
         """Whether the underlying source iterator is fully consumed."""
         return self._exhausted
 
+    @property
+    def buffered_chunks(self) -> list[bytes]:
+        """Chunks consumed from the source so far. Do not mutate."""
+        return self._buffer
+
     def __aiter__(self) -> "CachableAsyncIterator":
         return self
 

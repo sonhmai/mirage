@@ -161,7 +161,7 @@ async function unzipCommand(
     await ensureParents(accessor, outPath, mountPrefix)
     await s3Write(accessor, makePathSpec(outPath, mountPrefix), e.data)
     const reportPath = mountPrefix !== '' ? mountPrefix + outPath : outPath
-    writes[reportPath] = e.data
+    writes[outPath] = e.data
     if (!quiet) outputLines.push(`  inflating: ${reportPath}`)
   }
   const stdout: ByteSource | null =

@@ -70,7 +70,7 @@ async def unzip(
             await write_bytes(accessor, out_path, content)
             report_path = (mount_prefix +
                            out_path) if mount_prefix else out_path
-            writes[report_path] = content
+            writes[out_path] = content
             if not q:
                 output_lines.append(f"  inflating: {report_path}")
     output = ("\n".join(output_lines) +

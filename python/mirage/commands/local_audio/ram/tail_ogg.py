@@ -50,8 +50,8 @@ async def tail_ogg(
         duration = meta.get("duration", 0) or 0
         start = max(0.0, duration - seconds)
         stream = transcribe(raw, start_sec=start)
-        return stream, IOResult(reads={paths[0].original: raw},
-                                cache=[paths[0].original])
+        return stream, IOResult(reads={paths[0].strip_prefix: raw},
+                                cache=[paths[0].strip_prefix])
     except Exception as e:
         return None, IOResult(
             exit_code=1,

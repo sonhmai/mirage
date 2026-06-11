@@ -54,10 +54,7 @@ async def main() -> None:
     try:
         port = server.get_port()
         resource = SSHResource(
-            SSHConfig(host="127.0.0.1",
-                      port=port,
-                      username="integ",
-                      root="/"))
+            SSHConfig(host="127.0.0.1", port=port, username="integ", root="/"))
         ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
         await run_cases(ws)
         await resource.accessor.close()

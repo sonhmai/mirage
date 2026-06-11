@@ -35,6 +35,7 @@ jobs:
       nextcloud: ${{ steps.filter.outputs.nextcloud }}
       notion: ${{ steps.filter.outputs.notion }}
       s3: ${{ steps.filter.outputs.s3 }}
+      ssh: ${{ steps.filter.outputs.ssh }}
     steps:
       - uses: dorny/paths-filter@v3
         id: filter
@@ -113,6 +114,22 @@ jobs:
               - 'integ/**'
               - 'data/**'
               - 'python/**'
+              - '.github/workflows/test_integ.yml'
+            ssh:
+              - 'integ/ssh.py'
+              - 'integ/ssh.ts'
+              - 'integ/truth.txt'
+              - 'integ/cases.py'
+              - 'integ/cases.ts'
+              - 'python/mirage/accessor/ssh.py'
+              - 'python/mirage/core/ssh/**'
+              - 'python/mirage/commands/builtin/ssh/**'
+              - 'python/mirage/resource/ssh/**'
+              - 'typescript/packages/node/src/accessor/ssh.ts'
+              - 'typescript/packages/node/src/core/ssh/**'
+              - 'typescript/packages/node/src/commands/builtin/ssh/**'
+              - 'typescript/packages/node/src/resource/ssh/**'
+              - 'typescript/packages/node/src/ops/ssh/**'
               - '.github/workflows/test_integ.yml'
 
   integ:
@@ -723,10 +740,71 @@ jobs:
           ./python/.venv/bin/python integ/s3_cases.py > /tmp/s3_cases.out
           diff integ/truth.txt /tmp/s3_cases.out
 
+  integ-ssh:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ssh == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
+
+      - name: Run ssh integ (mock sftp server) and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/ssh.py > /tmp/ssh.out
+          diff integ/truth.txt /tmp/ssh.out
+
+  integ-ssh-ts:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ssh == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.32.1
+
+      - name: Install dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build mirage-core
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-core build
+
+      - name: Build mirage-node
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-node build
+
+      - name: Run TS ssh integ (mock sftp server) and diff against truth
+        working-directory: integ
+        run: |
+          pnpm exec tsx ssh.ts > /tmp/ts-ssh.out
+          diff truth.txt /tmp/ts-ssh.out
+
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, integ, integ-ts, integ-database, integ-database-ts, integ-mongodb, integ-chroma, integ-chroma-ts, integ-dify, integ-nextcloud, integ-notion, integ-notion-ts, integ-s3]
+    needs: [changes, integ, integ-ts, integ-database, integ-database-ts, integ-mongodb, integ-chroma, integ-chroma-ts, integ-dify, integ-nextcloud, integ-notion, integ-notion-ts, integ-s3, integ-ssh, integ-ssh-ts]
     if: always()
     steps:
       - name: Check required jobs

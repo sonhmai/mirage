@@ -1,0 +1,51 @@
+---
+title: Cache
+description: The two-layer workspace cache, index and file, with RAM and Redis stores.
+icon: database
+---
+
+## What It Does
+
+Every `Workspace` ships with a **two-layer cache** so repeated work against remote backends (S3, GDrive, Slack, ...) hits local state instead of the network:
+
+- **Index cache.** Listings and metadata. The first directory walk hits the API; subsequent ones serve from the index until the TTL expires.
+- **File cache.** Object bytes. The first read streams from origin; later pipelines read from cache.
+
+## Stores
+
+Each layer is a pluggable store with two built-ins:
+
+- **RAM** (default): in-process, zero setup, 512 MB file cache and 10-minute index TTL. Best for single-process apps and notebooks.
+- **Redis**: shared across workers, processes, and machines. Best for serverless, multi-replica services, or for cache state that survives restarts.
+
+```ts
+import { RedisFileCacheStore, S3Resource, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/s3': new S3Resource({ bucket: 'my-bucket' }) },
+  {
+    cache: new RedisFileCacheStore({ url: 'redis://localhost:6379/0', cacheLimit: '8GB' }),
+    index: { type: 'redis', url: 'redis://localhost:6379/0', ttl: 600 },
+  },
+)
+```
+
+## Miss/Hit Lifecycle
+
+```ts
+import { S3Resource, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace({ '/s3': new S3Resource({ bucket: 'my-bucket' }) })
+
+// 1. Index miss → S3 LIST. Listing stored in index cache.
+await ws.execute('ls /s3/data/')
+
+// 2. Index hit → 0 network calls.
+await ws.execute('find /s3/data/ -name "*.jsonl"')
+
+// 3. File miss → S3 GET. Bytes stored in file cache.
+await ws.execute('cat /s3/data/log.jsonl | wc -l')
+
+// 4. File hit → 0 network calls.
+await ws.execute('grep alert /s3/data/log.jsonl')
+```

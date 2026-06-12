@@ -135,15 +135,6 @@ export async function grepGeneric(
   const f = parseFlags(opts.flags)
   if (resolution.neverMatch) f.fixedString = false
   const recursive = opts.flags.r === true || opts.flags.R === true
-  if (pattern === null) {
-    return [
-      null,
-      new IOResult({
-        exitCode: 2,
-        stderr: ENC.encode(`${name}: usage: ${name} [flags] pattern [path]\n`),
-      }),
-    ]
-  }
 
   if (paths.length > 0) {
     const first = paths[0]

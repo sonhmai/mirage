@@ -287,34 +287,24 @@ async def test_jq_empty_jsonl_yields_nothing():
 
 
 @pytest.mark.asyncio
-async def test_grep_native_branch(monkeypatch):
-    monkeypatch.setattr(grep_mod, "detect_scope",
-                        lambda p: SimpleNamespace(use_native=True))
-
-    async def _fake_search(config, pattern, page_size):
-        return ["hit"]
-
-    monkeypatch.setattr(grep_mod, "search_page_content", _fake_search)
-    monkeypatch.setattr(grep_mod, "format_grep_results",
-                        lambda results, prefix: ["/db/notes.md:alpha"])
-    out = await _collect(await grep_mod.grep(_ACCESSOR, _paths("/db"),
-                                             "alpha"))
-    assert out.decode().strip() == "/db/notes.md:alpha"
-
-
-@pytest.mark.asyncio
-async def test_grep_byte_scan_fallback(monkeypatch):
-    monkeypatch.setattr(grep_mod, "detect_scope",
-                        lambda p: SimpleNamespace(use_native=False))
+async def test_grep_byte_scan():
     out = await _collect(await grep_mod.grep(_ACCESSOR, _paths("/db/notes.md"),
                                              "alpha"))
     assert out.decode().splitlines() == ["alpha", "alpha"]
 
 
 @pytest.mark.asyncio
-async def test_rg_byte_scan_fallback(monkeypatch):
-    monkeypatch.setattr(rg_mod, "detect_scope",
-                        lambda p: SimpleNamespace(use_native=False))
+async def test_grep_recursive_files_only():
+    out = await _collect(await grep_mod.grep(_ACCESSOR,
+                                             _paths("/db"),
+                                             "alpha",
+                                             r=True,
+                                             args_l=True))
+    assert out.decode().splitlines() == ["/db/notes.md"]
+
+
+@pytest.mark.asyncio
+async def test_rg_byte_scan():
     out = await _collect(await rg_mod.rg(_ACCESSOR, _paths("/db/notes.md"),
                                          "beta"))
     assert "beta" in out.decode()

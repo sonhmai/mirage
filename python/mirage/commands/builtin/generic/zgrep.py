@@ -58,7 +58,10 @@ def _zgrep_search(
         if max_count is not None and len(matched) >= max_count:
             break
     if count:
-        return [str(len(matched))], len(matched) > 0
+        value = str(len(matched))
+        if filename:
+            value = f"{filename}:{value}"
+        return [value], len(matched) > 0
     result: list[str] = []
     for idx, line in matched:
         prefix = ""
@@ -181,9 +184,11 @@ async def zgrep(
 
     if f.quiet:
         return None, IOResult(exit_code=0 if any_match else 1)
-    if not any_match:
-        return None, IOResult(exit_code=1)
-    return ("\n".join(all_results) + "\n").encode(), IOResult()
+    exit_code = 0 if any_match else 1
+    if not all_results:
+        return None, IOResult(exit_code=exit_code)
+    return ("\n".join(all_results) +
+            "\n").encode(), IOResult(exit_code=exit_code)
 
 
 __all__ = ["zgrep"]

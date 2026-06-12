@@ -425,3 +425,98 @@ def test_grep_flags_struct_rejects_typos():
     # FrozenInstanceError subclasses AttributeError
     with pytest.raises(AttributeError):
         f.ignore_case = False
+
+
+@pytest.mark.asyncio
+async def test_grep_count_only_no_match_exit_1():
+    readdir, stat, rb, rs = _make_backend({"/a.txt": b"hello\nworld\n"})
+    output, io = await grep(
+        [_spec("/a.txt")],
+        ["zzz"],
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+        flags={"c": True},
+    )
+    decoded = (await _drain_async(output)).decode().strip()
+    assert decoded == "0"
+    assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_grep_stdin_count_only_no_match_exit_1():
+    readdir, stat, rb, rs = _make_backend({})
+    output, io = await grep(
+        [],
+        ["zzz"],
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+        stdin=b"hello\nworld\n",
+        flags={"c": True},
+    )
+    decoded = (await _drain_async(output)).decode().strip()
+    assert decoded == "0"
+    assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_grep_count_only_multi_file_no_match_exit_1():
+    readdir, stat, rb, rs = _make_backend({
+        "/a.txt": b"hello\n",
+        "/b.txt": b"world\n",
+    })
+    output, io = await grep(
+        [_spec("/a.txt"), _spec("/b.txt")],
+        ["zzz"],
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+        flags={"c": True},
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded.splitlines() == ["/a.txt:0", "/b.txt:0"]
+    assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_grep_count_only_multi_file_match_exit_0():
+    readdir, stat, rb, rs = _make_backend({
+        "/a.txt": b"hello\n",
+        "/b.txt": b"world\n",
+    })
+    output, io = await grep(
+        [_spec("/a.txt"), _spec("/b.txt")],
+        ["hello"],
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+        flags={"c": True},
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded.splitlines() == ["/a.txt:1", "/b.txt:0"]
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_grep_recursive_count_only_no_match_exit_1():
+    readdir, stat, rb, rs = _make_backend({"/d/a.txt": b"hello\n"})
+    output, io = await grep(
+        [_spec("/d")],
+        ["zzz"],
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+        flags={
+            "r": True,
+            "c": True
+        },
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded.splitlines() == ["/d/a.txt:0"]
+    assert io.exit_code == 1

@@ -218,12 +218,30 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["stat_page_json", `stat ${DIR_A}/page.json`],
   ["find_json", `find ${MOUNT}/pages/ -name page.json`],
   ["pipe_grep", `cat ${DIR_B}/page.json | grep -c alpha`],
+  ["grep_file", `grep -n alpha ${DIR_B}/page.json`],
+  ["grep_multi", `grep -c alpha ${DIR_A}/page.json ${DIR_B}/page.json`],
+  ["grep_recursive", `grep -rl alpha ${MOUNT}/pages/`],
+  ["realpath_dotdot", `realpath -e ${DIR_C}/../page.json`],
+];
+
+const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
+  ["grep_c_match_exit", `grep -c alpha ${DIR_B}/page.json`],
+  ["grep_c_no_match_exit", `grep -c zzz ${DIR_B}/page.json`],
+  ["grep_rc_no_match_exit", `grep -rc zzz ${MOUNT}/pages/`],
 ];
 
 async function runCase(ws: Workspace, name: string, cmd: string): Promise<string> {
   const result = await ws.execute(cmd);
   const out = DEC.decode(result.stdout);
   return `=== ${name} ===\n` + (out.endsWith("\n") ? out : out + "\n");
+}
+
+async function runExitCase(ws: Workspace, name: string, cmd: string): Promise<string> {
+  const result = await ws.execute(cmd);
+  const out = DEC.decode(result.stdout);
+  let rendered = `=== ${name} ===\nexit=${String(result.exitCode)}\n`;
+  if (out !== "") rendered += out.endsWith("\n") ? out : out + "\n";
+  return rendered;
 }
 
 async function main(): Promise<void> {
@@ -244,11 +262,17 @@ async function main(): Promise<void> {
   });
   const mcpWs = new Workspace({ [MOUNT]: mcpResource }, { mode: MountMode.READ });
   try {
+    const allCases: ReadonlyArray<
+      readonly [string, string, (ws: Workspace, name: string, cmd: string) => Promise<string>]
+    > = [
+      ...CASES.map(([name, cmd]) => [name, cmd, runCase] as const),
+      ...EXIT_CODE_CASES.map(([name, cmd]) => [name, cmd, runExitCase] as const),
+    ];
     let mismatches = 0;
-    for (const [name, cmd] of CASES) {
-      const restOut = await runCase(restWs, name, cmd);
+    for (const [name, cmd, run] of allCases) {
+      const restOut = await run(restWs, name, cmd);
       process.stdout.write(restOut);
-      const mcpOut = await runCase(mcpWs, name, cmd);
+      const mcpOut = await run(mcpWs, name, cmd);
       if (mcpOut !== restOut) {
         mismatches += 1;
         process.stderr.write(
@@ -259,7 +283,7 @@ async function main(): Promise<void> {
     if (mismatches > 0) {
       process.exitCode = 1;
     } else {
-      const n = String(CASES.length);
+      const n = String(allCases.length);
       process.stderr.write(`mcp parity: ${n}/${n} cases byte-identical\n`);
     }
   } finally {

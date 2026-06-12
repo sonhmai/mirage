@@ -1462,6 +1462,25 @@ hello
 exit=1
 === grep_f_empty_no_match ===
 exit=1
+=== grep_c_match_exit ===
+exit=0
+1
+=== grep_c_no_match_exit ===
+exit=1
+0
+=== grep_c_stdin_no_match_exit ===
+exit=1
+0
+=== grep_c_multi_no_match_exit ===
+exit=1
+/data/a.txt:0
+/data/b.txt:0
+=== zgrep_c_match_exit ===
+exit=0
+1
+=== zgrep_c_no_match_exit ===
+exit=1
+0
 === grep_usage_exit ===
 exit=2
 === rg_usage_exit ===

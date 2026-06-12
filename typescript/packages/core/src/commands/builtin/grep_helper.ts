@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
-import { materialize } from '../../io/types.ts'
+import { materialize, type IOResult } from '../../io/types.ts'
 import { type FileStat, FileType, PathSpec } from '../../types.ts'
 import { getExtension } from '../resolve.ts'
 import { grepContextLines } from './grep_context.ts'
@@ -181,6 +181,26 @@ export function grepLines(
   if (opts.countOnly) return [String(count)]
   if (opts.filesOnly) return count > 0 ? [path] : []
   return results
+}
+
+// Whether any `path:count` record has a nonzero count.
+export function countRecordsHaveMatches(results: readonly string[]): boolean {
+  return results.some((r) => Number.parseInt(r.slice(r.lastIndexOf(':') + 1), 10) > 0)
+}
+
+// Yield count-only grep output, setting exit 1 when all counts are zero.
+// GNU grep -c prints the count but still exits 1 when no lines were
+// selected, so emptiness-based exit detection cannot apply.
+export async function* countExitStream(
+  source: AsyncIterable<Uint8Array>,
+  io: IOResult,
+): AsyncIterable<Uint8Array> {
+  let anyMatch = false
+  for await (const chunk of source) {
+    if (Number.parseInt(DEC.decode(chunk).trim() || '0', 10) > 0) anyMatch = true
+    yield chunk
+  }
+  if (!anyMatch) io.exitCode = 1
 }
 
 export interface GrepStreamOptions {

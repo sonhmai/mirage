@@ -195,3 +195,25 @@ name=page.json size=2979 modified=None type=json
 /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json
 === pipe_grep ===
 3
+=== grep_file ===
+12:  "markdown": "alpha beta gamma\n\n- [x] done item\n",
+23:            "plain_text": "alpha beta gamma",
+26:              "content": "alpha beta gamma"
+=== grep_multi ===
+/notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json:0
+/notion/pages/Notes__bbbb2222-3333-4444-5555-666677778888/page.json:3
+=== grep_recursive ===
+/notion/pages/Notes__bbbb2222-3333-4444-5555-666677778888/page.json
+=== realpath_dotdot ===
+/notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json
+=== grep_c_match_exit ===
+exit=0
+3
+=== grep_c_no_match_exit ===
+exit=1
+0
+=== grep_rc_no_match_exit ===
+exit=1
+/notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json:0
+/notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/Q1_Goals__cccc1111-2222-3333-4444-555566667777/page.json:0
+/notion/pages/Notes__bbbb2222-3333-4444-5555-666677778888/page.json:0

@@ -18,6 +18,8 @@ import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
   compilePattern,
+  countExitStream,
+  countRecordsHaveMatches,
   grepFilesOnly,
   type GrepFilesOnlyOptions,
   grepLines,
@@ -221,9 +223,10 @@ export async function grepGeneric(
           new Uint8Array(0),
           new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) }),
         ]
+      const exitCode = f.countOnly && !countRecordsHaveMatches(allResults) ? 1 : 0
       return [
         ENC.encode(allResults.join('\n') + '\n'),
-        new IOResult(stderr !== undefined ? { stderr } : {}),
+        new IOResult({ exitCode, ...(stderr !== undefined ? { stderr } : {}) }),
       ]
     }
 
@@ -263,8 +266,15 @@ export async function grepGeneric(
             ...(multiStderr !== undefined ? { stderr: multiStderr } : {}),
           }),
         ]
+      const multiExit = f.countOnly && !countRecordsHaveMatches(allResults) ? 1 : 0
       const out: ByteSource = ENC.encode(allResults.join('\n') + '\n')
-      return [out, new IOResult(multiStderr !== undefined ? { stderr: multiStderr } : {})]
+      return [
+        out,
+        new IOResult({
+          exitCode: multiExit,
+          ...(multiStderr !== undefined ? { stderr: multiStderr } : {}),
+        }),
+      ]
     }
 
     const firstStat = await stat(first)
@@ -284,6 +294,7 @@ export async function grepGeneric(
       return [quietMatch(matched, io), io]
     }
     const io = new IOResult()
+    if (f.countOnly) return [countExitStream(matched, io), io]
     return [exitOnEmpty(matched, io), io]
   }
 
@@ -301,5 +312,6 @@ export async function grepGeneric(
     return [quietMatch(matched, io), io]
   }
   const io = new IOResult()
+  if (f.countOnly) return [countExitStream(matched, io), io]
   return [exitOnEmpty(matched, io), io]
 }

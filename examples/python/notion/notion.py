@@ -89,33 +89,16 @@ async def main() -> None:
     result = await ws.execute("notion-search --query EVO")
     print((await result.stdout_str())[:1000])
 
-    # ── native search dispatch (Notion search API) ──
     print(f"\n=== grep Graph {page_path}/*.json (page glob) ===")
-    result = await ws.execute(f'grep Graph "{page_path}/"*.json')
+    result = await ws.execute(f'grep -c Graph "{page_path}/"*.json')
     out = (await result.stdout_str()).strip()
     lines = out.splitlines() if out else []
     print(f"  exit={result.exit_code} matches: {len(lines)}")
     for line in lines[:3]:
         print(f"  {line[:150]}")
 
-    print("\n=== grep Graph /notion/pages/ (pages root scope) ===")
-    result = await ws.execute('grep Graph /notion/pages/')
-    out = (await result.stdout_str()).strip()
-    lines = out.splitlines() if out else []
-    print(f"  exit={result.exit_code} matches: {len(lines)}")
-    for line in lines[:3]:
-        print(f"  {line[:150]}")
-
-    print("\n=== grep Graph /notion/ (workspace scope) ===")
-    result = await ws.execute('grep Graph /notion/')
-    out = (await result.stdout_str()).strip()
-    lines = out.splitlines() if out else []
-    print(f"  exit={result.exit_code} matches: {len(lines)}")
-    for line in lines[:3]:
-        print(f"  {line[:150]}")
-
-    print("\n=== rg Graph /notion/ ===")
-    result = await ws.execute('rg Graph /notion/')
+    print("\n=== rg Graph /notion/pages/ ===")
+    result = await ws.execute('rg -c Graph /notion/pages/')
     out = (await result.stdout_str()).strip()
     lines = out.splitlines() if out else []
     print(f"  exit={result.exit_code} matches: {len(lines)}")

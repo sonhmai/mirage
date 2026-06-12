@@ -13,30 +13,24 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from functools import partial
 
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.email._provision import file_read_provision
+from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.grep_helper import (compile_pattern,
                                                  grep_count_has_matches,
-                                                 grep_files_only, grep_lines,
-                                                 grep_stream)
-from mirage.commands.builtin.utils.output import (format_optional_records,
-                                                  format_records)
-from mirage.commands.builtin.utils.stream import _resolve_source
-from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
-                                                call_stat)
-from mirage.commands.errors import UsageError
+                                                 grep_lines, pattern_arg)
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.core.email.glob import resolve_glob
 from mirage.core.email.read import read as email_read
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.scope import EmailScope, detect_scope
 from mirage.core.email.search import search_and_format
 from mirage.core.email.stat import stat as _stat
-from mirage.io.stream import exit_on_empty, quiet_match, yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -65,152 +59,43 @@ async def grep(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    r: bool = False,
-    R: bool = False,
-    i: bool = False,
-    v: bool = False,
-    n: bool = False,
-    c: bool = False,
-    args_l: bool = False,
-    w: bool = False,
-    F: bool = False,
-    E: bool = False,
-    o: bool = False,
-    m: str | None = None,
-    q: bool = False,
-    H: bool = False,
-    args_h: bool = False,
-    A: str | None = None,
-    B: str | None = None,
-    C: str | None = None,
-    e: str | None = None,
     prefix: str = "",
     index: IndexCacheStore = None,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if e is not None:
-        pattern = e
-    elif texts:
-        pattern = texts[0]
-    else:
-        raise UsageError("grep: usage: grep [flags] pattern [path]")
-    max_count = int(m) if m is not None else None
-    after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
-    before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
+    fl = FlagView(flags, spec=SPECS["grep"])
+    pattern = pattern_arg(texts, fl)
 
-    if paths and (r or R):
+    if paths and pattern is not None and (fl.bool("r") or fl.bool("R")):
         scope = detect_scope(paths[0])
         if scope.use_native and scope.folder:
             return await _grep_server_side(accessor,
                                            scope.folder,
                                            pattern,
                                            paths,
-                                           i=i,
-                                           v=v,
-                                           n=n,
-                                           c=c,
-                                           args_l=args_l,
-                                           w=w,
-                                           F=F,
-                                           o=o,
-                                           max_count=max_count)
+                                           i=fl.bool("i"),
+                                           v=fl.bool("v"),
+                                           n=fl.bool("n"),
+                                           c=fl.bool("c"),
+                                           args_l=fl.bool("args_l"),
+                                           w=fl.bool("w"),
+                                           F=fl.bool("F"),
+                                           o=fl.bool("o"),
+                                           max_count=fl.int("m"))
 
-    if paths:
-        paths = await resolve_glob(accessor, paths, index)
-        file_prefix = paths[0].prefix if paths else ""
-        rd = partial(call_readdir,
-                     _readdir,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-        st = partial(call_stat,
-                     _stat,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-        rb = partial(call_read_bytes,
-                     email_read,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-
-        if args_l:
-            warnings: list[str] = []
-            results = await grep_files_only(rd,
-                                            st,
-                                            rb,
-                                            paths[0].original,
-                                            pattern,
-                                            recursive=r or R,
-                                            ignore_case=i,
-                                            invert=v,
-                                            line_numbers=n,
-                                            count_only=c,
-                                            fixed_string=F,
-                                            only_matching=o,
-                                            max_count=max_count,
-                                            whole_word=w,
-                                            warnings=warnings)
-            stderr = format_optional_records(warnings)
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            return (format_records(results), IOResult(stderr=stderr))
-
-        pat = compile_pattern(pattern, i, F, w)
-
-        if len(paths) > 1:
-            all_results: list[str] = []
-            for p in paths:
-                data = (await
-                        rb(p.original)).decode(errors="replace").splitlines()
-                hits = grep_lines(p.original, data, pat, v, n, c, args_l, o,
-                                  max_count)
-                if c:
-                    if hits:
-                        all_results.append(f"{p.original}:{hits[0]}")
-                elif args_l:
-                    all_results.extend(hits)
-                else:
-                    all_results.extend(f"{p.original}:{r_}" for r_ in hits)
-            if not all_results:
-                return b"", IOResult(exit_code=1)
-            return format_records(all_results), IOResult()
-
-        data = await rb(paths[0].original)
-        source = yield_bytes(data)
-        stream = grep_stream(source,
-                             pat,
-                             invert=v,
-                             line_numbers=n,
-                             only_matching=o,
-                             max_count=max_count,
-                             count_only=c,
-                             after_context=after_ctx,
-                             before_context=before_ctx)
-        if q:
-            io = IOResult(exit_code=1)
-            return quiet_match(stream, io), io
-        io = IOResult()
-        return exit_on_empty(stream, io), io
-
-    source = _resolve_source(stdin,
-                             "grep: usage: grep [flags] pattern [path]",
-                             error_cls=UsageError)
-    pat = compile_pattern(pattern, i, F, w)
-    stream = grep_stream(source,
-                         pat,
-                         invert=v,
-                         line_numbers=n,
-                         only_matching=o,
-                         max_count=max_count,
-                         count_only=c,
-                         after_context=after_ctx,
-                         before_context=before_ctx)
-    if q:
-        io = IOResult(exit_code=1)
-        return quiet_match(stream, io), io
-    io = IOResult()
-    return exit_on_empty(stream, io), io
+    resolved = await resolve_glob(accessor, paths, index) if paths else []
+    return await generic_grep(
+        resolved,
+        texts,
+        flags,
+        readdir=_readdir,
+        stat=_stat,
+        read_bytes=email_read,
+        read_stream=None,
+        accessor=accessor,
+        stdin=stdin,
+        index=index,
+    )
 
 
 async def _grep_server_side(

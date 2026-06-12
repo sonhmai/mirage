@@ -209,6 +209,16 @@ CASES: list[tuple[str, str]] = [
     ("stat_page_json", f"stat {DIR_A}/page.json"),
     ("find_json", f"find {MOUNT}/pages/ -name page.json"),
     ("pipe_grep", f"cat {DIR_B}/page.json | grep -c alpha"),
+    ("grep_file", f"grep -n alpha {DIR_B}/page.json"),
+    ("grep_multi", f"grep -c alpha {DIR_A}/page.json {DIR_B}/page.json"),
+    ("grep_recursive", f"grep -rl alpha {MOUNT}/pages/"),
+    ("realpath_dotdot", f"realpath -e {DIR_C}/../page.json"),
+]
+
+EXIT_CODE_CASES: list[tuple[str, str]] = [
+    ("grep_c_match_exit", f"grep -c alpha {DIR_B}/page.json"),
+    ("grep_c_no_match_exit", f"grep -c zzz {DIR_B}/page.json"),
+    ("grep_rc_no_match_exit", f"grep -rc zzz {MOUNT}/pages/"),
 ]
 
 
@@ -217,6 +227,15 @@ async def _run(ws: Workspace, name: str, cmd: str) -> None:
     out = await result.stdout_str()
     print(f"=== {name} ===")
     print(out, end="" if out.endswith("\n") else "\n")
+
+
+async def _run_exit(ws: Workspace, name: str, cmd: str) -> None:
+    result = await ws.execute(cmd)
+    out = await result.stdout_str()
+    print(f"=== {name} ===")
+    print(f"exit={result.exit_code}")
+    if out:
+        print(out, end="" if out.endswith("\n") else "\n")
 
 
 async def main() -> None:
@@ -231,6 +250,8 @@ async def main() -> None:
         ws = Workspace({MOUNT: resource}, mode=MountMode.READ)
         for name, cmd in CASES:
             await _run(ws, name, cmd)
+        for name, cmd in EXIT_CODE_CASES:
+            await _run_exit(ws, name, cmd)
     finally:
         server.shutdown()
 

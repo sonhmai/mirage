@@ -13,76 +13,32 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
-import { listChannels } from '../../../core/discord/channels.ts'
+import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { DiscordApiError } from '../../../core/discord/_client.ts'
+import { listChannels } from '../../../core/discord/channels.ts'
 import { resolveDiscordGlob } from '../../../core/discord/glob.ts'
 import { read as discordRead } from '../../../core/discord/read.ts'
 import { readdir as discordReaddir } from '../../../core/discord/readdir.ts'
 import { detectScope } from '../../../core/discord/scope.ts'
 import { formatGrepResults, searchGuild } from '../../../core/discord/search.ts'
 import { stat as discordStat } from '../../../core/discord/stat.ts'
-import { exitOnEmpty, quietMatch, yieldBytes } from '../../../io/stream.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { type FileStat, PathSpec, ResourceName } from '../../../types.ts'
+import { IOResult } from '../../../io/types.ts'
+import { type FileStat, type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { compilePattern, grepFilesOnly, grepLines, grepStream, patternArg } from '../grep_helper.ts'
-import { resolveSource } from '../utils/stream.ts'
+import { grepGeneric } from '../generic/grep.ts'
+import { patternArg } from '../grep_helper.ts'
+import { prependStderr } from '../utils/output.ts'
 import { fileReadProvision } from './_provision.ts'
-import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
-interface GrepFlags {
-  ignoreCase: boolean
-  invert: boolean
-  lineNumbers: boolean
-  countOnly: boolean
-  filesOnly: boolean
-  wholeWord: boolean
-  fixedString: boolean
-  onlyMatching: boolean
-  maxCount: number | null
-  quiet: boolean
-  afterContext: number
-  beforeContext: number
-}
-
-function parseFlags(flags: Record<string, string | boolean | string[]>): GrepFlags {
-  const toInt = (v: string | boolean | string[] | undefined): number | null =>
-    typeof v === 'string' ? Number.parseInt(v, 10) : null
-  const aCtx = toInt(flags.A)
-  const bCtx = toInt(flags.B)
-  const cCtx = toInt(flags.C)
-  return {
-    ignoreCase: flags.i === true,
-    invert: flags.v === true,
-    lineNumbers: flags.n === true,
-    countOnly: flags.c === true,
-    filesOnly: flags.args_l === true || flags.l === true,
-    wholeWord: flags.w === true,
-    fixedString: flags.F === true,
-    onlyMatching: flags.o === true,
-    maxCount: toInt(flags.m),
-    quiet: flags.q === true,
-    afterContext: aCtx ?? cCtx ?? 0,
-    beforeContext: bCtx ?? cCtx ?? 0,
-  }
-}
-
-function getPattern(
-  texts: readonly string[],
-  flags: Record<string, string | boolean | string[]>,
-): string {
-  const pattern = patternArg(texts, flags)
-  if (pattern !== null) return pattern
-  throw new Error('grep: usage: grep [flags] pattern [path]')
-}
-
-function splitLinesNoTrailing(text: string): string[] {
-  const stripped = text.endsWith('\n') ? text.slice(0, -1) : text
-  return stripped === '' ? [] : stripped.split('\n')
+async function* discordStream(
+  accessor: DiscordAccessor,
+  p: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  yield await discordRead(accessor, p, index)
 }
 
 async function grepCommand(
@@ -91,161 +47,60 @@ async function grepCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  let pattern: string
-  try {
-    pattern = getPattern(texts, opts.flags)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
-  }
-  const f = parseFlags(opts.flags)
+  const pattern = patternArg(texts, opts.flags)
+  const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
 
   const pushdownWarnings: string[] = []
-  if (paths.length > 0) {
-    const firstPath = paths[0]
-    if (firstPath !== undefined) {
-      const scope = detectScope(firstPath)
-      if (scope.useNative && scope.guildId !== undefined) {
-        try {
-          const count = f.maxCount ?? 100
-          const raw = await searchGuild(accessor, scope.guildId, pattern, scope.channelId, count)
-          const channelMap = new Map<string, string>()
-          if (scope.channelId === undefined) {
-            for (const ch of await listChannels(accessor, scope.guildId)) {
-              if (ch.name !== undefined) channelMap.set(ch.id, ch.name)
-            }
-          }
-          const lines = formatGrepResults(raw, scope, firstPath.prefix, channelMap)
-          if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-          return [ENC.encode(lines.join('\n') + '\n'), new IOResult()]
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          pushdownWarnings.push(
-            `discord: native search push-down failed (${msg}); ` + `falling back to per-file scan`,
-          )
-          const status = err instanceof DiscordApiError ? err.status : null
-          const lower = msg.toLowerCase()
-          if (
-            status === 403 ||
-            lower.includes('forbidden') ||
-            lower.includes('missing permissions') ||
-            lower.includes('missing access')
-          ) {
-            pushdownWarnings.push(
-              'discord: hint - ensure the bot has the READ_MESSAGE_HISTORY ' +
-                'permission for this guild and the MESSAGE CONTENT privileged ' +
-                'intent enabled',
-            )
+  const firstPath = paths[0]
+  if (firstPath !== undefined && pattern !== null) {
+    const scope = detectScope(firstPath)
+    if (scope.useNative && scope.guildId !== undefined) {
+      try {
+        const count = maxCount ?? 100
+        const raw = await searchGuild(accessor, scope.guildId, pattern, scope.channelId, count)
+        const channelMap = new Map<string, string>()
+        if (scope.channelId === undefined) {
+          for (const ch of await listChannels(accessor, scope.guildId)) {
+            if (ch.name !== undefined) channelMap.set(ch.id, ch.name)
           }
         }
-      }
-    }
-    const stderrFromWarnings = (extra: string[] = []): Uint8Array | undefined => {
-      const all = [...pushdownWarnings, ...extra]
-      if (all.length === 0) return undefined
-      return ENC.encode(all.join('\n') + '\n')
-    }
-    const resolved = await resolveDiscordGlob(accessor, paths, opts.index ?? undefined)
-    const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord)
-
-    if (f.filesOnly) {
-      const filePrefix = resolved[0]?.prefix ?? ''
-      const toScope = (p: string): PathSpec =>
-        new PathSpec({ original: p, directory: p, prefix: filePrefix })
-      const rd = (p: string): Promise<string[]> =>
-        discordReaddir(accessor, toScope(p), opts.index ?? undefined)
-      const st = (p: string): Promise<FileStat> =>
-        discordStat(accessor, toScope(p), opts.index ?? undefined)
-      const rb = (p: string): Promise<Uint8Array> =>
-        discordRead(accessor, toScope(p), opts.index ?? undefined)
-      const target = resolved[0]
-      if (target === undefined) return [null, new IOResult()]
-      const warnings: string[] = []
-      const results = await grepFilesOnly(
-        rd,
-        st,
-        rb,
-        target.original,
-        pattern,
-        {
-          recursive: opts.flags.r === true || opts.flags.R === true,
-          ignoreCase: f.ignoreCase,
-          invert: f.invert,
-          lineNumbers: f.lineNumbers,
-          countOnly: f.countOnly,
-          fixedString: f.fixedString,
-          onlyMatching: f.onlyMatching,
-          maxCount: f.maxCount,
-          wholeWord: f.wholeWord,
-        },
-        warnings,
-      )
-      const stderr = stderrFromWarnings(warnings)
-      if (results.length === 0) {
-        return [
-          new Uint8Array(0),
-          new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) }),
-        ]
-      }
-      return [
-        ENC.encode(results.join('\n') + '\n'),
-        new IOResult({ ...(stderr !== undefined ? { stderr } : {}) }),
-      ]
-    }
-
-    if (resolved.length > 1) {
-      const allResults: string[] = []
-      for (const p of resolved) {
-        const data = splitLinesNoTrailing(
-          DEC.decode(await discordRead(accessor, p, opts.index ?? undefined)),
+        const lines = formatGrepResults(raw, scope, firstPath.prefix, channelMap)
+        if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+        return [ENC.encode(lines.join('\n') + '\n'), new IOResult()]
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        pushdownWarnings.push(
+          `discord: native search push-down failed (${msg}); ` + `falling back to per-file scan`,
         )
-        const hits = grepLines(p.original, data, pat, f)
-        if (f.countOnly) {
-          if (hits.length > 0) allResults.push(`${p.original}:${hits[0] ?? ''}`)
-        } else {
-          for (const h of hits) allResults.push(`${p.original}:${h}`)
+        const status = err instanceof DiscordApiError ? err.status : null
+        const lower = msg.toLowerCase()
+        if (
+          status === 403 ||
+          lower.includes('forbidden') ||
+          lower.includes('missing permissions') ||
+          lower.includes('missing access')
+        ) {
+          pushdownWarnings.push(
+            'discord: hint - ensure the bot has the READ_MESSAGE_HISTORY ' +
+              'permission for this guild and the MESSAGE CONTENT privileged ' +
+              'intent enabled',
+          )
         }
       }
-      const stderr = stderrFromWarnings()
-      if (allResults.length === 0) {
-        return [
-          new Uint8Array(0),
-          new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) }),
-        ]
-      }
-      const out: ByteSource = formatRecords(allResults)
-      return [out, new IOResult({ ...(stderr !== undefined ? { stderr } : {}) })]
     }
-
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    const raw = await discordRead(accessor, first, opts.index ?? undefined)
-    const source = yieldBytes(raw)
-    const stream = grepStream(source, pat, f)
-    const stderr = stderrFromWarnings()
-    if (f.quiet) {
-      const io = new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) })
-      return [quietMatch(stream, io), io]
-    }
-    const io = new IOResult({ ...(stderr !== undefined ? { stderr } : {}) })
-    return [exitOnEmpty(stream, io), io]
   }
 
-  let source: AsyncIterable<Uint8Array>
-  try {
-    source = resolveSource(opts.stdin, 'grep: usage: grep [flags] pattern [path]')
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
-  }
-  const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord)
-  const stream = grepStream(source, pat, f)
-  if (f.quiet) {
-    const io = new IOResult({ exitCode: 1 })
-    return [quietMatch(stream, io), io]
-  }
-  const io = new IOResult()
-  return [exitOnEmpty(stream, io), io]
+  const resolved =
+    paths.length > 0 ? await resolveDiscordGlob(accessor, paths, opts.index ?? undefined) : []
+  const stat = (p: PathSpec): Promise<FileStat> => discordStat(accessor, p, opts.index ?? undefined)
+  const readdir = (p: PathSpec): Promise<string[]> =>
+    discordReaddir(accessor, p, opts.index ?? undefined)
+  const result = await grepGeneric('grep', resolved, texts, opts, stat, readdir, (p) =>
+    discordStream(accessor, p, opts.index ?? undefined),
+  )
+  if (result === null) return result
+  if (pushdownWarnings.length > 0) await prependStderr(result[1], pushdownWarnings)
+  return result
 }
 
 export const DISCORD_GREP = command({

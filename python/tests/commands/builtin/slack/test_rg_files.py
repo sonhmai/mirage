@@ -21,7 +21,7 @@ from mirage.cache.index import RAMIndexCacheStore
 from mirage.commands.builtin.slack.rg import rg
 from mirage.io.stream import materialize
 from mirage.resource.slack.config import SlackConfig
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 
 @pytest.fixture
@@ -161,6 +161,10 @@ async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
             patch("mirage.commands.builtin.slack.grep.slack_read",
                   new_callable=AsyncMock,
                   return_value=b"foo line\nbar\n") as mock_read,
+            patch("mirage.commands.builtin.slack.grep._stat",
+                  new_callable=AsyncMock,
+                  return_value=FileStat(name="report.txt",
+                                        type=FileType.TEXT)),
     ):
         from mirage.commands.builtin.slack.grep import grep
         out, io = await grep(

@@ -18,7 +18,7 @@ import pytest
 
 from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.rg import rg
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 
 def _concrete_paths(n: int = 7):
@@ -104,6 +104,10 @@ async def test_discord_grep_falls_back_when_native_raises():
     ) as fake_resolve, patch(
             "mirage.commands.builtin.discord.grep.discord_read",
             new=AsyncMock(return_value=b""),
+    ), patch(
+            "mirage.commands.builtin.discord.grep._stat",
+            new=AsyncMock(return_value=FileStat(name="2026-04-10.jsonl",
+                                                type=FileType.TEXT)),
     ):
         out, io = await grep(accessor, paths, "hello", index=_fake_index())
     assert fake_resolve.await_count == 1

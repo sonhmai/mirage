@@ -71,7 +71,11 @@ function zgrepSearch(
     }
     if (opts.maxCount !== null && matched.length >= opts.maxCount) break
   }
-  if (opts.count) return [[String(matched.length)], matched.length > 0]
+  if (opts.count) {
+    const value =
+      filename !== null ? `${filename}:${String(matched.length)}` : String(matched.length)
+    return [[value], matched.length > 0]
+  }
   const result: string[] = []
   for (const [idx, line] of matched) {
     let prefix = ''
@@ -195,7 +199,8 @@ export async function zgrepGeneric(
   }
 
   if (quiet) return [null, new IOResult({ exitCode: anyMatch ? 0 : 1 })]
-  if (!anyMatch) return [null, new IOResult({ exitCode: 1 })]
+  const exitCode = anyMatch ? 0 : 1
+  if (allResults.length === 0) return [null, new IOResult({ exitCode })]
   const result: ByteSource = ENC.encode(allResults.join('\n') + '\n')
-  return [result, new IOResult()]
+  return [result, new IOResult({ exitCode })]
 }

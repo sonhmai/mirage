@@ -4,10 +4,9 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.grep_helper import (compile_pattern,
-                                                 grep_files_only, grep_lines,
-                                                 grep_recursive, grep_stream,
-                                                 resolve_pattern)
+from mirage.commands.builtin.grep_helper import (  # yapf: disable
+    compile_pattern, count_exit_stream, count_records_have_matches,
+    grep_files_only, grep_lines, grep_recursive, grep_stream, resolve_pattern)
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
@@ -221,6 +220,9 @@ async def grep(
             stderr = format_optional_records(warnings)
             if not all_results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
+            if f.count_only and not count_records_have_matches(all_results):
+                return format_records(all_results), IOResult(exit_code=1,
+                                                             stderr=stderr)
             return format_records(all_results), IOResult(stderr=stderr)
 
         pat = compile_pattern(pattern, f.ignore_case, f.fixed_string,
@@ -255,6 +257,9 @@ async def grep(
             stderr = format_optional_records(multi_warnings)
             if not all_results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
+            if f.count_only and not count_records_have_matches(all_results):
+                return format_records(all_results), IOResult(exit_code=1,
+                                                             stderr=stderr)
             return format_records(all_results), IOResult(stderr=stderr)
 
         first_stat = await st(paths[0].original)
@@ -282,6 +287,8 @@ async def grep(
             io = IOResult(exit_code=1)
             return quiet_match(stream, io), io
         io = IOResult()
+        if f.count_only:
+            return count_exit_stream(stream, io), io
         return exit_on_empty(stream, io), io
 
     source = _resolve_source(stdin,
@@ -303,6 +310,8 @@ async def grep(
         io = IOResult(exit_code=1)
         return quiet_match(stream, io), io
     io = IOResult()
+    if f.count_only:
+        return count_exit_stream(stream, io), io
     return exit_on_empty(stream, io), io
 
 

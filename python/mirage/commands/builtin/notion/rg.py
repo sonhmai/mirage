@@ -17,17 +17,13 @@ from collections.abc import AsyncIterator
 from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
-from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.notion._provision import file_read_provision
-from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
 from mirage.core.notion.glob import resolve_glob
 from mirage.core.notion.read import read as notion_read
 from mirage.core.notion.readdir import readdir as _readdir
-from mirage.core.notion.scope import detect_scope, scope_warning
-from mirage.core.notion.search import format_grep_results, search_page_content
+from mirage.core.notion.scope import scope_warning
 from mirage.core.notion.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
@@ -54,24 +50,6 @@ async def rg(
     index: IndexCacheStore = None,
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["rg"])
-    pattern = pattern_arg(texts, fl)
-    max_count = fl.int("m")
-
-    if paths and pattern is not None:
-        scope = detect_scope(paths[0])
-        if scope.use_native:
-            file_prefix = paths[0].prefix or ""
-            results = await search_page_content(
-                accessor.config,
-                pattern,
-                page_size=max_count or 100,
-            )
-            lines = format_grep_results(results, file_prefix)
-            if not lines:
-                return b"", IOResult(exit_code=1)
-            return format_records(lines), IOResult()
-
     resolved = await resolve_glob(accessor, paths, index) if paths else []
     return await generic_rg(
         resolved,

@@ -14,22 +14,16 @@
 
 import logging
 from collections.abc import AsyncIterator
-from functools import partial
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.discord._provision import file_read_provision
-from mirage.commands.builtin.grep_helper import (compile_pattern,
-                                                 grep_files_only, grep_lines,
-                                                 grep_stream)
-from mirage.commands.builtin.utils.output import (format_optional_records,
-                                                  format_records)
-from mirage.commands.builtin.utils.stream import _resolve_source
-from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
-                                                call_stat)
-from mirage.commands.errors import UsageError
+from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.grep_helper import pattern_arg
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.core.discord.channels import list_channels
 from mirage.core.discord.entry import channel_dirname
 from mirage.core.discord.formatters import format_grep_results
@@ -39,7 +33,6 @@ from mirage.core.discord.readdir import readdir as _readdir
 from mirage.core.discord.scope import coalesce_scopes, detect_scope
 from mirage.core.discord.search import search_guild
 from mirage.core.discord.stat import stat as _stat
-from mirage.io.stream import exit_on_empty, quiet_match, yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -67,41 +60,16 @@ async def grep(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    r: bool = False,
-    R: bool = False,
-    i: bool = False,
-    v: bool = False,
-    n: bool = False,
-    c: bool = False,
-    args_l: bool = False,
-    w: bool = False,
-    F: bool = False,
-    E: bool = False,
-    o: bool = False,
-    m: str | None = None,
-    q: bool = False,
-    H: bool = False,
-    args_h: bool = False,
-    A: str | None = None,
-    B: str | None = None,
-    C: str | None = None,
-    e: str | None = None,
     prefix: str = "",
     index: IndexCacheStore = None,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if e is not None:
-        pattern = e
-    elif texts:
-        pattern = texts[0]
-    else:
-        raise UsageError("grep: usage: grep [flags] pattern [path]")
-    max_count = int(m) if m is not None else None
-    after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
-    before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
+    fl = FlagView(flags, spec=SPECS["grep"])
+    pattern = pattern_arg(texts, fl)
+    max_count = fl.int("m")
 
     pushdown_warnings: list[str] = []
-    if paths:
+    if paths and pattern is not None:
         scope = await detect_scope(paths[0], index)
         if scope.level in ("messages", "file_blob", "date"):
             coalesced = await coalesce_scopes(paths, index)
@@ -148,112 +116,21 @@ async def grep(
                     "discord search push-down failed (%s); "
                     "falling back to per-file scan", exc)
 
-        paths = await resolve_glob(accessor, paths, index=index)
-        file_prefix = paths[0].prefix if paths else ""
-        rd = partial(call_readdir,
-                     _readdir,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-        st = partial(call_stat,
-                     _stat,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-        rb = partial(call_read_bytes,
-                     discord_read,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-
-        def _stderr_from(*extra: list[str]) -> bytes | None:
-            joined: list[str] = list(pushdown_warnings)
-            for w in extra:
-                joined.extend(w)
-            return format_optional_records(joined)
-
-        if args_l:
-            warnings: list[str] = []
-            results = await grep_files_only(
-                rd,
-                st,
-                rb,
-                paths[0].original,
-                pattern,
-                recursive=r or R,
-                ignore_case=i,
-                invert=v,
-                line_numbers=n,
-                count_only=c,
-                fixed_string=F,
-                only_matching=o,
-                max_count=max_count,
-                whole_word=w,
-                warnings=warnings,
-            )
-            stderr = _stderr_from(warnings)
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            return (format_records(results), IOResult(stderr=stderr))
-
-        pat = compile_pattern(pattern, i, F, w)
-
-        if len(paths) > 1:
-            all_results: list[str] = []
-            for p in paths:
-                data = (await
-                        rb(p.original)).decode(errors="replace").splitlines()
-                hits = grep_lines(p.original, data, pat, v, n, c, args_l, o,
-                                  max_count)
-                if c:
-                    if hits:
-                        all_results.append(f"{p.original}:{hits[0]}")
-                elif args_l:
-                    all_results.extend(hits)
-                else:
-                    all_results.extend(f"{p.original}:{r}" for r in hits)
-            stderr = _stderr_from()
-            if not all_results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            return format_records(all_results), IOResult(stderr=stderr)
-
-        data = await rb(paths[0].original)
-        source = yield_bytes(data)
-        stream = grep_stream(
-            source,
-            pat,
-            invert=v,
-            line_numbers=n,
-            only_matching=o,
-            max_count=max_count,
-            count_only=c,
-            after_context=after_ctx,
-            before_context=before_ctx,
-        )
-        stderr = _stderr_from()
-        if q:
-            io = IOResult(exit_code=1, stderr=stderr)
-            return quiet_match(stream, io), io
-        io = IOResult(stderr=stderr)
-        return exit_on_empty(stream, io), io
-
-    source = _resolve_source(stdin,
-                             "grep: usage: grep [flags] pattern [path]",
-                             error_cls=UsageError)
-    pat = compile_pattern(pattern, i, F, w)
-    stream = grep_stream(
-        source,
-        pat,
-        invert=v,
-        line_numbers=n,
-        only_matching=o,
-        max_count=max_count,
-        count_only=c,
-        after_context=after_ctx,
-        before_context=before_ctx,
+    resolved = await resolve_glob(accessor, paths,
+                                  index=index) if paths else []
+    out, io = await generic_grep(
+        resolved,
+        texts,
+        flags,
+        readdir=_readdir,
+        stat=_stat,
+        read_bytes=discord_read,
+        read_stream=None,
+        accessor=accessor,
+        stdin=stdin,
+        index=index,
     )
-    if q:
-        io = IOResult(exit_code=1)
-        return quiet_match(stream, io), io
-    io = IOResult()
-    return exit_on_empty(stream, io), io
+    if pushdown_warnings:
+        extra = ("\n".join(pushdown_warnings) + "\n").encode()
+        io.stderr = extra + (io.stderr or b"")
+    return out, io

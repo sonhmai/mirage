@@ -25,6 +25,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.resolve import COMPOUND_EXTENSIONS
 from mirage.commands.spec.types import FlagView
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.types import IOResult
 from mirage.types import FileType, PathSpec
 
 BINARY_EXTENSIONS = frozenset({
@@ -280,6 +281,43 @@ async def nonzero_count_stream(
         count = int(chunk.decode(errors="replace").strip() or "0")
         if count > 0:
             yield chunk
+
+
+def count_records_have_matches(results: list[str]) -> bool:
+    """Return whether any `path:count` record has a nonzero count.
+
+    Args:
+        results (list[str]): Count-only records in `path:count` form.
+
+    Returns:
+        bool: True when any parsed count is greater than zero.
+    """
+    return any(int(r.rsplit(":", 1)[-1]) > 0 for r in results)
+
+
+async def count_exit_stream(
+    source: AsyncIterator[bytes],
+    io: IOResult,
+) -> AsyncIterator[bytes]:
+    """Yield count-only grep output, setting exit 1 when all counts are zero.
+
+    GNU grep -c prints the count but still exits 1 when no lines were
+    selected, so emptiness-based exit detection cannot apply.
+
+    Args:
+        source (AsyncIterator[bytes]): Count-only grep stream.
+        io (IOResult): Result whose exit_code becomes 1 when nothing matched.
+
+    Yields:
+        bytes: The unchanged count chunks.
+    """
+    any_match = False
+    async for chunk in source:
+        if int(chunk.decode(errors="replace").strip() or "0") > 0:
+            any_match = True
+        yield chunk
+    if not any_match:
+        io.exit_code = 1
 
 
 async def grep_stream(

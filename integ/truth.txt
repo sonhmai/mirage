@@ -925,6 +925,19 @@ baz
 2:world
 === du_max_depth_eq ===
 20	/data/sub
+=== grep_unknown_flag_ignored ===
+world
+=== grep_cluster_attached ===
+2:world
+=== grep_cluster_count ===
+Hello World
+=== rg_f_multi ===
+world
+bar
+baz
+=== zgrep_e_multi_pipe ===
+world
+baz
 === rg_e_flag ===
 world
 === rg_e_multi ===

@@ -63,3 +63,10 @@ mirage_integ/collections/books/documents.jsonl:
 output truncated at safeguard limit (2 lines)
 === safeguard_cat_pipe_uncapped ===
 5 /mongodb/mirage_integ/collections/books/documents.jsonl
+
+# ---- grep -e multi-pattern (newline-joined list, no search push-down) ----
+=== grep_e_multi ===
+1:{"_id": 1, "title": "alpha", "author": "ada"
+2:{"_id": 2, "title": "beta", "author": "ben"
+4:{"_id": 4, "title": "delta", "author": "ada"
+5:{"_id": 5, "title": "epsilon", "author": "ben"

@@ -23,7 +23,7 @@ const ENC = new TextEncoder()
 async function runIconv(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean> = {},
+  flags: Record<string, string | boolean | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ out: Uint8Array; exitCode: number }> {
   const cmd = RAM_ICONV[0]

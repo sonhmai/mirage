@@ -22,7 +22,7 @@ const DEC = new TextDecoder()
 
 async function runCut(
   stdin: Uint8Array | null,
-  flags: Record<string, string | boolean>,
+  flags: Record<string, string | boolean | string[]>,
 ): Promise<string> {
   const resource = new RAMResource()
   const cmd = RAM_CUT[0]

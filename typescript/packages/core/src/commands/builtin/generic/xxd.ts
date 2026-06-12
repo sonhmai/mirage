@@ -166,7 +166,7 @@ export async function xxdGeneric(
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
     }
   }
-  const toInt = (v: string | boolean | undefined): number =>
+  const toInt = (v: string | boolean | string[] | undefined): number =>
     typeof v === 'string' ? Number.parseInt(v, 10) : 0
   const skip = toInt(opts.flags.s)
   const limitFlag = toInt(opts.flags.args_l)

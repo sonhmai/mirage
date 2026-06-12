@@ -68,6 +68,10 @@ SEED_FILES = {
     "apple\ncherry\nelder\nfig\n",
     "/data/prefix_dup.txt":
     "1 apple\n2 apple\n3 banana\n",
+    "/data/patterns.txt":
+    "world\nbar\n",
+    "/data/patterns2.txt":
+    "baz\n",
 }
 
 CASES: list[tuple[str, str]] = [
@@ -341,6 +345,22 @@ CASES: list[tuple[str, str]] = [
     ("grep_only_match_multi", "grep -o o /data/a.txt"),
     ("grep_recursive_dir", 'grep -r hello /data/sub'),
     ("grep_empty_pattern", "grep '' /data/b.txt"),
+    ("grep_e_flag", "grep -e world /data/a.txt"),
+    ("grep_e_n", "grep -n -e bar /data/a.txt"),
+    ("grep_e_multi_file", "grep -e hello /data/mixed.txt /data/a.txt"),
+    ("grep_e_multi_pattern", "grep -e world -e bar /data/a.txt"),
+    ("grep_e_multi_pattern_n", "grep -n -e hello -e baz /data/a.txt"),
+    ("grep_e_multi_pattern_F", "grep -F -e a.b -e foo /data/a.txt"),
+    ("grep_f_file", "grep -f /data/patterns.txt /data/a.txt"),
+    ("grep_e_f_union", "grep -e hello -f /data/patterns.txt /data/a.txt"),
+    ("grep_f_multi",
+     "grep -f /data/patterns.txt -f /data/patterns2.txt /data/a.txt"),
+    ("grep_cluster_ne", "grep -ne world /data/a.txt"),
+    ("du_max_depth_eq", "du --max-depth=1 /data/sub"),
+    ("rg_e_flag", "rg -e world /data/a.txt"),
+    ("rg_e_multi", "rg -e world -e bar /data/a.txt"),
+    ("rg_f_file", "rg -f /data/patterns.txt /data/a.txt"),
+    ("zgrep_f_pipe", "cat /data/a.txt | gzip | zgrep -f /data/patterns.txt"),
 
     # ----- paste advanced -----
     ("paste_s", "paste -s /data/b.txt"),
@@ -411,6 +431,7 @@ CASES: list[tuple[str, str]] = [
 
     # ----- gzip / zcat / zgrep -----
     ("zgrep_pipe", "cat /data/a.txt | gzip | zgrep world"),
+    ("zgrep_e_pipe", "cat /data/a.txt | gzip | zgrep -e world"),
     ("gzip_c_pipe", "cat /data/b.txt | gzip -c | zcat"),
 
     # ----- jq more -----
@@ -482,6 +503,7 @@ EXIT_CODE_CASES: list[tuple[str, str]] = [
     ("jq_dot_no_input", 'jq "."'),
     ("lazy_exit_grep_match", "grep hello /data/a.txt"),
     ("lazy_exit_grep_no_match", "grep zzz /data/a.txt"),
+    ("grep_f_empty_no_match", "grep -f /data/empty.txt /data/a.txt"),
     ("cp_reject_multi_nondir", "cp /data/a.txt /data/b.txt /data/c.txt"),
     ("inv_ls_warm", "ls -1 /data/sub"),
     ("inv_touch", "touch /data/sub/inv_late.txt"),

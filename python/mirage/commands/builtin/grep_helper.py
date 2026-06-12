@@ -13,13 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 
 from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.grep_context import grep_context_lines
 from mirage.commands.builtin.utils.types import (_AsyncReadBytes,
                                                  _AsyncReaddir, _AsyncStat)
 from mirage.commands.resolve import COMPOUND_EXTENSIONS
+from mirage.commands.spec.types import FlagView
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.types import FileType
 
@@ -32,6 +33,8 @@ BINARY_EXTENSIONS = frozenset({
     ".hdf5",
     ".h5",
 })
+
+NEVER_MATCH = r"(?!)"
 
 
 def classify_pattern(
@@ -47,11 +50,90 @@ def classify_pattern(
     Returns:
         PatternType: EXACT, SIMPLE, or REGEX.
     """
+    if "\n" in pattern:
+        return PatternType.REGEX
     if fixed_string:
         return PatternType.EXACT
     if re.fullmatch(r'[\w\s\-_.]+', pattern):
         return PatternType.SIMPLE
     return PatternType.REGEX
+
+
+def pattern_arg(texts: Sequence[str], flags: FlagView) -> str | None:
+    """Resolve the pattern-list argument from -e values or the positional.
+
+    Args:
+        texts (Sequence[str]): positional TEXT operands.
+        flags (FlagView): typed view over raw flag kwargs.
+
+    Returns:
+        str | None: POSIX newline-joined pattern list (each -e value may
+            itself be a newline-separated list), or None when neither -e nor
+            a positional pattern was supplied.
+    """
+    e_values = flags.list("e")
+    if e_values:
+        return "\n".join(e_values)
+    if texts:
+        return texts[0]
+    return None
+
+
+def merge_pattern_list(
+    pattern: str | None,
+    file_data: bytes | None,
+) -> str | None:
+    """Merge a pattern list with the content of a -f pattern file.
+
+    Args:
+        pattern (str | None): newline-separated pattern list from -e or the
+            positional argument, or None when only -f supplied patterns.
+        file_data (bytes | None): raw -f file content, or None without -f.
+
+    Returns:
+        str | None: merged newline-separated pattern list, or None when the
+            list is empty (GNU: zero patterns match nothing).
+    """
+    parts: list[str] = [] if pattern is None else pattern.split("\n")
+    if file_data:
+        text = file_data.decode(errors="replace")
+        if text.endswith("\n"):
+            text = text[:-1]
+        parts.extend(text.split("\n"))
+    if not parts:
+        return None
+    return "\n".join(parts)
+
+
+def build_pattern_str(
+    pattern: str,
+    fixed_string: bool = False,
+    whole_word: bool = False,
+) -> str:
+    """Build a regex source string from a POSIX pattern list.
+
+    Args:
+        pattern (str): newline-separated pattern list; a line matches when
+            any of the patterns matches.
+        fixed_string (bool): True if -F flag is set.
+        whole_word (bool): True if -w flag is set.
+
+    Returns:
+        str: regex source string.
+    """
+    parts = pattern.split("\n")
+    if len(parts) == 1:
+        pat_str = re.escape(pattern) if fixed_string else pattern
+        if whole_word:
+            pat_str = r"\b" + pat_str + r"\b"
+        return pat_str
+    subs: list[str] = []
+    for part in parts:
+        sub = re.escape(part) if fixed_string else f"(?:{part})"
+        if whole_word:
+            sub = r"\b" + sub + r"\b"
+        subs.append(sub)
+    return "|".join(subs)
 
 
 def compile_pattern(
@@ -61,10 +143,8 @@ def compile_pattern(
     whole_word: bool = False,
 ) -> re.Pattern[str]:
     flags = re.IGNORECASE if ignore_case else 0
-    pat_str = re.escape(pattern) if fixed_string else pattern
-    if whole_word:
-        pat_str = r"\b" + pat_str + r"\b"
-    return re.compile(pat_str, flags)
+    return re.compile(build_pattern_str(pattern, fixed_string, whole_word),
+                      flags)
 
 
 def get_extension(path: str) -> str | None:

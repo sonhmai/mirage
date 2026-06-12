@@ -20,7 +20,7 @@ import { RAM_MKTEMP } from './mktemp.ts'
 const DEC = new TextDecoder()
 
 async function runMktemp(
-  flags: Record<string, string | boolean>,
+  flags: Record<string, string | boolean | string[]>,
   texts: string[] = [],
 ): Promise<{ out: string; resource: RAMResource }> {
   const resource = new RAMResource()

@@ -22,6 +22,7 @@ import { IOResult } from '../../../io/types.ts'
 import { type FileStat, PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { patternArg } from '../grep_helper.ts'
 import { grepGeneric } from '../generic/grep.ts'
 
 async function grepCommand(
@@ -32,8 +33,7 @@ async function grepCommand(
 ): Promise<CommandFnResult> {
   const index = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlob(accessor, paths, index) : []
-  const pattern =
-    typeof opts.flags.e === 'string' ? opts.flags.e : texts.length > 0 ? texts[0] : undefined
+  const pattern = patternArg(texts, opts.flags) ?? undefined
   let files = resolved
   let showFilename = false
   let grepOpts = opts

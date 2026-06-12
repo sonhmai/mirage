@@ -25,7 +25,7 @@ async function runTr(
   resource: RAMResource,
   paths: PathSpec[],
   texts: string[],
-  flags: Record<string, string | boolean> = {},
+  flags: Record<string, string | boolean | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_TR[0]

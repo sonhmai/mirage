@@ -413,12 +413,23 @@ class Mount:
                 p, PathSpec) else p for p in paths
         ]
 
-        kw = {
-            k:
-            dataclasses.replace(v, prefix=mount_prefix) if isinstance(
-                v, PathSpec) else v
-            for k, v in flag_kwargs.items()
-        }
+        # Attach this mount's prefix to path-shaped flag values so backend
+        # reads can strip it: a single PathSpec (e.g. awk -f, single grep -f)
+        # or a list of PathSpec (repeatable grep -f). Everything else (bools,
+        # strings, list[str] like repeated -e) is not a path and passes
+        # through unchanged.
+        kw = {}
+        for k, v in flag_kwargs.items():
+            if isinstance(v, PathSpec):
+                kw[k] = dataclasses.replace(v, prefix=mount_prefix)
+            elif isinstance(v, list) and v and all(
+                    isinstance(item, PathSpec) for item in v):
+                kw[k] = [
+                    dataclasses.replace(item, prefix=mount_prefix)
+                    for item in v
+                ]
+            else:
+                kw[k] = v
         kw["index"] = self.resource.index
         kw["cwd"] = PathSpec(
             original=cwd,

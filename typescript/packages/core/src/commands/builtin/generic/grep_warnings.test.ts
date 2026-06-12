@@ -27,7 +27,7 @@ function spec(path: string): PathSpec {
   return new PathSpec({ original: path, directory: path, resolved: false, prefix: '' })
 }
 
-function opts(flags: Record<string, string | boolean>): CommandOpts {
+function opts(flags: Record<string, string | boolean | string[]>): CommandOpts {
   return {
     stdin: null,
     flags,
@@ -61,7 +61,9 @@ async function decode(out: GrepOut): Promise<string> {
   return DEC.decode(out instanceof Uint8Array ? out : await materialize(out))
 }
 
-async function runGrep(flags: Record<string, string | boolean>): Promise<[GrepOut, IOResult]> {
+async function runGrep(
+  flags: Record<string, string | boolean | string[]>,
+): Promise<[GrepOut, IOResult]> {
   const result = await grepGeneric(
     'grep',
     [spec('/data')],

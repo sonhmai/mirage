@@ -58,7 +58,7 @@ async function resolveSizes(
   return { resolved, missing }
 }
 
-function parseNumFlag(value: string | boolean | undefined): number | null {
+function parseNumFlag(value: string | boolean | string[] | undefined): number | null {
   if (typeof value !== 'string') return null
   const n = Number.parseInt(value, 10)
   return Number.isFinite(n) ? n : null

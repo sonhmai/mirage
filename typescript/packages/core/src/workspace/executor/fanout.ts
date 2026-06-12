@@ -34,7 +34,7 @@ function pathSegments(path: string): string[] {
 export function shouldFanOut(
   cmdName: string,
   paths: readonly PathSpec[],
-  flagKwargs: Record<string, string | boolean>,
+  flagKwargs: Record<string, string | boolean | string[]>,
   registry: MountRegistry,
 ): boolean {
   if (paths.length === 0 || paths[0] === undefined) return false
@@ -50,14 +50,14 @@ export function shouldFanOut(
 }
 
 function adjustDepthFlags(
-  flagKwargs: Record<string, string | boolean>,
+  flagKwargs: Record<string, string | boolean | string[]>,
   parentPath: string,
   mountPrefix: string,
-): Record<string, string | boolean> | null {
+): Record<string, string | boolean | string[]> | null {
   const parentDepth = pathSegments(parentPath).length
   const mountDepth = pathSegments(mountPrefix).length
   const delta = mountDepth - parentDepth
-  const out: Record<string, string | boolean> = { ...flagKwargs }
+  const out: Record<string, string | boolean | string[]> = { ...flagKwargs }
   if ('maxdepth' in out) {
     const orig = Number(out.maxdepth)
     if (!Number.isNaN(orig)) {
@@ -78,7 +78,7 @@ function adjustDepthFlags(
 function synthesizeFindMountEntries(
   targetPath: string,
   descendants: readonly Mount[],
-  flagKwargs: Record<string, string | boolean>,
+  flagKwargs: Record<string, string | boolean | string[]>,
 ): string {
   const typeFilter = flagKwargs.type
   if (typeFilter !== undefined && typeFilter !== 'd') return ''
@@ -141,7 +141,7 @@ export async function fanOutTraversal(
   cmdName: string,
   paths: readonly PathSpec[],
   texts: readonly string[],
-  flagKwargs: Record<string, string | boolean>,
+  flagKwargs: Record<string, string | boolean | string[]>,
   registry: MountRegistry,
   primaryMount: Mount,
   cwd: string,
@@ -161,7 +161,7 @@ export async function fanOutTraversal(
   const mountsToRun: Mount[] = [primaryMount, ...descendants]
   for (const mount of mountsToRun) {
     let subPaths: PathSpec[]
-    let subFlags: Record<string, string | boolean>
+    let subFlags: Record<string, string | boolean | string[]>
     if (mount === primaryMount) {
       subPaths = [...paths]
       subFlags = { ...flagKwargs }

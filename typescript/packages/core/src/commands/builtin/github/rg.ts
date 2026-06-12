@@ -29,7 +29,7 @@ import { IOResult } from '../../../io/types.ts'
 import { type FileStat, ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { isRegexPattern } from '../grep_helper.ts'
+import { isRegexPattern, patternArg } from '../grep_helper.ts'
 import { rgGeneric } from '../generic/rg.ts'
 
 const ENC = new TextEncoder()
@@ -44,7 +44,7 @@ async function rgCommand(
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
-    const pattern = texts[0] ?? ''
+    const pattern = patternArg(texts, opts.flags) ?? ''
     const fixedString = opts.flags.F === true
     const key = scopeRelativeKey(first)
     let fileCount = countScopeFiles(accessor.tree, key)

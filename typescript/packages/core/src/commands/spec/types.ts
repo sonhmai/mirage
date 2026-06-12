@@ -21,10 +21,23 @@ export const OperandKind = Object.freeze({
 export type OperandKind = (typeof OperandKind)[keyof typeof OperandKind]
 
 export interface OptionInit {
+  /** Short form, e.g. "-e". */
   short?: string | null
+  /** Long form, e.g. "--max-depth". */
   long?: string | null
+  /**
+   * NONE for boolean flags; TEXT or PATH for value flags. PATH values are
+   * cwd-resolved and routed for mount dispatch.
+   */
   valueKind?: OperandKind
+  /** Treat "-<digits>" as this flag's value (e.g. head -5). */
   numericShorthand?: boolean
+  /**
+   * Repeated occurrences accumulate newline-joined instead of last-wins
+   * (POSIX pattern-list form, e.g. grep -e). Repeatable PATH flags resolve
+   * and route each joined path.
+   */
+  repeatable?: boolean
   description?: string
 }
 
@@ -33,6 +46,7 @@ export class Option {
   readonly long: string | null
   readonly valueKind: OperandKind
   readonly numericShorthand: boolean
+  readonly repeatable: boolean
   readonly description: string | null
 
   constructor(init: OptionInit = {}) {
@@ -40,20 +54,30 @@ export class Option {
     this.long = init.long ?? null
     this.valueKind = init.valueKind ?? OperandKind.NONE
     this.numericShorthand = init.numericShorthand ?? false
+    this.repeatable = init.repeatable ?? false
     this.description = init.description ?? null
     Object.freeze(this)
   }
 }
 
 export interface OperandInit {
+  /** PATH operands are cwd-resolved and routed; TEXT pass through verbatim. */
   kind?: OperandKind
+  /**
+   * Flags that supply this operand's value. When any is present the slot is
+   * skipped and remaining args classify as rest (e.g. grep's pattern with
+   * -e/-f).
+   */
+  providedBy?: readonly string[]
 }
 
 export class Operand {
   readonly kind: OperandKind
+  readonly providedBy: readonly string[]
 
   constructor(init: OperandInit = {}) {
     this.kind = init.kind ?? OperandKind.PATH
+    this.providedBy = init.providedBy ?? []
     Object.freeze(this)
   }
 }
@@ -84,23 +108,32 @@ export class CommandSpec {
 }
 
 export interface ParsedArgsInit {
-  flags: Record<string, string | boolean>
+  flags: Record<string, string | boolean | string[]>
   args: [string, OperandKind][]
   cachePaths?: string[]
   pathFlagValues?: string[]
+  rawOperands?: [string, OperandKind][]
+  textFlagValues?: string[]
+  warnings?: string[]
 }
 
 export class ParsedArgs {
-  readonly flags: Record<string, string | boolean>
+  readonly flags: Record<string, string | boolean | string[]>
   readonly args: [string, OperandKind][]
   readonly cachePaths: string[]
   readonly pathFlagValues: string[]
+  readonly rawOperands: [string, OperandKind][]
+  readonly textFlagValues: string[]
+  readonly warnings: string[]
 
   constructor(init: ParsedArgsInit) {
     this.flags = init.flags
     this.args = init.args
     this.cachePaths = init.cachePaths ?? []
     this.pathFlagValues = init.pathFlagValues ?? []
+    this.rawOperands = init.rawOperands ?? []
+    this.textFlagValues = init.textFlagValues ?? []
+    this.warnings = init.warnings ?? []
   }
 
   paths(): string[] {
@@ -115,7 +148,10 @@ export class ParsedArgs {
     return this.args.filter(([, k]) => k === OperandKind.TEXT).map(([v]) => v)
   }
 
-  flag(name: string, fallback: string | boolean | null = null): string | boolean | null {
+  flag(
+    name: string,
+    fallback: string | boolean | string[] | null = null,
+  ): string | boolean | string[] | null {
     return this.flags[name] ?? fallback
   }
 }

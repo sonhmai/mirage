@@ -28,7 +28,7 @@ const DEC = new TextDecoder()
 async function runLs(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean> = {},
+  flags: Record<string, string | boolean | string[]> = {},
 ): Promise<string> {
   const cmd = RAM_LS[0]
   if (cmd === undefined) throw new Error('ls not registered')

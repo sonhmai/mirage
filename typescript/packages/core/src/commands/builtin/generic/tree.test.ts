@@ -30,7 +30,7 @@ function spec(path: string): PathSpec {
   return new PathSpec({ original: path, directory: path, resolved: false, prefix: '' })
 }
 
-function opts(flags: Record<string, string | boolean>): CommandOpts {
+function opts(flags: Record<string, string | boolean | string[]>): CommandOpts {
   return {
     stdin: null,
     flags,
@@ -64,7 +64,7 @@ const s3Readdir = (p: PathSpec): Promise<string[]> => {
 
 async function run(
   readdir: (p: PathSpec) => Promise<string[]>,
-  flags: Record<string, string | boolean>,
+  flags: Record<string, string | boolean | string[]>,
 ): Promise<string> {
   const [out] = (await treeGeneric([spec('/')], opts(flags), readdir, stat)) as [
     Uint8Array,

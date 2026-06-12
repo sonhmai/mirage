@@ -17,12 +17,15 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
+  NEVER_MATCH,
   compilePattern,
   grepFilesOnly,
   type GrepFilesOnlyOptions,
   grepLines,
   grepRecursive,
   grepStream,
+  mergePatternList,
+  patternArg,
 } from '../grep_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
 
@@ -54,14 +57,18 @@ interface FlagSet {
   beforeContext: number
 }
 
-function getPattern(texts: readonly string[], flags: Record<string, string | boolean>): string {
-  if (typeof flags.e === 'string') return flags.e
-  if (texts.length > 0 && texts[0] !== undefined) return texts[0]
+function getPattern(
+  texts: readonly string[],
+  flags: Record<string, string | boolean | string[]>,
+): string | null {
+  const pattern = patternArg(texts, flags)
+  if (pattern !== null) return pattern
+  if (Array.isArray(flags.f)) return null
   throw new Error('grep: usage: grep [flags] pattern [path]')
 }
 
-function parseFlags(flags: Record<string, string | boolean>): FlagSet {
-  const toInt = (v: string | boolean | undefined): number | null =>
+function parseFlags(flags: Record<string, string | boolean | string[]>): FlagSet {
+  const toInt = (v: string | boolean | string[] | undefined): number | null =>
     typeof v === 'string' ? Number.parseInt(v, 10) : null
   const aCtx = toInt(flags.A)
   const bCtx = toInt(flags.B)
@@ -116,7 +123,7 @@ export async function grepGeneric(
   scopeCheck?: ScopeCheck,
   showFilename = false,
 ): Promise<CommandFnResult> {
-  let pattern: string
+  let pattern: string | null
   try {
     pattern = getPattern(texts, opts.flags)
   } catch (err) {
@@ -125,6 +132,37 @@ export async function grepGeneric(
   }
   const f = parseFlags(opts.flags)
   const recursive = opts.flags.r === true || opts.flags.R === true
+
+  if (Array.isArray(opts.flags.f)) {
+    // Repeatable -f arrives as a list of resolved paths; read each file.
+    for (const filePath of opts.flags.f) {
+      const patternSpec = PathSpec.fromStrPath(filePath, paths[0]?.prefix ?? opts.mountPrefix ?? '')
+      let fileData: Uint8Array
+      try {
+        fileData = await materialize(stream(patternSpec))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return [
+          null,
+          new IOResult({ exitCode: 2, stderr: ENC.encode(`${name}: ${filePath}: ${msg}\n`) }),
+        ]
+      }
+      pattern = mergePatternList(pattern, fileData)
+    }
+    if (pattern === null) {
+      pattern = NEVER_MATCH
+      f.fixedString = false
+    }
+  }
+  if (pattern === null) {
+    return [
+      null,
+      new IOResult({
+        exitCode: 2,
+        stderr: ENC.encode(`${name}: usage: ${name} [flags] pattern [path]\n`),
+      }),
+    ]
+  }
 
   if (paths.length > 0) {
     const first = paths[0]

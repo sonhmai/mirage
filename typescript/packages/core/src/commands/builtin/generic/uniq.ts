@@ -31,7 +31,7 @@ interface UniqOptions {
   ignoreCase: boolean
 }
 
-function parseCount(value: string | boolean | undefined): number | null {
+function parseCount(value: string | boolean | string[] | undefined): number | null {
   if (typeof value !== 'string') return null
   const count = Number.parseInt(value, 10)
   if (Number.isNaN(count) || count < 0) throw new Error(`uniq: invalid count: '${value}'`)
@@ -100,7 +100,7 @@ async function* uniqStream(
   }
 }
 
-function parseOptions(flags: Record<string, string | boolean>): UniqOptions {
+function parseOptions(flags: Record<string, string | boolean | string[]>): UniqOptions {
   return {
     count: flags.c === true,
     duplicatesOnly: flags.d === true,

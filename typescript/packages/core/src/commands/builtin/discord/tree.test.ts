@@ -23,7 +23,7 @@ const DEC = new TextDecoder()
 
 async function runTree(
   paths: PathSpec[],
-  flags: Record<string, string | boolean>,
+  flags: Record<string, string | boolean | string[]>,
   options: { index?: RAMIndexCacheStore; transport?: FakeDiscordTransport } = {},
 ): Promise<string> {
   const cmd = DISCORD_TREE[0]

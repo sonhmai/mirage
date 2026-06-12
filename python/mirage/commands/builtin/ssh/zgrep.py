@@ -31,43 +31,19 @@ async def zgrep(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    i: bool = False,
-    c: bool = False,
-    args_l: bool = False,
-    n: bool = False,
-    v: bool = False,
-    e: str | None = None,
-    E: bool = False,
-    F: bool = False,
-    H: bool = False,
-    h: bool = False,
-    m: str | None = None,
-    o: bool = False,
-    q: bool = False,
-    w: bool = False,
     index: IndexCacheStore = None,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    raw_pattern = e if e is not None else (texts[0] if texts else "")
     if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
     else:
         paths = []
-    return await generic_zgrep(paths,
-                               pattern=raw_pattern,
-                               read_bytes=read_bytes,
-                               accessor=accessor,
-                               stdin=stdin,
-                               ignore_case=i,
-                               invert=v,
-                               count=c,
-                               files_only=args_l,
-                               line_numbers=n,
-                               extended=E,
-                               fixed=F,
-                               force_filename=H,
-                               suppress_filename=h,
-                               max_count=int(m) if m is not None else None,
-                               only_matching=o,
-                               quiet=q,
-                               whole_word=w)
+    return await generic_zgrep(
+        paths,
+        texts,
+        flags,
+        read_bytes=read_bytes,
+        accessor=accessor,
+        stdin=stdin,
+        index=index,
+    )

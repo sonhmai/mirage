@@ -37,7 +37,7 @@ function spec(path: string): PathSpec {
   return new PathSpec({ original: path, directory: path, resolved: false, prefix: '' })
 }
 
-function opts(flags: Record<string, string | boolean>): CommandOpts {
+function opts(flags: Record<string, string | boolean | string[]>): CommandOpts {
   return {
     stdin: null,
     flags,
@@ -79,7 +79,7 @@ async function* stream(p: PathSpec): AsyncIterable<Uint8Array> {
 
 async function run(
   readdir: (p: PathSpec) => Promise<string[]>,
-  flags: Record<string, string | boolean>,
+  flags: Record<string, string | boolean | string[]>,
 ): Promise<string> {
   const [out] = (await rgGeneric([spec('/')], ['hello'], opts(flags), stat, readdir, stream)) as [
     Uint8Array,

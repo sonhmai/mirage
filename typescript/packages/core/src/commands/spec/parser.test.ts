@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { specOf } from './builtins.ts'
 import { parseCommand, parseToKwargs, resolvePath } from './parser.ts'
 import { CommandSpec, Operand, OperandKind, Option, ParsedArgs } from './types.ts'
 
@@ -198,11 +199,13 @@ describe('parseCommand — clustered flags shift positionals when one is missing
     rest: new Operand({ kind: OperandKind.PATH }),
   })
 
-  it('reproduces the misclassification when -I is missing from the spec', () => {
+  it('drops the cluster with a warning when -I is missing from the spec', () => {
     const p = parseCommand(grepLikeMissingI, ['-RIl', 'Base3\\|base3', '/r2/Review'], '/')
-    // -RIl falls through, becomes the pattern, real pattern shifts to path[0]
-    expect(p.texts()).toEqual(['-RIl'])
-    expect(p.paths()).toEqual(['/Base3\\|base3', '/r2/Review'])
+    // -RIl can't fully resolve; it is dropped with a warning instead of
+    // becoming the pattern and shifting the real pattern into the paths.
+    expect(p.texts()).toEqual(['Base3\\|base3'])
+    expect(p.paths()).toEqual(['/r2/Review'])
+    expect(p.warnings.some((w) => w.includes('-RIl'))).toBe(true)
   })
 
   it('correctly assigns pattern + path once -I is registered', () => {
@@ -210,6 +213,208 @@ describe('parseCommand — clustered flags shift positionals when one is missing
     expect(p.flags).toEqual({ '-R': true, '-I': true, '-l': true })
     expect(p.texts()).toEqual(['Base3\\|base3'])
     expect(p.paths()).toEqual(['/r2/Review'])
+  })
+})
+
+describe('parseCommand — providedBy frees the positional slot', () => {
+  // POSIX: `grep -e pat file` must behave like `grep pat file`. Without
+  // providedBy, the pattern positional still consumed the first raw arg, so
+  // the file path was classified as TEXT and paths() came back empty.
+  const grepLike = new CommandSpec({
+    options: [
+      new Option({ short: '-n' }),
+      new Option({ short: '-e', valueKind: OperandKind.TEXT }),
+    ],
+    positional: [new Operand({ kind: OperandKind.TEXT, providedBy: ['-e'] })],
+    rest: new Operand({ kind: OperandKind.PATH }),
+  })
+
+  it('classifies remaining args as rest paths when the flag is present', () => {
+    const p = parseCommand(grepLike, ['-e', 'orange', '/data/a.txt'], '/')
+    expect(p.flags['-e']).toBe('orange')
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/data/a.txt'])
+  })
+
+  it('keeps the positional slot when the flag is absent', () => {
+    const p = parseCommand(grepLike, ['orange', '/data/a.txt'], '/')
+    expect(p.texts()).toEqual(['orange'])
+    expect(p.paths()).toEqual(['/data/a.txt'])
+  })
+
+  it('handles extra flags and multiple paths', () => {
+    const p = parseCommand(grepLike, ['-n', '-e', 'pat', '/a.txt', '/b.txt'], '/')
+    expect(p.flags['-n']).toBe(true)
+    expect(p.paths()).toEqual(['/a.txt', '/b.txt'])
+  })
+
+  it('fixes `grep -e pat file` with the real builtin spec', () => {
+    const p = parseCommand(specOf('grep'), ['-e', 'orange', '/data/a.txt'], '/')
+    expect(p.flags['-e']).toEqual(['orange'])
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/data/a.txt'])
+  })
+
+  it('fixes `zgrep -e pat file` with the real builtin spec', () => {
+    const p = parseCommand(specOf('zgrep'), ['-e', 'orange', '/data/a.gz'], '/')
+    expect(p.flags['-e']).toEqual(['orange'])
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/data/a.gz'])
+  })
+})
+
+describe('parseCommand — repeatable value flags accumulate newline-joined', () => {
+  // POSIX: each -e adds a pattern; a pattern argument is itself a
+  // newline-separated pattern list, so repeats join with \n.
+  it('accumulates repeated -e for grep', () => {
+    const p = parseCommand(specOf('grep'), ['-e', 'foo', '-e', 'bar', '/a.txt'], '/')
+    expect(p.flags['-e']).toEqual(['foo', 'bar'])
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/a.txt'])
+  })
+
+  it('accumulates attached-value repeats', () => {
+    const p = parseCommand(specOf('grep'), ['-e', 'foo', '-ebar', '/a.txt'], '/')
+    expect(p.flags['-e']).toEqual(['foo', 'bar'])
+  })
+
+  it('non-repeatable value flags keep the last value', () => {
+    const p = parseCommand(specOf('grep'), ['-m', '1', '-m', '2', 'pat'], '/')
+    expect(p.flags['-m']).toBe('2')
+  })
+
+  it('cluster into a repeatable flag accumulates', () => {
+    const p = parseCommand(specOf('grep'), ['-ne', 'foo', '-e', 'bar', '/a.txt'], '/')
+    expect(p.flags['-n']).toBe(true)
+    expect(p.flags['-e']).toEqual(['foo', 'bar'])
+    expect(p.paths()).toEqual(['/a.txt'])
+  })
+
+  it('long =value and separate forms of a repeatable flag accumulate', () => {
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--tag', valueKind: OperandKind.TEXT, repeatable: true })],
+      rest: new Operand({ kind: OperandKind.PATH }),
+    })
+    const p = parseCommand(spec, ['--tag=a', '--tag', 'b', '/x'], '/')
+    expect(p.flags['--tag']).toEqual(['a', 'b'])
+    expect(p.paths()).toEqual(['/x'])
+  })
+
+  it('accumulates repeated -e for rg and frees the positional slot', () => {
+    const p = parseCommand(specOf('rg'), ['-e', 'foo', '-e', 'bar', '/x'], '/')
+    expect(p.flags['-e']).toEqual(['foo', 'bar'])
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/x'])
+  })
+})
+
+describe('parseCommand — grep -f pattern file', () => {
+  it('frees the positional slot and routes the pattern file', () => {
+    const p = parseCommand(specOf('grep'), ['-f', 'pats.txt', 'a.txt'], '/data')
+    expect(p.flags['-f']).toEqual(['/data/pats.txt'])
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/data/a.txt'])
+    expect(p.routingPaths()).toContain('/data/pats.txt')
+  })
+
+  it('keeps -e and -f together', () => {
+    const p = parseCommand(specOf('grep'), ['-e', 'foo', '-f', '/p.txt', '/a.txt'], '/')
+    expect(p.flags['-e']).toEqual(['foo'])
+    expect(p.flags['-f']).toEqual(['/p.txt'])
+    expect(p.paths()).toEqual(['/a.txt'])
+  })
+
+  it('repeated -f accumulates and routes each file', () => {
+    const p = parseCommand(specOf('grep'), ['-f', 'p1.txt', '-f', 'p2.txt', 'a.txt'], '/data')
+    expect(p.flags['-f']).toEqual(['/data/p1.txt', '/data/p2.txt'])
+    expect(p.paths()).toEqual(['/data/a.txt'])
+    expect(p.routingPaths()).toContain('/data/p1.txt')
+    expect(p.routingPaths()).toContain('/data/p2.txt')
+  })
+})
+
+describe('parseCommand — GNU long flag =value syntax', () => {
+  it('parses --max-depth=1', () => {
+    const p = parseCommand(specOf('du'), ['--max-depth=1', '/data'], '/')
+    expect(p.flags['--max-depth']).toBe('1')
+    expect(p.paths()).toEqual(['/data'])
+  })
+
+  it('parses rg --type=md', () => {
+    const p = parseCommand(specOf('rg'), ['--type=md', 'pat', '/x'], '/')
+    expect(p.flags['--type']).toBe('md')
+    expect(p.texts()).toEqual(['pat'])
+    expect(p.paths()).toEqual(['/x'])
+  })
+
+  it('unknown long flag with = is dropped with a warning', () => {
+    const p = parseCommand(specOf('grep'), ['--color=auto', 'pat', '/a.txt'], '/')
+    expect(p.flags['--color']).toBeUndefined()
+    expect(p.texts()).toEqual(['pat'])
+    expect(p.paths()).toEqual(['/a.txt'])
+    expect(p.warnings.some((w) => w.includes('--color=auto'))).toBe(true)
+  })
+})
+
+describe('parseCommand — unknown dash tokens warn and drop', () => {
+  it('drops unknown long flags from operands', () => {
+    const p = parseCommand(specOf('grep'), ['--bogus', 'pat', '/a.txt'], '/')
+    expect(p.texts()).toEqual(['pat'])
+    expect(p.paths()).toEqual(['/a.txt'])
+    expect(p.warnings.some((w) => w.includes('--bogus'))).toBe(true)
+  })
+
+  it('keeps dash tokens for TEXT-rest commands', () => {
+    const p = parseCommand(specOf('python'), ['-x', 'hello'], '/')
+    expect(p.texts()).toEqual(['-x', 'hello'])
+    expect(p.warnings).toEqual([])
+  })
+
+  it('keeps numeric dash tokens as operands', () => {
+    const p = parseCommand(specOf('grep'), ['-5', 'pat'], '/')
+    expect(p.texts()).toEqual(['-5'])
+    expect(p.warnings).toEqual([])
+  })
+
+  it('known flags produce no warnings', () => {
+    const p = parseCommand(specOf('grep'), ['-n', '-e', 'pat', '/a.txt'], '/')
+    expect(p.warnings).toEqual([])
+  })
+})
+
+describe('parseCommand — clusters ending in a value flag (getopt)', () => {
+  it('-ne pat: bools then value flag consuming the next arg', () => {
+    const p = parseCommand(specOf('grep'), ['-ne', 'pat', '/a.txt'], '/')
+    expect(p.flags['-n']).toBe(true)
+    expect(p.flags['-e']).toEqual(['pat'])
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/a.txt'])
+  })
+
+  it('-nepat: bools then value flag with attached value', () => {
+    const p = parseCommand(specOf('grep'), ['-nepat', '/a.txt'], '/')
+    expect(p.flags['-n']).toBe(true)
+    expect(p.flags['-e']).toEqual(['pat'])
+    expect(p.paths()).toEqual(['/a.txt'])
+  })
+
+  it('-im1: bool then numeric value attached', () => {
+    const p = parseCommand(specOf('grep'), ['-im1', 'pat', '/a.txt'], '/')
+    expect(p.flags['-i']).toBe(true)
+    expect(p.flags['-m']).toBe('1')
+    expect(p.texts()).toEqual(['pat'])
+  })
+
+  it('unknown char in cluster drops the token with a warning', () => {
+    const p = parseCommand(specOf('grep'), ['-nx', 'pat', '/a.txt'], '/')
+    expect(p.flags['-n']).toBeUndefined()
+    expect(p.texts()).toEqual(['pat'])
+    expect(p.warnings.some((w) => w.includes('-nx'))).toBe(true)
+  })
+
+  it('find multi-char short flags still work', () => {
+    const p = parseCommand(specOf('find'), ['/data', '-name', '*.txt'], '/')
+    expect(p.flags['-name']).toBe('*.txt')
   })
 })
 

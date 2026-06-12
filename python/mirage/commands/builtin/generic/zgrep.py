@@ -1,19 +1,25 @@
 import gzip as gziplib
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import (AsyncIterator, Awaitable, Callable, Mapping,
+                             Sequence)
+from functools import partial
 
+from mirage.commands.builtin.generic.grep import resolve_pattern
+from mirage.commands.builtin.grep_helper import build_pattern_str
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def _build_pattern(pattern: str, fixed: bool, whole_word: bool) -> str:
-    if fixed:
-        pattern = re.escape(pattern)
-    if whole_word:
-        pattern = r"\b" + pattern + r"\b"
-    return pattern
+async def _read_plain(
+    read_bytes: Callable[..., Awaitable[bytes]],
+    accessor: object,
+    path: PathSpec,
+    index: object = None,
+) -> bytes:
+    return await read_bytes(accessor, path)
 
 
 def _zgrep_search(
@@ -77,26 +83,31 @@ def _files_only_match(data: bytes, pattern: str, ignore_case: bool,
 
 async def zgrep(
     paths: list[PathSpec],
+    texts: Sequence[str] = (),
+    flags: Mapping[str, object] | None = None,
     *,
-    pattern: str,
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: object = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    ignore_case: bool = False,
-    invert: bool = False,
-    count: bool = False,
-    files_only: bool = False,
-    line_numbers: bool = False,
-    extended: bool = False,
-    fixed: bool = False,
-    force_filename: bool = False,
-    suppress_filename: bool = False,
-    max_count: int | None = None,
-    only_matching: bool = False,
-    quiet: bool = False,
-    whole_word: bool = False,
+    index: object = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    compiled = _build_pattern(pattern, fixed, whole_word)
+    fl = FlagView(flags)
+    pattern, never_match = await resolve_pattern(
+        texts, fl, partial(_read_plain, read_bytes), accessor, index,
+        "zgrep: usage: zgrep [flags] pattern [path]")
+    ignore_case = fl.bool("i")
+    invert = fl.bool("v")
+    count = fl.bool("c")
+    files_only = fl.bool("args_l")
+    line_numbers = fl.bool("n")
+    fixed = fl.bool("F") and not never_match
+    force_filename = fl.bool("H")
+    suppress_filename = fl.bool("h")
+    only_matching = fl.bool("o")
+    quiet = fl.bool("q")
+    whole_word = fl.bool("w")
+    max_count = fl.int("m")
+    compiled = build_pattern_str(pattern, fixed, whole_word)
     multi = len(paths) > 1
     show_filename = force_filename or (multi and not suppress_filename)
     any_match = False

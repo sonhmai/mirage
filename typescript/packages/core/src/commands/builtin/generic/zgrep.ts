@@ -13,10 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import { gunzip } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { compilePattern } from '../grep_helper.ts'
+import { NEVER_MATCH, compilePattern, mergePatternList, patternArg } from '../grep_helper.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -88,14 +88,36 @@ export async function zgrepGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const rawPattern =
-    typeof opts.flags.e === 'string'
-      ? opts.flags.e
-      : texts.length > 0 && texts[0] !== undefined
-        ? texts[0]
-        : ''
+  let rawPattern: string | null = patternArg(texts, opts.flags)
+  let neverMatch = false
+  if (Array.isArray(opts.flags.f)) {
+    // Repeatable -f arrives as a list of resolved paths; pattern files are
+    // plain text even though the search targets are gzipped.
+    for (const filePath of opts.flags.f) {
+      const patternSpec = PathSpec.fromStrPath(filePath, paths[0]?.prefix ?? opts.mountPrefix ?? '')
+      let fileData: Uint8Array
+      try {
+        fileData = await materialize(stream(patternSpec))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return [
+          null,
+          new IOResult({
+            exitCode: 2,
+            stderr: new TextEncoder().encode(`zgrep: ${filePath}: ${msg}\n`),
+          }),
+        ]
+      }
+      rawPattern = mergePatternList(rawPattern, fileData)
+    }
+    if (rawPattern === null) {
+      rawPattern = NEVER_MATCH
+      neverMatch = true
+    }
+  }
+  rawPattern ??= ''
   const extendedRegex = opts.flags.E === true
-  const fixedString = opts.flags.F === true
+  const fixedString = opts.flags.F === true && !neverMatch
   const wholeWord = opts.flags.w === true
   const ignoreCase = opts.flags.i === true
   const invert = opts.flags.v === true

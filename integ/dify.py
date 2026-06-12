@@ -228,6 +228,7 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("wc_c", "wc -c {root}policies/refunds"),
     ("grep_429", "grep 429 {root}guides/auth"),
     ("grep_c_rate", "grep -c rate {root}guides/auth"),
+    ("grep_e_multi", "grep -e 429 -e rate {root}guides/auth"),
     ("grep_r_refund", "grep -r refund {root}policies/"),
     ("grep_rl_encrypted", "grep -rl encrypted {root}"),
     ("rg_l_token", "rg -l token {root}"),

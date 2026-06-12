@@ -43,6 +43,9 @@ Welcome to Acme. This quickstart gets you running fast.
 Set your token in the ACME_TOKEN environment variable.
 === grep_429 ===
 If you exceed the limit you receive HTTP 429 and must back off.
+=== grep_e_multi ===
+Authentication uses bearer tokens via the Authorization header.
+If you exceed the limit you receive HTTP 429 and must back off.
 === grep_c_rate ===
 1
 === grep_r_refund ===

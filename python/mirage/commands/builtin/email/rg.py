@@ -20,10 +20,11 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.grep_helper import (compile_pattern,
                                                  grep_count_has_matches,
-                                                 grep_lines)
+                                                 grep_lines, pattern_arg)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.core.email._client import fetch_message
 from mirage.core.email.read import read as email_read
 from mirage.core.email.readdir import readdir as _readdir
@@ -40,32 +41,24 @@ async def rg(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    i: bool = False,
-    v: bool = False,
-    n: bool = False,
-    c: bool = False,
-    args_l: bool = False,
-    w: bool = False,
-    F: bool = False,
-    o: bool = False,
-    m: str | None = None,
-    A: str | None = None,
-    B: str | None = None,
-    C: str | None = None,
-    hidden: bool = False,
-    type: str | None = None,
-    glob: str | None = None,
     prefix: str = "",
     index: IndexCacheStore = None,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not texts:
+    fl = FlagView(flags)
+    pattern_str = pattern_arg(texts, fl)
+    if pattern_str is None:
         raise ValueError("rg: usage: rg [flags] pattern [path]")
-    pattern_str = texts[0]
-    max_count = int(m) if m is not None else None
+    i = fl.bool("i")
+    v = fl.bool("v")
+    n = fl.bool("n")
+    c = fl.bool("c")
+    args_l = fl.bool("args_l")
+    w = fl.bool("w")
+    F = fl.bool("F")
+    o = fl.bool("o")
+    max_count = fl.int("m")
     pat = compile_pattern(pattern_str, i, F, w)
-    after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
-    before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
 
     if paths:
         folder = extract_folder(paths)
@@ -116,26 +109,13 @@ async def rg(
 
     return await generic_rg(
         [],
-        pattern=pattern_str,
+        texts,
+        flags,
         readdir=_readdir,
         stat=_stat,
         read_bytes=email_read,
         read_stream=None,
         accessor=accessor,
         stdin=stdin,
-        ignore_case=i,
-        invert=v,
-        line_numbers=n,
-        count_only=c,
-        files_only=args_l,
-        whole_word=w,
-        fixed_string=F,
-        only_matching=o,
-        max_count=max_count,
-        context_before=before_ctx,
-        context_after=after_ctx,
-        hidden=hidden,
-        file_type=type,
-        glob_pattern=glob,
         index=index,
     )

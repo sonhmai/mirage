@@ -316,7 +316,7 @@ export class Mount {
     cmdName: string,
     paths: PathSpec[],
     texts: string[],
-    flags: Record<string, string | boolean>,
+    flags: Record<string, string | boolean | string[]>,
     opts: {
       stdin?: ByteSource | null
       cwd?: string

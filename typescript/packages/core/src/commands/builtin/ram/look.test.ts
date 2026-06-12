@@ -25,7 +25,7 @@ async function runLook(
   resource: RAMResource,
   texts: string[],
   paths: PathSpec[],
-  flags: Record<string, string | boolean> = {},
+  flags: Record<string, string | boolean | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_LOOK[0]

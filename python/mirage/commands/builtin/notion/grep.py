@@ -17,10 +17,12 @@ from collections.abc import AsyncIterator
 from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.notion._provision import file_read_provision
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.core.notion.glob import resolve_glob
 from mirage.core.notion.read import read as notion_read
 from mirage.core.notion.readdir import readdir as _readdir
@@ -51,40 +53,15 @@ async def grep(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    r: bool = False,
-    R: bool = False,
-    i: bool = False,
-    v: bool = False,
-    n: bool = False,
-    c: bool = False,
-    args_l: bool = False,
-    w: bool = False,
-    F: bool = False,
-    E: bool = False,
-    o: bool = False,
-    m: str | None = None,
-    q: bool = False,
-    H: bool = False,
-    args_h: bool = False,
-    A: str | None = None,
-    B: str | None = None,
-    C: str | None = None,
-    e: str | None = None,
     prefix: str = "",
     index: IndexCacheStore = None,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if e is not None:
-        pattern = e
-    elif texts:
-        pattern = texts[0]
-    else:
-        raise ValueError("grep: usage: grep [flags] pattern [path]")
-    max_count = int(m) if m is not None else None
-    after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
-    before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
+    fl = FlagView(flags)
+    pattern = pattern_arg(texts, fl)
+    max_count = fl.int("m")
 
-    if paths:
+    if paths and pattern is not None:
         scope = detect_scope(paths[0])
         if scope.use_native:
             file_prefix = paths[0].prefix or ""
@@ -101,26 +78,14 @@ async def grep(
     resolved = await resolve_glob(accessor, paths, index) if paths else []
     return await generic_grep(
         resolved,
-        pattern=pattern,
+        texts,
+        flags,
         readdir=_readdir,
         stat=_stat,
         read_bytes=notion_read,
         read_stream=None,
         accessor=accessor,
         stdin=stdin,
-        ignore_case=i,
-        invert=v,
-        line_numbers=n,
-        count_only=c,
-        files_only=args_l,
-        whole_word=w,
-        fixed_string=F,
-        only_matching=o,
-        quiet=q,
-        recursive=r or R,
-        max_count=max_count,
-        after_context=after_ctx,
-        before_context=before_ctx,
         scope_check=scope_warning,
         index=index,
     )

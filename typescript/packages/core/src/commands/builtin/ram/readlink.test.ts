@@ -24,7 +24,7 @@ const DEC = new TextDecoder()
 async function runReadlink(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean> = {},
+  flags: Record<string, string | boolean | string[]> = {},
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_READLINK[0]
   if (cmd === undefined) throw new Error('readlink not registered')

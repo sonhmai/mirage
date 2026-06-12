@@ -18,9 +18,10 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.generic.grep import grep as generic_grep
-from mirage.commands.builtin.grep_helper import classify_pattern
+from mirage.commands.builtin.grep_helper import classify_pattern, pattern_arg
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.core.github.constants import SCOPE_ERROR, SCOPE_WARN
 from mirage.core.github.glob import resolve_glob
 from mirage.core.github.read import read as github_read
@@ -95,46 +96,24 @@ async def grep(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    r: bool = False,
-    R: bool = False,
-    i: bool = False,
-    v: bool = False,
-    n: bool = False,
-    c: bool = False,
-    args_l: bool = False,
-    w: bool = False,
-    F: bool = False,
-    E: bool = False,
-    o: bool = False,
-    m: str | None = None,
-    q: bool = False,
-    H: bool = False,
-    args_h: bool = False,
-    A: str | None = None,
-    B: str | None = None,
-    C: str | None = None,
-    e: str | None = None,
     index: IndexCacheStore = None,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if e is not None:
-        pattern = e
-    elif texts:
-        pattern = texts[0]
-    else:
-        raise ValueError("grep: usage: grep [flags] pattern [path]")
-    max_count = int(m) if m is not None else None
-    after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
-    before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
+    fl = FlagView(flags)
+    pattern = pattern_arg(texts, fl)
+    recursive = fl.bool("r") or fl.bool("R")
 
     resolved: list[PathSpec] = []
     if paths and index is not None:
         key = scope_relative_key(paths[0])
         file_count = count_scope_files(index._entries, key)
-        pt = classify_pattern(pattern, F)
+        # -f-only invocations have no literal yet (files are read inside the
+        # generic); treat as regex so the search narrowing is skipped.
+        is_regex = (pattern is None or classify_pattern(pattern, fl.bool("F"))
+                    == PatternType.REGEX)
         use_search = (should_use_search(
-            is_regex=(pt == PatternType.REGEX),
-            recursive=(r or R),
+            is_regex=is_regex,
+            recursive=recursive,
             on_default_branch=(accessor.ref == accessor.default_branch),
         ) and is_repo_root(key) and file_count > SCOPE_WARN)
         if use_search:
@@ -153,25 +132,13 @@ async def grep(
 
     return await generic_grep(
         resolved,
-        pattern=pattern,
+        texts,
+        flags,
         readdir=github_readdir,
         stat=github_stat,
         read_bytes=github_read,
         read_stream=None,
         accessor=accessor,
         stdin=stdin,
-        ignore_case=i,
-        invert=v,
-        line_numbers=n,
-        count_only=c,
-        files_only=args_l,
-        whole_word=w,
-        fixed_string=F,
-        only_matching=o,
-        quiet=q,
-        recursive=r or R,
-        max_count=max_count,
-        after_context=after_ctx,
-        before_context=before_ctx,
         index=index,
     )

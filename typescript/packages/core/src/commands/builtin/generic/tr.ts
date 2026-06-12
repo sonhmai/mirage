@@ -89,7 +89,7 @@ async function* trStream(
 
 function buildOptions(
   texts: readonly string[],
-  flags: Record<string, string | boolean>,
+  flags: Record<string, string | boolean | string[]>,
 ): TrOptions {
   if (texts.length === 0) throw new Error('tr: usage: tr [-d] [-s] [-c] set1 [set2] [path]')
   let set1 = expandRanges(interpretEscapes(texts[0] ?? ''))

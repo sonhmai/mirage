@@ -48,12 +48,12 @@ export async function materializeStdout(stdout: ByteSource | null): Promise<Uint
 }
 
 export function stripPrefixFromPathKwargs(
-  kwargs: Record<string, string | boolean>,
+  kwargs: Record<string, string | boolean | string[]>,
   spec: CommandSpec,
   prefix: string,
-): Record<string, string | boolean> {
+): Record<string, string | boolean | string[]> {
   if (prefix === '') return kwargs
-  const result: Record<string, string | boolean> = { ...kwargs }
+  const result: Record<string, string | boolean | string[]> = { ...kwargs }
   for (const opt of spec.options) {
     if (opt.valueKind !== OperandKind.PATH) continue
     for (const flagName of [opt.short, opt.long]) {

@@ -27,8 +27,56 @@ export const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
   '.h5',
 ])
 
+export const NEVER_MATCH = '(?!)'
+
+const DEC = new TextDecoder()
+
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// Resolve the pattern-list argument from -e values (list[str] when
+// repeatable) or the positional. Returns the POSIX newline-joined pattern
+// list, or null when neither was supplied.
+export function patternArg(
+  texts: readonly string[],
+  flags: Record<string, string | boolean | string[]>,
+): string | null {
+  const e = flags.e
+  if (Array.isArray(e) && e.length > 0) return e.join('\n')
+  if (typeof e === 'string') return e
+  if (texts.length > 0 && texts[0] !== undefined) return texts[0]
+  return null
+}
+
+export function mergePatternList(
+  pattern: string | null,
+  fileData: Uint8Array | null,
+): string | null {
+  const parts: string[] = pattern === null ? [] : pattern.split('\n')
+  if (fileData !== null && fileData.length > 0) {
+    let text = DEC.decode(fileData)
+    if (text.endsWith('\n')) text = text.slice(0, -1)
+    parts.push(...text.split('\n'))
+  }
+  if (parts.length === 0) return null
+  return parts.join('\n')
+}
+
+export function buildPatternStr(pattern: string, fixedString = false, wholeWord = false): string {
+  const parts = pattern.split('\n')
+  if (parts.length === 1) {
+    let patStr = fixedString ? escapeRegex(pattern) : pattern
+    if (wholeWord) patStr = `\\b${patStr}\\b`
+    return patStr
+  }
+  const subs: string[] = []
+  for (const part of parts) {
+    let sub = fixedString ? escapeRegex(part) : `(?:${part})`
+    if (wholeWord) sub = `\\b${sub}\\b`
+    subs.push(sub)
+  }
+  return subs.join('|')
 }
 
 export function compilePattern(
@@ -37,12 +85,11 @@ export function compilePattern(
   fixedString = false,
   wholeWord = false,
 ): RegExp {
-  let patStr = fixedString ? escapeRegex(pattern) : pattern
-  if (wholeWord) patStr = `\\b${patStr}\\b`
-  return new RegExp(patStr, ignoreCase ? 'i' : '')
+  return new RegExp(buildPatternStr(pattern, fixedString, wholeWord), ignoreCase ? 'i' : '')
 }
 
 export function isRegexPattern(pattern: string, fixedString: boolean): boolean {
+  if (pattern.includes('\n')) return true
   if (fixedString) return false
   return !/^[\w\s\-.]+$/.test(pattern)
 }

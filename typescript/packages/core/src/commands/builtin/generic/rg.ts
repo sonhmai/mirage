@@ -16,7 +16,13 @@ import { exitOnEmpty } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { compilePattern, grepStream } from '../grep_helper.ts'
+import {
+  NEVER_MATCH,
+  compilePattern,
+  grepStream,
+  mergePatternList,
+  patternArg,
+} from '../grep_helper.ts'
 import { rgFolderFiletype, rgFull } from '../rg_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { grepGeneric } from './grep.ts'
@@ -50,8 +56,8 @@ interface RgFlags {
   hidden: boolean
 }
 
-function parseRgFlags(flags: Record<string, string | boolean>): RgFlags {
-  const toInt = (v: string | boolean | undefined): number | null =>
+function parseRgFlags(flags: Record<string, string | boolean | string[]>): RgFlags {
+  const toInt = (v: string | boolean | string[] | undefined): number | null =>
     typeof v === 'string' ? Number.parseInt(v, 10) : null
   const a = toInt(flags.A)
   const b = toInt(flags.B)
@@ -87,7 +93,29 @@ export async function rgGeneric(
   stream: Stream,
   scopeCheck?: ScopeCheck,
 ): Promise<CommandFnResult> {
-  const [exprText] = texts
+  let exprText: string | undefined = patternArg(texts, opts.flags) ?? undefined
+  let neverMatch = false
+  if (Array.isArray(opts.flags.f)) {
+    // Repeatable -f arrives as a list of resolved paths; read each file.
+    for (const filePath of opts.flags.f) {
+      const patternSpec = PathSpec.fromStrPath(filePath, paths[0]?.prefix ?? opts.mountPrefix ?? '')
+      let fileData: Uint8Array
+      try {
+        fileData = await materialize(stream(patternSpec))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return [
+          null,
+          new IOResult({ exitCode: 2, stderr: ENC.encode(`rg: ${filePath}: ${msg}\n`) }),
+        ]
+      }
+      exprText = mergePatternList(exprText ?? null, fileData) ?? undefined
+    }
+    if (exprText === undefined) {
+      exprText = NEVER_MATCH
+      neverMatch = true
+    }
+  }
   if (exprText === undefined) {
     return [
       null,
@@ -95,6 +123,7 @@ export async function rgGeneric(
     ]
   }
   const flags = parseRgFlags(opts.flags)
+  if (neverMatch) flags.fixedString = false
   const [first] = paths
 
   if (first === undefined) {

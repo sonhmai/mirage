@@ -25,7 +25,7 @@ async function runGrep(
   resource: RAMResource,
   pattern: string,
   paths: PathSpec[],
-  flags: Record<string, string | boolean> = {},
+  flags: Record<string, string | boolean | string[]> = {},
 ): Promise<{ text: string; exitCode: number }> {
   const cmd = RAM_GREP[0]
   if (cmd === undefined) throw new Error('grep not registered')

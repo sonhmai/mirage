@@ -242,6 +242,8 @@ a.txt
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/patterns.txt
+/data/patterns2.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -268,6 +270,8 @@ a.txt
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/patterns.txt
+/data/patterns2.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -296,6 +300,8 @@ mixed.txt
 no_nl.txt
 numbers.txt
 one_byte.txt
+patterns.txt
+patterns2.txt
 prefix_dup.txt
 repeats.txt
 sections.txt
@@ -323,6 +329,8 @@ mixed.txt
 no_nl.txt
 numbers.txt
 one_byte.txt
+patterns.txt
+patterns2.txt
 prefix_dup.txt
 repeats.txt
 sections.txt
@@ -430,6 +438,8 @@ baz
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/patterns.txt
+/data/patterns2.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -458,6 +468,8 @@ baz
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/patterns.txt
+/data/patterns2.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -517,7 +529,7 @@ world
       2 b
       1 c
 === find_pipe_wc ===
-20
+22
 === jq_pipe_wc ===
 3
 === cat_tr_sort ===
@@ -604,6 +616,8 @@ world
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/patterns.txt
+/data/patterns2.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -627,6 +641,7 @@ world
 /data/mixed.txt
 /data/no_nl.txt
 /data/numbers.txt
+/data/patterns.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -651,6 +666,8 @@ world
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/patterns.txt
+/data/patterns2.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -834,7 +851,9 @@ Jan
 Feb
 Mar
 === sort_b ===
-
+  both  
+  leading
+trailing  
 === uniq_u ===
 c
 === uniq_repeats ===
@@ -876,6 +895,47 @@ o
 
 === grep_empty_pattern ===
 
+=== grep_e_flag ===
+world
+=== grep_e_n ===
+4:bar
+=== grep_e_multi_file ===
+/data/mixed.txt:hello WORLD
+/data/a.txt:hello
+=== grep_e_multi_pattern ===
+world
+bar
+=== grep_e_multi_pattern_n ===
+1:hello
+5:baz
+=== grep_e_multi_pattern_F ===
+foo
+=== grep_f_file ===
+world
+bar
+=== grep_e_f_union ===
+hello
+world
+bar
+=== grep_f_multi ===
+world
+bar
+baz
+=== grep_cluster_ne ===
+2:world
+=== du_max_depth_eq ===
+20	/data/sub
+=== rg_e_flag ===
+world
+=== rg_e_multi ===
+world
+bar
+=== rg_f_file ===
+world
+bar
+=== zgrep_f_pipe ===
+world
+bar
 === paste_s ===
 1	2	3
 === paste_d_comma ===
@@ -904,6 +964,8 @@ baz,
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/patterns.txt
+/data/patterns2.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -929,6 +991,8 @@ baz,
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/patterns.txt
+/data/patterns2.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -942,6 +1006,7 @@ baz,
 === find_size_lt ===
 /data/empty.txt
 /data/one_byte.txt
+/data/patterns2.txt
 /data/sub
 /data/sub/deep
 /data/sub/deep/deeper.txt
@@ -961,6 +1026,8 @@ baz,
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/patterns.txt
+/data/patterns2.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -989,6 +1056,8 @@ baz,
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/patterns.txt
+/data/patterns2.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -1040,7 +1109,7 @@ baz,
 === du_file ===
 24	/data/a.txt
 === du_dir ===
-602	/data
+616	/data
 === du_h ===
 24B	/data/a.txt
 === tree ===
@@ -1054,11 +1123,19 @@ foo
 bar
 baz
 === cat_E ===
-
+hello
+world
+foo
+bar
+baz
 === cat_T ===
-
+a	1
+b	2
+c	3
 === cat_A ===
-
+a	1
+b	2
+c	3
 === nl_d_pipe ===
 
 === nl_w3 ===
@@ -1147,6 +1224,8 @@ deeper.txt
 === ls_sub_deep ===
 deeper.txt
 === zgrep_pipe ===
+world
+=== zgrep_e_pipe ===
 world
 === gzip_c_pipe ===
 1
@@ -1276,6 +1355,8 @@ exit=0
 exit=0
 hello
 === lazy_exit_grep_no_match ===
+exit=1
+=== grep_f_empty_no_match ===
 exit=1
 === cp_reject_multi_nondir ===
 exit=1

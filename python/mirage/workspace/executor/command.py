@@ -13,11 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable
+from typing import NamedTuple
 
 from mirage.commands.builtin.utils.safeguard import maybe_with_timeout
 from mirage.commands.safeguard import resolve_across_mounts, resolve_safeguard
-from mirage.commands.spec import (SPECS, OperandKind, parse_command,
-                                  parse_to_kwargs)
+from mirage.commands.spec import (SPECS, OperandKind, flag_kwarg_name,
+                                  parse_command, parse_to_kwargs)
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
@@ -106,17 +107,32 @@ def _check_mount_root_guard_raw(
     return None
 
 
+class _ParsedCommand(NamedTuple):
+    paths: list[PathSpec]
+    texts: list[str]
+    flag_kwargs: dict[str, object]
+    warnings: list[str]
+
+
 def _parse_flags(
     parts: list[str | PathSpec],
     mount: object,
     cmd_name: str,
     cwd: str,
-) -> tuple[list[PathSpec], list[str], dict]:
+) -> _ParsedCommand:
     """Parse flags from classified parts, recovering PathSpec for PATH values.
 
+    Args:
+        parts (list[str | PathSpec]): expanded command words after the
+            command name; path-classified words arrive as PathSpec.
+        mount (object): mount providing spec_for(cmd_name).
+        cmd_name (str): command name used to look up the spec.
+        cwd (str): current working directory for relative path resolution.
+
     Returns:
-        (paths, texts, flag_kwargs) — positional paths, positional texts,
-        and parsed flag dict with PathSpec for PATH flag values.
+        _ParsedCommand: positional paths, positional texts, parsed flag dict
+        (PATH flag values recovered to PathSpec, repeatable PATH flags to
+        list[PathSpec]), and parser warnings (e.g. ignored unknown options).
     """
     # Build string argv and PathSpec lookup
     argv = [
@@ -135,9 +151,24 @@ def _parse_flags(
         parsed = parse_command(spec, argv, cwd=cwd)
         flag_kwargs = parse_to_kwargs(parsed)
 
-        # Recover PathSpec for PATH flag values
+        # Recover PathSpec for PATH flag values; repeatable PATH flags
+        # arrive as a list of resolved paths and become list[PathSpec].
+        repeat_path_keys = {
+            flag_kwarg_name(name)
+            for opt in spec.options
+            if opt.value_kind == OperandKind.PATH and opt.repeatable
+            for name in (opt.short, opt.long) if name
+        }
         for key, value in flag_kwargs.items():
-            if isinstance(value, str) and value in scope_map:
+            if key in repeat_path_keys and isinstance(value, list):
+                flag_kwargs[key] = [
+                    scope_map.get(
+                        part,
+                        PathSpec(original=part,
+                                 directory=part[:part.rfind("/") + 1] or "/",
+                                 resolved=True)) for part in value
+                ]
+            elif isinstance(value, str) and value in scope_map:
                 flag_kwargs[key] = scope_map[value]
 
         # Classify positional args
@@ -155,12 +186,12 @@ def _parse_flags(
                 paths.append(scope)
             else:
                 texts.append(value)
-        return paths, texts, flag_kwargs
+        return _ParsedCommand(paths, texts, flag_kwargs, parsed.warnings)
 
     # No spec: separate by type
     paths = [item for item in parts if isinstance(item, PathSpec)]
     texts = [item for item in parts if not isinstance(item, PathSpec)]
-    return paths, texts, {}
+    return _ParsedCommand(paths, texts, {}, [])
 
 
 async def handle_command(
@@ -319,13 +350,23 @@ async def handle_command(
                                                          stderr=err)
 
     # Parse flags upstream — mount receives clean args
-    paths, texts, flag_kwargs = _parse_flags(parts[1:], mount, cmd_name,
-                                             session.cwd)
+    paths, texts, flag_kwargs, parse_warnings = _parse_flags(
+        parts[1:], mount, cmd_name, session.cwd)
+
+    warn_bytes = ("".join(
+        f"{cmd_name}: {w}\n"
+        for w in parse_warnings).encode() if parse_warnings else b"")
 
     if _should_fan_out(cmd_name, paths, flag_kwargs, registry):
-        return await _fan_out_traversal(cmd_name, paths, texts, flag_kwargs,
-                                        registry, mount, session.cwd, cmd_str,
-                                        stdin)
+        stdout, io, node = await _fan_out_traversal(cmd_name, paths, texts,
+                                                    flag_kwargs, registry,
+                                                    mount, session.cwd,
+                                                    cmd_str, stdin)
+        if warn_bytes:
+            existing = await materialize(io.stderr) if io.stderr else b""
+            io.stderr = warn_bytes + existing
+            node.stderr = warn_bytes + (node.stderr or b"")
+        return stdout, io, node
 
     try:
         stdout, io = await mount.execute_cmd(
@@ -367,6 +408,10 @@ async def handle_command(
         io.writes = {prefix + k: v for k, v in io.writes.items()}
         io.cache = [prefix + p for p in io.cache]
     stdout, io = wrap_cachable_streams(stdout, io)
+
+    if warn_bytes:
+        existing = await materialize(io.stderr) if io.stderr else b""
+        io.stderr = warn_bytes + existing
 
     stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
     io.stderr = maybe_with_timeout(io.stderr, io.safeguard, cmd_name)

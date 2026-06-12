@@ -59,3 +59,23 @@ def test_zgrep_no_match():
     _run_raw(ws, "tee /data/f.gz", stdin=compressed)
     stdout, io = _run_raw(ws, "zgrep xyz /data/f.gz")
     assert io.exit_code == 1
+
+
+def test_zgrep_dash_f_pattern_file():
+    ws, _ = _ws()
+    compressed = gzip.compress(b"foo\nbar\nbaz\n")
+    _run_raw(ws, "tee /data/f.gz", stdin=compressed)
+    _run_raw(ws, "tee /data/pats.txt", stdin=b"bar\nbaz\n")
+    stdout, io = _run_raw(ws, "zgrep -f /data/pats.txt /data/f.gz")
+    assert io.exit_code == 0
+    assert _bytes(stdout) == b"bar\nbaz\n"
+
+
+def test_zgrep_dash_e_and_dash_f_union():
+    ws, _ = _ws()
+    compressed = gzip.compress(b"foo\nbar\nbaz\n")
+    _run_raw(ws, "tee /data/f.gz", stdin=compressed)
+    _run_raw(ws, "tee /data/pats.txt", stdin=b"baz\n")
+    stdout, io = _run_raw(ws, "zgrep -e foo -f /data/pats.txt /data/f.gz")
+    assert io.exit_code == 0
+    assert _bytes(stdout) == b"foo\nbaz\n"

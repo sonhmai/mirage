@@ -40,7 +40,7 @@ function spec(path: string): PathSpec {
 }
 
 function opts(
-  flags: Record<string, string | boolean>,
+  flags: Record<string, string | boolean | string[]>,
   filetypeFns: Record<string, CommandFn> | null = null,
 ): CommandOpts {
   return {
@@ -82,7 +82,7 @@ async function* stream(p: PathSpec): AsyncIterable<Uint8Array> {
 
 async function run(
   paths: string[],
-  flags: Record<string, string | boolean>,
+  flags: Record<string, string | boolean | string[]>,
   filetypeFns: Record<string, CommandFn> | null = null,
 ): Promise<string> {
   const [out] = (await rgGeneric(

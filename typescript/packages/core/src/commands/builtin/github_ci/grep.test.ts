@@ -55,7 +55,7 @@ function makeAccessor(): GitHubCIAccessor {
 async function runGrep(
   paths: PathSpec[],
   texts: string[],
-  flags: Record<string, string | boolean> = {},
+  flags: Record<string, string | boolean | string[]> = {},
 ): Promise<{ stdout: string; exitCode: number }> {
   const cmd = GITHUB_CI_GREP[0]
   if (cmd === undefined) throw new Error('grep not registered')

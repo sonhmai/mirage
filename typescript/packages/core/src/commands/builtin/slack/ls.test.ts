@@ -23,7 +23,7 @@ const DEC = new TextDecoder()
 
 async function runLs(
   paths: PathSpec[],
-  flags: Record<string, string | boolean>,
+  flags: Record<string, string | boolean | string[]>,
   options: {
     index?: RAMIndexCacheStore
     transport?: FakeSlackTransport

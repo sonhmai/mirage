@@ -80,7 +80,7 @@ async def test_rg_stdin_basic():
     readdir, stat, rb, rs = _make_backend({})
     output, _ = await rg(
         [],
-        pattern="apple",
+        ["apple"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -97,13 +97,13 @@ async def test_rg_count_stdin_uses_match_count():
     readdir, stat, rb, rs = _make_backend({})
     output, io = await rg(
         [],
-        pattern="foo",
+        ["foo"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
         read_stream=rs,
         stdin=b"foo foo\nfoo bar\nbaz\n",
-        count_only=True,
+        flags={"c": True},
     )
     assert (await _drain_async(output)) == b"2\n"
     assert io.exit_code == 0
@@ -114,13 +114,13 @@ async def test_rg_count_stdin_zero_exits_1_without_output():
     readdir, stat, rb, rs = _make_backend({})
     output, io = await rg(
         [],
-        pattern="foo",
+        ["foo"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
         read_stream=rs,
         stdin=b"bar\nbaz\n",
-        count_only=True,
+        flags={"c": True},
     )
     assert await _drain_async(output) == b""
     assert io.exit_code == 1
@@ -134,7 +134,7 @@ async def test_rg_file_basic():
     })
     output, _ = await rg(
         [_spec("/a.txt")],
-        pattern="ap",
+        ["ap"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -151,7 +151,7 @@ async def test_rg_no_match_returns_exit_1():
     readdir, stat, rb, rs = _make_backend({"/a.txt": b"hello\nworld\n"})
     output, io = await rg(
         [_spec("/a.txt")],
-        pattern="zzz",
+        ["zzz"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -171,7 +171,7 @@ async def test_rg_dir_auto_recursive():
     })
     output, _ = await rg(
         [_spec("/dir")],
-        pattern="ap",
+        ["ap"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -190,12 +190,12 @@ async def test_rg_count_dir_skips_zero_count_files():
     })
     output, io = await rg(
         [_spec("/dir")],
-        pattern="foo",
+        ["foo"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
         read_stream=rs,
-        count_only=True,
+        flags={"c": True},
     )
     decoded = (await _drain_async(output)).decode()
     assert "/dir/a.txt:2" in decoded
@@ -211,12 +211,12 @@ async def test_rg_files_only_on_dir():
     })
     output, _ = await rg(
         [_spec("/dir")],
-        pattern="apple",
+        ["apple"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
         read_stream=rs,
-        files_only=True,
+        flags={"args_l": True},
     )
     decoded = (await _drain_async(output)).decode()
     assert "/dir/a.txt" in decoded
@@ -231,12 +231,12 @@ async def test_rg_hidden_excluded_by_default():
     })
     output, _ = await rg(
         [_spec("/dir")],
-        pattern="apple",
+        ["apple"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
         read_stream=rs,
-        files_only=True,
+        flags={"args_l": True},
     )
     decoded = (await _drain_async(output)).decode()
     assert "/dir/visible.txt" in decoded
@@ -251,13 +251,15 @@ async def test_rg_hidden_included_with_flag():
     })
     output, _ = await rg(
         [_spec("/dir")],
-        pattern="apple",
+        ["apple"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
         read_stream=rs,
-        files_only=True,
-        hidden=True,
+        flags={
+            "args_l": True,
+            "hidden": True
+        },
     )
     decoded = (await _drain_async(output)).decode()
     assert "/dir/visible.txt" in decoded
@@ -272,13 +274,15 @@ async def test_rg_file_type_filter():
     })
     output, _ = await rg(
         [_spec("/dir")],
-        pattern="apple",
+        ["apple"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
         read_stream=rs,
-        files_only=True,
-        file_type="py",
+        flags={
+            "args_l": True,
+            "type": "py"
+        },
     )
     decoded = (await _drain_async(output)).decode()
     assert "/dir/a.py" in decoded
@@ -293,13 +297,15 @@ async def test_rg_glob_filter():
     })
     output, _ = await rg(
         [_spec("/dir")],
-        pattern="apple",
+        ["apple"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
         read_stream=rs,
-        files_only=True,
-        glob_pattern="*.log",
+        flags={
+            "args_l": True,
+            "glob": "*.log"
+        },
     )
     decoded = (await _drain_async(output)).decode()
     assert "/dir/a.log" in decoded
@@ -388,12 +394,12 @@ async def test_rg_files_only_mount_prefix_not_doubled():
                  resolved=True)
     output, _ = await rg(
         [p],
-        pattern="apple",
+        ["apple"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
         read_stream=None,
-        files_only=True,
+        flags={"args_l": True},
         index=object(),
     )
     decoded = (await _drain_async(output)).decode().strip()
@@ -413,7 +419,7 @@ async def test_rg_single_file_threads_index():
                  resolved=True)
     output, _ = await rg(
         [p],
-        pattern="apple",
+        ["apple"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -432,7 +438,7 @@ async def test_rg_multiple_dirs_searches_all():
     })
     output, _ = await rg(
         [_spec("/d1"), _spec("/d2")],
-        pattern="apple",
+        ["apple"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -451,12 +457,12 @@ async def test_rg_files_only_multiple_files():
     })
     output, _ = await rg(
         [_spec("/t1.txt"), _spec("/t2.txt")],
-        pattern="apple",
+        ["apple"],
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
         read_stream=rs,
-        files_only=True,
+        flags={"args_l": True},
     )
     decoded = (await _drain_async(output)).decode()
     assert "/t1.txt" in decoded

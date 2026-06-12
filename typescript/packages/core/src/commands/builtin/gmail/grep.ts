@@ -22,6 +22,7 @@ import { stat as gmailStat } from '../../../core/gmail/stat.ts'
 import { exitOnEmpty, quietMatch, yieldBytes } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec, ResourceName } from '../../../types.ts'
+import { patternArg } from '../grep_helper.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { prefixAggregate } from '../aggregators.ts'
@@ -56,8 +57,8 @@ interface FlagSet {
   beforeContext: number
 }
 
-function parseFlags(flags: Record<string, string | boolean>): FlagSet {
-  const toInt = (v: string | boolean | undefined): number | null =>
+function parseFlags(flags: Record<string, string | boolean | string[]>): FlagSet {
+  const toInt = (v: string | boolean | string[] | undefined): number | null =>
     typeof v === 'string' ? Number.parseInt(v, 10) : null
   const aCtx = toInt(flags.A)
   const bCtx = toInt(flags.B)
@@ -78,9 +79,12 @@ function parseFlags(flags: Record<string, string | boolean>): FlagSet {
   }
 }
 
-function getPattern(texts: readonly string[], flags: Record<string, string | boolean>): string {
-  if (typeof flags.e === 'string') return flags.e
-  if (texts.length > 0 && texts[0] !== undefined) return texts[0]
+function getPattern(
+  texts: readonly string[],
+  flags: Record<string, string | boolean | string[]>,
+): string {
+  const pattern = patternArg(texts, flags)
+  if (pattern !== null) return pattern
   throw new Error('grep: usage: grep [flags] pattern [path]')
 }
 

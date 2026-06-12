@@ -14,6 +14,7 @@
 
 import type { CommandHistory } from '../../commands/config.ts'
 import { parseCommand, parseToKwargs } from '../../commands/spec/parser.ts'
+import { concatBytes } from '../../core/jq/format.ts'
 import { OperandKind } from '../../commands/spec/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -188,14 +189,23 @@ export async function handleCommand(
     throw err
   }
 
-  const [paths, texts, flagKwargs] = parseFlags(parts.slice(1), mount, cmdName, session.cwd)
+  const [paths, texts, flagKwargs, parseWarnings] = parseFlags(
+    parts.slice(1),
+    mount,
+    cmdName,
+    session.cwd,
+  )
+  const warnBytes =
+    parseWarnings.length > 0
+      ? new TextEncoder().encode(parseWarnings.map((w) => `${cmdName}: ${w}\n`).join(''))
+      : null
 
   if (ensureOpen !== undefined) {
     await ensureOpen(mount.resource)
   }
 
   if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
-    return fanOutTraversal(
+    const [fanOut, fanIo, fanNode] = await fanOutTraversal(
       cmdName,
       paths,
       texts,
@@ -207,6 +217,12 @@ export async function handleCommand(
       stdin,
       ensureOpen,
     )
+    if (warnBytes !== null) {
+      const existing = await materialize(fanIo.stderr)
+      fanIo.stderr = concatBytes([warnBytes, existing])
+      fanNode.stderr = concatBytes([warnBytes, fanNode.stderr])
+    }
+    return [fanOut, fanIo, fanNode]
   }
 
   // resolveMount may redirect a warm remote read to the cache mount, which
@@ -256,6 +272,10 @@ export async function handleCommand(
       io.writes = prefixKeys(io.writes, prefix)
       io.cache = io.cache.map((p) => prefix + p)
     }
+    if (warnBytes !== null) {
+      const existing = await materialize(io.stderr)
+      io.stderr = concatBytes([warnBytes, existing])
+    }
     stdout = maybeWithTimeout(stdout, io.safeguard, cmdName)
     io.stderr = maybeWithTimeout(io.stderr, io.safeguard, cmdName)
     const stderrBytes = await materialize(io.stderr)
@@ -281,7 +301,7 @@ function parseFlags(
   mount: Mount,
   cmdName: string,
   cwd: string,
-): [PathSpec[], string[], Record<string, string | boolean>] {
+): [PathSpec[], string[], Record<string, string | boolean | string[]>, string[]] {
   const argv: string[] = parts.map((item) => (item instanceof PathSpec ? item.original : item))
   const scopeMap = new Map<string, PathSpec>()
   for (const item of parts) {
@@ -327,7 +347,7 @@ function parseFlags(
         texts.push(value)
       }
     }
-    return [paths, texts, flagKwargs]
+    return [paths, texts, flagKwargs, parsed.warnings]
   }
 
   const paths: PathSpec[] = []
@@ -336,7 +356,7 @@ function parseFlags(
     if (item instanceof PathSpec) paths.push(item)
     else texts.push(item)
   }
-  return [paths, texts, {}]
+  return [paths, texts, {}, []]
 }
 
 function prefixKeys(obj: Record<string, ByteSource>, prefix: string): Record<string, ByteSource> {
@@ -433,7 +453,7 @@ async function injectChildMounts(
   stdout: ByteSource | null,
   registry: MountRegistry,
   paths: readonly PathSpec[],
-  flagKwargs: Record<string, string | boolean>,
+  flagKwargs: Record<string, string | boolean | string[]>,
   cwd: string,
 ): Promise<ByteSource | null> {
   if (flagKwargs.d === true || flagKwargs.R === true) return stdout

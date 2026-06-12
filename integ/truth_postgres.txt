@@ -66,3 +66,10 @@ public/tables/books/rows.jsonl:{"id":4,"title":"delta","author":"ada"
 output truncated at safeguard limit (2 lines)
 === safeguard_cat_pipe_uncapped ===
 5 /pg/public/tables/books/rows.jsonl
+
+# ---- grep -e multi-pattern (newline-joined list, no ILIKE push-down) ----
+=== grep_e_multi ===
+1:{"id":1,"title":"alpha","author":"ada","year":2020
+2:{"id":2,"title":"beta","author":"ben","year":2021
+4:{"id":4,"title":"delta","author":"ada","year":2023
+5:{"id":5,"title":"epsilon","author":"ben","year":2024

@@ -46,59 +46,23 @@ async def rg(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    i: bool = False,
-    v: bool = False,
-    n: bool = False,
-    c: bool = False,
-    args_l: bool = False,
-    w: bool = False,
-    F: bool = False,
-    o: bool = False,
-    m: str | None = None,
-    A: str | None = None,
-    B: str | None = None,
-    C: str | None = None,
-    hidden: bool = False,
-    type: str | None = None,
-    glob: str | None = None,
     prefix: str = "",
     index: IndexCacheStore = None,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not texts:
-        raise ValueError("rg: usage: rg [flags] pattern [path]")
-    pattern = texts[0]
-    max_count = int(m) if m is not None else None
-    context_after = int(A) if A is not None else 0
-    context_before = int(B) if B is not None else 0
-    if C is not None:
-        context_before = context_after = int(C)
 
     resolved = await resolve_glob(accessor, paths, index) if paths else []
 
     return await generic_rg(
         resolved,
-        pattern=pattern,
+        texts,
+        flags,
         readdir=_readdir,
         stat=_stat,
         read_bytes=trello_read,
         read_stream=None,
         accessor=accessor,
         stdin=stdin,
-        ignore_case=i,
-        invert=v,
-        line_numbers=n,
-        count_only=c,
-        files_only=args_l,
-        whole_word=w,
-        fixed_string=F,
-        only_matching=o,
-        max_count=max_count,
-        context_before=context_before,
-        context_after=context_after,
-        hidden=hidden,
-        file_type=type,
-        glob_pattern=glob,
         scope_check=scope_warning,
         index=index,
     )

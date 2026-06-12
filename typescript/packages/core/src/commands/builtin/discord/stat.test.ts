@@ -23,7 +23,7 @@ const DEC = new TextDecoder()
 
 async function runStat(
   paths: PathSpec[],
-  flags: Record<string, string | boolean>,
+  flags: Record<string, string | boolean | string[]>,
   options: { index?: RAMIndexCacheStore; transport?: FakeDiscordTransport } = {},
 ): Promise<{ stdout: string; exitCode: number }> {
   const cmd = DISCORD_STAT[0]

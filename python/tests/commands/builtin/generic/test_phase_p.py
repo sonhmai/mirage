@@ -151,7 +151,7 @@ async def test_zcat_stdin():
 async def test_zgrep_finds_match_in_compressed_file():
     raw = gziplib.compress(b"alpha\nbeta\ngamma\n")
     rb, _, _, _ = _make_backend({"/a.gz": raw})
-    output, io = await zgrep([_spec("/a.gz")], pattern="beta", read_bytes=rb)
+    output, io = await zgrep([_spec("/a.gz")], ["beta"], read_bytes=rb)
     assert b"beta" in output
     assert io.exit_code == 0
 
@@ -160,7 +160,7 @@ async def test_zgrep_finds_match_in_compressed_file():
 async def test_zgrep_no_match_returns_exit_1():
     raw = gziplib.compress(b"alpha\nbeta\n")
     rb, _, _, _ = _make_backend({"/a.gz": raw})
-    output, io = await zgrep([_spec("/a.gz")], pattern="zzz", read_bytes=rb)
+    output, io = await zgrep([_spec("/a.gz")], ["zzz"], read_bytes=rb)
     assert output is None
     assert io.exit_code == 1
 
@@ -169,10 +169,12 @@ async def test_zgrep_no_match_returns_exit_1():
 async def test_zgrep_count_only():
     raw = gziplib.compress(b"foo\nfoo\nbar\n")
     rb, _, _, _ = _make_backend({"/a.gz": raw})
-    output, _ = await zgrep([_spec("/a.gz")],
-                            pattern="foo",
-                            read_bytes=rb,
-                            count=True)
+    output, _ = await zgrep(
+        [_spec("/a.gz")],
+        ["foo"],
+        read_bytes=rb,
+        flags={"c": True},
+    )
     assert b"2" in output
 
 
@@ -180,10 +182,12 @@ async def test_zgrep_count_only():
 async def test_zgrep_ignore_case():
     raw = gziplib.compress(b"Apple\nbanana\n")
     rb, _, _, _ = _make_backend({"/a.gz": raw})
-    output, _ = await zgrep([_spec("/a.gz")],
-                            pattern="apple",
-                            read_bytes=rb,
-                            ignore_case=True)
+    output, _ = await zgrep(
+        [_spec("/a.gz")],
+        ["apple"],
+        read_bytes=rb,
+        flags={"i": True},
+    )
     assert b"Apple" in output
 
 
@@ -193,10 +197,12 @@ async def test_zgrep_files_only_multi():
         "/a.gz": gziplib.compress(b"foo\n"),
         "/b.gz": gziplib.compress(b"bar\n"),
     })
-    output, _ = await zgrep([_spec("/a.gz"), _spec("/b.gz")],
-                            pattern="foo",
-                            read_bytes=rb,
-                            files_only=True)
+    output, _ = await zgrep(
+        [_spec("/a.gz"), _spec("/b.gz")],
+        ["foo"],
+        read_bytes=rb,
+        flags={"args_l": True},
+    )
     decoded = output.decode()
     assert "/a.gz" in decoded
     assert "/b.gz" not in decoded
@@ -206,5 +212,5 @@ async def test_zgrep_files_only_multi():
 async def test_zgrep_stdin():
     raw = gziplib.compress(b"hello\nworld\n")
     rb, _, _, _ = _make_backend({})
-    output, _ = await zgrep([], pattern="hello", read_bytes=rb, stdin=raw)
+    output, _ = await zgrep([], ["hello"], read_bytes=rb, stdin=raw)
     assert b"hello" in output

@@ -16,25 +16,14 @@ import re
 from collections.abc import AsyncIterator
 
 from mirage.commands.builtin.grep_context import grep_context_lines
+from mirage.commands.builtin.grep_helper import (NEVER_MATCH, compile_pattern,
+                                                 merge_pattern_list)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import exit_on_empty, quiet_match
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _compile_pattern(
-    pattern: str,
-    ignore_case: bool = False,
-    fixed_string: bool = False,
-    whole_word: bool = False,
-) -> re.Pattern[str]:
-    flags = re.IGNORECASE if ignore_case else 0
-    pat_str = re.escape(pattern) if fixed_string else pattern
-    if whole_word:
-        pat_str = r"\b" + pat_str + r"\b"
-    return re.compile(pat_str, flags)
 
 
 async def _grep_stream(
@@ -122,15 +111,31 @@ async def grep(
     B: str | None = None,
     C: str | None = None,
     e: str | None = None,
+    f: PathSpec | list[PathSpec] | None = None,
     prefix: str = "",
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    pattern: str | None
     if e is not None:
         pattern = e
     elif texts:
         pattern = texts[0]
+    elif f is not None:
+        pattern = None
     else:
         raise ValueError("grep: usage: grep [flags] pattern [path]")
+
+    if f is not None:
+        if ops is None or "read_stream" not in ops:
+            raise ValueError(
+                "grep: -f: pattern file requires filesystem context")
+        files = f if isinstance(f, list) else [f]
+        for pf in files:
+            chunks = [chunk async for chunk in ops["read_stream"](pf)]
+            pattern = merge_pattern_list(pattern, b"".join(chunks))
+        if pattern is None:
+            pattern = NEVER_MATCH
+            F = False
 
     max_count = int(m) if m is not None else None
     after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
@@ -158,7 +163,7 @@ async def grep(
                 results = [prefix + "/" + r.lstrip("/") for r in results]
             return format_records(results), IOResult()
 
-        pat = _compile_pattern(pattern, i, F, w)
+        pat = compile_pattern(pattern, i, F, w)
         source = ops["read_stream"](paths[0])
         stream = _grep_stream(
             source,
@@ -178,7 +183,7 @@ async def grep(
         return exit_on_empty(stream, io), io
 
     source = _resolve_source(stdin, "grep: usage: grep [flags] pattern [path]")
-    pat = _compile_pattern(pattern, i, F, w)
+    pat = compile_pattern(pattern, i, F, w)
     stream = _grep_stream(
         source,
         pat,

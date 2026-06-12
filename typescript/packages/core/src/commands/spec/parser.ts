@@ -22,12 +22,63 @@ export function resolvePath(cwd: string, path: string): string {
   return posixNormpath(`${rstripSlash(cwd)}/${path}`)
 }
 
+function setValueFlag(
+  flags: Record<string, string | boolean | string[]>,
+  name: string,
+  value: string,
+  repeatFlags: ReadonlySet<string>,
+): void {
+  if (repeatFlags.has(name)) {
+    const prev = flags[name]
+    if (Array.isArray(prev)) {
+      prev.push(value)
+    } else {
+      flags[name] = [value]
+    }
+  } else {
+    flags[name] = value
+  }
+}
+
+interface MixedCluster {
+  bools: string[]
+  valueFlag: string
+  attached: string | null
+}
+
+// getopt-style cluster of bool flags ending in a value flag, e.g. -ne / -nepat.
+// Returns null when any character is unknown or no value flag terminates it.
+function matchMixedCluster(
+  tok: string,
+  boolFlags: ReadonlySet<string>,
+  valueFlags: ReadonlySet<string>,
+): MixedCluster | null {
+  const bools: string[] = []
+  const chars = tok.slice(1)
+  for (let idx = 0; idx < chars.length; idx++) {
+    const ch = chars[idx]
+    if (ch === undefined) break
+    const name = `-${ch}`
+    if (boolFlags.has(name)) {
+      bools.push(name)
+      continue
+    }
+    if (valueFlags.has(name)) {
+      const rest = chars.slice(idx + 1)
+      return { bools, valueFlag: name, attached: rest.length > 0 ? rest : null }
+    }
+    return null
+  }
+  return null
+}
+
 export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): ParsedArgs {
   const boolFlags = new Set<string>()
   const valueFlags = new Set<string>()
   const longBoolFlags = new Set<string>()
   const longValueFlags = new Set<string>()
   const valueFlagKinds = new Map<string, OperandKind>()
+  const repeatFlags = new Set<string>()
   let numericShorthandFlag: string | null = null
 
   for (const opt of spec.options) {
@@ -36,9 +87,8 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         boolFlags.add(opt.short)
       } else {
         valueFlags.add(opt.short)
-        if (opt.valueKind === OperandKind.PATH) {
-          valueFlagKinds.set(opt.short, OperandKind.PATH)
-        }
+        valueFlagKinds.set(opt.short, opt.valueKind)
+        if (opt.repeatable) repeatFlags.add(opt.short)
         if (opt.numericShorthand) numericShorthandFlag = opt.short
       }
     }
@@ -47,14 +97,12 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         longBoolFlags.add(opt.long)
       } else {
         longValueFlags.add(opt.long)
-        if (opt.valueKind === OperandKind.PATH) {
-          valueFlagKinds.set(opt.long, OperandKind.PATH)
-        }
+        valueFlagKinds.set(opt.long, opt.valueKind)
+        if (opt.repeatable) repeatFlags.add(opt.long)
       }
     }
   }
 
-  const positional: OperandKind[] = spec.positional.map((op) => op.kind)
   const restKind: OperandKind | null = spec.rest !== null ? spec.rest.kind : null
 
   const cachePaths: string[] = []
@@ -76,8 +124,13 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     }
   }
 
-  const flags: Record<string, string | boolean> = {}
+  const flags: Record<string, string | boolean | string[]> = {}
   const rawArgs: string[] = []
+  const warnings: string[] = []
+  // Free-text commands (echo/python/bash-style TEXT rest) keep unknown dash
+  // tokens verbatim; elsewhere they are dropped with a warning so a stray
+  // flag never corrupts pattern/path classification.
+  const lenientDashOperands = restKind === OperandKind.TEXT
   i = 0
   let endOfFlags = false
 
@@ -102,10 +155,17 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         flags[tok] = true
         i += 1
       } else if (longValueFlags.has(tok) && i + 1 < filteredArgv.length) {
-        flags[tok] = filteredArgv[i + 1] ?? ''
+        setValueFlag(flags, tok, filteredArgv[i + 1] ?? '', repeatFlags)
         i += 2
       } else {
-        rawArgs.push(tok)
+        const eq = tok.indexOf('=')
+        if (eq !== -1 && longValueFlags.has(tok.slice(0, eq))) {
+          setValueFlag(flags, tok.slice(0, eq), tok.slice(eq + 1), repeatFlags)
+        } else if (lenientDashOperands) {
+          rawArgs.push(tok)
+        } else {
+          warnings.push(`warning: unknown option '${tok}' ignored`)
+        }
         i += 1
       }
       continue
@@ -120,13 +180,13 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
       let matchedValue = false
       for (const vf of valueFlags) {
         if (tok === vf && i + 1 < filteredArgv.length) {
-          flags[vf] = filteredArgv[i + 1] ?? ''
+          setValueFlag(flags, vf, filteredArgv[i + 1] ?? '', repeatFlags)
           i += 2
           matchedValue = true
           break
         }
         if (tok.startsWith(vf) && tok.length > vf.length) {
-          flags[vf] = tok.slice(vf.length)
+          setValueFlag(flags, vf, tok.slice(vf.length), repeatFlags)
           i += 1
           matchedValue = true
           break
@@ -153,7 +213,27 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         continue
       }
 
-      rawArgs.push(tok)
+      const mixed = matchMixedCluster(tok, boolFlags, valueFlags)
+      if (mixed !== null) {
+        if (mixed.attached !== null) {
+          for (const name of mixed.bools) flags[name] = true
+          setValueFlag(flags, mixed.valueFlag, mixed.attached, repeatFlags)
+          i += 1
+          continue
+        }
+        if (i + 1 < filteredArgv.length) {
+          for (const name of mixed.bools) flags[name] = true
+          setValueFlag(flags, mixed.valueFlag, filteredArgv[i + 1] ?? '', repeatFlags)
+          i += 2
+          continue
+        }
+      }
+
+      if (lenientDashOperands || /^-\d+$/.test(tok)) {
+        rawArgs.push(tok)
+      } else {
+        warnings.push(`warning: unknown option '${tok}' ignored`)
+      }
       i += 1
       continue
     }
@@ -162,7 +242,12 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     i += 1
   }
 
+  const positional: OperandKind[] = spec.positional
+    .filter((op) => !op.providedBy.some((name) => name in flags))
+    .map((op) => op.kind)
+
   const classified: [string, OperandKind][] = []
+  const rawOperands: [string, OperandKind][] = []
   for (let j = 0; j < rawArgs.length; j++) {
     const arg = rawArgs[j]
     if (arg === undefined) continue
@@ -176,28 +261,52 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     }
     if (kind === OperandKind.PATH) {
       classified.push([resolvePath(cwd, arg), OperandKind.PATH])
+      rawOperands.push([arg, OperandKind.PATH])
     } else {
       classified.push([arg, OperandKind.TEXT])
+      rawOperands.push([arg, OperandKind.TEXT])
     }
   }
 
   const pathFlagValues: string[] = []
   for (const [flagName, kind] of valueFlagKinds) {
-    if (kind === OperandKind.PATH && flagName in flags) {
-      const val = flags[flagName]
-      if (typeof val === 'string') {
-        const resolved = resolvePath(cwd, val)
-        flags[flagName] = resolved
-        pathFlagValues.push(resolved)
-      }
+    if (kind !== OperandKind.PATH || !(flagName in flags)) continue
+    const val = flags[flagName]
+    if (Array.isArray(val)) {
+      const resolvedList = val.map((part) => resolvePath(cwd, part))
+      flags[flagName] = resolvedList
+      pathFlagValues.push(...resolvedList)
+    } else if (typeof val === 'string') {
+      const resolved = resolvePath(cwd, val)
+      flags[flagName] = resolved
+      pathFlagValues.push(resolved)
     }
   }
 
-  return new ParsedArgs({ flags, args: classified, cachePaths, pathFlagValues })
+  const textFlagValues: string[] = []
+  for (const [flagName, kind] of valueFlagKinds) {
+    if (kind !== OperandKind.TEXT || !(flagName in flags)) continue
+    const val = flags[flagName]
+    if (Array.isArray(val)) {
+      textFlagValues.push(...val)
+    } else if (typeof val === 'string') {
+      textFlagValues.push(val)
+    }
+  }
+
+  return new ParsedArgs({
+    flags,
+    args: classified,
+    cachePaths,
+    pathFlagValues,
+    rawOperands,
+    textFlagValues,
+    warnings,
+  })
 }
 
-export function parseToKwargs(parsed: ParsedArgs): Record<string, string | boolean> {
-  const result: Record<string, string | boolean> = {}
+export function parseToKwargs(parsed: ParsedArgs): Record<string, string | boolean | string[]> {
+  const result: Record<string, string | boolean | string[]> = {}
   for (const [key, value] of Object.entries(parsed.flags)) {
     let clean = key.replace(/^-+/, '').replaceAll('-', '_')
     clean = AMBIGUOUS_NAMES[clean] ?? clean

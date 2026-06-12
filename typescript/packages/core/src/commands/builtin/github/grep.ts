@@ -30,7 +30,7 @@ import { type FileStat, ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { prefixAggregate } from '../aggregators.ts'
-import { isRegexPattern } from '../grep_helper.ts'
+import { isRegexPattern, patternArg } from '../grep_helper.ts'
 import { grepGeneric } from '../generic/grep.ts'
 
 const ENC = new TextEncoder()
@@ -45,7 +45,7 @@ async function grepCommand(
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
-    const pattern = typeof opts.flags.e === 'string' ? opts.flags.e : (texts[0] ?? '')
+    const pattern = patternArg(texts, opts.flags) ?? ''
     const recursive = opts.flags.r === true || opts.flags.R === true
     const fixedString = opts.flags.F === true
     const key = scopeRelativeKey(first)

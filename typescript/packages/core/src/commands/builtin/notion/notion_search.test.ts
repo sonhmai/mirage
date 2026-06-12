@@ -56,7 +56,7 @@ function makePage(overrides: Record<string, unknown>): Record<string, unknown> {
 }
 
 interface RunOpts {
-  flags: Record<string, string | boolean>
+  flags: Record<string, string | boolean | string[]>
   responses: Record<string, unknown>[]
 }
 

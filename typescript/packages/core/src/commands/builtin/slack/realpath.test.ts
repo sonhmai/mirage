@@ -22,7 +22,7 @@ const DEC = new TextDecoder()
 
 async function runRealpath(
   paths: PathSpec[],
-  flags: Record<string, string | boolean> = {},
+  flags: Record<string, string | boolean | string[]> = {},
 ): Promise<string> {
   const cmd = SLACK_REALPATH[0]
   if (cmd === undefined) throw new Error('realpath not registered')

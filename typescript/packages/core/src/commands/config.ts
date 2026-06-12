@@ -46,7 +46,7 @@ export interface CommandHistory {
 
 export interface CommandOpts {
   stdin: ByteSource | null
-  flags: Record<string, string | boolean>
+  flags: Record<string, string | boolean | string[]>
   filetypeFns: Record<string, CommandFn> | null
   mountPrefix?: string
   cwd: string

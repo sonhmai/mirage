@@ -22,7 +22,7 @@ const DEC = new TextDecoder()
 
 async function runBc(
   stdin: string,
-  flags: Record<string, string | boolean> = {},
+  flags: Record<string, string | boolean | string[]> = {},
 ): Promise<{ out: string; exitCode: number }> {
   const resource = new RAMResource()
   const cmd = GENERAL_BC[0]

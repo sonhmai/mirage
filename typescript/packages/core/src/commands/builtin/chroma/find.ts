@@ -26,9 +26,9 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 function defaultName(
-  flags: Record<string, string | boolean>,
+  flags: Record<string, string | boolean | string[]>,
   texts: readonly string[],
-): Record<string, string | boolean> {
+): Record<string, string | boolean | string[]> {
   if (typeof flags.name === 'string') return flags
   const first = texts[0]
   if (first !== undefined && !first.startsWith('-')) {

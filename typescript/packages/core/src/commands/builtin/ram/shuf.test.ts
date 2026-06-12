@@ -24,7 +24,7 @@ const DEC = new TextDecoder()
 async function runShuf(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean> = {},
+  flags: Record<string, string | boolean | string[]> = {},
   stdin: Uint8Array | null = null,
   texts: string[] = [],
 ): Promise<{ out: string; exitCode: number }> {

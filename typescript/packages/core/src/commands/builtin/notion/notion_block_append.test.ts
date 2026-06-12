@@ -46,7 +46,7 @@ function makeFakeResource(transport: NotionTransport): NotionResourceLike {
 }
 
 interface RunOpts {
-  flags: Record<string, string | boolean>
+  flags: Record<string, string | boolean | string[]>
   responses?: Record<string, unknown>[]
 }
 

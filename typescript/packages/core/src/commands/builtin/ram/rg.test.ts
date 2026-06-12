@@ -25,7 +25,7 @@ async function runRg(
   resource: RAMResource,
   texts: string[],
   paths: PathSpec[],
-  flags: Record<string, string | boolean> = {},
+  flags: Record<string, string | boolean | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ lines: string[]; out: string; exitCode: number }> {
   const cmd = RAM_RG[0]

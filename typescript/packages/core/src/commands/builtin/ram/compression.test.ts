@@ -28,7 +28,7 @@ async function runCmd(
   reg: readonly RegisteredCommand[],
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean>,
+  flags: Record<string, string | boolean | string[]>,
   stdin: Uint8Array | null,
 ): Promise<{ out: Uint8Array; writes: Record<string, Uint8Array>; exitCode: number }> {
   const cmd = reg[0]

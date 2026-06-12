@@ -42,6 +42,7 @@ async def rg(
     accessor: DatabricksVolumeAccessor,
     paths: list[PathSpec],
     *texts: str,
+    e: str | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     i: bool = False,
     v: bool = False,
@@ -62,9 +63,12 @@ async def rg(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not texts:
+    if e is not None:
+        pattern = e
+    elif texts:
+        pattern = texts[0]
+    else:
         raise ValueError("rg: usage: rg [flags] pattern [path]")
-    pattern = texts[0]
     max_count = int(m) if m is not None else None
     context_after = int(A) if A is not None else 0
     context_before = int(B) if B is not None else 0

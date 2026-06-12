@@ -34,7 +34,7 @@ function spec(path: string): PathSpec {
   return new PathSpec({ original: path, directory: path, resolved: false, prefix: '' })
 }
 
-function opts(flags: Record<string, string | boolean>): CommandOpts {
+function opts(flags: Record<string, string | boolean | string[]>): CommandOpts {
   return {
     stdin: null,
     flags,
@@ -60,7 +60,7 @@ const readdir = (p: PathSpec): Promise<string[]> => {
   return Promise.resolve([])
 }
 
-async function run(flags: Record<string, string | boolean>): Promise<string[]> {
+async function run(flags: Record<string, string | boolean | string[]>): Promise<string[]> {
   const result = await lsGeneric([spec('/')], opts(flags), readdir, stat)
   if (result === null) return []
   const [out] = result

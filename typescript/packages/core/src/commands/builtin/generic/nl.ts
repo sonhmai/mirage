@@ -68,7 +68,7 @@ async function* nlMulti(
   }
 }
 
-function parseOptions(flags: Record<string, string | boolean>): NlOptions {
+function parseOptions(flags: Record<string, string | boolean | string[]>): NlOptions {
   const b = typeof flags.b === 'string' ? flags.b : 't'
   let bodyNumbering = b
   let pattern: RegExp | null = null

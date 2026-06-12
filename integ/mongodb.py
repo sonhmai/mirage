@@ -104,6 +104,8 @@ CASES: list[tuple[str, str]] = [
     ("grep_c_title",
      f"grep -c title {MOUNT}/{DB}/collections/books/documents.jsonl"),
     ("grep_ada", f"grep ada {MOUNT}/{DB}/collections/books/documents.jsonl"),
+    ("grep_e_multi",
+     f"grep -n -e ada -e ben {MOUNT}/{DB}/collections/books/documents.jsonl"),
     ("grep_db_scope", f"grep ada {MOUNT}/{DB}/"),
     ("grep_root_scope", f"grep ada {MOUNT}/"),
     ("rg_db_scope", f"rg ben {MOUNT}/{DB}/"),

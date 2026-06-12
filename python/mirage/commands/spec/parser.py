@@ -27,6 +27,54 @@ def _resolve(cwd: str, path: str) -> str:
     return posixpath.normpath(posixpath.join(cwd, path))
 
 
+def _set_value_flag(
+    flags: dict[str, str | bool | list[str]],
+    name: str,
+    value: str,
+    repeat_flags: set[str],
+) -> None:
+    if name in repeat_flags:
+        prev = flags.get(name)
+        if isinstance(prev, list):
+            prev.append(value)
+        else:
+            flags[name] = [value]
+    else:
+        flags[name] = value
+
+
+def _match_mixed_cluster(
+    tok: str,
+    bool_flags: set[str],
+    value_flags: set[str],
+) -> tuple[list[str], str, str | None] | None:
+    """Match a getopt-style cluster of bool flags ending in a value flag.
+
+    Args:
+        tok (str): token like "-ne" or "-nepat".
+        bool_flags (set[str]): single-dash boolean flag names.
+        value_flags (set[str]): single-dash value flag names.
+
+    Returns:
+        tuple[list[str], str, str | None] | None: (bool flag names, value
+            flag name, attached value or None when the value comes from the
+            next token), or None when any character is unknown or no value
+            flag terminates the cluster.
+    """
+    bools: list[str] = []
+    chars = tok[1:]
+    for idx, ch in enumerate(chars):
+        name = f"-{ch}"
+        if name in bool_flags:
+            bools.append(name)
+            continue
+        if name in value_flags:
+            rest = chars[idx + 1:]
+            return bools, name, (rest if rest else None)
+        return None
+    return None
+
+
 def parse_command(
     spec: CommandSpec,
     argv: list[str],
@@ -37,6 +85,7 @@ def parse_command(
     long_bool_flags: set[str] = set()
     long_value_flags: set[str] = set()
     value_flag_kinds: dict[str, OperandKind] = {}
+    repeat_flags: set[str] = set()
     numeric_shorthand_flag: str | None = None
     for opt in spec.options:
         if opt.short:
@@ -44,8 +93,9 @@ def parse_command(
                 bool_flags.add(opt.short)
             else:
                 value_flags.add(opt.short)
-                if opt.value_kind == OperandKind.PATH:
-                    value_flag_kinds[opt.short] = OperandKind.PATH
+                value_flag_kinds[opt.short] = opt.value_kind
+                if opt.repeatable:
+                    repeat_flags.add(opt.short)
                 if opt.numeric_shorthand:
                     numeric_shorthand_flag = opt.short
         if opt.long:
@@ -53,11 +103,10 @@ def parse_command(
                 long_bool_flags.add(opt.long)
             else:
                 long_value_flags.add(opt.long)
-                if opt.value_kind == OperandKind.PATH:
-                    value_flag_kinds[opt.long] = OperandKind.PATH
+                value_flag_kinds[opt.long] = opt.value_kind
+                if opt.repeatable:
+                    repeat_flags.add(opt.long)
 
-    positional: tuple[OperandKind,
-                      ...] = tuple(op.kind for op in spec.positional)
     rest_kind: OperandKind | None = (spec.rest.kind
                                      if spec.rest is not None else None)
 
@@ -74,8 +123,13 @@ def parse_command(
             filtered_argv.append(argv[i])
             i += 1
 
-    flags: dict[str, str | bool] = {}
+    flags: dict[str, str | bool | list[str]] = {}
     raw_args: list[str] = []
+    warnings: list[str] = []
+    # Free-text commands (echo/python/bash-style TEXT rest) keep unknown
+    # dash tokens verbatim; elsewhere they are dropped with a warning so a
+    # stray flag never corrupts pattern/path classification.
+    lenient_dash_operands = rest_kind == OperandKind.TEXT
     i = 0
     end_of_flags = False
 
@@ -97,10 +151,17 @@ def parse_command(
                 flags[tok] = True
                 i += 1
             elif tok in long_value_flags and i + 1 < len(filtered_argv):
-                flags[tok] = filtered_argv[i + 1]
+                _set_value_flag(flags, tok, filtered_argv[i + 1], repeat_flags)
                 i += 2
             else:
-                raw_args.append(tok)
+                eq = tok.find("=")
+                if eq != -1 and tok[:eq] in long_value_flags:
+                    _set_value_flag(flags, tok[:eq], tok[eq + 1:],
+                                    repeat_flags)
+                elif lenient_dash_operands:
+                    raw_args.append(tok)
+                else:
+                    warnings.append(f"warning: unknown option '{tok}' ignored")
                 i += 1
             continue
 
@@ -113,12 +174,13 @@ def parse_command(
             matched_value = False
             for vf in value_flags:
                 if tok == vf and i + 1 < len(filtered_argv):
-                    flags[vf] = filtered_argv[i + 1]
+                    _set_value_flag(flags, vf, filtered_argv[i + 1],
+                                    repeat_flags)
                     i += 2
                     matched_value = True
                     break
                 if tok.startswith(vf) and len(tok) > len(vf):
-                    flags[vf] = tok[len(vf):]
+                    _set_value_flag(flags, vf, tok[len(vf):], repeat_flags)
                     i += 1
                     matched_value = True
                     break
@@ -141,14 +203,40 @@ def parse_command(
                 i += 1
                 continue
 
-            raw_args.append(tok)
+            mixed = _match_mixed_cluster(tok, bool_flags, value_flags)
+            if mixed is not None:
+                cluster_bools, vflag, attached = mixed
+                if attached is not None:
+                    for name in cluster_bools:
+                        flags[name] = True
+                    _set_value_flag(flags, vflag, attached, repeat_flags)
+                    i += 1
+                    continue
+                if i + 1 < len(filtered_argv):
+                    for name in cluster_bools:
+                        flags[name] = True
+                    _set_value_flag(flags, vflag, filtered_argv[i + 1],
+                                    repeat_flags)
+                    i += 2
+                    continue
+
+            if lenient_dash_operands or _NUMERIC_SHORT.match(tok):
+                raw_args.append(tok)
+            else:
+                warnings.append(f"warning: unknown option '{tok}' ignored")
             i += 1
             continue
 
         raw_args.append(tok)
         i += 1
 
+    positional: tuple[OperandKind,
+                      ...] = tuple(op.kind for op in spec.positional
+                                   if not any(name in flags
+                                              for name in op.provided_by))
+
     classified: list[tuple[str, OperandKind]] = []
+    raw_operands: list[tuple[str, OperandKind]] = []
     for j, arg in enumerate(raw_args):
         if j < len(positional):
             kind = positional[j]
@@ -158,29 +246,53 @@ def parse_command(
             continue
         if kind == OperandKind.PATH:
             classified.append((_resolve(cwd, arg), OperandKind.PATH))
+            raw_operands.append((arg, OperandKind.PATH))
         else:
             classified.append((arg, OperandKind.TEXT))
+            raw_operands.append((arg, OperandKind.TEXT))
 
     path_flag_values: list[str] = []
     for flag_name, kind in value_flag_kinds.items():
-        if (kind == OperandKind.PATH and flag_name in flags
-                and isinstance(flags[flag_name], str)):
-            resolved = _resolve(cwd, flags[flag_name])
+        if kind != OperandKind.PATH or flag_name not in flags:
+            continue
+        value = flags[flag_name]
+        if isinstance(value, list):
+            resolved_list = [_resolve(cwd, part) for part in value]
+            flags[flag_name] = resolved_list
+            path_flag_values.extend(resolved_list)
+        elif isinstance(value, str):
+            resolved = _resolve(cwd, value)
             flags[flag_name] = resolved
             path_flag_values.append(resolved)
+
+    text_flag_values: list[str] = []
+    for flag_name, kind in value_flag_kinds.items():
+        if kind != OperandKind.TEXT or flag_name not in flags:
+            continue
+        value = flags[flag_name]
+        if isinstance(value, list):
+            text_flag_values.extend(value)
+        elif isinstance(value, str):
+            text_flag_values.append(value)
 
     return ParsedArgs(
         flags=flags,
         args=classified,
         cache_paths=cache_paths,
         path_flag_values=path_flag_values,
+        raw_operands=raw_operands,
+        text_flag_values=text_flag_values,
+        warnings=warnings,
     )
 
 
-def parse_to_kwargs(parsed: ParsedArgs) -> dict[str, str | bool]:
-    result: dict[str, str | bool] = {}
+def flag_kwarg_name(flag: str) -> str:
+    clean = flag.lstrip("-").replace("-", "_")
+    return AMBIGUOUS_NAMES.get(clean, clean)
+
+
+def parse_to_kwargs(parsed: ParsedArgs) -> dict[str, str | bool | list[str]]:
+    result: dict[str, str | bool | list[str]] = {}
     for key, value in parsed.flags.items():
-        clean = key.lstrip("-").replace("-", "_")
-        clean = AMBIGUOUS_NAMES.get(clean, clean)
-        result[clean] = value
+        result[flag_kwarg_name(key)] = value
     return result

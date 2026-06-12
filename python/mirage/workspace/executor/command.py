@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable
+from typing import NamedTuple
 
 from mirage.commands.builtin.utils.safeguard import maybe_with_timeout
 from mirage.commands.safeguard import resolve_across_mounts, resolve_safeguard
@@ -106,18 +107,25 @@ def _check_mount_root_guard_raw(
     return None
 
 
+class _ParsedCommand(NamedTuple):
+    paths: list[PathSpec]
+    texts: list[str]
+    flag_kwargs: dict[str, object]
+    warnings: list[str]
+
+
 def _parse_flags(
     parts: list[str | PathSpec],
     mount: object,
     cmd_name: str,
     cwd: str,
-) -> tuple[list[PathSpec], list[str], dict, list[str]]:
+) -> _ParsedCommand:
     """Parse flags from classified parts, recovering PathSpec for PATH values.
 
     Returns:
-        (paths, texts, flag_kwargs, warnings) — positional paths, positional
-        texts, parsed flag dict with PathSpec for PATH flag values, and
-        parser warnings (e.g. unknown options that were ignored).
+        _ParsedCommand: positional paths, positional texts, parsed flag dict
+        (PATH flag values recovered to PathSpec, repeatable PATH flags to
+        list[PathSpec]), and parser warnings (e.g. ignored unknown options).
     """
     # Build string argv and PathSpec lookup
     argv = [
@@ -171,12 +179,12 @@ def _parse_flags(
                 paths.append(scope)
             else:
                 texts.append(value)
-        return paths, texts, flag_kwargs, parsed.warnings
+        return _ParsedCommand(paths, texts, flag_kwargs, parsed.warnings)
 
     # No spec: separate by type
     paths = [item for item in parts if isinstance(item, PathSpec)]
     texts = [item for item in parts if not isinstance(item, PathSpec)]
-    return paths, texts, {}, []
+    return _ParsedCommand(paths, texts, {}, [])
 
 
 async def handle_command(

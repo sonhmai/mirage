@@ -59,6 +59,10 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+async def _fake_jsonl_stream(accessor, path, index=None):
+    yield FAKE_JSONL
+
+
 def _make_index() -> RAMIndexCacheStore:
     index = RAMIndexCacheStore(ttl=600)
     _run(
@@ -293,9 +297,8 @@ async def test_jq(accessor):
             patch("mirage.commands.builtin.discord.jq.resolve_glob",
                   new_callable=AsyncMock,
                   return_value=_glob_result(ABS_FILE)),
-            patch("mirage.commands.builtin.discord.jq.discord_read",
-                  new_callable=AsyncMock,
-                  return_value=FAKE_JSONL),
+            patch("mirage.commands.builtin.discord.jq.read_stream",
+                  new=_fake_jsonl_stream),
     ):
         stream, io = await jq(accessor, _make_glob(ABS_FILE), ".[].content")
     data = await _collect(stream)
@@ -308,9 +311,8 @@ async def test_jq_raw(accessor):
             patch("mirage.commands.builtin.discord.jq.resolve_glob",
                   new_callable=AsyncMock,
                   return_value=_glob_result(ABS_FILE)),
-            patch("mirage.commands.builtin.discord.jq.discord_read",
-                  new_callable=AsyncMock,
-                  return_value=FAKE_JSONL),
+            patch("mirage.commands.builtin.discord.jq.read_stream",
+                  new=_fake_jsonl_stream),
     ):
         stream, io = await jq(accessor,
                               _make_glob(ABS_FILE),

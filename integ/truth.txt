@@ -100,6 +100,11 @@ alice
 === jq_jsonl_chain_raw ===
 hello
 world
+=== jq_no_filter_piped ===
+{
+  "name": "alice",
+  "age": 30
+}
 === sort ===
 bar
 baz
@@ -1263,6 +1268,10 @@ world
 gz-data
 === arch_mktemp ===
 1
+=== jq_no_filter_no_input ===
+exit=0
+=== jq_dot_no_input ===
+exit=0
 === lazy_exit_grep_match ===
 exit=0
 hello

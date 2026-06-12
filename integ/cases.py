@@ -108,6 +108,7 @@ CASES: list[tuple[str, str]] = [
     ("jq_jsonl_id", 'jq ".id" /data/data.jsonl'),
     ("jq_jsonl_chain", 'jq ".[].id" /data/data.jsonl'),
     ("jq_jsonl_chain_raw", 'jq -r ".[].msg" /data/chat.jsonl'),
+    ("jq_no_filter_piped", "cat /data/user.json | jq"),
 
     # ----- sort / uniq / shuffle -----
     ("sort", "sort /data/a.txt"),
@@ -477,6 +478,8 @@ CASES: list[tuple[str, str]] = [
 ]
 
 EXIT_CODE_CASES: list[tuple[str, str]] = [
+    ("jq_no_filter_no_input", "jq"),
+    ("jq_dot_no_input", 'jq "."'),
     ("lazy_exit_grep_match", "grep hello /data/a.txt"),
     ("lazy_exit_grep_no_match", "grep zzz /data/a.txt"),
     ("cp_reject_multi_nondir", "cp /data/a.txt /data/b.txt /data/c.txt"),

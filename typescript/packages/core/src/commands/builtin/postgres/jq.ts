@@ -28,21 +28,13 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 
-const ENC = new TextEncoder()
-
 async function jqCommand(
   accessor: PostgresAccessor,
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const expression = texts[0]
-  if (expression === undefined) {
-    return [
-      null,
-      new IOResult({ exitCode: 1, stderr: ENC.encode('jq: usage: jq EXPRESSION [path]\n') }),
-    ]
-  }
+  const expression = texts[0] ?? '.'
   const raw = opts.flags.r === true
   const compact = opts.flags.c === true
   const slurp = opts.flags.s === true
@@ -63,9 +55,7 @@ async function jqCommand(
   }
 
   const bytes = await readStdinAsync(opts.stdin)
-  if (bytes === null) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('jq: missing input\n') })]
-  }
+  if (bytes === null) return [null, new IOResult()]
   let data = parseJsonAuto(bytes)
   if (slurp && !Array.isArray(data)) data = [data]
   const result = await jqEval(data, expression.trim())

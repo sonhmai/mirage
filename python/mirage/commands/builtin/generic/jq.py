@@ -28,9 +28,8 @@ async def jq(
     c: bool = False,
     s: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not texts:
-        raise ValueError("jq: usage: jq EXPRESSION [path]")
-    expression = texts[0]
+    # GNU jq defaults the filter to "." when no expression is given
+    expression = texts[0] if texts else "."
     spread = "[]" in expression
     if paths:
         if is_jsonl_path(
@@ -51,7 +50,8 @@ async def jq(
             outputs.append(format_jq_output(result, r, c, spread))
         return b"".join(outputs), IOResult()
     if stdin is None:
-        raise ValueError("jq: missing input")
+        # GNU jq: empty input -> no output, exit 0 (jq . </dev/null)
+        return None, IOResult()
     raw_bytes = await _read_stdin_bytes(stdin)
     data = parse_json_auto(raw_bytes)
     if s and not isinstance(data, list):

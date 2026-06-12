@@ -803,10 +803,11 @@ class TestJqMemoryBackend:
         result = json.loads(collect(stdout))
         assert result == [1, 2, 3]
 
-    def test_missing_expression_raises(self):
+    def test_missing_expression_defaults_dot(self):
         ws = mem_ws({"/f.json": b'{"a": 1}'})
-        _, io = run_raw(ws, "jq")
-        assert io.exit_code != 0
+        stdout, io = run_raw(ws, "jq")
+        assert io.exit_code == 0
+        assert collect(stdout) == b""
 
     def test_pipe_in_command(self):
         ws = mem_ws({"/f.json": b'{"items": [1, 2, 3]}'})

@@ -28,8 +28,6 @@ import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 
-const ENC = new TextEncoder()
-
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
 export async function jqProvisionGeneric(
@@ -70,13 +68,8 @@ export async function jqGeneric(
   opts: CommandOpts,
   stream: Stream,
 ): Promise<CommandFnResult> {
-  const expression = texts[0]
-  if (expression === undefined) {
-    return [
-      null,
-      new IOResult({ exitCode: 1, stderr: ENC.encode('jq: usage: jq EXPRESSION [path]\n') }),
-    ]
-  }
+  // GNU jq defaults the filter to "." when no expression is given
+  const expression = texts[0] ?? '.'
   const raw = opts.flags.r === true
   const compact = opts.flags.c === true
   const slurp = opts.flags.s === true

@@ -38,9 +38,7 @@ async def jq(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not texts:
-        raise ValueError("jq: usage: jq EXPRESSION [path]")
-    expression = texts[0]
+    expression = texts[0] if texts else "."
     if paths:
         paths = await resolve_glob(accessor, paths, index)
         outputs: list[bytes] = []
@@ -69,4 +67,4 @@ async def jq(
         result = jq_eval(data, expression.strip())
         spread = "[]" in expression
         return format_jq_output(result, r, c, spread), IOResult()
-    raise ValueError("jq: missing input")
+    return None, IOResult()

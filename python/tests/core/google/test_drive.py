@@ -18,9 +18,10 @@ import pytest
 
 from mirage.core.google._client import TokenManager
 from mirage.core.google.config import GoogleConfig
-from mirage.core.google.drive import (download_file, download_file_stream,
-                                      get_file_metadata, list_all_files,
-                                      list_files)
+from mirage.core.google.drive import (delete_file, download_file,
+                                      download_file_stream, get_file_metadata,
+                                      list_all_files, list_files,
+                                      list_shared_drives)
 
 
 @pytest.fixture
@@ -71,6 +72,63 @@ async def test_list_files(token_manager):
 
 
 @pytest.mark.asyncio
+async def test_list_files_shared_drive_sets_corpus_params(token_manager):
+    with patch(
+            "mirage.core.google.drive.google_get",
+            new_callable=AsyncMock,
+            return_value={"files": []},
+    ) as mock_get:
+        await list_files(token_manager,
+                         folder_id="folder123",
+                         drive_id="drive123")
+
+    params = mock_get.call_args.kwargs["params"]
+    assert params["corpora"] == "drive"
+    assert params["driveId"] == "drive123"
+    assert params["includeItemsFromAllDrives"] == "true"
+    assert params["supportsAllDrives"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_list_shared_drives_paginates(token_manager):
+    responses = [
+        {
+            "drives": [{
+                "id": "drive1",
+                "name": "Team"
+            }],
+            "nextPageToken": "next",
+        },
+        {
+            "drives": [{
+                "id": "drive2",
+                "name": "Projects"
+            }],
+        },
+    ]
+    with patch(
+            "mirage.core.google.drive.google_get",
+            new_callable=AsyncMock,
+            side_effect=responses,
+    ) as mock_get:
+        result = await list_shared_drives(token_manager)
+
+    assert result == [
+        {
+            "id": "drive1",
+            "name": "Team"
+        },
+        {
+            "id": "drive2",
+            "name": "Projects"
+        },
+    ]
+    assert mock_get.call_count == 2
+    assert "pageToken" not in mock_get.call_args_list[0].kwargs["params"]
+    assert mock_get.call_args_list[1].kwargs["params"]["pageToken"] == "next"
+
+
+@pytest.mark.asyncio
 async def test_list_all_files(token_manager):
     page1 = {
         "files": [{
@@ -105,9 +163,10 @@ async def test_download_file(token_manager):
             "mirage.core.google.drive.google_get_bytes",
             new_callable=AsyncMock,
             return_value=content,
-    ):
+    ) as mock_get:
         result = await download_file(token_manager, "file123")
         assert result == content
+        assert "supportsAllDrives=true" in mock_get.call_args.args[1]
 
 
 @pytest.mark.asyncio
@@ -121,11 +180,12 @@ async def test_download_file_stream(token_manager):
     with patch(
             "mirage.core.google.drive.google_get_stream",
             side_effect=mock_stream,
-    ):
+    ) as mock_get:
         result = b""
         async for chunk in download_file_stream(token_manager, "file123"):
             result += chunk
         assert result == b"chunk1chunk2chunk3"
+        assert "supportsAllDrives=true" in mock_get.call_args.args[1]
 
 
 @pytest.mark.asyncio
@@ -163,6 +223,18 @@ async def test_get_file_metadata(token_manager):
         assert result["name"] == "report.pdf"
         call_kwargs = mock_get.call_args
         assert "fields" in call_kwargs.kwargs["params"]
+        assert call_kwargs.kwargs["params"]["supportsAllDrives"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_delete_file_supports_shared_drives(token_manager):
+    with patch(
+            "mirage.core.google.drive.google_delete",
+            new_callable=AsyncMock,
+    ) as mock_delete:
+        await delete_file(token_manager, "file123")
+
+    assert "supportsAllDrives=true" in mock_delete.call_args.args[1]
 
 
 @pytest.mark.asyncio

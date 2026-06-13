@@ -11,3 +11,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+DIRECTORY_RESOURCE_TYPES = frozenset({
+    "gdrive/folder",
+    "gdrive/shared_drive",
+})

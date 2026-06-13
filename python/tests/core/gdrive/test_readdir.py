@@ -221,6 +221,40 @@ async def test_readdir_root_includes_shared_drives(accessor, index):
 
 
 @pytest.mark.asyncio
+async def test_readdir_root_uniquifies_duplicate_shared_drive_names(
+        accessor, index):
+    drives = [
+        {
+            "id": "drive1",
+            "name": "Team"
+        },
+        {
+            "id": "drive2",
+            "name": "Team"
+        },
+        {
+            "id": "drive3",
+            "name": "Team"
+        },
+    ]
+    with patch("mirage.core.gdrive.readdir.list_files",
+               new_callable=AsyncMock, return_value=[]), \
+         patch("mirage.core.gdrive.readdir.list_shared_drives",
+               new_callable=AsyncMock, return_value=drives):
+        result = await readdir(accessor, PathSpec(original="/", directory="/"),
+                               index)
+
+    assert result == [
+        "/Team/",
+        "/Team [Shared Drive]/",
+        "/Team [Shared Drive 2]/",
+    ]
+    assert (await index.get("/Team")).entry.id == "drive1"
+    assert (await index.get("/Team [Shared Drive]")).entry.id == "drive2"
+    assert (await index.get("/Team [Shared Drive 2]")).entry.id == "drive3"
+
+
+@pytest.mark.asyncio
 async def test_readdir_root_shared_drives_best_effort(accessor, index):
     """If Shared Drive enumeration fails, My Drive listing still succeeds."""
     files = [{

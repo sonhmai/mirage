@@ -26,6 +26,9 @@ _PATCH_TARGETS = {
     "list_files": [
         "mirage.core.gdrive.readdir.list_files",
     ],
+    "list_shared_drives": [
+        "mirage.core.gdrive.readdir.list_shared_drives",
+    ],
     "list_all_files": [
         "mirage.core.gdocs.readdir.list_all_files",
         "mirage.core.gsheets.readdir.list_all_files",
@@ -170,11 +173,12 @@ def _build_fakes(registry):
     async def fake_list_files(
         token_manager,
         folder_id: str = "root",
+        drive_id: str | None = None,
         mime_type: str | None = None,
         trashed: bool = False,
         page_size: int = 1000,
     ) -> list[dict]:
-        del mime_type, trashed, page_size
+        del drive_id, mime_type, trashed, page_size
         fake = _resolve_fake(token_manager, registry)
         if fake is None:
             return []
@@ -191,6 +195,9 @@ def _build_fakes(registry):
         if fake is None:
             return []
         return fake.all_files()
+
+    async def fake_list_shared_drives(token_manager) -> list[dict]:
+        return []
 
     async def fake_download_file(token_manager, file_id: str) -> bytes:
         fake = _resolve_fake(token_manager, registry)
@@ -215,6 +222,7 @@ def _build_fakes(registry):
     return {
         "refresh": fake_refresh,
         "list_files": fake_list_files,
+        "list_shared_drives": fake_list_shared_drives,
         "list_all_files": fake_list_all_files,
         "download_file": fake_download_file,
         "download_file_stream": fake_download_file_stream,

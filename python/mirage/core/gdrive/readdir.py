@@ -12,17 +12,32 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.google.drive import (MIME_TO_EXT, list_files,
                                       list_shared_drives)
 from mirage.types import PathSpec
 
+logger = logging.getLogger(__name__)
+
 
 def is_dir_name(child: str) -> bool | None:
     # Cold listings mark folders with a trailing slash; warm index-cache
     # entries are slash-less, so classification falls back to stat.
     return True if child.endswith("/") else None
+
+
+def unique_shared_drive_name(name: str, existing_names: set[str]) -> str:
+    if name not in existing_names:
+        return name
+    filename = f"{name} [Shared Drive]"
+    suffix = 2
+    while filename in existing_names:
+        filename = f"{name} [Shared Drive {suffix}]"
+        suffix += 1
+    return filename
 
 
 async def readdir(
@@ -111,13 +126,12 @@ async def readdir(
         try:
             shared_drives = await list_shared_drives(accessor.token_manager)
         except Exception:
+            logger.debug("Unable to list Google Shared Drives", exc_info=True)
             shared_drives = []
         existing_names = {name for name, _, _ in entries}
         for d in shared_drives:
             name = d["name"]
-            filename = name
-            if filename in existing_names:
-                filename = f"{name} [Shared Drive]"
+            filename = unique_shared_drive_name(name, existing_names)
             existing_names.add(filename)
             entry = IndexEntry(
                 id=d["id"],

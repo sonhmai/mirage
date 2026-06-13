@@ -17,6 +17,7 @@ import posixpath
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.gdocs.read import read_doc
+from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
 from mirage.core.gdrive.readdir import readdir
 from mirage.core.google._client import TokenManager
 from mirage.core.google.drive import download_file
@@ -66,7 +67,7 @@ async def read(
                 pass
         if result.entry is None:
             raise FileNotFoundError(path)
-    if result.entry.resource_type == "gdrive/folder":
+    if result.entry.resource_type in DIRECTORY_RESOURCE_TYPES:
         raise IsADirectoryError(path)
     if result.entry.resource_type == "gdrive/gdoc":
         return await read_doc(accessor.token_manager, result.entry.id)

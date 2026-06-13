@@ -202,7 +202,7 @@ async def delete_file(
         token_manager (TokenManager): OAuth2 token manager.
         file_id (str): file ID.
     """
-    url = f"{DRIVE_API_BASE}/files/{file_id}"
+    url = f"{DRIVE_API_BASE}/files/{file_id}?supportsAllDrives=true"
     await google_delete(token_manager, url)
 
 
@@ -223,7 +223,12 @@ async def get_file_metadata(
     fields = ("id,name,mimeType,size,"
               "createdTime,modifiedTime,"
               "owners,capabilities/canEdit,parents")
-    return await google_get(token_manager, url, params={"fields": fields})
+    return await google_get(token_manager,
+                            url,
+                            params={
+                                "fields": fields,
+                                "supportsAllDrives": "true",
+                            })
 
 
 async def download_file(
@@ -239,7 +244,8 @@ async def download_file(
     Returns:
         bytes: file content.
     """
-    url = f"{DRIVE_API_BASE}/files/{file_id}?alt=media"
+    url = (f"{DRIVE_API_BASE}/files/{file_id}"
+           "?alt=media&supportsAllDrives=true")
     return await google_get_bytes(token_manager, url)
 
 
@@ -255,6 +261,7 @@ async def download_file_stream(
         file_id (str): file ID.
         chunk_size (int): chunk size in bytes.
     """
-    url = f"{DRIVE_API_BASE}/files/{file_id}?alt=media"
+    url = (f"{DRIVE_API_BASE}/files/{file_id}"
+           "?alt=media&supportsAllDrives=true")
     async for chunk in google_get_stream(token_manager, url, chunk_size):
         yield chunk

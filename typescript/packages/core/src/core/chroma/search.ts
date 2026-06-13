@@ -18,7 +18,7 @@ import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { scoreFromDistance } from '../../utils/score.ts'
-import { stripSlash } from '../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { metadataString } from './_client.ts'
 import { resolvePath } from './path.ts'
 import { walk } from './walk.ts'
@@ -121,7 +121,7 @@ export function queryResultToBytes(
     if (scopedSlugs !== null && !scopedSlugs.has(slugValue)) continue
     const score = scoreFromDistance(distances[i])
     let path = '/' + slugValue
-    const prefix = mountPrefix.replace(/\/+$/, '')
+    const prefix = rstripSlash(mountPrefix)
     if (prefix !== '') path = prefix + path
     const content = typeof document === 'string' ? document : ''
     contents.push(`${path}:${score}\n${content}`)

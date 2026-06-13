@@ -17,7 +17,7 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { decodeBase64 } from '../../utils/base64.ts'
 import { gunzip } from '../../utils/compress.ts'
-import { stripSlash } from '../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { fetchPathTree } from './_client.ts'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -176,7 +176,7 @@ export function metadataIntOrNull(metadata: Record<string, unknown>, key: string
 }
 
 export function mountRoot(prefix: string): string {
-  const stripped = prefix.replace(/\/+$/, '')
+  const stripped = rstripSlash(prefix)
   return stripped !== '' ? stripped : '/'
 }
 
@@ -194,7 +194,7 @@ export function parent(path: string): string {
 }
 
 export function basename(path: string): string {
-  const stripped = path.replace(/\/+$/, '')
+  const stripped = rstripSlash(path)
   const last = stripped.split('/').pop()
   return last !== undefined && last !== '' ? last : '/'
 }

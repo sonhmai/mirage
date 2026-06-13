@@ -17,21 +17,22 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import { PathSpec } from '../../types.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
+import { lstripSlash, rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { modifiedTs } from '../generic/find.ts'
 import { resolvePath } from './path.ts'
 import { stat } from './stat.ts'
 import { walk } from './walk.ts'
 
 function relativeDepth(item: string, root: string): number {
-  const rootNorm = root.replace(/\/+$/, '') !== '' ? root.replace(/\/+$/, '') : '/'
-  const itemNorm = item.replace(/\/+$/, '') !== '' ? item.replace(/\/+$/, '') : '/'
+  const rootNorm = rstripSlash(root) !== '' ? rstripSlash(root) : '/'
+  const itemNorm = rstripSlash(item) !== '' ? rstripSlash(item) : '/'
   if (itemNorm === rootNorm) return 0
   let relative: string
   if (rootNorm === '/') {
-    relative = itemNorm.replace(/^\/+|\/+$/g, '')
+    relative = stripSlash(itemNorm)
   } else {
     relative = itemNorm.startsWith(rootNorm) ? itemNorm.slice(rootNorm.length) : itemNorm
-    relative = relative.replace(/^\/+/, '')
+    relative = lstripSlash(relative)
   }
   if (relative === '') return 0
   return relative.split('/').length
@@ -45,7 +46,7 @@ async function matches(
   root: string,
   options: FindOptions,
 ): Promise<boolean> {
-  const itemName = item.replace(/\/+$/, '').split('/').pop() ?? ''
+  const itemName = rstripSlash(item).split('/').pop() ?? ''
   if (options.minDepth != null && relativeDepth(item, root) < options.minDepth) return false
   if (options.name != null && options.name !== '' && !fnmatch(itemName, options.name)) return false
   if (

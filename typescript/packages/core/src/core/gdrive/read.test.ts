@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as DriveModule from '../google/drive.ts'
 
 vi.mock('../google/drive.ts', async () => {
@@ -21,6 +21,7 @@ vi.mock('../google/drive.ts', async () => {
 })
 
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/_client.ts'
@@ -32,6 +33,10 @@ const STUB_TOKEN_MANAGER = {} as TokenManager
 function makeAccessor(): GDriveAccessor {
   return new GDriveAccessor({ tokenManager: STUB_TOKEN_MANAGER })
 }
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 
 describe('gdrive read auto-bootstrap', () => {
   it('refetches root listing when entry is evicted from index', async () => {
@@ -77,5 +82,24 @@ describe('gdrive read auto-bootstrap', () => {
     const index = new RAMIndexCacheStore()
     const path = new PathSpec({ original: '/missing.txt', directory: '/missing.txt' })
     await expect(read(accessor, path, index)).rejects.toThrow(/ENOENT/)
+  })
+
+  it('throws EISDIR when reading a shared drive root', async () => {
+    vi.mocked(drive.downloadFile).mockRejectedValue(new Error('should not call downloadFile'))
+    const accessor = makeAccessor()
+    const index = new RAMIndexCacheStore()
+    await index.put(
+      '/Team Drive',
+      new IndexEntry({
+        id: 'drive1',
+        name: 'Team Drive',
+        resourceType: 'gdrive/shared_drive',
+        vfsName: 'Team Drive',
+        extra: { drive_id: 'drive1' },
+      }),
+    )
+    const path = new PathSpec({ original: '/Team Drive', directory: '/Team Drive' })
+    await expect(read(accessor, path, index)).rejects.toThrow(/EISDIR/)
+    expect(vi.mocked(drive.downloadFile)).not.toHaveBeenCalled()
   })
 })

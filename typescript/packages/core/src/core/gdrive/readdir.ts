@@ -16,8 +16,13 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { MIME_TO_EXT, listFiles } from '../google/drive.ts'
+import { MIME_TO_EXT, listFiles, listSharedDrives } from '../google/drive.ts'
 import { rstripSlash, stripSlash } from '../../util/slash.ts'
+
+export const DIRECTORY_RESOURCE_TYPES: ReadonlySet<string> = new Set([
+  'gdrive/folder',
+  'gdrive/shared_drive',
+])
 
 export function isDirName(child: string): boolean | null {
   // Cold listings mark folders with a trailing slash; warm index-cache
@@ -36,6 +41,17 @@ function resourceTypeFor(mime: string): string {
   if (mime === SHEET_MIME) return 'gdrive/gsheet'
   if (mime === SLIDE_MIME) return 'gdrive/gslide'
   return 'gdrive/file'
+}
+
+export function uniqueSharedDriveName(name: string, existingNames: Set<string>): string {
+  if (!existingNames.has(name)) return name
+  let filename = `${name} [Shared Drive]`
+  let suffix = 2
+  while (existingNames.has(filename)) {
+    filename = `${name} [Shared Drive ${String(suffix)}]`
+    suffix += 1
+  }
+  return filename
 }
 
 export async function readdir(
@@ -59,6 +75,7 @@ export async function readdir(
   }
 
   let folderId: string
+  let driveId: string | null = null
   if (key === '') {
     folderId = 'root'
   } else {
@@ -82,9 +99,11 @@ export async function readdir(
       }
     }
     folderId = result.entry.id
+    const entryDriveId = result.entry.extra.drive_id
+    driveId = typeof entryDriveId === 'string' ? entryDriveId : null
   }
 
-  const files = await listFiles(accessor.tokenManager, { folderId })
+  const files = await listFiles(accessor.tokenManager, { folderId, driveId })
   const entries: { name: string; entry: IndexEntry; isDir: boolean }[] = []
   for (const f of files) {
     const mime = f.mimeType ?? ''
@@ -100,8 +119,33 @@ export async function readdir(
       remoteTime: f.modifiedTime ?? '',
       vfsName: filename,
       size: Number.isFinite(sizeNum) && sizeNum > 0 ? sizeNum : null,
+      extra: f.driveId !== undefined ? { drive_id: f.driveId } : {},
     })
     entries.push({ name: filename, entry, isDir })
+  }
+
+  if (key === '') {
+    // Shared Drive enumeration is best-effort: if the account can't list
+    // them (missing scope, API error), still return My Drive contents.
+    let sharedDrives: { id: string; name: string }[] = []
+    try {
+      sharedDrives = await listSharedDrives(accessor.tokenManager)
+    } catch {
+      sharedDrives = []
+    }
+    const existingNames = new Set(entries.map((e) => e.name))
+    for (const d of sharedDrives) {
+      const filename = uniqueSharedDriveName(d.name, existingNames)
+      existingNames.add(filename)
+      const entry = new IndexEntry({
+        id: d.id,
+        name: d.name,
+        resourceType: 'gdrive/shared_drive',
+        vfsName: filename,
+        extra: { drive_id: d.id },
+      })
+      entries.push({ name: filename, entry, isDir: true })
+    }
   }
 
   if (index !== undefined) {

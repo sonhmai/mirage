@@ -20,7 +20,7 @@ import { downloadFile } from '../google/drive.ts'
 import { readSpreadsheet } from '../gsheets/read.ts'
 import { readPresentation } from '../gslides/read.ts'
 import type { TokenManager } from '../google/_client.ts'
-import { readdir } from './readdir.ts'
+import { DIRECTORY_RESOURCE_TYPES, readdir } from './readdir.ts'
 import { rstripSlash, stripSlash } from '../../util/slash.ts'
 
 function enoent(p: string): Error {
@@ -66,7 +66,7 @@ export async function read(
     if (result.entry === undefined || result.entry === null) throw enoent(path.original)
   }
   const rt = result.entry.resourceType
-  if (rt === 'gdrive/folder') throw eisdir(path.original)
+  if (DIRECTORY_RESOURCE_TYPES.has(rt)) throw eisdir(path.original)
   if (rt === 'gdrive/gdoc') return readDoc(accessor.tokenManager, result.entry.id)
   if (rt === 'gdrive/gsheet') return readSpreadsheet(accessor.tokenManager, result.entry.id)
   if (rt === 'gdrive/gslide') return readPresentation(accessor.tokenManager, result.entry.id)

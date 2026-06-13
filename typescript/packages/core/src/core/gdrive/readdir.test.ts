@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as DriveModule from '../google/drive.ts'
 
 vi.mock('../google/drive.ts', async () => {
   const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  return { ...actual, listFiles: vi.fn() }
+  return { ...actual, listFiles: vi.fn(), listSharedDrives: vi.fn() }
 })
 
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
@@ -34,6 +34,10 @@ const STUB_TOKEN_MANAGER = {} as TokenManager
 function makeAccessor(): GDriveAccessor {
   return new GDriveAccessor({ tokenManager: STUB_TOKEN_MANAGER })
 }
+
+beforeEach(() => {
+  vi.mocked(drive.listSharedDrives).mockResolvedValue([])
+})
 
 describe('readdir parent recursion', () => {
   it('repopulates evicted subfolder entry by refetching parent', async () => {
@@ -91,5 +95,93 @@ describe('readdir parent recursion', () => {
     await expect(
       readdir(accessor, new PathSpec({ original: '/docs', directory: '/docs' }), index),
     ).rejects.toThrow(/ENOENT/)
+  })
+})
+
+describe('readdir shared drives', () => {
+  it('surfaces shared drives as top-level directories', async () => {
+    vi.mocked(drive.listFiles).mockResolvedValue([
+      {
+        id: 'f1',
+        name: 'readme.txt',
+        mimeType: 'text/plain',
+        modifiedTime: '2026-04-01T00:00:00.000Z',
+      },
+    ])
+    vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'drive1', name: 'Team Drive' }])
+
+    const accessor = makeAccessor()
+    const index = new RAMIndexCacheStore()
+    const out = await readdir(accessor, new PathSpec({ original: '/', directory: '/' }), index)
+    expect(out).toContain('/readme.txt')
+    expect(out).toContain('/Team Drive/')
+    const entry = (await index.get('/Team Drive')).entry
+    expect(entry).not.toBeNull()
+    expect(entry?.extra.drive_id).toBe('drive1')
+  })
+
+  it('uniquifies duplicate shared drive names', async () => {
+    vi.mocked(drive.listFiles).mockResolvedValue([])
+    vi.mocked(drive.listSharedDrives).mockResolvedValue([
+      { id: 'drive1', name: 'Team' },
+      { id: 'drive2', name: 'Team' },
+      { id: 'drive3', name: 'Team' },
+    ])
+
+    const accessor = makeAccessor()
+    const index = new RAMIndexCacheStore()
+    const out = await readdir(accessor, new PathSpec({ original: '/', directory: '/' }), index)
+    expect(out).toEqual(['/Team/', '/Team [Shared Drive]/', '/Team [Shared Drive 2]/'])
+    expect((await index.get('/Team')).entry?.id).toBe('drive1')
+    expect((await index.get('/Team [Shared Drive]')).entry?.id).toBe('drive2')
+    expect((await index.get('/Team [Shared Drive 2]')).entry?.id).toBe('drive3')
+  })
+
+  it('still lists My Drive when shared drive enumeration fails', async () => {
+    vi.mocked(drive.listFiles).mockResolvedValue([
+      {
+        id: 'f1',
+        name: 'readme.txt',
+        mimeType: 'text/plain',
+        modifiedTime: '2026-04-01T00:00:00.000Z',
+      },
+    ])
+    vi.mocked(drive.listSharedDrives).mockRejectedValue(new Error('no scope'))
+
+    const accessor = makeAccessor()
+    const index = new RAMIndexCacheStore()
+    const out = await readdir(accessor, new PathSpec({ original: '/', directory: '/' }), index)
+    expect(out).toContain('/readme.txt')
+  })
+
+  it('passes drive_id from the cached entry when listing inside a shared drive', async () => {
+    vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'drive1', name: 'Team Drive' }])
+    vi.mocked(drive.listFiles).mockImplementation((_tm, opts) => {
+      if (opts?.folderId === 'root') return Promise.resolve([])
+      if (opts?.folderId === 'drive1') {
+        return Promise.resolve([
+          {
+            id: 'f2',
+            name: 'spec.pdf',
+            mimeType: 'application/pdf',
+            driveId: 'drive1',
+            modifiedTime: '2026-04-01T00:00:00.000Z',
+          },
+        ])
+      }
+      throw new Error(`unexpected folderId=${String(opts?.folderId)}`)
+    })
+
+    const accessor = makeAccessor()
+    const index = new RAMIndexCacheStore()
+    await readdir(accessor, new PathSpec({ original: '/', directory: '/' }), index)
+    const out = await readdir(
+      accessor,
+      new PathSpec({ original: '/Team Drive', directory: '/Team Drive' }),
+      index,
+    )
+    expect(out).toContain('/Team Drive/spec.pdf')
+    const innerCall = vi.mocked(drive.listFiles).mock.calls.find((c) => c[1]?.folderId === 'drive1')
+    expect(innerCall?.[1]?.driveId).toBe('drive1')
   })
 })

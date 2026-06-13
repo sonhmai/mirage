@@ -28,6 +28,7 @@ EXPECTED_RESOURCES = {
     "gcs",
     "minio",
     "ceph",
+    "seaweedfs",
     "wasabi",
     "backblaze",
     "digitalocean",
@@ -61,6 +62,7 @@ EXPECTED_RESOURCES = {
     "nextcloud",
     "dify",
     "chroma",
+    "onedrive",
 }
 
 

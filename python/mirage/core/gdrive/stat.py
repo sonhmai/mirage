@@ -14,6 +14,7 @@
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
 from mirage.core.gdrive.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
@@ -59,7 +60,7 @@ async def stat(
         result = await index.get(virtual_key)
         if result.entry is None:
             raise enoent(virtual)
-    if result.entry.resource_type == "gdrive/folder":
+    if result.entry.resource_type in DIRECTORY_RESOURCE_TYPES:
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.DIRECTORY,

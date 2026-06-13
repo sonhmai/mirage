@@ -167,6 +167,13 @@ const REGISTRY: Record<string, ResourceFactory> = {
     })
     return new CephResource(norm as unknown as S3AliasBrowserCtorConfig)
   },
+  seaweedfs: async (config) => {
+    const { SeaweedFSResource } = await import('./seaweedfs/seaweedfs.ts')
+    const norm = normalizeFields(config, {
+      rename: { endpoint_url: 'endpoint' },
+    })
+    return new SeaweedFSResource(norm as unknown as S3AliasBrowserCtorConfig)
+  },
   wasabi: async (config) => {
     const { WasabiResource } = await import('./wasabi/wasabi.ts')
     const norm = normalizeFields(config, {

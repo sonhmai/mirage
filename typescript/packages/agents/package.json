@@ -88,14 +88,14 @@
     "@mariozechner/pi-ai": "^0.70.2",
     "@mariozechner/pi-coding-agent": "^0.70.2",
     "@mastra/core": "^1.29.1",
-    "@struktoai/mirage-node": "workspace:*",
     "@openai/agents": "^0.8.0",
+    "@struktoai/mirage-node": "workspace:*",
     "@types/picomatch": "^4.0.3",
     "ai": "^6.0.170",
     "deepagents": "^1.9.0",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",
-    "vitest": "^3.0.0",
+    "vitest": "^3.2.6",
     "zod": "^4.0.0"
   }
 }

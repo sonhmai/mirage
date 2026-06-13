@@ -70,7 +70,7 @@
             "group": "Learn",
             "pages": [
               "home/architecture",
-              "home/shell",
+              "home/bash",
               "home/resource-matrix",
               "home/cache",
               "home/snapshot",
@@ -105,6 +105,7 @@
                   "home/setup/supabase",
                   "home/setup/minio",
                   "home/setup/ceph",
+                  "home/setup/seaweedfs",
                   "home/setup/wasabi",
                   "home/setup/backblaze",
                   "home/setup/digitalocean",
@@ -129,6 +130,13 @@
                 "icon": "google",
                 "pages": [
                   "home/setup/google"
+                ]
+              },
+              {
+                "group": "Microsoft",
+                "icon": "microsoft",
+                "pages": [
+                  "home/setup/onedrive"
                 ]
               },
               {
@@ -172,7 +180,7 @@
               },
               {
                 "group": "Knowledge",
-                "icon": "/images/dify-logo.svg",
+                "icon": "brain",
                 "pages": [
                   "home/setup/dify"
                 ]
@@ -247,6 +255,7 @@
                   "python/resource/oci",
                   "python/resource/minio",
                   "python/resource/ceph",
+                  "python/resource/seaweedfs",
                   "python/resource/wasabi",
                   "python/resource/backblaze",
                   "python/resource/digitalocean",
@@ -275,6 +284,13 @@
                   "python/resource/gdocs",
                   "python/resource/gsheets",
                   "python/resource/gslides"
+                ]
+              },
+              {
+                "group": "Microsoft",
+                "icon": "microsoft",
+                "pages": [
+                  "python/resource/onedrive"
                 ]
               },
               {
@@ -316,7 +332,7 @@
               },
               {
                 "group": "Knowledge",
-                "icon": "/images/dify-logo.svg",
+                "icon": "brain",
                 "pages": [
                   "python/resource/dify"
                 ]
@@ -395,6 +411,7 @@
                   "typescript/setup/supabase",
                   "typescript/setup/minio",
                   "typescript/setup/ceph",
+                  "typescript/setup/seaweedfs",
                   "typescript/setup/wasabi",
                   "typescript/setup/backblaze",
                   "typescript/setup/digitalocean",

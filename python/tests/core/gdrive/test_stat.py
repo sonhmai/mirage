@@ -106,6 +106,26 @@ async def test_stat_folder(accessor, index):
 
 
 @pytest.mark.asyncio
+async def test_stat_shared_drive_is_directory(accessor, index):
+    await index.put(
+        "/Team Drive",
+        IndexEntry(
+            id="drive1",
+            name="Team Drive",
+            resource_type="gdrive/shared_drive",
+            vfs_name="Team Drive",
+            extra={"drive_id": "drive1"},
+        ))
+    result = await stat(
+        accessor,
+        PathSpec(original="/Team Drive", directory="/Team Drive"),
+        index,
+    )
+    assert result.type == FileType.DIRECTORY
+    assert result.extra["file_id"] == "drive1"
+
+
+@pytest.mark.asyncio
 async def test_stat_not_found(accessor, index):
     idx = await _populate_index(index)
     with patch(

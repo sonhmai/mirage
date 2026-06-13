@@ -55,6 +55,27 @@ cp = await ws.copy()
 
 Both `snapshot` and `copy` are `async` because fingerprint capture stats each touched path on a `SUPPORTS_SNAPSHOT` mount.
 
+## Versioning: commit, checkout, clone
+
+A tar snapshot is a *portable* capture you move between machines. Versioning is the in-place complement: a git-style history kept *with* the workspace, server-side and keyed by workspace id, so you can checkpoint, roll back, branch, and fork without writing a file. It is backed by a real git object store (dulwich) inside the daemon.
+
+This is a CLI / REST feature, not an SDK method (there is no `ws.commit()` in-process):
+
+```bash
+mirage workspace commit demo -m "before refactor"   # checkpoint the live state
+mirage workspace checkout demo <version>             # roll back in place
+mirage workspace clone demo --at <version>           # fork a past version
+```
+
+See the [CLI versioning reference](/home/cli#versioning) for `log`, `diff`, `branch`, and the full flag set.
+
+| | Tar snapshot | Versioning |
+| --- | --- | --- |
+| Output | a `.tar` you move or archive | history kept with the workspace (server) |
+| API | `ws.snapshot()` / `Workspace.load()` (SDK) | `mirage workspace commit` / `checkout` / `clone` (CLI + REST) |
+| Lineage | none, each tar stands alone | git-style commits, branches, diff |
+| Best for | reproducing a run on another machine | iterating in place with checkpoints to revert to |
+
 ## What Is And Isn't Captured
 
 <Columns cols={2}>

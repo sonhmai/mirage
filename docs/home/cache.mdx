@@ -18,7 +18,22 @@ Each layer is a pluggable store with two built-ins:
 - **RAM** (default): in-process, zero setup, 512 MB file cache and 10-minute index TTL. Best for single-process apps and notebooks.
 - **Redis**: shared across workers, processes, and machines. Best for serverless, multi-replica services, or for cache state that survives restarts.
 
-```ts
+<CodeGroup>
+
+```python Python
+from mirage import Workspace
+from mirage.cache.file.config import RedisCacheConfig
+from mirage.cache.index.config import RedisIndexConfig
+from mirage.resource.s3 import S3Config, S3Resource
+
+ws = Workspace(
+    {"/s3": S3Resource(S3Config(bucket="my-bucket"))},
+    cache=RedisCacheConfig(url="redis://localhost:6379/0", limit="8GB"),
+    index=RedisIndexConfig(url="redis://localhost:6379/0", ttl=600),
+)
+```
+
+```typescript TypeScript
 import { RedisFileCacheStore, S3Resource, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
@@ -30,9 +45,43 @@ const ws = new Workspace(
 )
 ```
 
+</CodeGroup>
+
+## Eviction & Limits
+
+The two layers are bounded differently:
+
+| Layer | Holds | Default | Bound | Eviction |
+| --- | --- | --- | --- | --- |
+| **File cache** | object bytes per virtual path | RAM, 512 MB | `cache_limit` (Py) / `cacheLimit` (TS) | LRU: least-recently-used bytes drop once the total exceeds the limit |
+| **Index cache** | directory listings + `FileStat` metadata | RAM, 10-min TTL | `ttl` (seconds) | time-based: entries expire after the TTL, then re-fetch on next access |
+
+Raising the file limit keeps more bytes warm at the cost of memory; lengthening the index TTL serves listings longer between API walks at the cost of staleness.
+
 ## Miss/Hit Lifecycle
 
-```ts
+<CodeGroup>
+
+```python Python
+from mirage import Workspace
+from mirage.resource.s3 import S3Config, S3Resource
+
+ws = Workspace({"/s3": S3Resource(S3Config(bucket="my-bucket"))})
+
+# 1. Index miss → S3 LIST. Listing stored in index cache.
+await ws.execute("ls /s3/data/")
+
+# 2. Index hit → 0 network calls.
+await ws.execute('find /s3/data/ -name "*.jsonl"')
+
+# 3. File miss → S3 GET. Bytes stored in file cache.
+await ws.execute("cat /s3/data/log.jsonl | wc -l")
+
+# 4. File hit → 0 network calls.
+await ws.execute("grep alert /s3/data/log.jsonl")
+```
+
+```typescript TypeScript
 import { S3Resource, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace({ '/s3': new S3Resource({ bucket: 'my-bucket' }) })
@@ -49,3 +98,9 @@ await ws.execute('cat /s3/data/log.jsonl | wc -l')
 // 4. File hit → 0 network calls.
 await ws.execute('grep alert /s3/data/log.jsonl')
 ```
+
+</CodeGroup>
+
+## Relationship To Snapshots
+
+The file cache is exactly what a [snapshot](/home/snapshot) serializes: `ws.snapshot()` writes the cached bytes for every touched path into the tar, and `Workspace.load()` restores them into the file cache so a replayed run reads from local state. The index cache is not snapshotted; it rebuilds lazily after load.

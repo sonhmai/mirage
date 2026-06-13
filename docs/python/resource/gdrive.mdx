@@ -36,6 +36,9 @@ ws = Workspace({"/gdrive": resource}, mode=MountMode.READ)
     <name>.gdoc.json
     <name>.gsheet.json
     <name>.gslide.json
+  <shared-drive>/
+    <file>
+    <folder>/
 ```
 
 Example:
@@ -52,13 +55,17 @@ Example:
     meeting.gdoc.json
   Presentations/
     quarterly_review.gslide.json
+  Team Drive/
+    shared-spec.pdf
   data.csv
   report.pdf
 ```
 
 The mount mirrors the actual Google Drive folder hierarchy. The root
-of the mount corresponds to the Drive API `root` folder. Subfolders
-appear as directories, and regular files keep their original names.
+contains the Drive API `root` folder plus each Shared Drive visible to
+the user. Shared Drives appear as top-level directories. Duplicate names
+receive a `[Shared Drive]` suffix and, when needed, a numeric suffix.
+Subfolders appear as directories, and regular files keep their original names.
 
 ### Synthetic Extensions
 

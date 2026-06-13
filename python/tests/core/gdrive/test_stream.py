@@ -67,13 +67,14 @@ async def _collect(source):
 @pytest.mark.asyncio
 async def test_stream_file(accessor, index):
     await index.put(
-        "/data/report.pdf",
+        "/Team Drive/report.pdf",
         IndexEntry(
             id="file123",
             name="report",
             resource_type="gdrive/file",
             remote_time="2026-04-01T00:00:00.000Z",
             vfs_name="report.pdf",
+            extra={"drive_id": "drive1"},
         ))
     with patch(
             "mirage.core.gdrive.stream.download_file_stream",
@@ -82,15 +83,15 @@ async def test_stream_file(accessor, index):
         data = await _collect(
             stream(
                 accessor,
-                PathSpec(original="/data/report.pdf",
-                         directory="/data/report.pdf"), index))
+                PathSpec(original="/Team Drive/report.pdf",
+                         directory="/Team Drive/report.pdf"), index))
         assert data == b"chunk1chunk2"
 
 
 @pytest.mark.asyncio
 async def test_stream_not_found(accessor, index):
 
-    async def fake_list_files(_tm, folder_id):
+    async def fake_list_files(_tm, folder_id, drive_id=None):
         return []
 
     with patch("mirage.core.gdrive.readdir.list_files", new=fake_list_files):
@@ -105,7 +106,7 @@ async def test_stream_not_found(accessor, index):
 @pytest.mark.asyncio
 async def test_stream_auto_bootstraps_from_empty_index(accessor, index):
 
-    async def fake_list_files(_tm, folder_id):
+    async def fake_list_files(_tm, folder_id, drive_id=None):
         if folder_id == "root":
             return [{
                 "id": "f1",
@@ -151,3 +152,28 @@ async def test_stream_folder_raises(accessor, index):
         await _collect(
             stream(accessor, PathSpec(original="/data", directory="/data"),
                    index))
+
+
+@pytest.mark.asyncio
+async def test_stream_shared_drive_raises(accessor, index):
+    await index.put(
+        "/Team Drive",
+        IndexEntry(
+            id="drive1",
+            name="Team Drive",
+            resource_type="gdrive/shared_drive",
+            vfs_name="Team Drive",
+            extra={"drive_id": "drive1"},
+        ))
+    with patch(
+            "mirage.core.gdrive.stream.download_file_stream",
+            side_effect=_fake_download_stream,
+    ) as mock_download:
+        with pytest.raises(IsADirectoryError):
+            await _collect(
+                stream(
+                    accessor,
+                    PathSpec(original="/Team Drive", directory="/Team Drive"),
+                    index,
+                ))
+    mock_download.assert_not_called()

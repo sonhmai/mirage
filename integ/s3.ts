@@ -24,6 +24,7 @@ import {
   GCSResource,
   MountMode,
   S3Resource,
+  SeaweedFSResource,
   Workspace,
 } from "@struktoai/mirage-node";
 import { runNotFound } from "./cases.ts";
@@ -37,7 +38,8 @@ const SEED_OBJECTS = ["example.jsonl", "example.json"];
 const S3_BUCKET = "mirage-integ-s3";
 const GCS_BUCKET = "mirage-integ-gcs";
 const MINIO_BUCKET = "mirage-integ-minio";
-const MOUNTS = ["/s3", "/gcs", "/minio"];
+const SEAWEEDFS_BUCKET = "mirage-integ-seaweedfs";
+const MOUNTS = ["/s3", "/gcs", "/minio", "/seaweedfs"];
 
 const ENDPOINT = process.env.S3_ENDPOINT ?? "http://localhost:9000";
 const REGION = process.env.S3_REGION ?? "us-east-1";
@@ -125,7 +127,12 @@ function sdkClient(): S3Client {
 async function seed(): Promise<void> {
   const client = sdkClient();
   try {
-    for (const bucket of [S3_BUCKET, GCS_BUCKET, MINIO_BUCKET]) {
+    for (const bucket of [
+      S3_BUCKET,
+      GCS_BUCKET,
+      MINIO_BUCKET,
+      SEAWEEDFS_BUCKET,
+    ]) {
       try {
         await client.send(new CreateBucketCommand({ Bucket: bucket }));
       } catch (err) {
@@ -162,15 +169,20 @@ function buildWorkspace(): Workspace {
   const s3 = new S3Resource({ bucket: S3_BUCKET, ...common });
   const gcs = new GCSResource({ bucket: GCS_BUCKET, ...common });
   const minio = new S3Resource({ bucket: MINIO_BUCKET, ...common });
+  const seaweedfs = new SeaweedFSResource({
+    bucket: SEAWEEDFS_BUCKET,
+    ...common,
+  });
   const cap = new CommandSafeguard({ maxLines: 20 });
   return new Workspace(
-    { "/s3": s3, "/gcs": gcs, "/minio": minio },
+    { "/s3": s3, "/gcs": gcs, "/minio": minio, "/seaweedfs": seaweedfs },
     {
       mode: MountMode.READ,
       commandSafeguards: {
         "/s3": { cat: cap },
         "/gcs": { cat: cap },
         "/minio": { cat: cap },
+        "/seaweedfs": { cat: cap },
       },
     },
   );

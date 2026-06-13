@@ -1,0 +1,103 @@
+---
+title: OneDrive
+icon: microsoft
+description: Get a Microsoft Graph access token and drive ID for the OneDrive resource.
+---
+
+The OneDrive resource talks to Microsoft OneDrive and SharePoint document
+libraries through the [Microsoft Graph API](https://learn.microsoft.com/en-us/graph/).
+It authenticates with an OAuth2 **bearer access token**, optionally scoped to a
+specific **drive**.
+
+## Credentials
+
+You need two things: an **access token**, and (for app-only tokens or SharePoint)
+a **drive ID**. Pick whichever token path fits.
+
+### Option A: Quick token (Graph Explorer)
+
+Fastest way to try it. The token lasts about an hour, which is plenty for a test run.
+
+1. Open [Graph Explorer](https://developer.microsoft.com/graph/graph-explorer) and **Sign in**.
+1. Run any query (for example `GET /me/drive`) and consent when prompted.
+1. Open the **Access token** tab and copy the token.
+
+This is a **delegated** token, so it works against your own `/me/drive` and you do
+**not** need a drive ID.
+
+### Option B: Repeatable token (app registration + device code)
+
+Use this for scripted or CI runs.
+
+1. In the [Microsoft Entra admin center](https://entra.microsoft.com), go to
+   **Identity** -> **Applications** -> **App registrations** -> **New registration**.
+   For a personal account, choose *Accounts in any organizational directory and
+   personal Microsoft accounts*.
+1. Under **Authentication** -> **Advanced settings**, set
+   **Allow public client flows** to **Yes**.
+1. Under **API permissions** -> **Microsoft Graph** -> **Delegated**, add
+   `Files.ReadWrite.All` (add `Sites.ReadWrite.All` for SharePoint libraries).
+1. Run the device-code flow with your **Application (client) ID**:
+
+```bash
+CLIENT_ID="<your app client id>"
+
+# 1) request a device code
+curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/devicecode" \
+  -d "client_id=$CLIENT_ID" \
+  -d "scope=Files.ReadWrite.All offline_access"
+#   -> open https://microsoft.com/devicelogin and enter the user_code it prints
+
+# 2) after you sign in, exchange the device_code for a token
+curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
+  -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
+  -d "client_id=$CLIENT_ID" \
+  -d "device_code=<device_code from step 1>" | jq -r .access_token
+```
+
+<Note>
+**App-only tokens** (client-credentials flow) have no signed-in user, so
+`/me/drive` returns an error. With an app-only token you **must** pass a
+`drive_id` (or `site_id`). Delegated tokens (Options A and B) can use `/me/drive`
+with no drive ID.
+</Note>
+
+### Get your drive ID
+
+Only needed for app-only tokens or to target a specific SharePoint library. With
+your token exported as `TOKEN`:
+
+```bash
+# your personal OneDrive drive id
+curl -s -H "Authorization: Bearer $TOKEN" \
+  https://graph.microsoft.com/v1.0/me/drive | jq -r .id
+
+# list every drive you can see (name + id)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  https://graph.microsoft.com/v1.0/me/drives | jq '.value[] | {name, id}'
+
+# a SharePoint site's drives
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://graph.microsoft.com/v1.0/sites/{hostname}:/sites/{site-path}" | jq -r .id
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://graph.microsoft.com/v1.0/sites/{site-id}/drives" | jq '.value[] | {name, id}'
+```
+
+The drive ID looks like `b!a1B2c3...`.
+
+### Set environment variables
+
+```bash
+# .env.development
+ONEDRIVE_ACCESS_TOKEN=<token>
+ONEDRIVE_DRIVE_ID=<drive id>   # omit when using a delegated /me/drive token
+```
+
+<Note>
+Snapshots and version pinning rely on OneDrive/SharePoint **version history**,
+which is on by default. Older versions are only readable while the library
+retains them (the version cap is configurable, and an admin can disable
+versioning).
+</Note>
+
+For Python configuration, see the [Python OneDrive Setup](/python/setup/onedrive) guide.

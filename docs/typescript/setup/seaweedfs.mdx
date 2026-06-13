@@ -1,0 +1,121 @@
+---
+title: SeaweedFS
+icon: /images/seaweedfs-logo.svg
+description: Set up SeaweedFS as a MIRAGE resource from Node or the browser.
+---
+
+SeaweedFS speaks the S3 API with AWS Signature V4 against its S3 gateway endpoint (e.g. `http://localhost:8333`). The gateway is self-hosted, so the endpoint is required and path-style addressing is used by default.
+
+Credentials (access key + secret key from the gateway's `-s3.config`) are created the same way in both runtimes, see [SeaweedFS Credentials](/home/setup/seaweedfs).
+
+## Node (server-side)
+
+```bash
+pnpm add @struktoai/mirage-node
+```
+
+```ts
+import { SeaweedFSResource, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const seaweedfs = new SeaweedFSResource({
+  bucket: process.env.SEAWEEDFS_BUCKET!,
+  endpoint: process.env.SEAWEEDFS_ENDPOINT!,
+  accessKeyId: process.env.SEAWEEDFS_ACCESS_KEY!,
+  secretAccessKey: process.env.SEAWEEDFS_SECRET_KEY!,
+})
+
+const ws = new Workspace({ '/bucket/': seaweedfs }, { mode: MountMode.READ })
+const res = await ws.execute('ls /bucket/')
+console.log(res.stdoutText)
+```
+
+## Browser (presigned URLs)
+
+```bash
+pnpm add @struktoai/mirage-browser
+```
+
+The browser `SeaweedFSResource` is secret-free, your backend signs each operation using your SeaweedFS keys and returns a URL. SeaweedFS accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at your gateway endpoint.
+
+### 1. Server: sign URLs with the SeaweedFS endpoint
+
+```ts
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+
+const client = new S3Client({
+  region: 'us-east-1',
+  endpoint: process.env.SEAWEEDFS_ENDPOINT,
+  forcePathStyle: true,
+  credentials: {
+    accessKeyId: process.env.SEAWEEDFS_ACCESS_KEY!,
+    secretAccessKey: process.env.SEAWEEDFS_SECRET_KEY!,
+  },
+})
+const BUCKET = process.env.SEAWEEDFS_BUCKET!
+
+app.post('/presign/seaweedfs', async (req, res) => {
+  const { path, op, opts } = req.body
+  const key = path.replace(/^\/+/, '')
+  const ttl = typeof opts?.ttlSec === 'number' ? opts.ttlSec : 300
+  let cmd
+  switch (op) {
+    case 'GET':    cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'PUT':    cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: opts?.contentType }); break
+    case 'HEAD':   cmd = new HeadObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'DELETE': cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key }); break
+    case 'LIST':   cmd = new ListObjectsV2Command({
+      Bucket: BUCKET,
+      Prefix: opts?.listPrefix,
+      Delimiter: opts?.listDelimiter,
+      ContinuationToken: opts?.listContinuationToken,
+    }); break
+    case 'COPY':   cmd = new CopyObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      CopySource: `${BUCKET}/${opts?.copySource}`,
+    }); break
+  }
+  res.json({ url: await getSignedUrl(client, cmd, { expiresIn: ttl }) })
+})
+```
+
+<Warning>
+SeaweedFS uses **path-style** URLs (`forcePathStyle: true`), virtual-hosted style requires extra DNS setup on a self-hosted gateway.
+</Warning>
+
+### 2. Browser: wire it up
+
+```ts
+import { SeaweedFSResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+
+const seaweedfs = new SeaweedFSResource({
+  bucket: 'my-bucket',
+  endpoint: 'http://localhost:8333',
+  presignedUrlProvider: async (path, op, opts) => {
+    const r = await fetch('/presign/seaweedfs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, op, opts }),
+    })
+    const { url } = await r.json()
+    return url
+  },
+})
+
+const ws = new Workspace({ '/bucket/': seaweedfs }, { mode: MountMode.READ })
+```
+
+<Tip>
+`endpoint` on the browser config is only used for display/logging; the actual endpoint is baked into the presigned URLs your backend returns.
+</Tip>
+
+See the [SeaweedFS resource](/python/resource/seaweedfs) docs for the equivalent Python wiring.

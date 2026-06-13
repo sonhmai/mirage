@@ -1,0 +1,119 @@
+import pytest
+from aioresponses import CallbackResult, aioresponses
+
+from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
+from mirage.commands.builtin.onedrive.cp import cp
+from mirage.core.onedrive._client import GraphError
+from mirage.core.onedrive.copy import copy
+from mirage.core.onedrive.truncate import truncate
+from mirage.types import PathSpec
+
+
+def _accessor(**kw) -> OneDriveAccessor:
+    return OneDriveAccessor(OneDriveConfig(access_token="tok", **kw))
+
+
+_BASE = "https://graph.microsoft.com/v1.0/me/drive"
+
+
+@pytest.mark.asyncio
+async def test_copy_posts_copy_action_with_name():
+    body = {}
+
+    def _cb(url, **kwargs):
+        body.update(kwargs.get("json") or {})
+        return CallbackResult(status=202, payload={})
+
+    with aioresponses() as m:
+        m.post(_BASE + "/root:/a.txt:/copy", callback=_cb)
+        await copy(_accessor(), PathSpec.from_str_path("/a.txt"),
+                   PathSpec.from_str_path("/sub/b.txt"))
+    assert body["name"] == "b.txt"
+    assert "/root:/sub" in body["parentReference"]["path"]
+
+
+@pytest.mark.asyncio
+async def test_copy_polls_monitor_until_completed():
+    monitor = "https://monitor.example/op/123"
+    with aioresponses() as m:
+        m.post(_BASE + "/root:/a.txt:/copy",
+               status=202,
+               headers={"Location": monitor})
+        m.get(monitor, payload={"status": "completed"})
+        await copy(_accessor(), PathSpec.from_str_path("/a.txt"),
+                   PathSpec.from_str_path("/b.txt"))
+
+
+@pytest.mark.asyncio
+async def test_copy_raises_when_monitor_reports_failed():
+    monitor = "https://monitor.example/op/456"
+    with aioresponses() as m:
+        m.post(_BASE + "/root:/a.txt:/copy",
+               status=202,
+               headers={"Location": monitor})
+        m.get(monitor,
+              payload={
+                  "status": "failed",
+                  "error": {
+                      "code": "nameAlreadyExists",
+                      "message": "x"
+                  }
+              })
+        with pytest.raises(GraphError):
+            await copy(_accessor(), PathSpec.from_str_path("/a.txt"),
+                       PathSpec.from_str_path("/b.txt"))
+
+
+@pytest.mark.asyncio
+async def test_cp_recursive_uses_server_side_folder_copy():
+    src = PathSpec.from_str_path("/src")
+    dst = PathSpec.from_str_path("/dst")
+    with aioresponses() as m:
+        m.get(_BASE + "/root:/src:/children",
+              payload={
+                  "value": [
+                      {
+                          "id": "1",
+                          "name": "a.txt",
+                          "size": 3,
+                          "file": {}
+                      },
+                      {
+                          "id": "2",
+                          "name": "sub",
+                          "folder": {
+                              "childCount": 1
+                          }
+                      },
+                  ]
+              })
+        m.get(_BASE + "/root:/src/sub:/children",
+              payload={
+                  "value": [{
+                      "id": "3",
+                      "name": "b.txt",
+                      "size": 4,
+                      "file": {}
+                  }]
+              })
+        m.post(_BASE + "/root:/src:/copy", status=202, payload={})
+        _out, io = await cp.__wrapped__(_accessor(), [src, dst],
+                                        r=True,
+                                        index=None)
+    assert set(io.writes) == {"/dst/a.txt", "/dst/sub/b.txt"}
+
+
+@pytest.mark.asyncio
+async def test_truncate_shrinks_content():
+    captured = {}
+
+    def _put_cb(url, **kwargs):
+        captured["body"] = kwargs.get("data")
+        return CallbackResult(status=200, payload={"id": "X"})
+
+    content = _BASE + "/root:/a.txt:/content"
+    with aioresponses() as m:
+        m.get(content, body=b"hello")
+        m.put(content, callback=_put_cb)
+        await truncate(_accessor(), PathSpec.from_str_path("/a.txt"), 3)
+    assert captured["body"] == b"hel"

@@ -27,21 +27,23 @@ mode: "frame"
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
+    import os
+
     from mirage import Workspace
     from mirage.resource.ram import RAMResource
-    from mirage.resource.s3 import S3Resource
-    from mirage.resource.slack import SlackResource
+    from mirage.resource.s3 import S3Config, S3Resource
+    from mirage.resource.slack import SlackConfig, SlackResource
 
     ws = Workspace({
         "/data": RAMResource(),
-        "/s3": S3Resource(bucket="my-bucket"),
-        "/slack": SlackResource(),
+        "/s3": S3Resource(S3Config(bucket="my-bucket")),
+        "/slack": SlackResource(SlackConfig(token=os.environ["SLACK_BOT_TOKEN"])),
     })
 
     # Same shell vocabulary, three different backends.
     await ws.execute('echo "hello mirage" > /data/hello.txt')
     await ws.execute("ls /s3/reports/")
-    result = await ws.execute('grep -r "release" /slack/eng')
+    result = await ws.execute('grep -r "release" /slack/channels/eng__C04QX')
     print(await result.stdout_str())
     ```
   </Tab>
@@ -57,13 +59,13 @@ mode: "frame"
     const ws = new Workspace({
       '/data': new RAMResource(),
       '/s3': new S3Resource({ bucket: 'my-bucket' }),
-      '/slack': new SlackResource(),
+      '/slack': new SlackResource({ token: process.env.SLACK_BOT_TOKEN! }),
     })
 
     // Same shell vocabulary, three different backends.
     await ws.execute('echo "hello mirage" > /data/hello.txt')
     await ws.execute('ls /s3/reports/')
-    const res = await ws.execute('grep -r "release" /slack/eng')
+    const res = await ws.execute('grep -r "release" /slack/channels/eng__C04QX')
     console.log(new TextDecoder().decode(res.stdout))
     ```
   </Tab>
@@ -83,12 +85,14 @@ mode: "frame"
       /slack:
         resource: slack
         mode: READ
+        config:
+          token: ${SLACK_BOT_TOKEN}
     EOF
 
     mirage workspace create workspace.yaml --id demo
     mirage execute -w demo -c 'echo "hello mirage" > /data/hello.txt'
     mirage execute -w demo -c 'ls /s3/reports/'
-    mirage execute -w demo -c 'grep -r "release" /slack/eng'
+    mirage execute -w demo -c 'grep -r "release" /slack/channels/eng__C04QX'
     ```
   </Tab>
 </Tabs>
@@ -103,17 +107,17 @@ mode: "frame"
 
 <div className="max-w-none space-y-1 text-[15px] leading-7">
   <p className="my-0">
-    <img noZoom src="/images/mirage-icon-light.svg" alt="Mirage" className="inline-block h-4 align-middle mr-1 dark:hidden" /><img noZoom src="/images/mirage-icon-dark.svg" alt="Mirage" className="hidden h-4 align-middle mr-1 dark:inline-block" /><b>Mirage</b> is a <b>Unified Virtual Filesystem</b> for AI agents. It mounts your apps, services, and systems (S3, R2, GCS, Gmail, Google Drive, GitHub, Linear, Notion, Slack, Discord, MongoDB, Redis, SSH, local disk, and more) behind one filesystem interface. Agents reach every backend with the same handful of Unix-like tools, pipelines compose across services as naturally as on a local disk, and the workspace embeds in any application, sandbox, or coding agent runtime.
+    <img noZoom src="/images/mirage-icon-light.svg" alt="Mirage" className="inline-block h-4 align-middle mr-1 dark:hidden" /><img noZoom src="/images/mirage-icon-dark.svg" alt="Mirage" className="hidden h-4 align-middle mr-1 dark:inline-block" /><b>Mirage</b> is a <b>Unified Virtual Filesystem</b> for AI agents. It mounts your apps, services, and systems behind one filesystem interface, so an agent reaches every backend with the same handful of Unix-like tools instead of a new SDK per service.
   </p>
   <div className="space-y-3">
     <div>
-      <h4 className="text-lg font-bold mt-4 mb-1"><Icon icon="cubes" size={20} /> One Filesystem</h4>
+      <h4 className="text-lg font-bold mt-4 mb-1">One Filesystem</h4>
       <p className="my-0">
         Every service speaks the same filesystem semantics, so agents reason about one abstraction instead of N SDKs and M MCPs. S3, R2, Google Drive, GitHub, Linear, Notion, Slack, Discord, MongoDB, Redis, SSH, and more mount side-by-side under a single root.
       </p>
     </div>
     <div>
-      <h4 className="text-lg font-bold mt-4 mb-1"><Icon icon="terminal" size={20} /> Familiar Bash Tools</h4>
+      <h4 className="text-lg font-bold mt-4 mb-1">Familiar Bash Tools</h4>
       <p className="my-0">
         Agents reuse the same handful of Unix-like tools (<code>ls</code>, <code>find</code>, <code>grep</code>, <code>cat</code>, ...) instead of learning a new API per service. Pipelines compose across services as naturally as on a local disk, the exact corpus modern LLMs are most heavily trained on.
       </p>
@@ -125,21 +129,15 @@ grep -r "mirage" /slack /gmail /github
 
     </div>
     <div>
-      <h4 className="text-lg font-bold mt-4 mb-1"><Icon icon="box-archive" size={20} /> Portable Workspaces</h4>
+      <h4 className="text-lg font-bold mt-4 mb-1">Portable, Versioned Workspaces</h4>
       <p className="my-0">
-        Clone, snapshot, and version your environment. Move agent runs between machines without restarting or reconfiguring the system, and replay any past state on demand.
+        Snapshot, clone, and version a workspace the way git treats source. Move agent runs between machines without restarting, fork from any past state, and replay a run on demand.
       </p>
     </div>
     <div>
-      <h4 className="text-lg font-bold mt-4 mb-1"><Icon icon="puzzle-piece" size={20} /> Embed in Apps and Agents</h4>
+      <h4 className="text-lg font-bold mt-4 mb-1">Embed in Apps and Agents</h4>
       <p className="my-0">
         Python and TypeScript SDKs give your AI agents a virtual filesystem directly inside FastAPI, Express, browser apps, or any async runtime, no separate process required. Works with the major agent frameworks (OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL, OpenHands) and a lightweight CLI plugs into coding agents like <img noZoom src="/images/claude-logo.svg" alt="" className="inline-block h-4 align-middle mr-1" />Claude Code and <img noZoom src="/images/openai-logo.svg" alt="" className="inline-block h-4 align-middle mr-1 brightness-0 dark:invert" />Codex.
-      </p>
-    </div>
-    <div>
-      <h4 className="text-lg font-bold mt-4 mb-1"><Icon icon="code-branch" size={20} /> Git-style Versioning</h4>
-      <p className="my-0">
-        Snapshot and clone your workspace the way git treats source. Fork from any past state and replay an agent run.
       </p>
     </div>
   </div>
@@ -256,7 +254,7 @@ grep -r "mirage" /slack /gmail /github
 
     <div className="max-w-none text-[15px] leading-7 mt-4 mb-4">
       <p className="my-0">
-        API preview. Runnable TypeScript example coming soon. See <a href="https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/openai/multi_resource_agent.ts" target="_blank" rel="noopener noreferrer"><code>multi_resource_agent.ts</code></a> for the same shell-tool pattern over Slack + S3 today.
+        Runnable source: <a href="https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/openai/multi_resource_agent.ts" target="_blank" rel="noopener noreferrer"><code>examples/typescript/agents/openai/multi_resource_agent.ts</code></a>, the same shell-tool pattern over Slack and S3.
       </p>
     </div>
   </Tab>

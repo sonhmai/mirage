@@ -69,13 +69,14 @@ async def test_read_bytes(token_manager):
 @pytest.mark.asyncio
 async def test_read_file(accessor, index):
     await index.put(
-        "/data/report.pdf",
+        "/Team Drive/report.pdf",
         IndexEntry(
             id="file123",
             name="report",
             resource_type="gdrive/file",
             remote_time="2026-04-01T00:00:00.000Z",
             vfs_name="report.pdf",
+            extra={"drive_id": "drive1"},
         ))
     content = b"pdf content here"
     with patch(
@@ -85,9 +86,33 @@ async def test_read_file(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(original="/data/report.pdf",
-                     directory="/data/report.pdf"), index)
+            PathSpec(original="/Team Drive/report.pdf",
+                     directory="/Team Drive/report.pdf"), index)
         assert result == content
+
+
+@pytest.mark.asyncio
+async def test_read_shared_drive_raises_is_a_directory(accessor, index):
+    await index.put(
+        "/Team Drive",
+        IndexEntry(
+            id="drive1",
+            name="Team Drive",
+            resource_type="gdrive/shared_drive",
+            vfs_name="Team Drive",
+            extra={"drive_id": "drive1"},
+        ))
+    with patch(
+            "mirage.core.gdrive.read.download_file",
+            new_callable=AsyncMock,
+    ) as mock_download:
+        with pytest.raises(IsADirectoryError):
+            await read(
+                accessor,
+                PathSpec(original="/Team Drive", directory="/Team Drive"),
+                index,
+            )
+    mock_download.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -102,7 +127,7 @@ async def test_read_not_found(accessor, index):
 @pytest.mark.asyncio
 async def test_read_auto_bootstraps_from_empty_index(accessor, index):
 
-    async def fake_list_files(_tm, folder_id):
+    async def fake_list_files(_tm, folder_id, drive_id=None):
         if folder_id == "root":
             return [{
                 "id": "f1",
@@ -136,7 +161,7 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
 @pytest.mark.asyncio
 async def test_read_missing_file_raises_after_recursion(accessor, index):
 
-    async def fake_list_files(_tm, folder_id):
+    async def fake_list_files(_tm, folder_id, drive_id=None):
         if folder_id == "root":
             return [{
                 "id": "f1",

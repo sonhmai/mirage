@@ -41,6 +41,12 @@ import { DigitalOceanResource } from './digitalocean/digitalocean.ts'
 import { minioToS3Config, normalizeMinIOConfig, type MinIOConfig } from './minio/config.ts'
 import { MinIOResource } from './minio/minio.ts'
 import {
+  normalizeSeaweedFSConfig,
+  seaweedfsToS3Config,
+  type SeaweedFSConfig,
+} from './seaweedfs/config.ts'
+import { SeaweedFSResource } from './seaweedfs/seaweedfs.ts'
+import {
   normalizeQingStorConfig,
   qingStorToS3Config,
   resolvedQingStorEndpoint,
@@ -259,9 +265,17 @@ const ENDPOINT_CASES = [
     make: (): CephConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
     build: (config: never) => new CephResource(config),
   },
+  {
+    name: 'seaweedfs',
+    kind: ResourceName.SEAWEEDFS,
+    toS3: seaweedfsToS3Config as (config: never) => S3CoreConfig,
+    normalize: normalizeSeaweedFSConfig as (input: Record<string, unknown>) => unknown,
+    make: (): SeaweedFSConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
+    build: (config: never) => new SeaweedFSResource(config),
+  },
 ] as const
 
-describe('endpoint-required S3 aliases (minio/ceph)', () => {
+describe('endpoint-required S3 aliases (minio/ceph/seaweedfs)', () => {
   for (const c of ENDPOINT_CASES) {
     it(`${c.name}: toS3Config defaults region and path style`, () => {
       const s3 = c.toS3(c.make() as never)

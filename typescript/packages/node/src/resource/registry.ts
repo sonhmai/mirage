@@ -104,6 +104,11 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { normalizeCephConfig } = await import('./ceph/config.ts')
     return new CephResource(normalizeCephConfig(config))
   },
+  seaweedfs: async (config) => {
+    const { SeaweedFSResource } = await import('./seaweedfs/seaweedfs.ts')
+    const { normalizeSeaweedFSConfig } = await import('./seaweedfs/config.ts')
+    return new SeaweedFSResource(normalizeSeaweedFSConfig(config))
+  },
   wasabi: async (config) => {
     const { WasabiResource } = await import('./wasabi/wasabi.ts')
     const { normalizeWasabiConfig } = await import('./wasabi/config.ts')

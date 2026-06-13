@@ -161,7 +161,7 @@ async def test_find_cold_name_matches_directory(accessor, index):
         ],
     }
 
-    async def fake_list_files(token_manager, folder_id="root"):
+    async def fake_list_files(token_manager, folder_id="root", drive_id=None):
         return files_by_folder.get(folder_id, [])
 
     with patch(
@@ -177,7 +177,7 @@ async def test_find_cold_name_matches_directory(accessor, index):
 @pytest.mark.asyncio
 async def test_find_cold_output_has_no_trailing_slash(accessor, index):
 
-    async def fake_list_files(token_manager, folder_id="root"):
+    async def fake_list_files(token_manager, folder_id="root", drive_id=None):
         if folder_id == "root":
             return [{
                 "id": "fid-docs",

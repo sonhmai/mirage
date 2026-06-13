@@ -69,6 +69,50 @@ async function main(): Promise<void> {
 main()
 ```
 
+## Output Safeguards
+
+To keep huge reads from flooding an agent, `cat`, `grep`, `rg`, `head`,
+and `tail` cap their **final** output at 2000 lines by default. When a
+cap fires, the agent sees the truncated bytes plus a stderr notice
+(`output truncated at safeguard limit (2000 lines); ...`); the exit code
+stays 0.
+
+Caps fire only on the **terminal** command of a pipeline, so
+`cat big.txt | head -n 30` still shows 30 lines.
+
+### Configure per mount
+
+Pass a `commandSafeguards` option keyed by mount prefix, then command.
+Each `CommandSafeguard` sets `maxLines` / `maxBytes` (output cap) and/or
+`timeoutSeconds` (deadline); `onExceed` is `TRUNCATE` (default, exit 0
+plus notice) or `ERROR` (exit 1 plus notice):
+
+```ts
+import {
+  CommandSafeguard,
+  MountMode,
+  OnExceed,
+  RAMResource,
+  Workspace,
+} from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/data': new RAMResource() },
+  {
+    mode: MountMode.WRITE,
+    commandSafeguards: {
+      '/data': {
+        head: new CommandSafeguard({ maxLines: 100 }), // cap, keep going
+        grep: new CommandSafeguard({ maxLines: 50, onExceed: OnExceed.ERROR }),
+        rg: new CommandSafeguard({ timeoutSeconds: 30 }), // deadline
+      },
+    },
+  },
+)
+```
+
+The same limits are available to the CLI as a `command_safeguards` block in the workspace YAML.
+
 ## Next Steps
 
 - See [TypeScript Installation](/typescript/install) for optional native peers (FUSE, Redis, Postgres, MongoDB, SSH, Email).

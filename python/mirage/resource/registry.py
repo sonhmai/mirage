@@ -53,6 +53,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "ceph":
     ResourceEntry("mirage.resource.ceph:CephResource",
                   "mirage.resource.ceph:CephConfig"),
+    "seaweedfs":
+    ResourceEntry("mirage.resource.seaweedfs:SeaweedFSResource",
+                  "mirage.resource.seaweedfs:SeaweedFSConfig"),
     "wasabi":
     ResourceEntry("mirage.resource.wasabi:WasabiResource",
                   "mirage.resource.wasabi:WasabiConfig"),
@@ -86,6 +89,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "hf_spaces":
     ResourceEntry("mirage.resource.hf_spaces:HfSpacesResource",
                   "mirage.resource.hf_spaces:HfSpacesConfig"),
+    "onedrive":
+    ResourceEntry("mirage.resource.onedrive:OneDriveResource",
+                  "mirage.resource.onedrive:OneDriveConfig"),
     "github":
     ResourceEntry("mirage.resource.github:GitHubResource",
                   "mirage.resource.github:GitHubConfig"),

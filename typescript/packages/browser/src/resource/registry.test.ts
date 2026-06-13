@@ -29,6 +29,7 @@ describe('browser resource registry', () => {
     expect(names).toContain('slack')
     expect(names).toContain('minio')
     expect(names).toContain('ceph')
+    expect(names).toContain('seaweedfs')
     expect(names).toContain('wasabi')
     expect(names).toContain('backblaze')
     expect(names).toContain('digitalocean')
@@ -44,6 +45,7 @@ describe('browser resource registry', () => {
     for (const name of [
       'minio',
       'ceph',
+      'seaweedfs',
       'wasabi',
       'backblaze',
       'digitalocean',

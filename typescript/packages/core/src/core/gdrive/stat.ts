@@ -15,7 +15,7 @@
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { readdir as coreReaddir } from './readdir.ts'
+import { DIRECTORY_RESOURCE_TYPES, readdir as coreReaddir } from './readdir.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
@@ -82,7 +82,7 @@ export async function stat(
       throw enoent(path.original)
     }
   }
-  if (result.entry.resourceType === 'gdrive/folder') {
+  if (DIRECTORY_RESOURCE_TYPES.has(result.entry.resourceType)) {
     return new FileStat({
       name: result.entry.vfsName !== '' ? result.entry.vfsName : result.entry.name,
       type: FileType.DIRECTORY,

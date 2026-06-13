@@ -146,6 +146,7 @@ export const ResourceName = Object.freeze({
   DATABRICKS_VOLUME: 'databricks_volume',
   MINIO: 'minio',
   CEPH: 'ceph',
+  SEAWEEDFS: 'seaweedfs',
   WASABI: 'wasabi',
   BACKBLAZE: 'backblaze',
   DIGITALOCEAN: 'digitalocean',

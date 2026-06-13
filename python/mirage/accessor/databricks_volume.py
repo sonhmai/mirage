@@ -46,6 +46,7 @@ class DatabricksVolumeAccessor(Accessor):
                 "host": self.config.host,
                 "token": self.config.token,
                 "profile": self.config.profile,
+                "auth_type": "pat" if self.config.token is not None else None,
                 "http_timeout_seconds": self.config.timeout,
             }
             sdk_config = WorkspaceConfig(**{

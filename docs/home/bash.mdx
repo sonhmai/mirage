@@ -1,56 +1,10 @@
 ---
-title: Shell
-description: The `execute()` API, per-call `cwd`/`env` overrides, and mid-flight cancellation.
+title: Bash
+description: Run bash commands with `execute()`, per-call `cwd`/`env` overrides, and mid-flight cancellation.
 icon: terminal
 ---
 
-The shell is how agents act on the workspace. `execute()` parses a bash-style command, looks up the target session, resolves mounts, runs the executor, applies I/O side effects, and records history.
-
-## `execute()`
-
-<Tabs>
-  <Tab title="Python" icon="/images/python-logo.svg">
-    ```python
-    async def execute(
-        self,
-        command: str,
-        session_id: str = DEFAULT_SESSION_ID,
-        stdin: AsyncIterator[bytes] | bytes | None = None,
-        provision: bool = False,
-        agent_id: str = DEFAULT_AGENT_ID,
-        native: bool | None = None,
-        cwd: str | None = None,
-        env: dict[str, str] | None = None,
-        cancel: asyncio.Event | None = None,
-    ) -> IOResult:
-        ...
-    ```
-  </Tab>
-  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
-    ```typescript
-    interface ExecuteOptions {
-      stdin?: ByteSource | null
-      provision?: boolean
-      sessionId?: string
-      agentId?: string
-      native?: boolean
-      signal?: AbortSignal
-      noHistory?: boolean
-      cwd?: string
-      env?: Record<string, string>
-    }
-
-    async execute(command: string, options?: ExecuteOptions): Promise<ExecuteResult>
-    ```
-  </Tab>
-  <Tab title="CLI" icon="terminal">
-    ```bash
-    mirage execute --workspace demo --command "ls /data"
-    mirage execute --workspace demo --session agent-1 --command "pwd"
-    ```
-    Per-call `cwd` / `env` / `cancel` are SDK-only as named flags. From the CLI, use bash subshell syntax inside the command string for per-call scoping (see below) and `mirage job cancel` to stop background work.
-  </Tab>
-</Tabs>
+Mirage Bash is how agents act on the workspace. `execute()` parses a bash-style command, looks up the target session, resolves mounts, runs the executor, applies I/O side effects, and records history.
 
 ## Per-call overrides: `cwd`, `env`
 
@@ -90,6 +44,17 @@ Providing `cwd` or `env` runs the command in an ephemeral session clone, like a 
 </Tabs>
 
 This makes per-call overrides safe under concurrent calls on the same session. Two parallel `execute()` calls with different `cwd` see their own cwd without cross-contamination, even on the same session.
+
+## Subshells `(...)`
+
+Wrapping commands in `( ... )` runs them in an isolated copy of the session: `cd`, `export`, and other mutations inside the parens do not leak back. It is the same isolation as the `cwd` / `env` overrides above, and the CLI's stand-in for them (there are no `--cwd` / `--env` flags).
+
+```bash
+(cd /data && ls)              # cwd change scoped to the subshell
+(export TOKEN=xyz; printenv)  # env var gone once the parens close
+```
+
+The isolation holds under concurrency, and subshells are still covered by the per-session mount allowlist and the cancellation boundaries below.
 
 ## Mid-flight cancellation: `cancel` / `signal`
 
@@ -145,7 +110,7 @@ Both bindings support cooperative cancellation observed at recursion boundaries 
 
 ## Supported bash syntax
 
-The shell is a tree-sitter-bash parser plus a custom executor. It implements the constructs LLMs reach for most often. What is not supported returns a clear, parseable error so an agent can self-correct on its next turn.
+Mirage Bash is a tree-sitter-bash parser plus a custom executor. It implements the constructs LLMs reach for most often. What is not supported returns a clear, parseable error so an agent can self-correct on its next turn.
 
 ### Supported
 
@@ -217,7 +182,7 @@ The allowlist is a property of the session, so it covers every command issued un
 
 ## Agent Pattern
 
-Agent harnesses commonly fan out tool calls in parallel, each with its own `cwd`/`env`/`cancel`. The clone semantics make this race-free without per-call boilerplate.
+Agent harnesses commonly fan out tool calls in parallel, each with its own `cwd`/`env`/`cancel`. The clone semantics make this race-free without per-call boilerplate. From the CLI, a subshell per call gives the same isolation.
 
 <Tabs>
   <Tab title="Python​​​" icon="/images/python-logo.svg">
@@ -249,5 +214,12 @@ Agent harnesses commonly fan out tool calls in parallel, each with its own `cwd`
       toolCall("grep foo *.log", "/logs", { DEBUG: "1" }, 5000),
     ])
     ```
+  </Tab>
+  <Tab title="CLI" icon="terminal">
+    ```bash
+    # No --cwd/--env flags: isolate each parallel call in a subshell
+    mirage execute -w demo -c "(cd /data && export DEBUG=1 && ls) & (cd /logs && export DEBUG=1 && grep foo *.log) & wait"
+    ```
+    Each `( ... )` runs in its own scope, so the parallel `cd` / `export` don't collide. `&` backgrounds them inside Mirage Bash and `wait` joins.
   </Tab>
 </Tabs>

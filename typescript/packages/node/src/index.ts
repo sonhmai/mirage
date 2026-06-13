@@ -137,6 +137,13 @@ export {
   type MinIOConfigRedacted,
 } from './resource/minio/config.ts'
 export { MINIO_PROMPT } from './resource/minio/prompt.ts'
+export { SeaweedFSResource, type SeaweedFSResourceState } from './resource/seaweedfs/seaweedfs.ts'
+export {
+  redactSeaweedFSConfig,
+  type SeaweedFSConfig,
+  type SeaweedFSConfigRedacted,
+} from './resource/seaweedfs/config.ts'
+export { SEAWEEDFS_PROMPT } from './resource/seaweedfs/prompt.ts'
 export { CephResource, type CephResourceState } from './resource/ceph/ceph.ts'
 export {
   redactCephConfig,

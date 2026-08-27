@@ -1,0 +1,14 @@
+[package]
+name = "mirage-pointer-codec-py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "mirage_pointer_codec_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+mirage-pointer-codec = { path = "../core" }
+pyo3.workspace = true

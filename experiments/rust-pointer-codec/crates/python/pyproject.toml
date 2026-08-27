@@ -1,0 +1,11 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "mirage-pointer-codec-py"
+version = "0.0.0"
+requires-python = ">=3.11"
+
+[tool.maturin]
+module-name = "mirage_pointer_codec_py"

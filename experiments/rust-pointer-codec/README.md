@@ -3,6 +3,8 @@
 Disposable vertical slice for the canonical LFS/remote pointer boundary discussed in
 `strukto-ai/mirage#721`. It changes no production package or call site.
 
+Maintainer decision proposal: [`PROPOSAL.md`](./PROPOSAL.md).
+
 ## Shape
 
 ```text

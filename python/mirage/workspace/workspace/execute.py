@@ -34,8 +34,10 @@ from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
 from mirage.types import Refusal
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.node import provision_node, run_command_tree
-from mirage.workspace.node.admission import admit_line, is_pending
+from mirage.workspace.node.admission import (admit_line, is_pending,
+                                             is_pending_refusal)
 from mirage.workspace.node.explain import prejudge_line, unrefused_nodes
+from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.session import (get_current_session_for,
                                       reset_current_session,
                                       set_current_session)
@@ -93,6 +95,7 @@ async def recurse(
     nested: NestedRefusal,
     handed: HandOff,
     cmd: str,
+    node: Any = None,
     **opts: Any,
 ) -> Any:
     """The executor's internal eval ($(), source, eval, xargs, ...).
@@ -101,10 +104,11 @@ async def recurse(
     its own recording context (GNU: history is appended by the line
     reader, the evaluator can't touch it). It inherits the typed
     line's routing decision and agent: nested lines never re-route,
-    and an approval they raise is the outer line's agent's. It inherits
-    the line's hand-off too, as the parent of its own: the outer pass
-    reads into the words a command runs, so the grants it claimed for
-    them are the inner line's to spend.
+    and an approval they raise is the outer line's agent's. It runs on
+    a hand-off of its own under the line's, standing at the node whose
+    text it evaluates: the outer pass reads into the words a command
+    runs and claims for them at that place, so the grants are the
+    inner line's to spend and nobody else's.
 
     Args:
         ws: the workspace hosting the outer line.
@@ -116,13 +120,19 @@ async def recurse(
             is kept for the typed line.
         handed (HandOff): the outer line's hand-off.
         cmd (str): the nested command line.
+        node (Any): the node whose text ``cmd`` is: the command running
+            a line, or the substitution being expanded. None when the
+            caller has none, which leaves the inner line's commands
+            standing nowhere the pass could have placed them, so its
+            gates ask afresh.
     """
+    origin = occurrence_of(node, handed) if node is not None else None
     io = await ws.execute(cmd,
                           cancel=cancel,
                           record=False,
                           routing_decision=routing_decision,
                           agent_id=agent_id,
-                          handed=handed,
+                          handed=HandOff(parent=handed, origin=origin),
                           **opts)
     if isinstance(io, IOResult) and io.refusal is not None:
         nested.latest = io.refusal
@@ -158,7 +168,7 @@ async def execute_line(
     record: bool,
     runtime: str | None,
     routing_decision: RouteDecision | None,
-    parent: HandOff | None = None,
+    handed: HandOff | None = None,
 ) -> IOResult | ProvisionResult:
     """The body of ``Workspace.execute``; see its docstring for the
     argument contract.
@@ -172,9 +182,9 @@ async def execute_line(
 
     Args:
         ws: the workspace the line runs in.
-        parent (HandOff | None): the enclosing line's hand-off when
-            this line is one of its nested evaluations, None for a
-            typed line.
+        handed (HandOff | None): the hand-off the line runs on, made by
+            ``recurse`` for a nested evaluation; None for a typed line,
+            which gets one of its own.
     """
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
@@ -239,10 +249,11 @@ async def execute_line(
         nested = NestedRefusal()
         # The line's hand-off: the grants its judging passes claim for
         # its gates, which the gates spend from and the line's end
-        # sweeps. A nested evaluation is handed it as the parent of its
-        # own, so what this line's pass claimed for the words a command
-        # runs is spent by the line that runs them.
-        handed = HandOff(parent=parent)
+        # sweeps. A nested evaluation runs on one made under it, so
+        # what this line's pass claimed for the words a command runs is
+        # spent by the line that runs them.
+        if handed is None:
+            handed = HandOff()
         exec_recursion = partial(recurse, ws, cancel, decision, agent, nested,
                                  handed)
         if provision:
@@ -401,6 +412,16 @@ async def execute_line(
                 routing_decision=decision,
                 handed=handed,
             )
+            # A record a nested line earned is the line's to report when
+            # its own tree earned none (see NestedRefusal).
+            if io.refusal is None:
+                io.refusal = nested.latest
+            # A question a gate left waiting holds the line exactly as
+            # one the pass left waiting does: the retry has to find the
+            # grants the pass claimed for the other commands standing,
+            # or it asks for them again, and the answer to this one
+            # would be taken by the first spelling the pass reads.
+            held = is_pending_refusal(io.refusal)
         finally:
             if held:
                 ws._registry.decisions.release(effective_session.session_id,
@@ -408,10 +429,6 @@ async def execute_line(
             else:
                 await ws._registry.decisions.revoke(
                     effective_session.session_id, handed)
-        # A record a nested line earned is the line's to report when
-        # its own tree earned none (see NestedRefusal).
-        if io.refusal is None:
-            io.refusal = nested.latest
         session.last_exit_code = io.exit_code
         await ws.apply_io(io, records=scope.records)
         return io

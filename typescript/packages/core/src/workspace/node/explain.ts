@@ -17,10 +17,12 @@ import { decide } from '../../policy/match/decide.ts'
 import {
   Outcome,
   type Ask,
+  type Claimant,
   type CommandContext,
   type Deny,
   type Explanation,
   type HandOff,
+  type Occurrence,
   type Pending,
 } from '../../policy/types.ts'
 import { getParts, getText, literalWord, splitEnvPrefix } from '../../shell/helpers.ts'
@@ -43,6 +45,14 @@ import {
   type Refused,
 } from './admission.ts'
 import { innerLines, innerReadable, wordValue, type Word } from './inner_lines.ts'
+import {
+  type Frame,
+  bodyFrame,
+  lineFrame,
+  occurrenceIn,
+  rootFrame,
+  wholeOccurrence,
+} from './occurrence.ts'
 
 const DECODER = new TextDecoder()
 
@@ -57,14 +67,35 @@ const FORK_SCOPES: ReadonlySet<string> = new Set([
   NodeType.PROCESS_SUBSTITUTION,
 ])
 
-type WalkItem = [Word[], Word[], Session]
+/**
+ * One command of a walked line, as both readers of the line see it: its
+ * words, the redirect targets of its statement, the session it is
+ * judged in, and where it stands. Mirrors the Python Walked.
+ */
+interface Walked {
+  readonly words: Word[]
+  readonly redirects: Word[]
+  readonly session: Session
+  readonly occurrence: Occurrence
+}
+
+/**
+ * One command's explanation and where the command stands. The
+ * occurrence is what the pass hands the ledger beside the explanation:
+ * a grant claimed for the command is bound to it, so the gate that runs
+ * the same occurrence finds it and no other reader does.
+ */
+interface Judged {
+  readonly explanation: Explanation
+  readonly occurrence: Occurrence
+}
 
 /**
  * A walk yields each command and returns the session its scope ends in,
  * which is how a `cd` reaches the commands after it without escaping the
  * child shell it ran in.
  */
-type Walk = Generator<WalkItem, Session>
+type Walk = Generator<Walked, Session>
 
 function unreadableWord(raw: string): Explanation {
   const reason = `cannot read ${raw} before the runtime expands it`
@@ -156,18 +187,25 @@ async function explained(
  * are empty for a command with none and for the inner lines a command
  * runs, which admission reads the same way.
  */
-export async function explainWords(
+/**
+ * Explain one command and whatever lines it runs in turn, each with its
+ * occurrence. A line the command runs (`eval`, `sh -c`) is parsed on
+ * its own and read under the command's occurrence, exactly as the
+ * nested evaluation will stand when it runs.
+ */
+async function judgeWords(
   words: readonly Word[],
+  occurrence: Occurrence,
   session: Session,
   registry: MountRegistry,
   namespace: Namespace | null,
   agentId: string,
   reparse: (line: string) => TSNodeLike,
   redirectWords: readonly Word[] = [],
-): Promise<Explanation[]> {
+): Promise<Judged[]> {
   const head = words[0]
   if (head === undefined) return []
-  if (head.text === null) return [unreadableWord(head.raw)]
+  if (head.text === null) return [{ explanation: unreadableWord(head.raw), occurrence }]
   const name = wordValue(head)
   const args = words.slice(1).map(wordValue)
   const classified = classifiedWords(name, args, session, registry)
@@ -182,16 +220,31 @@ export async function explainWords(
     null,
     redirectPaths(redirectWords, registry, session.cwd),
   )
-  if (!Array.isArray(gated)) return [fromRefusal(name, args, gated)]
+  if (!Array.isArray(gated)) return [{ explanation: fromRefusal(name, args, gated), occurrence }]
   const [ctx, asked] = gated
-  const out = [await explained(ctx, session, registry, asked)]
+  const out: Judged[] = [
+    { explanation: await explained(ctx, session, registry, asked), occurrence },
+  ]
   for (const inner of innerLines(name, words.slice(1))) {
     if (!innerReadable(inner)) continue
-    out.push(
-      ...(inner.line !== null
-        ? await explainLine(reparse(inner.line), session, registry, namespace, agentId, reparse)
-        : await explainWords(inner.argv, session, registry, namespace, agentId, reparse)),
-    )
+    if (inner.line !== null) {
+      out.push(
+        ...(await judgeLine(
+          reparse(inner.line),
+          session,
+          registry,
+          namespace,
+          agentId,
+          reparse,
+          lineFrame(inner.line, occurrence),
+        )),
+      )
+    } else {
+      const within = wholeOccurrence(lineFrame(inner.argv.map(wordValue).join(' '), occurrence))
+      out.push(
+        ...(await judgeWords(inner.argv, within, session, registry, namespace, agentId, reparse)),
+      )
+    }
   }
   return out
 }
@@ -221,40 +274,55 @@ function wordsOf(node: TSNodeLike, home: string | null): Word[] {
  * "escapes" means, and because `&` is not a wrapper node: it is a token
  * following its command, visible only to whoever holds the sibling list.
  */
-function* walkNode(node: TSNodeLike, session: Session, home: string | null): Walk {
+function* walkNode(node: TSNodeLike, session: Session, home: string | null, frame: Frame): Walk {
   if (node.type === NodeType.COMMAND) {
     let walked = session
     const words = wordsOf(node, home)
     if (words.length > 0) {
-      yield [words, statementRedirects(node, home), session]
+      yield {
+        words,
+        redirects: statementRedirects(node, home),
+        session,
+        occurrence: occurrenceIn(node, frame),
+      }
       walked = afterCd(words, session)
     }
     // A substitution among the words runs in its own shell.
-    for (const child of node.children) yield* walkNode(child, session, home)
+    for (const child of node.children) yield* walkNode(child, session, home, frame)
     return walked
   }
   if (FORK_SCOPES.has(node.type)) {
-    yield* walkChildren(node, session, home)
+    // A substitution's body is walked in a frame of its own: the nested
+    // line that evaluates it parses the body alone, under the
+    // substitution's node, and the commands in it have to be placed
+    // here exactly where that line will place them.
+    const inner = bodyFrame(node, frame)
+    yield* walkChildren(node, session, home, inner ?? frame)
     return session
   }
   if (node.type === NodeType.PIPELINE) {
-    for (const child of node.children) yield* walkNode(child, session, home)
+    for (const child of node.children) yield* walkNode(child, session, home, frame)
     return session
   }
-  return yield* walkChildren(node, session, home)
+  return yield* walkChildren(node, session, home, frame)
 }
 
 /**
  * One scope's children in order, threading the cwd between them; returns
  * the session the scope ends in.
  */
-function* walkChildren(node: TSNodeLike, session: Session, home: string | null): Walk {
+function* walkChildren(
+  node: TSNodeLike,
+  session: Session,
+  home: string | null,
+  frame: Frame,
+): Walk {
   let walked = session
   const children = node.children
   for (let index = 0; index < children.length; index += 1) {
     const child = children[index]
     if (child === undefined) continue
-    const ended = yield* walkNode(child, walked, home)
+    const ended = yield* walkNode(child, walked, home, frame)
     if (children[index + 1]?.type === '&') continue
     walked = ended
   }
@@ -291,8 +359,12 @@ function afterCd(words: readonly Word[], session: Session): Session {
  * ride along for the same reason: they are read here so both readers
  * judge the file the shell opens, not just the operands.
  */
-function* walkedLine(root: TSNodeLike, session: Session): Generator<WalkItem> {
-  yield* walkNode(root, session, homeDir(session))
+function* walkedLine(
+  root: TSNodeLike,
+  session: Session,
+  frame: Frame | null = null,
+): Generator<Walked> {
+  yield* walkNode(root, session, homeDir(session), frame ?? rootFrame(root, null))
 }
 
 /**
@@ -397,19 +469,30 @@ export async function prejudgeLine(
   // could no longer cut short.
   signal?: AbortSignal,
 ): Promise<Refused | null> {
-  const judged: [Word[], Session, Explanation[]][] = []
-  for (const [words, redirects, walked] of walkedLine(root, session)) {
-    if (words[0]?.text === null) continue
+  const judged: [Walked, Judged[]][] = []
+  const frame = rootFrame(root, handed.origin)
+  for (const item of walkedLine(root, session, frame)) {
+    if (item.words[0]?.text === null) continue
     judged.push([
-      redirects,
-      walked,
-      await explainWords(words, walked, registry, namespace, agentId, reparse, redirects),
+      item,
+      await judgeWords(
+        item.words,
+        item.occurrence,
+        item.session,
+        registry,
+        namespace,
+        agentId,
+        reparse,
+        item.redirects,
+      ),
     ])
   }
-  if (judged.reduce((n, [, , explained]) => n + explained.length, 0) < 2) return null
-  for (const [redirects, walked, explained] of judged) {
-    const targets = redirectPaths(redirects, registry, walked.cwd)
-    for (const [index, expl] of explained.entries()) {
+  if (judged.reduce((n, [, explained]) => n + explained.length, 0) < 2) return null
+  for (const [item, explained] of judged) {
+    const walked = item.session
+    const targets = redirectPaths(item.redirects, registry, walked.cwd)
+    for (const [index, one] of explained.entries()) {
+      const expl = one.explanation
       if (!isJudged(expl)) continue
       const args = [...expl.argv]
       const classified = classifiedWords(expl.command, args, walked, registry)
@@ -422,7 +505,7 @@ export async function prejudgeLine(
         namespace,
         agentId,
         null,
-        // explainWords lists the statement's own command first and the
+        // judgeWords lists the statement's own command first and the
         // lines it runs after it, so only the first explanation is the
         // command the redirects belong to.
         index === 0 ? targets : [],
@@ -430,7 +513,7 @@ export async function prejudgeLine(
         // This pass judges on the gate's behalf and runs nothing itself, so
         // a grant the host gives here is handed to the per-command gate that
         // runs the line, which spends it: one question per run, not per pass.
-        handed,
+        { line: handed, occurrence: one.occurrence },
         true,
       )
       if (!(answered instanceof Admitted)) return answered
@@ -457,7 +540,7 @@ export async function prejudgeLine(
  * the answer lands exactly once and the gate does not ask again.
  */
 async function verdictRefuses(
-  expl: Explanation,
+  judged: Judged,
   redirects: readonly PathSpec[],
   walked: Session,
   registry: MountRegistry,
@@ -468,6 +551,8 @@ async function verdictRefuses(
   handed: HandOff,
   signal?: AbortSignal,
 ): Promise<boolean> {
+  const expl = judged.explanation
+  const claimant: Claimant = { line: handed, occurrence: judged.occurrence }
   const args = [...expl.argv]
   const classified = classifiedWords(expl.command, args, walked, registry)
   const gated = await gate(
@@ -484,13 +569,13 @@ async function verdictRefuses(
   if (!Array.isArray(gated)) return true
   const [ctx, asked] = gated
   if (asked?.kind !== 'ask') return asked !== null
-  const standing = await registry.decisions.held(ctx, asked, handed)
+  const standing = await registry.decisions.held(ctx, asked, claimant)
   if (standing === null) return false
   if (standing.kind === 'deny') return true
   // handOff: this pass exists to decide whether a secret is fetched, and the
   // gate behind it still has to admit the line. An answer given here is left
   // standing for that gate, which consumes it — so the host is asked once.
-  const action = await registry.decisions.resolve(ctx, asked, signal, handed, true)
+  const action = await registry.decisions.resolve(ctx, asked, signal, claimant, true)
   if (action !== null && action.kind === 'abandoned') throw makeAbortError()
   return action !== null
 }
@@ -525,12 +610,11 @@ function definesFunction(node: TSNodeLike): boolean {
  * expand, a `$NAME` anywhere -- returns null, and the caller keeps the
  * node, because some part of it may still run and read.
  */
-function soleLiteralCommand(node: TSNodeLike, session: Session): WalkItem | null {
-  const items = [...walkedLine(node, session)]
+function soleLiteralCommand(node: TSNodeLike, session: Session, frame: Frame): Walked | null {
+  const items = [...walkedLine(node, session, frame)]
   const item = items[0]
   if (items.length !== 1 || item === undefined) return null
-  const [words, redirects] = item
-  if ([...words, ...redirects].some((word) => word.text === null)) return null
+  if ([...item.words, ...item.redirects].some((word) => word.text === null)) return null
   if (definesFunction(node)) return null
   if (referencedNames(node).size > 0 || opaqueReads(node)) return null
   return item
@@ -541,7 +625,7 @@ function soleLiteralCommand(node: TSNodeLike, session: Session): WalkItem | null
  * unanswered ask through the ledger the gate reads.
  */
 async function commandRefused(
-  item: WalkItem,
+  item: Walked,
   registry: MountRegistry,
   namespace: Namespace | null,
   agentId: string,
@@ -549,25 +633,26 @@ async function commandRefused(
   reparse: (line: string) => TSNodeLike,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  const [words, redirects, walked] = item
-  const explained = await explainWords(
-    words,
+  const walked = item.session
+  const explained = await judgeWords(
+    item.words,
+    item.occurrence,
     walked,
     registry,
     namespace,
     agentId,
     reparse,
-    redirects,
+    item.redirects,
   )
-  const targets = redirectPaths(redirects, registry, walked.cwd)
-  for (const [index, expl] of explained.entries()) {
-    if (!isVerdict(expl)) continue
-    // explainWords lists the statement's own command first and the
+  const targets = redirectPaths(item.redirects, registry, walked.cwd)
+  for (const [index, judged] of explained.entries()) {
+    if (!isVerdict(judged.explanation)) continue
+    // judgeWords lists the statement's own command first and the
     // lines it runs after it, so only the first explanation is the
     // command the redirects belong to.
     if (
       await verdictRefuses(
-        expl,
+        judged,
         index === 0 ? targets : [],
         walked,
         registry,
@@ -623,7 +708,10 @@ export async function unrefusedNodes(
 ): Promise<TSNodeLike[]> {
   const out: TSNodeLike[] = []
   for (const [position, node] of nodes.entries()) {
-    const item = soleLiteralCommand(node, session)
+    // Each node is read in the frame of its own tree: the line's, or
+    // the one a stored body or alias expansion was parsed from, which
+    // is the frame its gate will read it in.
+    const item = soleLiteralCommand(node, session, rootFrame(node, handed.origin))
     if (item === null) {
       out.push(node)
       continue
@@ -659,10 +747,45 @@ export async function explainLine(
   agentId: string,
   reparse: (line: string) => TSNodeLike,
 ): Promise<Explanation[]> {
-  const out: Explanation[] = []
-  for (const [words, redirects, walked] of walkedLine(root, session)) {
+  const judged = await judgeLine(
+    root,
+    session,
+    registry,
+    namespace,
+    agentId,
+    reparse,
+    rootFrame(root, null),
+  )
+  return judged.map((one) => one.explanation)
+}
+
+/**
+ * Every command of a line explained, in the order the gate reads them,
+ * each with its place on the line. `frame` is the scope the line is
+ * read in.
+ */
+async function judgeLine(
+  root: TSNodeLike,
+  session: Session,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+  agentId: string,
+  reparse: (line: string) => TSNodeLike,
+  frame: Frame,
+): Promise<Judged[]> {
+  const out: Judged[] = []
+  for (const item of walkedLine(root, session, frame)) {
     out.push(
-      ...(await explainWords(words, walked, registry, namespace, agentId, reparse, redirects)),
+      ...(await judgeWords(
+        item.words,
+        item.occurrence,
+        item.session,
+        registry,
+        namespace,
+        agentId,
+        reparse,
+        item.redirects,
+      )),
     )
   }
   return out

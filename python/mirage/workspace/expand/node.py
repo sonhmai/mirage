@@ -99,13 +99,14 @@ async def _expand_backtick_region(
     raw: str,
     session: Session,
     execute_fn: Callable[..., Any],
+    node: tree_sitter.Node,
 ) -> str:
     parts: list[str] = []
     for text, is_command in _split_backtick_segments(raw):
         if not is_command:
             parts.append(text)
             continue
-        io = await execute_fn(text, session_id=session.session_id)
+        io = await execute_fn(text, session_id=session.session_id, node=node)
         parts.append((await io.stdout_str()).rstrip("\n"))
         session._cmdsub_seq += 1
         session._cmdsub_status = io.exit_code
@@ -331,7 +332,7 @@ async def expand_node_marked(
             # the grammar, which merges adjacent pairs (see
             # _split_backtick_segments).
             return prefix + await _expand_backtick_region(
-                raw, session, execute_fn)
+                raw, session, execute_fn, ts_node)
         if raw.startswith("$((") and raw.endswith("))"):
             # Inside heredoc bodies tree-sitter parses `$((expr))` as a
             # command substitution wrapping a subshell; reparse in
@@ -350,7 +351,11 @@ async def expand_node_marked(
         inner = raw[2:-1]
         if not inner.strip():
             return prefix
-        io = await execute_fn(inner, session_id=session.session_id)
+        # The substitution names its own node: the nested line's
+        # commands stand under it, which is where the pass placed them.
+        io = await execute_fn(inner,
+                              session_id=session.session_id,
+                              node=ts_node)
         text = (await io.stdout_str()).rstrip("\n")
         # Record the substitution's status: an assignment-only
         # statement whose value ran substitutions reports the last

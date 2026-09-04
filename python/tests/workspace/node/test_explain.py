@@ -762,3 +762,49 @@ async def test_a_job_that_cannot_be_submitted_hands_its_borrow_back():
         assert len(asked) == 2
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_word_that_expands_to_a_judged_command_does_not_run_on_its_nod(
+        ws):
+    # The pass reads the literal cat and claims the answer for it; the
+    # first cat's operand expands at run time into the same command.
+    # Read by spelling, that gate found the literal's grant and read the
+    # secret before its own question was ever put, and the literal then
+    # asked again. Bound to its occurrence, the grant is the literal's
+    # alone: the expanded command asks, its question holds the line,
+    # and the retry runs both on their own answers.
+    line = "F=/data/secret.txt; cat $F && cat /data/secret.txt"
+    first = await ws.execute(line, session_id="s")
+    assert first.exit_code == 126
+    assert first.refusal is not None and first.refusal.kind == "pending"
+    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    second = await ws.execute(line, session_id="s")
+    assert second.exit_code == 126
+    assert second.stdout == b""
+    assert second.refusal is not None and second.refusal.kind == "pending"
+    assert len(ws.decisions.list("s")) == 2
+    await ws.decisions.answer(second.refusal.ask_id, Outcome.ALLOW)
+    ran = await ws.execute(line, session_id="s")
+    assert ran.exit_code == 0
+    assert ran.stdout == b"s\ns\n"
+    assert ws.decisions.list("s") == ()
+
+
+@pytest.mark.asyncio
+async def test_one_body_under_two_words_is_two_occurrences():
+    # The same substitution twice on a line is two questions, and each
+    # nested line spends its own: the second body cannot be answered by
+    # the first body's nod, nor ask a third time.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute(
+            "echo $(cat /data/secret.txt) $(cat /data/secret.txt) && ls /data",
+            session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout.startswith(b"s s\n")
+        assert len(asked) == 2
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()

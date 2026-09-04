@@ -14,6 +14,7 @@
 
 import asyncio
 import dataclasses
+from functools import partial
 from typing import Any
 
 from mirage.commands.builtin.utils.limit import run_with_timeout
@@ -22,7 +23,7 @@ from mirage.context import (redirect_paths_for, reset_admission,
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import PolicyDenied, resolve_limit
-from mirage.policy.types import HandOff, SessionContext
+from mirage.policy.types import Claimant, HandOff, SessionContext
 from mirage.runtime.routing import RouteDecision
 from mirage.shell.bytes import encode_text
 from mirage.shell.parse import find_syntax_error, parse, syntax_error_result
@@ -42,6 +43,7 @@ from mirage.workspace.expand.globs import expand_boundary_globs
 from mirage.workspace.lookup import (SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS,
                                      follows_last_component)
 from mirage.workspace.node.admission import Admitted, Refused, admit
+from mirage.workspace.node.occurrence import claimant_for
 from mirage.workspace.session.state import (ensure_var_visible,
                                             pre_session_gate, seed_var,
                                             session_view, set_attr)
@@ -222,6 +224,13 @@ async def _dispatch_command_body(
     agent_id: str = "",
     handed: HandOff | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
+    # The command's place on the line, as the pass computed it, and
+    # the door its nested evaluations re-enter through: a word that
+    # runs a line (eval, source, xargs) is bound to this node, and a
+    # substitution names its own node when it calls, so every nested
+    # line stands under the node its text came from.
+    claimant = claimant_for(node, handed)
+    execute_fn = partial(execute_fn, node=node)
     parent = node.parent
     if parent is None or parent.type != NT.REDIRECTED_STATEMENT:
         for child in node.named_children:
@@ -251,7 +260,9 @@ async def _dispatch_command_body(
                     command=name or "process_sub", exit_code=2, stderr=err)
             inner = get_process_sub_body(p)
             if inner:
-                io_ps = await execute_fn(inner, session_id=session.session_id)
+                io_ps = await execute_fn(inner,
+                                         session_id=session.session_id,
+                                         node=p)
                 proc_sub_parts.append(io_ps.stdout or b"")
                 stderr = await materialize(io_ps.stderr)
                 if stderr:
@@ -289,7 +300,7 @@ async def _dispatch_command_body(
                      row=node.start_point[0],
                      agent_id=agent_id,
                      redirects=redirect_paths_for(node.id),
-                     handed=handed)
+                     claimant=claimant)
     # Capture xtrace before the body runs so `set -x` itself is not
     # traced (bash enables tracing only for the following commands).
     xtrace = bool(session.shell_options.get("xtrace"))
@@ -325,7 +336,7 @@ async def _run_argv(
     row: int = 0,
     agent_id: str = "",
     redirects: tuple[PathSpec, ...] = (),
-    handed: HandOff | None = None,
+    claimant: Claimant | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler.
 
@@ -382,7 +393,7 @@ async def _run_argv(
                               stdin,
                               redirects=redirects,
                               cancel=cancel,
-                              handed=handed)
+                              claimant=claimant)
         if isinstance(verdict, Refused):
             cmd_str = " ".join([name, *argv.args])
             return None, IOResult(exit_code=verdict.exit_code,

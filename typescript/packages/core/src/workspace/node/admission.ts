@@ -25,6 +25,7 @@ import {
 } from '../../policy/index.ts'
 import type {
   Ask,
+  Claimant,
   CommandContext,
   CommandRule,
   AdmissionRules,
@@ -78,6 +79,7 @@ import {
 import type { Session } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { innerLines, innerReadable, wordValue, type Word } from './inner_lines.ts'
+import { type Frame, lineFrame, occurrenceIn, rootFrame, wholeOccurrence } from './occurrence.ts'
 
 /**
  * What the command plane prints when a line does not get to run: 127
@@ -97,6 +99,14 @@ export interface Refused {
  * Whether a refusal is a question the host has not answered yet, which
  * holds the line for its retry rather than ending it.
  */
+/**
+ * Whether a record is a question the host has not answered yet, which
+ * holds the line for its retry rather than ending it.
+ */
+export function isPendingRefusal(refusal: Refusal | null): boolean {
+  return refusal !== null && refusal.kind === 'pending'
+}
+
 export function isPending(refused: Refused): boolean {
   return refused.refusal?.kind === 'pending'
 }
@@ -380,16 +390,16 @@ export async function admit(
   // cannot outlive the run that raised it. Nothing else here waits on
   // anything outside mirage.
   signal?: AbortSignal,
-  // The line's hand-off, null outside a line. The gate spends the
-  // grants claimed on it and never one claimed by another line; a
-  // judging pass claims on it.
-  handed: HandOff | null = null,
+  // The command and its line, null outside a line. The gate spends the
+  // grants claimed for its occurrence and never one claimed for
+  // another; a judging pass claims for it.
+  claimant: Claimant | null = null,
   // True for a pass that judges the command on behalf of the gate that
-  // runs it (`prejudgeLine`): the grants behind the command are claimed
-  // on `handed` for that gate to spend, so one question covers one run
-  // rather than one pass. A refusal needs no such care — the record
-  // refuses the agent's retry from the ledger either way. False for the
-  // gate.
+  // runs it (`prejudgeLine`, `admitLine`): the grants behind the command
+  // are claimed on the line's hand-off for that gate to spend, so one
+  // question covers one run rather than one pass. A refusal needs no
+  // such care — the record refuses the agent's retry from the ledger
+  // either way. False for the gate.
   judging = false,
 ): Promise<Refused | Admitted> {
   const gated = await gate(
@@ -410,7 +420,7 @@ export async function admit(
   // never re-opens a deny.
   const action =
     asked !== null && asked.kind === 'ask'
-      ? await registry.decisions.resolve(ctx, asked, signal, handed, judging)
+      ? await registry.decisions.resolve(ctx, asked, signal, claimant, judging)
       : asked
   // The ledger stopped waiting on a host because this run was killed
   // while it was deciding. That is the kill landing late, not a ruling,
@@ -495,9 +505,9 @@ async function admitWords(
   reparse: (line: string) => TSNodeLike,
   redirectWords: readonly Word[] = [],
   signal?: AbortSignal,
-  // The line's hand-off and whether this is a judging pass, as `admit`
-  // takes them.
-  handed: HandOff | null = null,
+  // The command and its line, as `admit` takes it (the lines it runs
+  // stand under it), and whether this is a judging pass.
+  claimant: Claimant | null = null,
   judging = false,
 ): Promise<Refused | null> {
   const head = words[0]
@@ -519,7 +529,7 @@ async function admitWords(
     null,
     redirects,
     signal,
-    handed,
+    claimant,
     judging,
   )
   if (!(verdict instanceof Admitted)) return verdict
@@ -547,33 +557,45 @@ async function admitWords(
       if (hasRules(rules)) return refuse(name, 'runs lines the gate cannot read')
       continue
     }
-    const innerRefusal =
-      inner.line !== null
-        ? await admitLine(
-            reparse(inner.line),
-            session,
-            registry,
-            namespace,
-            agentId,
-            reparse,
-            signal,
-            handed,
-            judging,
-          )
-        : await admitWords(
-            inner.argv,
-            inner.open,
-            session,
-            registry,
-            namespace,
-            agentId,
-            rules,
-            reparse,
-            [],
-            signal,
-            handed,
-            judging,
-          )
+    let innerRefusal: Refused | null
+    if (inner.line !== null) {
+      innerRefusal = await admitLine(
+        reparse(inner.line),
+        session,
+        registry,
+        namespace,
+        agentId,
+        reparse,
+        signal,
+        claimant?.line ?? null,
+        judging,
+        claimant === null ? null : lineFrame(inner.line, claimant.occurrence),
+      )
+    } else {
+      const within: Claimant | null =
+        claimant === null
+          ? null
+          : {
+              line: claimant.line,
+              occurrence: wholeOccurrence(
+                lineFrame(inner.argv.map(wordValue).join(' '), claimant.occurrence),
+              ),
+            }
+      innerRefusal = await admitWords(
+        inner.argv,
+        inner.open,
+        session,
+        registry,
+        namespace,
+        agentId,
+        rules,
+        reparse,
+        [],
+        signal,
+        within,
+        judging,
+      )
+    }
     if (innerRefusal !== null) return innerRefusal
   }
   return null
@@ -613,7 +635,9 @@ async function admitWords(
  * waiting keeps its earlier answers standing for the retry, exactly as
  * the compound-line pass does, where spending them here asked the human
  * again for each on every retry. `handed` is null outside a line (a
- * bare admission with no run behind it).
+ * bare admission with no run behind it). `frame` is the scope the line
+ * is read in, for a line a word runs; null reads `root` as the line
+ * itself.
  */
 export async function admitLine(
   root: TSNodeLike,
@@ -625,9 +649,11 @@ export async function admitLine(
   signal?: AbortSignal,
   handed: HandOff | null = null,
   judging = false,
+  frame: Frame | null = null,
 ): Promise<Refused | null> {
   const rules = session.commands
   const home = homeDir(session)
+  const scope = frame ?? rootFrame(root, handed?.origin ?? null)
   for (const node of commandNodes(root)) {
     const [, parts] = splitEnvPrefix(getParts(node))
     const words: Word[] = parts.map((part) => ({
@@ -646,7 +672,7 @@ export async function admitLine(
       reparse,
       statementRedirects(node, home),
       signal,
-      handed,
+      handed === null ? null : { line: handed, occurrence: occurrenceIn(node, scope) },
       judging,
     )
     if (refusal !== null) return refusal

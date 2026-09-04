@@ -1121,9 +1121,10 @@ class Workspace:
             routing_decision: Internal. The typed line's routing decision,
                 forwarded by the executor's nested evals so inner
                 lines never re-route.
-            handed: Internal. The enclosing line's hand-off, forwarded
-                by the executor's nested evals so an inner line spends
-                the grants the outer line's pass claimed for it.
+            handed: Internal. The hand-off the line runs on, made by the
+                executor's nested evals under the outer line's so an
+                inner line spends the grants the outer line's pass
+                claimed for it.
         """
         return await execute_line(self, command, session_id, stdin, provision,
                                   agent_id, cwd, env, cancel, record, runtime,

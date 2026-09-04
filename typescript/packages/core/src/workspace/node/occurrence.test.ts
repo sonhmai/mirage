@@ -1,0 +1,138 @@
+import { describe, expect, it } from 'vitest'
+
+import type { HandOff, Occurrence } from '../../policy/types.ts'
+import { commandNodes } from '../../runtime/routing/index.ts'
+import { NodeType, type TSNodeLike } from '../../shell/types.ts'
+import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import {
+  bodyFrame,
+  claimantFor,
+  type Frame,
+  lineFrame,
+  occurrenceIn,
+  occurrenceOf,
+  rootFrame,
+  wholeOccurrence,
+} from './occurrence.ts'
+
+async function parse(line: string): Promise<TSNodeLike> {
+  const parser = await getTestParser()
+  return parser.parse(line) as unknown as TSNodeLike
+}
+
+/** The nth command of a parse, which the test knows is there. */
+function command(root: TSNodeLike, index: number): TSNodeLike {
+  const node = commandNodes(root)[index]
+  if (node === undefined) throw new Error(`no command ${String(index)}`)
+  return node
+}
+
+function first(node: TSNodeLike, kind: string): TSNodeLike {
+  const stack = [node]
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    if (current.type === kind) return current
+    stack.push(...[...current.children].reverse())
+  }
+  throw new Error(kind)
+}
+
+function body(node: TSNodeLike, frame: Frame): Frame {
+  const inner = bodyFrame(node, frame)
+  if (inner === null) throw new Error('no body')
+  return inner
+}
+
+function fresh(origin: Occurrence | null = null): HandOff {
+  return { claimed: [], holders: 1, parent: null, origin }
+}
+
+describe('occurrence', () => {
+  it('stands a command at its span in the line', async () => {
+    const line = 'touch /tmp/x && cat /data/secret.txt'
+    const root = await parse(line)
+    const frame = rootFrame(root, null)
+    expect(frame).toEqual({ text: line, base: 0, parent: null })
+    expect(occurrenceIn(command(root, 0), frame)).toEqual({
+      parent: null,
+      source: line,
+      start: 0,
+      end: 12,
+    })
+    expect(occurrenceIn(command(root, 1), frame)).toEqual({
+      parent: null,
+      source: line,
+      start: 16,
+      end: 36,
+    })
+  })
+
+  it('computes one occurrence for the gate and the pass', async () => {
+    // The gate builds the frame from the node it runs and the pass from
+    // the tree it walks; on one parse they have to agree.
+    const root = await parse('cat /data/secret.txt')
+    const node = command(root, 0)
+    const handed = fresh()
+    expect(occurrenceOf(node, handed)).toEqual(occurrenceIn(node, rootFrame(root, null)))
+    expect(claimantFor(node, null)).toBeNull()
+    const claimant = claimantFor(node, handed)
+    expect(claimant?.line).toBe(handed)
+    expect(claimant?.occurrence).toEqual(occurrenceOf(node, handed))
+  })
+
+  it('stands a nested line under the node that ran it', async () => {
+    // A nested line's hand-off carries the node its text came from, and
+    // every command of the nested parse stands under it.
+    const outer = await parse("eval 'cat /data/secret.txt'")
+    const origin = occurrenceOf(command(outer, 0), fresh())
+    const inner = await parse('cat /data/secret.txt')
+    const at = occurrenceOf(command(inner, 0), fresh(origin))
+    expect(at).toEqual({ parent: origin, source: 'cat /data/secret.txt', start: 0, end: 20 })
+    // The pass reads the line the word runs in a frame of its own, and
+    // places the same command at the same occurrence.
+    expect(occurrenceIn(command(inner, 0), lineFrame('cat /data/secret.txt', origin))).toEqual(at)
+  })
+
+  it('reads a substitution body as the nested line parses it', async () => {
+    const line = 'echo $(cat /data/secret.txt) && ls'
+    const root = await parse(line)
+    const frame = rootFrame(root, null)
+    const sub = first(root, NodeType.COMMAND_SUBSTITUTION)
+    const inner = body(sub, frame)
+    expect(inner.text).toBe('cat /data/secret.txt')
+    expect(inner.parent).toEqual(occurrenceIn(sub, frame))
+    const within = commandNodes(root).find(
+      (c) =>
+        (c.startIndex ?? 0) > (sub.startIndex ?? 0) && (c.endIndex ?? 0) <= (sub.endIndex ?? 0),
+    )
+    if (within === undefined) throw new Error('no inner command')
+    const walked = occurrenceIn(within, inner)
+    // What the nested line computes when it parses the body alone.
+    const nested = fresh(occurrenceIn(sub, frame))
+    const ran = occurrenceOf(command(await parse(inner.text), 0), nested)
+    expect(walked).toEqual(ran)
+  })
+
+  it('sets a folded prefix and backticks aside', async () => {
+    const line = 'echo "$a `cat /data/secret.txt`"'
+    const root = await parse(line)
+    const frame = rootFrame(root, null)
+    const inner = body(first(root, NodeType.COMMAND_SUBSTITUTION), frame)
+    expect(inner.text).toBe('cat /data/secret.txt')
+    expect(line.slice(inner.base, inner.base + inner.text.length)).toBe(inner.text)
+  })
+
+  it('has no body frame for a node that is no substitution', async () => {
+    const root = await parse('(cd /tmp && ls)')
+    expect(bodyFrame(first(root, NodeType.SUBSHELL), rootFrame(root, null))).toBeNull()
+  })
+
+  it('stands the words a command runs at the whole text', () => {
+    const parent: Occurrence = { parent: null, source: 'xargs cat', start: 0, end: 9 }
+    expect(wholeOccurrence(lineFrame('cat', parent))).toEqual({
+      parent,
+      source: 'cat',
+      start: 0,
+      end: 3,
+    })
+  })
+})

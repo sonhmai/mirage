@@ -16,10 +16,29 @@ import { describe, expect, it } from 'vitest'
 
 import { Decisions, askRule, covers, decisionId } from './decisions.ts'
 import { Outcome, Scope } from './types.ts'
-import type { Ask, CommandContext, CommandRule, Decision, HandOff } from './types.ts'
+import type {
+  Ask,
+  Claimant,
+  CommandContext,
+  CommandRule,
+  Decision,
+  HandOff,
+  Occurrence,
+} from './types.ts'
 
 const RULE: CommandRule = { reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }
 const ASK: Ask = { kind: 'ask', reason: 'sign-off', rule: RULE }
+
+/** A fresh line's hand-off. */
+function fresh(parent: HandOff | null = null): HandOff {
+  return { claimed: [], holders: 1, parent, origin: null }
+}
+
+/** The reader for one spelling of a command on a line, each its own occurrence. */
+function at(handed: HandOff, index = 0): Claimant {
+  const occurrence: Occurrence = { parent: null, source: 'line', start: index, end: index + 1 }
+  return { line: handed, occurrence }
+}
 
 function ctx(sessionId = 's', argv: readonly string[] = ['push']): CommandContext {
   return {
@@ -202,9 +221,9 @@ describe('decisions', () => {
       return Promise.resolve({ ...r, outcome: Outcome.ALLOW, scope: Scope.ONCE })
     }
     const ledger = new Decisions(null, allow)
-    const first: HandOff = { claimed: [], holders: 1, parent: null }
-    expect(await ledger.resolve(ctx(), ASK, undefined, first, true)).toBeNull()
-    expect(await ledger.resolve(ctx(), ASK, undefined, first)).toBeNull()
+    const first: HandOff = fresh()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(first), true)).toBeNull()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(first))).toBeNull()
     expect(asked).toBe(1)
     expect(await ledger.resolve(ctx(), ASK)).toBeNull()
     expect(asked).toBe(2)
@@ -218,14 +237,14 @@ describe('decisions', () => {
     const both: Ask = { kind: 'ask', reason: 'sign-off', rules: [RULE, other] }
     // The first rule is granted to a line that was then held, which
     // releases its claim; the second during this line's own pass.
-    const earlier: HandOff = { claimed: [], holders: 1, parent: null }
-    expect(await ledger.resolve(ctx(), ASK, undefined, earlier, true)).toBeNull()
+    const earlier: HandOff = fresh()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(earlier), true)).toBeNull()
     ledger.release('s', earlier)
-    const line: HandOff = { claimed: [], holders: 1, parent: null }
-    expect(await ledger.resolve(ctx(), both, undefined, line, true)).toBeNull()
+    const line: HandOff = fresh()
+    expect(await ledger.resolve(ctx(), both, undefined, at(line), true)).toBeNull()
     expect(asked).toBe(4)
     // The gate finds both standing and asks nothing.
-    expect(await ledger.resolve(ctx(), both, undefined, line)).toBeNull()
+    expect(await ledger.resolve(ctx(), both, undefined, at(line))).toBeNull()
     expect(asked).toBe(4)
     expect(ledger.list('s')).toEqual([])
   })
@@ -239,10 +258,10 @@ describe('decisions', () => {
       return Promise.resolve({ ...r, outcome: Outcome.ALLOW, scope: Scope.ONCE })
     }
     const ledger = new Decisions(null, allow)
-    const handed: HandOff = { claimed: [], holders: 1, parent: null }
-    expect(await ledger.resolve(ctx(), ASK, undefined, handed, true)).toBeNull()
+    const handed: HandOff = fresh()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(handed), true)).toBeNull()
     expect(ledger.list('s')).toHaveLength(1)
-    expect(handed.claimed).toEqual(ledger.list('s'))
+    expect(handed.claimed.map((c) => c.decision)).toEqual(ledger.list('s'))
     await ledger.revoke('s', handed)
     expect(ledger.list('s')).toEqual([])
     expect(handed.claimed).toEqual([])
@@ -260,16 +279,37 @@ describe('decisions', () => {
       return Promise.resolve({ ...r, outcome: Outcome.ALLOW, scope: Scope.ONCE })
     }
     const ledger = new Decisions(null, allow)
-    const handed: HandOff = { claimed: [], holders: 1, parent: null }
-    expect(await ledger.resolve(ctx(), ASK, undefined, handed, true)).toBeNull()
-    expect(await ledger.resolve(ctx(), ASK, undefined, handed, true)).toBeNull()
+    const handed: HandOff = fresh()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, 0), true)).toBeNull()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, 1), true)).toBeNull()
     expect(asked).toBe(2)
     expect(handed.claimed).toHaveLength(2)
     expect(ledger.list('s')).toHaveLength(2)
-    expect(await ledger.resolve(ctx(), ASK, undefined, handed)).toBeNull()
-    expect(await ledger.resolve(ctx(), ASK, undefined, handed)).toBeNull()
+    // The pass reading either spelling again finds it answered.
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, 1), true)).toBeNull()
+    expect(asked).toBe(2)
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, 0))).toBeNull()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, 1))).toBeNull()
     expect(asked).toBe(2)
     expect(ledger.list('s')).toEqual([])
+  })
+
+  it('offers a claim to its occurrence alone', async () => {
+    // A grant the pass claimed for one spelling is not on offer to
+    // another spelling of the same command on the same line, whether a
+    // pass or a gate reads it: a word that expands at run time into the
+    // command cannot run on the nod a literal spelling was given.
+    const ledger = new Decisions()
+    const waiting = await ledger.resolve(ctx(), ASK)
+    expect(waiting?.kind).toBe('pending')
+    await ledger.answer((waiting as { id: string }).id, Outcome.ALLOW)
+    const handed = fresh()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, 0), true)).toBeNull()
+    expect((await ledger.resolve(ctx(), ASK, undefined, at(handed, 1)))?.kind).toBe('pending')
+    expect((await ledger.held(ctx(), ASK, at(handed, 1)))?.kind).toBe('pending')
+    expect(await ledger.held(ctx(), ASK, at(handed, 0))).toBeNull()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, 0))).toBeNull()
+    expect(ledger.pending('s')).toHaveLength(1)
   })
 
   it('lets a nested line spend what its parent pass claimed', async () => {
@@ -284,23 +324,23 @@ describe('decisions', () => {
       return Promise.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE })
     })
     const ask: Ask = { kind: 'ask', reason: 'sign-off', rule: RULE }
-    const outer: HandOff = { claimed: [], holders: 1, parent: null }
-    expect(await ledger.resolve(ctx(), ask, undefined, outer, true)).toBeNull()
+    const outer: HandOff = fresh()
+    expect(await ledger.resolve(ctx(), ask, undefined, at(outer), true)).toBeNull()
     expect(asked).toHaveLength(1)
-    const inner: HandOff = { claimed: [], holders: 1, parent: outer }
+    const inner: HandOff = fresh(outer)
     // The inner pass finds the outer claim standing for this occurrence.
-    expect(await ledger.resolve(ctx(), ask, undefined, inner, true)).toBeNull()
+    expect(await ledger.resolve(ctx(), ask, undefined, at(inner, 0), true)).toBeNull()
     expect(asked).toHaveLength(1)
     // A second spelling on the inner line is a question of its own.
-    expect(await ledger.resolve(ctx(), ask, undefined, inner, true)).toBeNull()
+    expect(await ledger.resolve(ctx(), ask, undefined, at(inner, 1), true)).toBeNull()
     expect(asked).toHaveLength(2)
     // A line outside the lineage sees neither claim.
-    const stranger: HandOff = { claimed: [], holders: 1, parent: null }
-    expect(await ledger.resolve(ctx(), ask, undefined, stranger, true)).toBeNull()
+    const stranger: HandOff = fresh()
+    expect(await ledger.resolve(ctx(), ask, undefined, at(stranger), true)).toBeNull()
     expect(asked).toHaveLength(3)
     // The inner gates spend both without asking.
-    expect(await ledger.resolve(ctx(), ask, undefined, inner)).toBeNull()
-    expect(await ledger.resolve(ctx(), ask, undefined, inner)).toBeNull()
+    expect(await ledger.resolve(ctx(), ask, undefined, at(inner, 0))).toBeNull()
+    expect(await ledger.resolve(ctx(), ask, undefined, at(inner, 1))).toBeNull()
     expect(asked).toHaveLength(3)
     await ledger.revoke('s', inner)
     await ledger.revoke('s', outer)
@@ -316,18 +356,18 @@ describe('decisions', () => {
     const waiting = await ledger.resolve(ctx(), ASK)
     if (waiting?.kind !== 'pending') throw new Error('unreachable')
     await ledger.answer(waiting.id, Outcome.ALLOW)
-    const first: HandOff = { claimed: [], holders: 1, parent: null }
-    const second: HandOff = { claimed: [], holders: 1, parent: null }
-    expect(await ledger.resolve(ctx(), ASK, undefined, first, true)).toBeNull()
-    expect((await ledger.resolve(ctx(), ASK, undefined, second, true))?.kind).toBe('pending')
+    const first: HandOff = fresh()
+    const second: HandOff = fresh()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(first), true)).toBeNull()
+    expect((await ledger.resolve(ctx(), ASK, undefined, at(second), true))?.kind).toBe('pending')
     expect((await ledger.resolve(ctx(), ASK))?.kind).toBe('pending')
-    expect(await ledger.resolve(ctx(), ASK, undefined, first)).toBeNull()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(first))).toBeNull()
     expect(ledger.pending('s')).toHaveLength(1)
     expect(ledger.list('s')).toHaveLength(1)
     // Released at the line's end, a claim no longer hides anything.
     await ledger.revoke('s', first)
     await ledger.answer(ledger.pending('s')[0]?.id ?? '', Outcome.ALLOW)
-    expect(await ledger.resolve(ctx(), ASK, undefined, second, true)).toBeNull()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(second), true)).toBeNull()
   })
 
   it('spends a borrowed hand-off at its last holder', async () => {
@@ -338,12 +378,12 @@ describe('decisions', () => {
     const waiting = await ledger.resolve(ctx(), ASK)
     if (waiting?.kind !== 'pending') throw new Error('unreachable')
     await ledger.answer(waiting.id, Outcome.ALLOW)
-    const handed: HandOff = { claimed: [], holders: 1, parent: null }
-    expect(await ledger.resolve(ctx(), ASK, undefined, handed, true)).toBeNull()
+    const handed: HandOff = fresh()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(handed), true)).toBeNull()
     ledger.borrow(handed)
     await ledger.revoke('s', handed)
     expect(ledger.list('s')).toHaveLength(1)
-    expect(await ledger.resolve(ctx(), ASK, undefined, handed)).toBeNull()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(handed))).toBeNull()
     await ledger.revoke('s', handed)
     expect(ledger.list('s')).toEqual([])
   })
@@ -357,12 +397,10 @@ describe('decisions', () => {
     if (waiting?.kind !== 'pending') throw new Error('unreachable')
     await ledger.answer(waiting.id, Outcome.ALLOW)
     expect(await ledger.held(ctx(), ASK)).toBeNull()
-    const handed: HandOff = { claimed: [], holders: 1, parent: null }
-    expect(await ledger.resolve(ctx(), ASK, undefined, handed, true)).toBeNull()
+    const handed: HandOff = fresh()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(handed), true)).toBeNull()
     expect((await ledger.held(ctx(), ASK))?.kind).toBe('pending')
-    expect((await ledger.held(ctx(), ASK, { claimed: [], holders: 1, parent: null }))?.kind).toBe(
-      'pending',
-    )
+    expect((await ledger.held(ctx(), ASK, at(fresh())))?.kind).toBe('pending')
     ledger.release('s', handed)
     expect(await ledger.held(ctx(), ASK)).toBeNull()
   })
@@ -376,8 +414,8 @@ describe('decisions', () => {
     expect(waiting?.kind).toBe('pending')
     if (waiting?.kind !== 'pending') throw new Error('unreachable')
     await ledger.answer(waiting.id, Outcome.ALLOW)
-    const handed: HandOff = { claimed: [], holders: 1, parent: null }
-    expect(await ledger.resolve(ctx(), ASK, undefined, handed, true)).toBeNull()
+    const handed: HandOff = fresh()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(handed), true)).toBeNull()
     expect(handed.claimed).toHaveLength(1)
     await ledger.revoke('s', handed)
     expect(ledger.list('s')).toEqual([])

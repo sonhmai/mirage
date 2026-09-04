@@ -28,9 +28,16 @@ import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
 import { expandBraces, expansionWrite, lookupVar } from './variable.ts'
 import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
 
+/**
+ * The executor's door for a nested line. `node` is the node whose text
+ * the line is: the command running it (bound by the dispatcher for
+ * every word that runs a line) or the substitution being expanded,
+ * which names itself. The inner line's commands stand under it, where
+ * the judging pass placed them.
+ */
 export type ExecuteFn = (
   command: string,
-  opts: { sessionId: string; stdin?: ByteSource | null },
+  opts: { sessionId: string; stdin?: ByteSource | null; node?: TSNodeLike },
 ) => Promise<IOResult>
 
 // Whitespace tree-sitter folds into an expansion's opening token.
@@ -89,6 +96,7 @@ async function expandBacktickRegion(
   raw: string,
   session: Session,
   executeFn: ExecuteFn,
+  node: TSNodeLike,
 ): Promise<string> {
   let out = ''
   for (const [text, isCommand] of splitBacktickSegments(raw)) {
@@ -96,7 +104,7 @@ async function expandBacktickRegion(
       out += text
       continue
     }
-    const io = await executeFn(text, { sessionId: session.sessionId })
+    const io = await executeFn(text, { sessionId: session.sessionId, node })
     out += (await io.stdoutStr()).replace(/\n+$/, '')
     session.cmdsubSeq += 1
     session.cmdsubStatus = io.exitCode
@@ -315,7 +323,7 @@ export async function expandNodeMarked(
     if (rawSub.startsWith('`') && rawSub.endsWith('`')) {
       // Backtick regions are re-lexed here rather than trusted from the
       // grammar, which merges adjacent pairs (see splitBacktickSegments).
-      return prefix + (await expandBacktickRegion(rawSub, session, executeFn))
+      return prefix + (await expandBacktickRegion(rawSub, session, executeFn, tsNode))
     }
     if (rawSub.startsWith('$((') && rawSub.endsWith('))')) {
       // Inside heredoc bodies tree-sitter parses `$((expr))` as a
@@ -350,7 +358,9 @@ export async function expandNodeMarked(
     // assignments, control flow).
     const inner = rawSub.slice(2, -1)
     if (inner.trim() === '') return prefix
-    const io = await executeFn(inner, { sessionId: session.sessionId })
+    // The substitution names its own node: the nested line's commands
+    // stand under it, which is where the pass placed them.
+    const io = await executeFn(inner, { sessionId: session.sessionId, node: tsNode })
     const text = (await io.stdoutStr()).replace(/\n+$/, '')
     // Record the substitution's status: an assignment-only statement
     // whose value ran substitutions reports the last one's status as

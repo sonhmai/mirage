@@ -49,7 +49,8 @@ import type { ExecutionNode } from '../types.ts'
 import { failureResult, isControlFlowError } from './failure.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { cliEnvNames, fillEnv, fillNames, guestBound, lineNodes } from './fill.ts'
-import { admitLine, isPending } from '../node/admission.ts'
+import { admitLine, isPending, isPendingRefusal } from '../node/admission.ts'
+import { occurrenceOf } from '../node/occurrence.ts'
 import { runWholeLine } from './line.ts'
 import type { WorkspaceMeta } from './meta.ts'
 import type { Router } from './routing.ts'
@@ -262,10 +263,10 @@ async function runLine(
 
   // The line's hand-off: the grants its judging passes claim for its
   // gates, which the gates spend from and the line's end sweeps. A
-  // nested evaluation is handed it as the parent of its own, so what
-  // this line's pass claimed for the words a command runs is spent by
-  // the line that runs them.
-  const handed: HandOff = { claimed: [], holders: 1, parent: options.handed ?? null }
+  // nested evaluation runs on one made under it, standing at the node
+  // whose text it evaluates, so what this line's pass claimed for the
+  // words a command runs is spent by the line that runs them.
+  const handed: HandOff = options.handed ?? { claimed: [], holders: 1, parent: null, origin: null }
 
   const executeFn: ExecuteFn = async (cmd, opts) => {
     // The executor's internal evals ($(), eval, source, xargs) are
@@ -283,7 +284,12 @@ async function runLine(
     // Nested lines never re-route: the evaluator's inner lines keep
     // the typed line's decision (runtime argument, policy, or scripts).
     if (routingDecision !== null) innerOpts.routingDecision = routingDecision
-    innerOpts.handed = handed
+    innerOpts.handed = {
+      claimed: [],
+      holders: 1,
+      parent: handed,
+      origin: opts.node === undefined ? null : occurrenceOf(opts.node, handed),
+    }
     // `command NAME` re-runs the inner line and must forward the pipe
     // stdin so `... | command cat` filters the upstream output; the same
     // path carries `echo hi | bash -c 'cat'` into the inner line.
@@ -587,6 +593,16 @@ async function runParsedLine(
       runCommandTree(deps, rootNode, effectiveSession, stdin)
     try {
       execResult = isLine ? await runWithRecording(runBody) : [await runBody(), []]
+      // A record a nested line earned is the line's to report when its
+      // own tree earned none (see NestedRefusal). A question a gate left
+      // waiting holds the line exactly as one the pass left waiting
+      // does: the retry has to find the grants the pass claimed for the
+      // other commands standing, or it asks for them again, and the
+      // answer to this one would be taken by the first spelling the pass
+      // reads.
+      const treeIo = execResult[0][1]
+      treeIo.refusal ??= nested.latest
+      held = isPendingRefusal(treeIo.refusal)
     } catch (err) {
       // Abort (cancellation) and content drift are control-flow signals
       // that must propagate, mirroring the Python workspace. Any other
@@ -603,9 +619,6 @@ async function runParsedLine(
     else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
   }
   const [[materialized, io], opRecords] = execResult
-  // A record a nested line earned is the line's to report when its own
-  // tree earned none (see NestedRefusal).
-  io.refusal ??= nested.latest
   targetSession.lastExitCode = io.exitCode
   let stdoutBytes: Uint8Array
   try {

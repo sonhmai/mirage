@@ -297,17 +297,20 @@ inline or out of band, is handed to the run; when a later command is
 refused instead, nothing runs and the refusal spends the grant, so the
 next line spelling that command asks again. A grant the run never
 reaches (a `&&` that short-circuited before the command) is spent when
-the line ends, for the same reason. A command spelled twice on one line
-is two questions: one `once` grant answers one spelling, and a grant one
-line has claimed is not on offer to a line judged at the same time. A
-grant given to a line that launches a background job stays with the job
-until the job ends, since its commands reach their gates after the line
-has returned. A line the shell evaluates from inside another (`$( )`,
-`eval`, `source`, `xargs`) spends what the outer line was given for the
-words it runs, so `echo $(cat secret.txt)` is one question, not two. A
-line a whole-line runtime takes is judged the same way: an answer it
-was given stands while a later question on the same line waits, so the
-retry asks only for what is still unanswered.
+the line ends, for the same reason. A grant is bound to the place on
+the line it was given for, so a command spelled twice on one line is two
+questions, a word that expands at run time into a command cannot run on
+the nod a literal spelling elsewhere on the line was given (`$S && cat
+secret.txt` asks for both), and a grant one line has claimed is not on
+offer to a line judged at the same time. A grant given to a line that
+launches a background job stays with the job until the job ends, since
+its commands reach their gates after the line has returned. A line the
+shell evaluates from inside another (`$( )`, `eval`, `source`, `xargs`)
+spends what the outer line was given for the words it runs, so
+`echo $(cat secret.txt)` is one question, not two, and two such bodies on
+one line are two. A line a whole-line runtime takes is judged the same
+way: an answer it was given stands while a later question on the same
+line waits, so the retry asks only for what is still unanswered.
 
 ## Dry runs
 

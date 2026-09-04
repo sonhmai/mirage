@@ -18,8 +18,9 @@ import hashlib
 from collections.abc import Awaitable, Callable, Sequence
 
 from mirage.policy.match import Outcome
-from mirage.policy.types import (Abandoned, Ask, CommandContext, CommandRule,
-                                 Decision, Deny, HandOff, Pending, Scope,
+from mirage.policy.types import (Abandoned, Ask, Claim, Claimant,
+                                 CommandContext, CommandRule, Decision, Deny,
+                                 HandOff, Pending, Scope,
                                  SessionDecisionsQuery)
 
 # A host that answers an Ask inside the line.
@@ -265,7 +266,7 @@ class Decisions:
         ctx: CommandContext,
         ask: Ask,
         cancel: asyncio.Event | None = None,
-        handed: HandOff | None = None,
+        claimant: Claimant | None = None,
         judging: bool = False,
     ) -> Deny | Pending | Abandoned | None:
         """The executor's branch for an Ask: settled records answer it,
@@ -294,23 +295,23 @@ class Decisions:
             cancel (asyncio.Event | None): the run's kill channel, so a
                 question outlives neither its run's deadline nor a
                 caller's kill.
-            handed (HandOff | None): the line's hand-off, None outside a
-                line (a bare chain). A grant another live hand-off has
-                claimed is not on offer to this line at all, whichever
-                pass reads it, unless that hand-off is one this line
-                was evaluated from: the outer pass claimed it for the
-                words it runs, so it is this line's to spend.
+            claimant (Claimant | None): the reading command and its
+                line, None outside a line (a bare chain). A claimed
+                grant is on offer to a reader at the occurrence it was
+                claimed for, on the same line or one evaluated from it,
+                and to nobody else: not to another spelling of the
+                command on the line, and not to another line judged at
+                the same time.
             judging (bool): True for a pass that judges the line on
-                behalf of the one that runs it -- the env pre-pass, and
-                the compound-line pass that judges every command before
-                any runs. Nothing is spent then: every ONCE grant behind
-                the command, the one the host gives now and any already
-                on file, is claimed on ``handed`` for the gate behind
-                the pass, which runs the line and spends them. A
-                claimed grant is not seen again by the same pass, so a
-                command spelled twice on one line is asked twice. False
-                for that gate, which sees its own line's claims and
-                spends them.
+                behalf of the one that runs it -- the env pre-pass, the
+                compound-line pass that judges every command before any
+                runs, and the pass over a line a runtime takes whole.
+                Nothing is spent then: every ONCE grant behind the
+                command, the one the host gives now and any already on
+                file, is claimed on the line's hand-off for the
+                claimant's occurrence, for the gate behind the pass,
+                which runs the line and spends them. False for that
+                gate.
 
         Returns:
             None to run the line, a Deny to refuse it, a Pending when
@@ -319,7 +320,7 @@ class Decisions:
         """
         rules = ask.rules or (ask_rule(ctx, ask), )
         argv = (ctx.command, *ctx.argv)
-        held = self._standing(ctx.session_id, handed, judging)
+        held = self._standing(ctx.session_id, claimant)
         answers = [(rule, self._settled(held, rule, argv, ctx.cwd))
                    for rule in rules]
         refused = next((rule for rule, r in answers
@@ -345,12 +346,13 @@ class Decisions:
         # without the re-read, the grant it gave THIS line would still be
         # standing for the next identical one, and whoever allowed once
         # would have allowed twice.
-        once = self._once_answers(ctx.session_id, rules, argv, ctx.cwd, handed,
-                                  judging)
-        if not judging or handed is None:
+        once = self._once_answers(ctx.session_id, rules, argv, ctx.cwd,
+                                  claimant)
+        if not judging or claimant is None:
             await self._spend(ctx.session_id, once)
             return None
-        handed.claimed.extend(once)
+        handed = claimant.line
+        handed.claimed.extend(Claim(claimant.occurrence, r) for r in once)
         live = self._live.setdefault(ctx.session_id, [])
         if once and not any(h is handed for h in live):
             live.append(handed)
@@ -394,7 +396,8 @@ class Decisions:
         handed.holders -= 1
         if handed.holders > 0:
             return
-        await self._spend(session_id, tuple(handed.claimed))
+        await self._spend(session_id,
+                          tuple(c.decision for c in handed.claimed))
         self.release(session_id, handed)
 
     def release(self, session_id: str, handed: HandOff) -> None:
@@ -414,36 +417,40 @@ class Decisions:
         live = self._live.get(session_id, [])
         self._live[session_id] = [h for h in live if h is not handed]
 
-    def _standing(self, session_id: str, handed: HandOff | None,
-                  judging: bool) -> tuple[Decision, ...]:
-        """The session's records as one line may read them.
+    def _standing(self, session_id: str,
+                  claimant: Claimant | None) -> tuple[Decision, ...]:
+        """The session's records as one reader may see them.
 
-        A grant claimed by another live line is not on offer: it is
-        that line's to spend, and reading it here would let two lines
-        judged at once both pass on one nod, the second of them running
-        its earlier commands before its gate found the grant gone. A
-        grant this line claimed is on offer to its gate, which spends
-        it, and not to its own judging pass, so a command spelled twice
-        on the line is asked twice. A grant claimed by a line this one
-        was evaluated from is on offer to both, gate and pass alike: the
-        outer pass read into the words it runs and claimed for them,
-        so the inner pass finds the same occurrence answered rather
-        than asking for it again, and the inner gate spends it.
+        A claimed grant is on offer to exactly one reader: the command
+        it was claimed for, on the line that claimed it or a line
+        evaluated from that line, whether the pass or the gate is
+        reading. Every other claim is hidden. A grant claimed by
+        another line is that line's to spend, and reading it here would
+        let two lines judged at once both pass on one nod, the second
+        of them running its earlier commands before its gate found the
+        grant gone. A grant claimed for another occurrence on this line
+        is that occurrence's: reading it would let a word that expands
+        at run time into the same command run on the nod a literal
+        spelling was given, and would let one nod answer two spellings.
+        A pass re-reading an occurrence its outer line's pass already
+        claimed finds it answered, which is how a nested line runs on
+        the outer line's questions rather than asking them again.
 
         Args:
             session_id (str): the asking session.
-            handed (HandOff | None): the line's hand-off, None outside a
-                line.
-            judging (bool): whether the reader is a judging pass.
+            claimant (Claimant | None): the reading command and its
+                line, None outside a line.
         """
         held = self._records(session_id)
-        own = lineage(handed)
+        own = lineage(claimant.line) if claimant is not None else ()
         taken: list[Decision] = []
         for other in self._live.get(session_id, ()):
-            if not any(other is h for h in own):
-                taken.extend(other.claimed)
-        if judging and handed is not None:
-            taken.extend(handed.claimed)
+            mine = any(other is h for h in own)
+            for claim in other.claimed:
+                if mine and claimant is not None and (claim.occurrence
+                                                      == claimant.occurrence):
+                    continue
+                taken.append(claim.decision)
         if not taken:
             return held
         return tuple(r for r in held if not any(r is t for t in taken))
@@ -454,8 +461,7 @@ class Decisions:
         rules: Sequence[CommandRule],
         argv: tuple[str, ...],
         cwd: str,
-        handed: HandOff | None,
-        judging: bool,
+        claimant: Claimant | None,
     ) -> tuple[Decision, ...]:
         """Every ONCE answer standing behind this line, as the ledger
         holds it now.
@@ -465,13 +471,13 @@ class Decisions:
             rules (Sequence[CommandRule]): the rules the ask named.
             argv (tuple[str, ...]): the line, command name first.
             cwd (str): the directory the line was typed in.
-            handed (HandOff | None): the line's hand-off.
-            judging (bool): whether the reader is a judging pass.
+            claimant (Claimant | None): the reading command and its
+                line.
 
         Returns:
             tuple[Decision, ...]: the settled ONCE records.
         """
-        held = self._standing(session_id, handed, judging)
+        held = self._standing(session_id, claimant)
         found = (self._settled(held, rule, argv, cwd) for rule in rules)
         return tuple(r for r in found
                      if r is not None and r.scope is Scope.ONCE)
@@ -479,7 +485,7 @@ class Decisions:
     def held(self,
              ctx: CommandContext,
              ask: Ask,
-             handed: HandOff | None = None) -> Deny | Pending | None:
+             claimant: Claimant | None = None) -> Deny | Pending | None:
         """What the settled records alone say about an asked line.
 
         The read-only half of :meth:`resolve`, and the only half a dry
@@ -488,14 +494,14 @@ class Decisions:
         reaching the host. So ``explain`` can report that a line would
         be refused, or would still be waiting, without a question
         arriving for a line nobody typed. It reads through the same
-        reservations a judging pass does, so a grant a live line has
-        claimed reads as waiting here exactly as a run would find it.
+        reservations a run does, so a grant a live line has claimed
+        reads as waiting here exactly as a run would find it.
 
         Args:
             ctx (CommandContext): the asked line.
             ask (Ask): the chain's answer.
-            handed (HandOff | None): the reading line's hand-off, None
-                for a dry run outside any line.
+            claimant (Claimant | None): the reading command and its
+                line, None for a dry run outside any line.
 
         Returns:
             None when every rule the ask names is already answered, a
@@ -503,7 +509,7 @@ class Decisions:
             rule nothing answers.
         """
         argv = (ctx.command, *ctx.argv)
-        held = self._standing(ctx.session_id, handed, True)
+        held = self._standing(ctx.session_id, claimant)
         answers = [(rule, self._settled(held, rule, argv, ctx.cwd))
                    for rule in (ask.rules or (ask_rule(ctx, ask), ))]
         refused = next((rule for rule, r in answers

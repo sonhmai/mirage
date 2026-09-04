@@ -696,4 +696,48 @@ describe('prejudge scope', () => {
     expect(DEC.decode(ran.stdout)).toBe('rm: /data/prod/x.txt: production data is protected\n')
     expect(DEC.decode(ran.stderr)).toBe('')
   })
+
+  it("does not run a command expanded at run time on a judged spelling's nod", async () => {
+    // The pass reads the literal cat and claims the answer for it; the
+    // first cat's operand expands at run time into the same command. Read
+    // by spelling, that gate found the literal's grant and read the secret
+    // before its own question was ever put, and the literal then asked
+    // again. Bound to its occurrence, the grant is the literal's alone:
+    // the expanded command asks, its question holds the line, and the
+    // retry runs both on their own answers.
+    const w = await ws()
+    const line = 'F=/data/secret.txt; cat $F && cat /data/secret.txt'
+    const first = await w.execute(line, { sessionId: 's' })
+    expect(first.exitCode).toBe(126)
+    expect(first.refusal?.kind).toBe('pending')
+    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    const second = await w.execute(line, { sessionId: 's' })
+    expect(second.exitCode).toBe(126)
+    expect(DEC.decode(second.stdout)).toBe('')
+    expect(second.refusal?.kind).toBe('pending')
+    expect(w.decisions.list('s')).toHaveLength(2)
+    await w.decisions.answer(second.refusal?.askId ?? '', Outcome.ALLOW)
+    const ran = await w.execute(line, { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('s\ns\n')
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('reads one body under two words as two occurrences', async () => {
+    // The same substitution twice on a line is two questions, and each
+    // nested line spends its own: the second body cannot be answered by
+    // the first body's nod, nor ask a third time.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute(
+      'echo $(cat /data/secret.txt) $(cat /data/secret.txt) && ls /data',
+      {
+        sessionId: 's',
+      },
+    )
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout).startsWith('s s\n')).toBe(true)
+    expect(asked).toHaveLength(2)
+    expect(w.decisions.list('s')).toEqual([])
+  })
 })

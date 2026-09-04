@@ -17,11 +17,13 @@ import { Outcome } from './types.ts'
 import type {
   Abandoned,
   Ask,
+  Claimant,
   CommandContext,
   CommandRule,
   Decision,
   Deny,
   HandOff,
+  Occurrence,
   Pending,
   SessionDecisionsQuery,
 } from './types.ts'
@@ -185,6 +187,21 @@ export function lineage(handed: HandOff | null): HandOff[] {
   return out
 }
 
+/**
+ * Whether two occurrences are one place: the same span of the same
+ * text, under the same node all the way up.
+ */
+export function sameOccurrence(a: Occurrence | null, b: Occurrence | null): boolean {
+  let x = a
+  let y = b
+  while (x !== null && y !== null) {
+    if (x.source !== y.source || x.start !== y.start || x.end !== y.end) return false
+    x = x.parent
+    y = y.parent
+  }
+  return x === null && y === null
+}
+
 export class Decisions {
   private readonly sessions: SessionDecisionsQuery | null
   private readonly onAsk: AskHandler | null
@@ -266,19 +283,20 @@ export class Decisions {
    * @param ask the chain's Ask.
    * @param signal the run's abort signal, so a question outlives
    *   neither its run's deadline nor a caller's kill.
-   * @param handed the line's hand-off, null outside a line (a bare
-   *   chain, a whole line a runtime takes). A grant another live
-   *   hand-off has claimed is not on offer to this line at all,
-   *   whichever pass reads it.
+   * @param claimant the reading command and its line, null outside a
+   *   line (a bare chain). A claimed grant is on offer to a reader at
+   *   the occurrence it was claimed for, on the same line or one
+   *   evaluated from it, and to nobody else: not to another spelling
+   *   of the command on the line, and not to another line judged at
+   *   the same time.
    * @param judging true for a pass that judges the line on behalf of
-   *   the one that runs it — the env pre-pass, and the compound-line
-   *   pass that judges every command before any runs. Nothing is spent
-   *   then: every ONCE grant behind the command, the one the host gives
-   *   now and any already on file, is claimed on `handed` for the gate
-   *   behind the pass, which runs the line and spends them. A claimed
-   *   grant is not seen again by the same pass, so a command spelled
-   *   twice on one line is asked twice. False for that gate, which sees
-   *   its own line's claims and spends them.
+   *   the one that runs it — the env pre-pass, the compound-line pass
+   *   that judges every command before any runs, and the pass over a
+   *   line a runtime takes whole. Nothing is spent then: every ONCE
+   *   grant behind the command, the one the host gives now and any
+   *   already on file, is claimed on the line's hand-off for the
+   *   claimant's occurrence, for the gate behind the pass, which runs
+   *   the line and spends them. False for that gate.
    * @returns the refusal, the question left waiting, an Abandoned for a
    *   run killed mid-question, or null to run.
    */
@@ -286,13 +304,13 @@ export class Decisions {
     ctx: CommandContext,
     ask: Ask,
     signal?: AbortSignal,
-    handed: HandOff | null = null,
+    claimant: Claimant | null = null,
     judging = false,
   ): Promise<Deny | Pending | Abandoned | null> {
     const rules = ask.rules ?? [askRule(ctx, ask)]
     const argv = [ctx.command, ...ctx.argv]
     const sessionId = ctx.sessionId ?? ''
-    const held = this.standing(sessionId, handed, judging)
+    const held = this.standing(sessionId, claimant)
     const answers = rules.map(
       (rule) => [rule, Decisions.settled(held, rule, argv, ctx.cwd)] as const,
     )
@@ -318,12 +336,13 @@ export class Decisions {
     // inline settled its record during the loop above: without the re-read,
     // the grant it gave THIS line would still be standing for the next
     // identical one, and whoever allowed once would have allowed twice.
-    const once = this.onceAnswers(sessionId, rules, argv, ctx.cwd, handed, judging)
-    if (!judging || handed === null) {
+    const once = this.onceAnswers(sessionId, rules, argv, ctx.cwd, claimant)
+    if (!judging || claimant === null) {
       await this.spend(sessionId, once)
       return null
     }
-    handed.claimed.push(...once)
+    const handed = claimant.line
+    handed.claimed.push(...once.map((decision) => ({ occurrence: claimant.occurrence, decision })))
     if (once.length > 0) {
       const live = this.live.get(sessionId) ?? new Set<HandOff>()
       live.add(handed)
@@ -354,7 +373,10 @@ export class Decisions {
   async revoke(sessionId: string, handed: HandOff): Promise<void> {
     handed.holders -= 1
     if (handed.holders > 0) return
-    await this.spend(sessionId, [...handed.claimed])
+    await this.spend(
+      sessionId,
+      handed.claimed.map((c) => c.decision),
+    )
     this.release(sessionId, handed)
   }
 
@@ -386,30 +408,34 @@ export class Decisions {
   /**
    * The session's records as one line may read them.
    *
-   * A grant claimed by another live line is not on offer: it is that
+   * A claimed grant is on offer to exactly one reader: the command it
+   * was claimed for, on the line that claimed it or a line evaluated
+   * from that line, whether the pass or the gate is reading. Every
+   * other claim is hidden. A grant claimed by another line is that
    * line's to spend, and reading it here would let two lines judged at
    * once both pass on one nod, the second of them running its earlier
-   * commands before its gate found the grant gone. A grant this line
-   * claimed is on offer to its gate, which spends it, and not to its
-   * own judging pass, so a command spelled twice on the line is asked
-   * twice. A grant claimed by a line this one was evaluated from is on
-   * offer to both, gate and pass alike: the outer pass read into the
-   * words it runs and claimed for them, so the inner pass finds the
-   * same occurrence answered rather than asking for it again, and the
-   * inner gate spends it.
+   * commands before its gate found the grant gone. A grant claimed for
+   * another occurrence on this line is that occurrence's: reading it
+   * would let a word that expands at run time into the same command
+   * run on the nod a literal spelling was given, and would let one nod
+   * answer two spellings. A pass re-reading an occurrence its outer
+   * line's pass already claimed finds it answered, which is how a
+   * nested line runs on the outer line's questions rather than asking
+   * them again.
    */
-  private standing(
-    sessionId: string,
-    handed: HandOff | null,
-    judging: boolean,
-  ): readonly Decision[] {
+  private standing(sessionId: string, claimant: Claimant | null): readonly Decision[] {
     const held = this.records(sessionId)
-    const own = lineage(handed)
+    const own = claimant === null ? [] : lineage(claimant.line)
     const taken: Decision[] = []
     for (const other of this.live.get(sessionId) ?? []) {
-      if (!own.includes(other)) taken.push(...other.claimed)
+      const mine = own.includes(other)
+      for (const claim of other.claimed) {
+        if (mine && claimant !== null && sameOccurrence(claim.occurrence, claimant.occurrence)) {
+          continue
+        }
+        taken.push(claim.decision)
+      }
     }
-    if (judging && handed !== null) taken.push(...handed.claimed)
     if (taken.length === 0) return held
     return held.filter((r) => !taken.some((t) => t === r))
   }
@@ -420,10 +446,9 @@ export class Decisions {
     rules: readonly CommandRule[],
     argv: readonly string[],
     cwd: string,
-    handed: HandOff | null,
-    judging: boolean,
+    claimant: Claimant | null,
   ): Decision[] {
-    const held = this.standing(sessionId, handed, judging)
+    const held = this.standing(sessionId, claimant)
     return rules
       .map((rule) => Decisions.settled(held, rule, argv, cwd))
       .filter((r): r is Decision => r !== null && r.scope === Scope.ONCE)
@@ -441,17 +466,17 @@ export class Decisions {
    * pass does, so a grant a live line has claimed reads as waiting here
    * exactly as a run would find it.
    *
-   * @param handed the reading line's hand-off, null for a dry run
-   *   outside any line.
+   * @param claimant the reading command and its line, null for a dry
+   *   run outside any line.
    */
   async held(
     ctx: CommandContext,
     ask: Ask,
-    handed: HandOff | null = null,
+    claimant: Claimant | null = null,
   ): Promise<Deny | Pending | null> {
     const argv = [ctx.command, ...ctx.argv]
     const sessionId = ctx.sessionId ?? ''
-    const records = this.standing(sessionId, handed, true)
+    const records = this.standing(sessionId, claimant)
     const answers = (ask.rules ?? [askRule(ctx, ask)]).map(
       (rule) => [rule, Decisions.settled(records, rule, argv, ctx.cwd)] as const,
     )

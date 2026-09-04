@@ -21,10 +21,10 @@ from typing import Any
 from mirage.commands.spec.types import ValueType
 from mirage.context.session_context import session_path_allowed
 from mirage.io.types import ByteSource
-from mirage.policy import (Abandoned, AdmissionRules, Ask, CommandContext,
-                           CommandRule, Deny, HandOff, Pending, PolicyDenied,
-                           Scope, ask_rule, refusal_of, render_deny,
-                           render_pending)
+from mirage.policy import (Abandoned, AdmissionRules, Ask, Claimant,
+                           CommandContext, CommandRule, Deny, HandOff, Pending,
+                           PolicyDenied, Scope, ask_rule, refusal_of,
+                           render_deny, render_pending)
 from mirage.policy.match import (Outcome, has_rules, io_refusal, reads_args,
                                  scopes_paths)
 from mirage.runtime.routing import command_nodes
@@ -56,6 +56,8 @@ from mirage.workspace.lookup import (SHELL_NAMES, SLASH_KEEPS_LAST, WordPolicy,
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.inner_lines import Word, inner_lines
+from mirage.workspace.node.occurrence import (Frame, line_frame, occurrence_in,
+                                              root_frame, whole_occurrence)
 from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir
 
@@ -321,7 +323,7 @@ async def admit(
     stdin: ByteSource | None = None,
     redirects: Sequence[PathSpec] = (),
     cancel: asyncio.Event | None = None,
-    handed: HandOff | None = None,
+    claimant: Claimant | None = None,
     judging: bool = False,
 ) -> Refused | Admitted:
     """The command plane's admission of one command: visibility, then
@@ -357,16 +359,17 @@ async def admit(
             only so a question put to a host cannot outlive the run
             that raised it. Nothing else here waits on anything outside
             mirage.
-        handed (HandOff | None): the line's hand-off, None outside a
-            line. The gate spends the grants claimed on it and never
-            one claimed by another line; a judging pass claims on it.
+        claimant (Claimant | None): the command and its line, None
+            outside a line. The gate spends the grants claimed for its
+            occurrence and never one claimed for another; a judging
+            pass claims for it.
         judging (bool): True for a pass that judges the command on
-            behalf of the gate that runs it (``prejudge_line``): the
-            grants behind the command are claimed on ``handed`` for
-            that gate to spend, so one question covers one run rather
-            than one pass. A refusal needs no such care -- the record
-            refuses the agent's retry from the ledger either way. False
-            for the gate.
+            behalf of the gate that runs it (``prejudge_line``,
+            ``admit_line``): the grants behind the command are claimed
+            on the line's hand-off for that gate to spend, so one
+            question covers one run rather than one pass. A refusal
+            needs no such care -- the record refuses the agent's retry
+            from the ledger either way. False for the gate.
     """
     gated = await gate(name, args, operands, session, registry, namespace,
                        agent_id, stdin, redirects)
@@ -377,7 +380,7 @@ async def admit(
     # the ledger answers it from the session's records or the host, so
     # an answer never re-opens a deny.
     action: Deny | Pending | Abandoned | None = (
-        await registry.decisions.resolve(ctx, asked, cancel, handed, judging)
+        await registry.decisions.resolve(ctx, asked, cancel, claimant, judging)
         if isinstance(asked, Ask) else asked)
     # The ledger stopped waiting on a host because this run was killed
     # while it was deciding. That is the kill landing late, not a ruling,
@@ -403,14 +406,23 @@ async def admit(
     return Refused(err, code, refusal_of(action))
 
 
-def is_pending(refused: Refused) -> bool:
-    """Whether a refusal is a question the host has not answered yet,
+def is_pending_refusal(refusal: Refusal | None) -> bool:
+    """Whether a record is a question the host has not answered yet,
     which holds the line for its retry rather than ending it.
+
+    Args:
+        refusal (Refusal | None): the record a result carries.
+    """
+    return refusal is not None and refusal.kind == "pending"
+
+
+def is_pending(refused: Refused) -> bool:
+    """Whether a refusal is a question the host has not answered yet.
 
     Args:
         refused (Refused): what the gate refused with.
     """
-    return refused.refusal is not None and refused.refusal.kind == "pending"
+    return is_pending_refusal(refused.refusal)
 
 
 def _refuse(name: str, reason: str) -> Refused:
@@ -507,7 +519,7 @@ async def _admit_words(
     rules: AdmissionRules | None,
     redirect_words: tuple[Word, ...] = (),
     cancel: asyncio.Event | None = None,
-    handed: HandOff | None = None,
+    claimant: Claimant | None = None,
     judging: bool = False,
 ) -> Refused | None:
     """Admit one command of a whole line on the words the gate read,
@@ -526,8 +538,8 @@ async def _admit_words(
         redirect_words (tuple[Word, ...]): the statement's redirect
             targets, as the gate reads them.
         cancel (asyncio.Event | None): the run's kill channel.
-        handed (HandOff | None): the line's hand-off, as ``admit`` takes
-            it.
+        claimant (Claimant | None): the command and its line, as
+            ``admit`` takes it; the lines it runs stand under it.
         judging (bool): whether this is a judging pass, as ``admit``
             takes it.
     """
@@ -548,7 +560,7 @@ async def _admit_words(
                          agent_id,
                          redirects=redirects,
                          cancel=cancel,
-                         handed=handed,
+                         claimant=claimant,
                          judging=judging)
     if isinstance(action, Refused):
         return action
@@ -576,11 +588,21 @@ async def _admit_words(
                 return _refuse(name, "runs lines the gate cannot read")
             continue
         if inner.line is not None:
+            frame = (line_frame(inner.line, claimant.occurrence)
+                     if claimant is not None else None)
             refusal = await admit_line(parse(inner.line), session, registry,
-                                       namespace, agent_id, cancel, handed,
-                                       judging)
+                                       namespace, agent_id, cancel,
+                                       claimant.line if claimant else None,
+                                       judging, frame)
         else:
-            refusal = await _admit_words(list(inner.argv),
+            argv = list(inner.argv)
+            within = (Claimant(
+                claimant.line,
+                whole_occurrence(
+                    line_frame(" ".join(w.value
+                                        for w in argv), claimant.occurrence)))
+                      if claimant is not None else None)
+            refusal = await _admit_words(argv,
                                          inner.open,
                                          session,
                                          registry,
@@ -588,7 +610,7 @@ async def _admit_words(
                                          agent_id,
                                          rules,
                                          cancel=cancel,
-                                         handed=handed,
+                                         claimant=within,
                                          judging=judging)
         if refusal is not None:
             return refusal
@@ -604,6 +626,7 @@ async def admit_line(
     cancel: asyncio.Event | None = None,
     handed: HandOff | None = None,
     judging: bool = False,
+    frame: Frame | None = None,
 ) -> Refused | None:
     """Admit every command of a line a runtime takes whole.
 
@@ -652,9 +675,13 @@ async def admit_line(
             line (a bare admission with no run behind it).
         judging (bool): True for the executor's pass over a line a
             runtime takes whole, which claims on ``handed``.
+        frame (Frame | None): the scope the line is read in, for a line
+            a word runs; None reads ``ast`` as the line itself.
     """
     rules = session.commands
     home = home_dir(session)
+    if frame is None:
+        frame = root_frame(ast, handed.origin if handed is not None else None)
     for node in command_nodes(ast):
         _, parts = split_env_prefix(get_parts(node))
         words = [
@@ -662,18 +689,19 @@ async def admit_line(
         ]
         if not words:
             continue
-        refusal = await _admit_words(words,
-                                     False,
-                                     session,
-                                     registry,
-                                     namespace,
-                                     agent_id,
-                                     rules,
-                                     redirect_words=statement_redirects(
-                                         node, home),
-                                     cancel=cancel,
-                                     handed=handed,
-                                     judging=judging)
+        refusal = await _admit_words(
+            words,
+            False,
+            session,
+            registry,
+            namespace,
+            agent_id,
+            rules,
+            redirect_words=statement_redirects(node, home),
+            cancel=cancel,
+            claimant=Claimant(handed, occurrence_in(node, frame))
+            if handed is not None else None,
+            judging=judging)
         if refusal is not None:
             return refusal
     return None

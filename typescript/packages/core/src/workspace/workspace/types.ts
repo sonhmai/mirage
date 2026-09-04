@@ -270,9 +270,9 @@ export interface ExecuteOptions {
    */
   routingDecision?: RouteDecision
   /**
-   * @internal The enclosing line's hand-off, forwarded to nested evals
-   * so an inner line spends the grants the outer line's pass claimed
-   * for it.
+   * @internal The hand-off the line runs on, made by the executor's
+   * nested evals under the outer line's so an inner line spends the
+   * grants the outer line's pass claimed for it.
    */
   handed?: HandOff
 }

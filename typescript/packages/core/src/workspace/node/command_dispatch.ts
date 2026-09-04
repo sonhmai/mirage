@@ -42,12 +42,13 @@ import { PathSpec, wordText } from '../../types.ts'
 import { Argv, expandArgv } from '../expand/argv.ts'
 import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
+import { claimantFor } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { handleCommand } from '../executor/command.ts'
 import { type AliasMark, aliasCommandText } from '../executor/builtins/alias/index.ts'
 import { findSyntaxError } from '../../shell/parse/index.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
-import { PolicyDenied, resolveLimit, type HandOff } from '../../policy/index.ts'
+import { PolicyDenied, resolveLimit, type Claimant, type HandOff } from '../../policy/index.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import {
@@ -285,7 +286,7 @@ async function runCommandBody(
   dispatch: DispatchFn,
   registry: MountRegistry,
   namespace: Namespace,
-  executeFn: ExecuteFn,
+  executeFnIn: ExecuteFn,
   node: TSNodeLike,
   parts: TSNodeLike[],
   name: string,
@@ -304,6 +305,13 @@ async function runCommandBody(
   // A background job's kill channel rides the session; fold it in so
   // builtins (sleep) and the mount layer observe the kill.
   const signal = mergeSignals(signalIn, session.abortSignal)
+  // The command's place on the line, as the pass computed it, and the
+  // door its nested evaluations re-enter through: a word that runs a
+  // line (eval, source, xargs) is bound to this node, and a substitution
+  // names its own node when it calls, so every nested line stands under
+  // the node its text came from.
+  const claimant = claimantFor(node, handed)
+  const executeFn: ExecuteFn = (cmd, opts) => executeFnIn(cmd, { node, ...opts })
 
   if (node.parent?.type !== NT.REDIRECTED_STATEMENT) {
     for (const child of node.namedChildren) {
@@ -342,7 +350,7 @@ async function runCommandBody(
       }
       const inner = getProcessSubBody(p)
       if (inner !== '') {
-        const io = await executeFn(inner, { sessionId: session.sessionId })
+        const io = await executeFn(inner, { sessionId: session.sessionId, node: p })
         procSubParts.push(await materialize(io.stdout))
         const stderr = await materialize(io.stderr)
         if (stderr.byteLength > 0) procSubStderr.push(stderr)
@@ -399,7 +407,7 @@ async function runCommandBody(
       node.startPosition?.row ?? 0,
       agentId,
       redirectPathsFor(node),
-      handed,
+      claimant,
     ),
     timeout,
     argv.name !== '' ? argv.name : '?',
@@ -465,7 +473,7 @@ async function runArgv(
   // command's gate window.
   redirects: readonly PathSpec[] = [],
   // The line's hand-off, which its gate spends from.
-  handed?: HandOff,
+  claimant: Claimant | null = null,
 ): Promise<Result> {
   const name = argv.name
 
@@ -513,7 +521,7 @@ async function runArgv(
       stdin,
       redirects,
       signal,
-      handed ?? null,
+      claimant,
     )
     if (!(verdict instanceof Admitted)) {
       return [

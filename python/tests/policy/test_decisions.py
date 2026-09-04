@@ -19,8 +19,9 @@ import pytest
 
 from mirage.policy.decisions import Decisions, ask_rule, covers, decision_id
 from mirage.policy.match import Outcome
-from mirage.policy.types import (Abandoned, Ask, CommandContext, CommandRule,
-                                 Decision, Deny, HandOff, Pending, Scope)
+from mirage.policy.types import (Abandoned, Ask, Claimant, CommandContext,
+                                 CommandRule, Decision, Deny, HandOff,
+                                 Occurrence, Pending, Scope)
 
 RULE = CommandRule(reason="sign-off", commands=("git push", ))
 
@@ -43,6 +44,16 @@ def _ctx(command: str = "git",
                           session_id=session_id,
                           registry=_Registry(),
                           tokens=(command, *argv))
+
+
+def _at(handed: HandOff, index: int = 0) -> Claimant:
+    """The reader for one spelling of a command on a line.
+
+    Args:
+        handed (HandOff): the line's hand-off.
+        index (int): which spelling, each its own occurrence.
+    """
+    return Claimant(handed, Occurrence(None, "line", index, index + 1))
 
 
 def _record(**over: object) -> Decision:
@@ -238,8 +249,8 @@ async def test_a_hand_off_spends_nothing_for_the_pass_that_follows():
     ledger = Decisions(on_ask=allow)
     ask = Ask("sign-off", rule=RULE)
     line = HandOff()
-    assert await ledger.resolve(_ctx(), ask, None, line, True) is None
-    assert await ledger.resolve(_ctx(), ask, None, line) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(line), True) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(line)) is None
     assert len(asked) == 1
     assert await ledger.resolve(_ctx(), ask) is None
     assert len(asked) == 2
@@ -249,13 +260,13 @@ async def test_a_hand_off_spends_nothing_for_the_pass_that_follows():
     # The first rule is granted to a line that was then held, which
     # releases its claim; the second during this line's own pass.
     earlier = HandOff()
-    assert await ledger.resolve(_ctx(), ask, None, earlier, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(earlier), True) is None
     ledger.release("s", earlier)
     line = HandOff()
-    assert await ledger.resolve(_ctx(), both, None, line, True) is None
+    assert await ledger.resolve(_ctx(), both, None, _at(line), True) is None
     assert len(asked) == 4
     # The gate finds both standing and asks nothing.
-    assert await ledger.resolve(_ctx(), both, None, line) is None
+    assert await ledger.resolve(_ctx(), both, None, _at(line)) is None
     assert len(asked) == 4
     assert ledger.list("s") == ()
 
@@ -275,9 +286,9 @@ async def test_a_revoked_hand_off_is_asked_again():
     ledger = Decisions(on_ask=allow)
     ask = Ask("sign-off", rule=RULE)
     handed = HandOff()
-    assert await ledger.resolve(_ctx(), ask, None, handed, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(handed), True) is None
     assert len(ledger.list("s")) == 1
-    assert handed.claimed == list(ledger.list("s"))
+    assert [c.decision for c in handed.claimed] == list(ledger.list("s"))
     await ledger.revoke("s", handed)
     assert ledger.list("s") == ()
     assert handed.claimed == []
@@ -301,13 +312,19 @@ async def test_a_hand_off_claims_a_grant_for_one_occurrence():
     ledger = Decisions(on_ask=allow)
     ask = Ask("sign-off", rule=RULE)
     handed = HandOff()
-    assert await ledger.resolve(_ctx(), ask, None, handed, True) is None
-    assert await ledger.resolve(_ctx(), ask, None, handed, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(handed, 0),
+                                True) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(handed, 1),
+                                True) is None
     assert len(asked) == 2
     assert len(handed.claimed) == 2
     assert len(ledger.list("s")) == 2
-    assert await ledger.resolve(_ctx(), ask, None, handed) is None
-    assert await ledger.resolve(_ctx(), ask, None, handed) is None
+    # The pass reading either spelling again finds it answered.
+    assert await ledger.resolve(_ctx(), ask, None, _at(handed, 1),
+                                True) is None
+    assert len(asked) == 2
+    assert await ledger.resolve(_ctx(), ask, None, _at(handed, 0)) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(handed, 1)) is None
     assert len(asked) == 2
     assert ledger.list("s") == ()
 
@@ -324,17 +341,17 @@ async def test_a_grant_one_line_claimed_is_not_on_offer_to_another():
     assert isinstance(waiting, Pending)
     await ledger.answer(waiting.id, Outcome.ALLOW)
     first, second = HandOff(), HandOff()
-    assert await ledger.resolve(_ctx(), ask, None, first, True) is None
-    assert isinstance(await ledger.resolve(_ctx(), ask, None, second, True),
-                      Pending)
+    assert await ledger.resolve(_ctx(), ask, None, _at(first), True) is None
+    assert isinstance(
+        await ledger.resolve(_ctx(), ask, None, _at(second), True), Pending)
     assert isinstance(await ledger.resolve(_ctx(), ask), Pending)
-    assert await ledger.resolve(_ctx(), ask, None, first) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(first)) is None
     assert len(ledger.pending("s")) == 1
     assert len(ledger.list("s")) == 1
     # Released at the line's end, a claim no longer hides anything.
     await ledger.revoke("s", first)
     await ledger.answer(ledger.pending("s")[0].id, Outcome.ALLOW)
-    assert await ledger.resolve(_ctx(), ask, None, second, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(second), True) is None
 
 
 @pytest.mark.asyncio
@@ -348,11 +365,11 @@ async def test_a_borrowed_hand_off_is_spent_by_its_last_holder():
     assert isinstance(waiting, Pending)
     await ledger.answer(waiting.id, Outcome.ALLOW)
     handed = HandOff()
-    assert await ledger.resolve(_ctx(), ask, None, handed, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(handed), True) is None
     ledger.borrow(handed)
     await ledger.revoke("s", handed)
     assert len(ledger.list("s")) == 1
-    assert await ledger.resolve(_ctx(), ask, None, handed) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(handed)) is None
     await ledger.revoke("s", handed)
     assert ledger.list("s") == ()
 
@@ -369,9 +386,9 @@ async def test_held_reads_through_a_live_lines_claim():
     await ledger.answer(waiting.id, Outcome.ALLOW)
     assert ledger.held(_ctx(), ask) is None
     handed = HandOff()
-    assert await ledger.resolve(_ctx(), ask, None, handed, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(handed), True) is None
     assert isinstance(ledger.held(_ctx(), ask), Pending)
-    assert isinstance(ledger.held(_ctx(), ask, HandOff()), Pending)
+    assert isinstance(ledger.held(_ctx(), ask, _at(HandOff())), Pending)
     ledger.release("s", handed)
     assert ledger.held(_ctx(), ask) is None
 
@@ -387,7 +404,7 @@ async def test_revoke_hands_back_a_grant_given_before_the_pass():
     assert isinstance(waiting, Pending)
     await ledger.answer(waiting.id, Outcome.ALLOW)
     handed = HandOff()
-    assert await ledger.resolve(_ctx(), ask, None, handed, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(handed), True) is None
     assert len(handed.claimed) == 1
     await ledger.revoke("s", handed)
     assert ledger.list("s") == ()
@@ -534,24 +551,46 @@ async def test_a_nested_line_spends_what_its_parents_pass_claimed():
     ledger = Decisions(on_ask=allow)
     ask = Ask("sign-off", rule=RULE)
     outer = HandOff()
-    assert await ledger.resolve(_ctx(), ask, None, outer, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(outer), True) is None
     assert len(asked) == 1
     inner = HandOff(parent=outer)
     # The inner pass finds the outer claim standing for this occurrence.
-    assert await ledger.resolve(_ctx(), ask, None, inner, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(inner, 0), True) is None
     assert len(asked) == 1
     # A second spelling on the inner line is a question of its own.
-    assert await ledger.resolve(_ctx(), ask, None, inner, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(inner, 1), True) is None
     assert len(asked) == 2
     # A line outside the lineage sees neither claim.
     stranger = HandOff()
-    assert await ledger.resolve(_ctx(), ask, None, stranger, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(stranger), True) is None
     assert len(asked) == 3
     # The inner gates spend both without asking.
-    assert await ledger.resolve(_ctx(), ask, None, inner) is None
-    assert await ledger.resolve(_ctx(), ask, None, inner) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(inner, 0)) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(inner, 1)) is None
     assert len(asked) == 3
     await ledger.revoke("s", inner)
     await ledger.revoke("s", outer)
     await ledger.revoke("s", stranger)
     assert ledger.list("s") == ()
+
+
+@pytest.mark.asyncio
+async def test_a_claim_is_on_offer_to_its_occurrence_alone():
+    """A grant the pass claimed for one spelling is not on offer to
+    another spelling of the same command on the same line, whether a
+    pass or a gate reads it: a word that expands at run time into the
+    command cannot run on the nod a literal spelling was given."""
+    ledger = Decisions()
+    ask = Ask("sign-off", rule=RULE)
+    waiting = await ledger.resolve(_ctx(), ask)
+    assert isinstance(waiting, Pending)
+    await ledger.answer(waiting.id, Outcome.ALLOW)
+    handed = HandOff()
+    assert await ledger.resolve(_ctx(), ask, None, _at(handed, 0),
+                                True) is None
+    assert isinstance(await ledger.resolve(_ctx(), ask, None, _at(handed, 1)),
+                      Pending)
+    assert isinstance(ledger.held(_ctx(), ask, _at(handed, 1)), Pending)
+    assert ledger.held(_ctx(), ask, _at(handed, 0)) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(handed, 0)) is None
+    assert len(ledger.pending("s")) == 1

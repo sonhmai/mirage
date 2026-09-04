@@ -222,6 +222,21 @@ function applyRelative(base: Date, words: string[], utc: boolean): Date | null {
   return result
 }
 
+// Whether an epoch-seconds timestamp sits inside an inclusive mtime window.
+// An unbounded window keeps everything; an unknown timestamp fails any
+// bounded one. Mirrors the Python in_mtime_window.
+export function inMtimeWindow(
+  timestamp: number | null | undefined,
+  mtimeMin: number | null | undefined,
+  mtimeMax: number | null | undefined,
+): boolean {
+  if (mtimeMin == null && mtimeMax == null) return true
+  if (timestamp == null) return false
+  if (mtimeMin != null && timestamp < mtimeMin) return false
+  if (mtimeMax != null && timestamp > mtimeMax) return false
+  return true
+}
+
 // Parse a GNU `date -d` expression, or null when it is invalid. Covers the
 // forms agents actually type: ISO 8601 dates and datetimes (with or without
 // zone), `@epoch`, and gnulib's relative grammar (`24 hours ago`,

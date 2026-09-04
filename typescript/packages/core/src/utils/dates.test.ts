@@ -13,7 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { epochToIso, isoToEpoch, parseDateExpr, utcDateFolder } from './dates.ts'
+import { epochToIso, inMtimeWindow, isoToEpoch, parseDateExpr, utcDateFolder } from './dates.ts'
+
+describe('inMtimeWindow', () => {
+  it('keeps everything under an unbounded window', () => {
+    expect(inMtimeWindow(100, null, null)).toBe(true)
+    expect(inMtimeWindow(null, undefined, undefined)).toBe(true)
+  })
+  it('applies inclusive bounds', () => {
+    expect(inMtimeWindow(100, 100, null)).toBe(true)
+    expect(inMtimeWindow(99, 100, null)).toBe(false)
+    expect(inMtimeWindow(100, null, 100)).toBe(true)
+    expect(inMtimeWindow(101, null, 100)).toBe(false)
+  })
+  it('fails an unknown timestamp against any bound', () => {
+    expect(inMtimeWindow(null, 100, null)).toBe(false)
+    expect(inMtimeWindow(undefined, null, 100)).toBe(false)
+  })
+})
 
 describe('epochToIso', () => {
   it('formats whole seconds as second-precision ISO-Z', () => {

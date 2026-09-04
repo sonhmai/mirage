@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import shlex
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -89,6 +91,24 @@ def line_frame(text: str, parent: Occurrence) -> Frame:
         parent (Occurrence): the command running it.
     """
     return Frame(text, 0, parent)
+
+
+def argv_frame(argv: Sequence[str], parent: Occurrence) -> Frame:
+    """The frame of the line a command hands the evaluator for words it
+    was given already split (``command``, ``env``, ``timeout``,
+    ``xargs``), spelled as those builtins spell it: joined with shlex,
+    so an operand holding a space survives the re-parse as one word.
+
+    The nested gate parses that spelling, so the pass has to compute the
+    occurrence on it. Joined with a plain space, ``cat '/data/secret
+    file'`` was read as ``cat /data/secret file`` and the gate could not
+    find the grant claimed for it.
+
+    Args:
+        argv (Sequence[str]): the command's words, name first.
+        parent (Occurrence): the command running them.
+    """
+    return line_frame(shlex.join(argv), parent)
 
 
 def occurrence_in(node: Any, frame: Frame) -> Occurrence:

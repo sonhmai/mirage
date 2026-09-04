@@ -20,7 +20,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from mirage.policy.match import Outcome
 from mirage.policy.types import (Abandoned, Ask, Claim, Claimant,
                                  CommandContext, CommandRule, Decision, Deny,
-                                 HandOff, Pending, Scope,
+                                 HandOff, Occurrence, Pending, Scope,
                                  SessionDecisionsQuery)
 
 # A host that answers an Ask inside the line.
@@ -153,6 +153,22 @@ def lineage(handed: HandOff | None) -> tuple[HandOff, ...]:
         out.append(handed)
         handed = handed.parent
     return tuple(out)
+
+
+def encloses(scope: Occurrence, occurrence: Occurrence) -> bool:
+    """Whether a command stands inside a scope: within the scope's span
+    of the same text, or on a line evaluated from a node that does.
+
+    Args:
+        scope (Occurrence): the enclosing node, a background job's.
+        occurrence (Occurrence): the command's place.
+    """
+    within: Occurrence | None = occurrence
+    while within is not None:
+        if within.parent == scope.parent and within.source == scope.source:
+            return scope.start <= within.start and within.end <= scope.end
+        within = within.parent
+    return False
 
 
 class Decisions:
@@ -358,22 +374,41 @@ class Decisions:
             live.append(handed)
         return None
 
-    def borrow(self, handed: HandOff) -> None:
-        """Add a holder to a hand-off: a background job the line
-        launched, whose gates run after the line has returned.
+    def split(self, session_id: str, handed: HandOff,
+              scope: Occurrence) -> HandOff:
+        """Hand the claims made for one part of a line to a run of its
+        own: a background job, whose gates run after the line has
+        returned and which ends on its own clock.
 
-        The job's ``revoke`` hands the hand-off back; the claims are
-        spent by whichever holder finishes last, so a job that reaches
-        its gate after the line ended still finds its grant.
+        Every claim standing inside the scope leaves the line's hand-off
+        for the new one, so the line's end touches only what the line's
+        own gates would have spent, whether it revokes or, held on a
+        question still waiting, releases: the job's grants stay reserved
+        until its gates spend them or its own end revokes them. Held on
+        the line's hand-off, a release for a pending foreground gate let
+        go of the job's grants with the rest, and a line judged while
+        the job slept could take them.
 
         Args:
+            session_id (str): the session the line was judged in.
             handed (HandOff): the line's hand-off.
+            scope (Occurrence): the job's node on the line.
+
+        Returns:
+            The job's hand-off, live while it holds a claim.
         """
-        handed.holders += 1
+        job = HandOff(parent=handed.parent, origin=handed.origin)
+        kept: list[Claim] = []
+        for claim in handed.claimed:
+            (job.claimed
+             if encloses(scope, claim.occurrence) else kept).append(claim)
+        handed.claimed[:] = kept
+        if job.claimed:
+            self._live.setdefault(session_id, []).append(job)
+        return job
 
     async def revoke(self, session_id: str, handed: HandOff) -> None:
-        """Spend every grant claimed on a hand-off that no gate spent,
-        once its last holder is done with it.
+        """Spend every grant claimed on a hand-off that no gate spent.
 
         The hand-off in :meth:`resolve` leaves the grants behind a
         command standing for the gate that runs the line, and that gate
@@ -393,9 +428,6 @@ class Decisions:
             session_id (str): the session the line was judged in.
             handed (HandOff): the line's hand-off.
         """
-        handed.holders -= 1
-        if handed.holders > 0:
-            return
         await self._spend(session_id,
                           tuple(c.decision for c in handed.claimed))
         self.release(session_id, handed)

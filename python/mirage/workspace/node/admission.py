@@ -56,8 +56,9 @@ from mirage.workspace.lookup import (SHELL_NAMES, SLASH_KEEPS_LAST, WordPolicy,
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.inner_lines import Word, inner_lines
-from mirage.workspace.node.occurrence import (Frame, line_frame, occurrence_in,
-                                              root_frame, whole_occurrence)
+from mirage.workspace.node.occurrence import (Frame, argv_frame, line_frame,
+                                              occurrence_in, root_frame,
+                                              whole_occurrence)
 from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir
 
@@ -599,8 +600,7 @@ async def _admit_words(
             within = (Claimant(
                 claimant.line,
                 whole_occurrence(
-                    line_frame(" ".join(w.value
-                                        for w in argv), claimant.occurrence)))
+                    argv_frame([w.value for w in argv], claimant.occurrence)))
                       if claimant is not None else None)
             refusal = await _admit_words(argv,
                                          inner.open,

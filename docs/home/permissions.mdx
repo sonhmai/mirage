@@ -302,9 +302,11 @@ the line it was given for, so a command spelled twice on one line is two
 questions, a word that expands at run time into a command cannot run on
 the nod a literal spelling elsewhere on the line was given (`$S && cat
 secret.txt` asks for both), and a grant one line has claimed is not on
-offer to a line judged at the same time. A grant given to a line that
-launches a background job stays with the job until the job ends, since
-its commands reach their gates after the line has returned. A line the
+offer to a line judged at the same time. The grants given to a line
+for the commands inside a background job it launches are the job's own
+from the moment it is launched, and stay with it until it ends: its
+commands reach their gates after the line has returned, and a question
+that holds the rest of the line does not let go of them. A line the
 shell evaluates from inside another (`$( )`, `eval`, `source`, `xargs`)
 spends what the outer line was given for the words it runs, so
 `echo $(cat secret.txt)` is one question, not two, and two such bodies on

@@ -33,11 +33,14 @@ const ENC = new TextEncoder()
 
 const PROFILE = parseSessionProfile({
   commands: {
-    allow: ['ls', 'cat', 'git', 'rm', 'mkdir', 'cd', 'echo', 'sleep', 'wait', 'eval'],
+    allow: ['ls', 'cat', 'git', 'rm', 'mkdir', 'cd', 'echo', 'sleep', 'wait', 'eval', 'command'],
     deny: [{ reason: 'production data is protected', commands: { rm: ['/data/prod/*'] } }],
     ask: [
       { reason: 'pushes need sign-off', commands: ['git push'] },
-      { reason: 'secrets need sign-off', commands: { cat: ['/data/secret.txt'] } },
+      {
+        reason: 'secrets need sign-off',
+        commands: { cat: ['/data/secret.txt', '/data/secret file'] },
+      },
     ],
   },
 })
@@ -739,5 +742,44 @@ describe('prejudge scope', () => {
     expect(DEC.decode(ran.stdout).startsWith('s s\n')).toBe(true)
     expect(asked).toHaveLength(2)
     expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('reads the words command hands on as command spells them', async () => {
+    // command re-runs its operands as one line, joined with shellJoin so
+    // an operand holding a space survives the re-parse. The pass has to
+    // read the words the same way, or the occurrence it claims the
+    // answer for is not the one the nested gate computes, and the cat
+    // asks a second time after the echo has already run.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    await w.execute("echo s > '/data/secret file'")
+    const ran = await w.execute("echo x && command cat '/data/secret file'", { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('x\ns\n')
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it("keeps a job's grant reserved while the line that launched it is held", async () => {
+    // The job is launched on the grant the pass claimed for its cat, and
+    // the foreground cat expands into a question that holds the line. A
+    // hold that let go of the job's grant with the line's left it
+    // standing for anyone while the job slept, so a line judged then ran
+    // on it and the job asked again. The grant is the job's own: the
+    // other line asks, and the job runs on its nod.
+    const w = await ws()
+    const line = 'F=/data/secret.txt; sleep 0.5 && cat /data/secret.txt & cat $F'
+    const first = await w.execute(line, { sessionId: 's' })
+    expect(first.refusal?.kind).toBe('pending')
+    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    const held = await w.execute(line, { sessionId: 's' })
+    expect(held.exitCode).toBe(126)
+    expect(held.refusal?.kind).toBe('pending')
+    const other = await w.execute('cat /data/secret.txt', { sessionId: 's' })
+    expect(other.exitCode).toBe(126)
+    expect(other.refusal?.kind).toBe('pending')
+    const waited = await w.execute('wait', { sessionId: 's' })
+    expect(waited.exitCode).toBe(0)
+    expect(w.decisions.pending('s')).toHaveLength(w.decisions.list('s').length)
   })
 })

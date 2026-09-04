@@ -46,7 +46,7 @@ PROFILE = {
     "commands": {
         "allow": [
             "ls", "cat", "git", "rm", "mkdir", "cd", "echo", "sleep", "wait",
-            "eval"
+            "eval", "command"
         ],
         "deny": [{
             "reason": "production data is protected",
@@ -60,7 +60,7 @@ PROFILE = {
         }, {
             "reason": "secrets need sign-off",
             "commands": {
-                "cat": ["/data/secret.txt"]
+                "cat": ["/data/secret.txt", "/data/secret file"]
             }
         }],
     },
@@ -808,3 +808,47 @@ async def test_one_body_under_two_words_is_two_occurrences():
         assert ws.decisions.list("s") == ()
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_words_handed_on_by_command_are_one_question():
+    # command re-runs its operands as one line, joined with shlex so an
+    # operand holding a space survives the re-parse. The pass has to
+    # read the words the same way, or the occurrence it claims the
+    # answer for is not the one the nested gate computes, and the cat
+    # asks a second time after the echo has already run.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        await ws.fs.write("/data/secret file", b"s\n")
+        ran = await ws.execute("echo x && command cat '/data/secret file'",
+                               session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout == b"x\ns\n"
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_held_line_keeps_its_jobs_grant_reserved(ws):
+    # The job is launched on the grant the pass claimed for its cat,
+    # and the foreground cat expands into a question that holds the
+    # line. A hold that let go of the job's grant with the line's left
+    # it standing for anyone while the job slept, so a line judged then
+    # ran on it and the job asked again. The grant is the job's own:
+    # the other line asks, and the job runs on its nod.
+    line = "F=/data/secret.txt; sleep 0.5 && cat /data/secret.txt & cat $F"
+    first = await ws.execute(line, session_id="s")
+    assert first.refusal is not None and first.refusal.kind == "pending"
+    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    held = await ws.execute(line, session_id="s")
+    assert held.exit_code == 126
+    assert held.refusal is not None and held.refusal.kind == "pending"
+    other = await ws.execute("cat /data/secret.txt", session_id="s")
+    assert other.exit_code == 126
+    assert other.refusal is not None and other.refusal.kind == "pending"
+    waited = await ws.execute("wait", session_id="s")
+    assert waited.exit_code == 0
+    assert len(ws.decisions.pending("s")) == len(ws.decisions.list("s"))

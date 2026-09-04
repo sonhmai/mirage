@@ -1,4 +1,5 @@
 import type { Claimant, HandOff, Occurrence } from '../../policy/types.ts'
+import { shellJoin } from '../../shell/join.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 
 /**
@@ -59,6 +60,21 @@ export function rootFrame(node: TSNodeLike, parent: Occurrence | null): Frame {
  */
 export function lineFrame(text: string, parent: Occurrence): Frame {
   return { text, base: 0, parent }
+}
+
+/**
+ * The frame of the line a command hands the evaluator for words it was
+ * given already split (`command`, `env`, `timeout`, `xargs`), spelled
+ * as those builtins spell it: joined with shellJoin, so an operand
+ * holding a space survives the re-parse as one word.
+ *
+ * The nested gate parses that spelling, so the pass has to compute the
+ * occurrence on it. Joined with a plain space, `cat '/data/secret
+ * file'` was read as `cat /data/secret file` and the gate could not
+ * find the grant claimed for it.
+ */
+export function argvFrame(argv: readonly string[], parent: Occurrence): Frame {
+  return lineFrame(shellJoin(argv), parent)
 }
 
 /** Where a node stands, as a parse of the frame's text would place it. */

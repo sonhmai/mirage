@@ -48,6 +48,7 @@ import { innerLines, innerReadable, wordValue, type Word } from './inner_lines.t
 import {
   type Frame,
   bodyFrame,
+  argvFrame,
   lineFrame,
   occurrenceIn,
   rootFrame,
@@ -240,7 +241,7 @@ async function judgeWords(
         )),
       )
     } else {
-      const within = wholeOccurrence(lineFrame(inner.argv.map(wordValue).join(' '), occurrence))
+      const within = wholeOccurrence(argvFrame(inner.argv.map(wordValue), occurrence))
       out.push(
         ...(await judgeWords(inner.argv, within, session, registry, namespace, agentId, reparse)),
       )

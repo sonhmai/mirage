@@ -5,6 +5,7 @@ import { commandNodes } from '../../runtime/routing/index.ts'
 import { NodeType, type TSNodeLike } from '../../shell/types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import {
+  argvFrame,
   bodyFrame,
   claimantFor,
   type Frame,
@@ -43,7 +44,7 @@ function body(node: TSNodeLike, frame: Frame): Frame {
 }
 
 function fresh(origin: Occurrence | null = null): HandOff {
-  return { claimed: [], holders: 1, parent: null, origin }
+  return { claimed: [], parent: null, origin }
 }
 
 describe('occurrence', () => {
@@ -134,5 +135,22 @@ describe('occurrence', () => {
       start: 0,
       end: 3,
     })
+  })
+
+  it('spells the words a command hands on as the command spells them', async () => {
+    // command, env, timeout and xargs each hand the evaluator their
+    // words joined with shellJoin, so the nested gate parses the quoted
+    // spelling; the pass computes the occurrence on that spelling, and
+    // the parse places the command at the whole of it.
+    const parent: Occurrence = {
+      parent: null,
+      source: "command cat '/data/secret file'",
+      start: 0,
+      end: 31,
+    }
+    const frame = argvFrame(['cat', '/data/secret file'], parent)
+    expect(frame.text).toBe("cat '/data/secret file'")
+    const root = await parse(frame.text)
+    expect(occurrenceIn(command(root, 0), frame)).toEqual(wholeOccurrence(frame))
   })
 })

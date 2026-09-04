@@ -16,10 +16,10 @@ from mirage.policy import HandOff, Occurrence
 from mirage.runtime.routing import command_nodes
 from mirage.shell import parse
 from mirage.shell.types import NodeType
-from mirage.workspace.node.occurrence import (Frame, body_frame, claimant_for,
-                                              line_frame, occurrence_in,
-                                              occurrence_of, root_frame,
-                                              whole_occurrence)
+from mirage.workspace.node.occurrence import (Frame, argv_frame, body_frame,
+                                              claimant_for, line_frame,
+                                              occurrence_in, occurrence_of,
+                                              root_frame, whole_occurrence)
 
 
 def _first(node, kind: str):
@@ -118,3 +118,15 @@ def test_words_a_command_runs_stand_at_the_whole_text():
     parent = Occurrence(None, "xargs cat", 0, 9)
     frame = line_frame("cat", parent)
     assert whole_occurrence(frame) == Occurrence(parent, "cat", 0, 3)
+
+
+def test_words_a_command_hands_on_are_spelled_as_it_spells_them():
+    # command, env, timeout and xargs each hand the evaluator their
+    # words joined with shlex, so the nested gate parses the quoted
+    # spelling; the pass computes the occurrence on that spelling, and
+    # the parse places the command at the whole of it.
+    parent = Occurrence(None, "command cat '/data/secret file'", 0, 31)
+    frame = argv_frame(["cat", "/data/secret file"], parent)
+    assert frame.text == "cat '/data/secret file'"
+    node = list(command_nodes(parse(frame.text)))[0]
+    assert occurrence_in(node, frame) == whole_occurrence(frame)

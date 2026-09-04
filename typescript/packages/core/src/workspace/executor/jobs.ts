@@ -27,6 +27,7 @@ import type { SessionView } from '../../ops/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { Session } from '../session/session.ts'
+import { occurrenceOf } from '../node/occurrence.ts'
 import { scanOptions } from './builtins/getopt.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
@@ -35,6 +36,8 @@ import { ExecutionNode } from '../types.ts'
 export interface ExecuteNodeOpts {
   sink?: JobConsole
   signal?: AbortSignal
+  /** The hand-off the subtree runs on: a background job's own. */
+  handed?: HandOff
 }
 
 export type ExecuteNodeFn = (
@@ -79,14 +82,21 @@ export async function handleBackground(
   agentId: string | null,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
-  // The line's hand-off and the ledger it lives in: the job borrows the
-  // hand-off before the line returns, since its gates run after that,
-  // and hands it back when it ends, so the grants the line was given
-  // are spent by whichever finishes last.
+  // The line's hand-off and the ledger it lives in. The claims the
+  // line's pass made for the commands inside the job leave that
+  // hand-off for one of the job's own before the job starts
+  // (`Decisions.split`): its gates run after the line has returned, and
+  // its grants have to stay reserved through the line's end whichever
+  // way the line ends, a release for a question left waiting included.
+  // The job revokes its own hand-off when it ends.
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
 ): Promise<JobHandlerResult> {
   const bgSession = session.fork()
+  const jobHanded =
+    handed !== null && decisions !== null
+      ? decisions.split(session.sessionId, handed, occurrenceOf(left, handed))
+      : null
 
   const abort = new AbortController()
   // `kill %n` aborts this controller; the signal rides the forked
@@ -105,10 +115,9 @@ export async function handleBackground(
         // writes as it finishes rather than the whole construct landing
         // at the end. The signal is what makes `kill` able to stop the
         // job at all, since a promise cannot be cancelled.
-        ;[stdout, io, execNode] = await executeNode(left, bgSession, null, callStack, {
-          sink: console_,
-          signal: abort.signal,
-        })
+        const opts: ExecuteNodeOpts = { sink: console_, signal: abort.signal }
+        if (jobHanded !== null) opts.handed = jobHanded
+        ;[stdout, io, execNode] = await executeNode(left, bgSession, null, callStack, opts)
       } catch (err) {
         if (err instanceof CommandTimeoutError) {
           const msg = new TextEncoder().encode(`${err.message}\n`)
@@ -156,12 +165,13 @@ export async function handleBackground(
     try {
       return await (asyncContextIsolatesTasks ? runWithSession(bgSession, body) : body())
     } finally {
-      if (handed !== null && decisions !== null) await decisions.revoke(session.sessionId, handed)
+      if (jobHanded !== null && decisions !== null) {
+        await decisions.revoke(session.sessionId, jobHanded)
+      }
     }
   }
 
   const cmdStr = left.text
-  if (handed !== null && decisions !== null) decisions.borrow(handed)
   // Non-interactive bash announces nothing on launch ("[1] <pid>" is
   // interactive-only); the job stays discoverable via $! and `jobs`.
   let job: Job
@@ -176,10 +186,12 @@ export async function handleBackground(
     })
   } catch (err) {
     // A submission that fails (a console the table cannot build) starts
-    // no runner, so nothing would ever hand the borrow back: the
-    // hand-off would stay a holder short of release and hide its grants
-    // from every later line.
-    if (handed !== null && decisions !== null) await decisions.revoke(session.sessionId, handed)
+    // no runner, so nothing would ever revoke the job's hand-off: its
+    // grants would stay reserved for good, neither spent nor on offer
+    // to any later line.
+    if (jobHanded !== null && decisions !== null) {
+      await decisions.revoke(session.sessionId, jobHanded)
+    }
     throw err
   }
   session.lastBgJobId = job.id

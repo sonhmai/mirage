@@ -116,6 +116,7 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
   const next: ExecuteNodeDeps = { ...base }
   if (opts.sink !== undefined) next.sink = opts.sink
   if (opts.signal !== undefined) next.signal = opts.signal
+  if (opts.handed !== undefined) next.handed = opts.handed
   return next
 }
 

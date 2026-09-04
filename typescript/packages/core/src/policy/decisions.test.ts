@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { Decisions, askRule, covers, decisionId } from './decisions.ts'
+import { Decisions, askRule, covers, decisionId, encloses } from './decisions.ts'
 import { Outcome, Scope } from './types.ts'
 import type {
   Ask,
@@ -31,7 +31,7 @@ const ASK: Ask = { kind: 'ask', reason: 'sign-off', rule: RULE }
 
 /** A fresh line's hand-off. */
 function fresh(parent: HandOff | null = null): HandOff {
-  return { claimed: [], holders: 1, parent, origin: null }
+  return { claimed: [], parent, origin: null }
 }
 
 /** The reader for one spelling of a command on a line, each its own occurrence. */
@@ -370,21 +370,53 @@ describe('decisions', () => {
     expect(await ledger.resolve(ctx(), ASK, undefined, at(second), true)).toBeNull()
   })
 
-  it('spends a borrowed hand-off at its last holder', async () => {
-    // A background job borrows the line's hand-off before the line
-    // returns, so the line's own revoke leaves the claims standing for the
-    // job's gates, and the job's revoke spends them.
+  it('reads a span and the lines evaluated inside it as enclosed', () => {
+    const line = 'sleep 1 && cat s & ls'
+    const scope: Occurrence = { parent: null, source: line, start: 0, end: 18 }
+    const inside: Occurrence = { parent: null, source: line, start: 11, end: 16 }
+    expect(encloses(scope, inside)).toBe(true)
+    expect(encloses(scope, { parent: inside, source: 'cat s', start: 0, end: 5 })).toBe(true)
+    expect(encloses(scope, { parent: null, source: line, start: 19, end: 21 })).toBe(false)
+    expect(encloses(scope, { parent: null, source: 'cat s', start: 0, end: 5 })).toBe(false)
+  })
+
+  it("hands a job's claims to a run of its own", async () => {
+    // A background job takes the claims made inside its span onto a
+    // hand-off of its own, so the line's end, a release for a question
+    // left waiting included, lets go of the line's claims alone, and the
+    // job's stay reserved until the job spends them.
+    const ledger = new Decisions()
+    const handed: HandOff = fresh()
+    for (const index of [0, 1]) {
+      const waiting = await ledger.resolve(ctx(), ASK)
+      if (waiting?.kind !== 'pending') throw new Error('unreachable')
+      await ledger.answer(waiting.id, Outcome.ALLOW)
+      expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, index), true)).toBeNull()
+    }
+    const job = ledger.split('s', handed, { parent: null, source: 'line', start: 1, end: 2 })
+    expect(handed.claimed.map((c) => c.occurrence.start)).toEqual([0])
+    expect(job.claimed.map((c) => c.occurrence.start)).toEqual([1])
+    ledger.release('s', handed)
+    // The line's grant is on offer again; the job's is not.
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(fresh(), 0), true)).toBeNull()
+    expect((await ledger.held(ctx(), ASK, at(fresh(), 1)))?.kind).toBe('pending')
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(job, 1))).toBeNull()
+    expect(ledger.list('s')).toHaveLength(1)
+    await ledger.revoke('s', job)
+    expect(ledger.list('s')).toHaveLength(1)
+  })
+
+  it("spends a job's unspent grant when the job ends", async () => {
     const ledger = new Decisions()
     const waiting = await ledger.resolve(ctx(), ASK)
     if (waiting?.kind !== 'pending') throw new Error('unreachable')
     await ledger.answer(waiting.id, Outcome.ALLOW)
     const handed: HandOff = fresh()
     expect(await ledger.resolve(ctx(), ASK, undefined, at(handed), true)).toBeNull()
-    ledger.borrow(handed)
+    const job = ledger.split('s', handed, { parent: null, source: 'line', start: 0, end: 1 })
     await ledger.revoke('s', handed)
     expect(ledger.list('s')).toHaveLength(1)
-    expect(await ledger.resolve(ctx(), ASK, undefined, at(handed))).toBeNull()
-    await ledger.revoke('s', handed)
+    await ledger.revoke('s', job)
     expect(ledger.list('s')).toEqual([])
   })
 

@@ -17,6 +17,7 @@ import { Outcome } from './types.ts'
 import type {
   Abandoned,
   Ask,
+  Claim,
   Claimant,
   CommandContext,
   CommandRule,
@@ -202,6 +203,22 @@ export function sameOccurrence(a: Occurrence | null, b: Occurrence | null): bool
   return x === null && y === null
 }
 
+/**
+ * Whether a command stands inside a scope: within the scope's span of
+ * the same text, or on a line evaluated from a node that does.
+ *
+ * @param scope the enclosing node, a background job's.
+ * @param occurrence the command's place.
+ */
+export function encloses(scope: Occurrence, occurrence: Occurrence): boolean {
+  for (let within: Occurrence | null = occurrence; within !== null; within = within.parent) {
+    if (sameOccurrence(within.parent, scope.parent) && within.source === scope.source) {
+      return scope.start <= within.start && within.end <= scope.end
+    }
+  }
+  return false
+}
+
 export class Decisions {
   private readonly sessions: SessionDecisionsQuery | null
   private readonly onAsk: AskHandler | null
@@ -371,8 +388,6 @@ export class Decisions {
    * @param handed the line's hand-off.
    */
   async revoke(sessionId: string, handed: HandOff): Promise<void> {
-    handed.holders -= 1
-    if (handed.holders > 0) return
     await this.spend(
       sessionId,
       handed.claimed.map((c) => c.decision),
@@ -381,14 +396,38 @@ export class Decisions {
   }
 
   /**
-   * Add a holder to a hand-off: a background job the line launched,
-   * whose gates run after the line has returned. The job's `revoke`
-   * hands the hand-off back; the claims are spent by whichever holder
-   * finishes last, so a job that reaches its gate after the line ended
-   * still finds its grant.
+   * Hand the claims made for one part of a line to a run of its own: a
+   * background job, whose gates run after the line has returned and
+   * which ends on its own clock.
+   *
+   * Every claim standing inside the scope leaves the line's hand-off
+   * for the new one, so the line's end touches only what the line's
+   * own gates would have spent, whether it revokes or, held on a
+   * question still waiting, releases: the job's grants stay reserved
+   * until its gates spend them or its own end revokes them. Held on
+   * the line's hand-off, a release for a pending foreground gate let
+   * go of the job's grants with the rest, and a line judged while the
+   * job slept could take them.
+   *
+   * @param sessionId the session the line was judged in.
+   * @param handed the line's hand-off.
+   * @param scope the job's node on the line.
+   * @returns the job's hand-off, live while it holds a claim.
    */
-  borrow(handed: HandOff): void {
-    handed.holders += 1
+  split(sessionId: string, handed: HandOff, scope: Occurrence): HandOff {
+    const job: HandOff = { claimed: [], parent: handed.parent, origin: handed.origin }
+    const kept: Claim[] = []
+    for (const claim of handed.claimed) {
+      if (encloses(scope, claim.occurrence)) job.claimed.push(claim)
+      else kept.push(claim)
+    }
+    handed.claimed.splice(0, handed.claimed.length, ...kept)
+    if (job.claimed.length > 0) {
+      const live = this.live.get(sessionId) ?? new Set<HandOff>()
+      live.add(job)
+      this.live.set(sessionId, live)
+    }
+    return job
   }
 
   /**

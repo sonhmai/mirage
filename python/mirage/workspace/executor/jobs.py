@@ -28,6 +28,7 @@ from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.workspace.executor.builtins.getopt import scan_options
+from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.session import (Session, reset_current_session,
                                       set_current_session)
 from mirage.workspace.types import ExecutionNode
@@ -73,11 +74,17 @@ async def handle_background(
     """Run left side in background.
 
     ``handed`` and ``decisions`` are the line's hand-off and the ledger
-    it lives in: the job borrows the hand-off before the line returns,
-    since its gates run after that, and hands it back when it ends, so
-    the grants the line was given are spent by whichever finishes last.
+    it lives in. The claims the line's pass made for the commands inside
+    the job leave that hand-off for one of the job's own before the job
+    starts (``Decisions.split``): its gates run after the line has
+    returned, and its grants have to stay reserved through the line's
+    end whichever way the line ends, a release for a question left
+    waiting included. The job revokes its own hand-off when it ends.
     """
     bg_session = session.fork()
+    job_handed = (decisions.split(session.session_id, handed,
+                                  occurrence_of(left, handed))
+                  if handed is not None and decisions is not None else None)
 
     async def _run_bg(job: Job) -> tuple[IOResult, ExecutionNode]:
         # Background jobs don't receive stdin, matching real shell
@@ -103,7 +110,8 @@ async def handle_background(
                                                            bg_session,
                                                            None,
                                                            call_stack,
-                                                           sink=console)
+                                                           sink=console,
+                                                           handed=job_handed)
             except CommandTimeoutError as exc:
                 msg = (str(exc) + "\n").encode()
                 stdout = b""
@@ -129,13 +137,11 @@ async def handle_background(
             return io, exec_node
         finally:
             reset_current_session(token)
-            if handed is not None and decisions is not None:
-                await decisions.revoke(session.session_id, handed)
+            if job_handed is not None and decisions is not None:
+                await decisions.revoke(session.session_id, job_handed)
 
     cmd_str = get_text(left) if hasattr(left, 'text') else str(left)
 
-    if handed is not None and decisions is not None:
-        decisions.borrow(handed)
     # Non-interactive bash announces nothing on launch ("[1] <pid>" is
     # interactive-only); the job stays discoverable via $! and `jobs`.
     try:
@@ -146,11 +152,11 @@ async def handle_background(
                                session_id=session.session_id)
     except Exception:
         # A submission that fails (a console the table cannot build)
-        # starts no runner, so nothing would ever hand the borrow back:
-        # the hand-off would stay a holder short of release and hide
-        # its grants from every later line.
-        if handed is not None and decisions is not None:
-            await decisions.revoke(session.session_id, handed)
+        # starts no runner, so nothing would ever revoke the job's
+        # hand-off: its grants would stay reserved for good, neither
+        # spent nor on offer to any later line.
+        if job_handed is not None and decisions is not None:
+            await decisions.revoke(session.session_id, job_handed)
         raise
     session.last_bg_job_id = job.id
 

@@ -287,8 +287,11 @@ export interface Claim {
  * invisible to every other line of the session while this one lives, so
  * two lines judged at once cannot both run on one nod; the run spends
  * each grant at the gate it was claimed for, and whatever the run never
- * reaches is spent when the line ends (`Decisions.revoke`). Compared by
- * identity, because the hand-off is the line.
+ * reaches is spent when the line ends (`Decisions.revoke`). A
+ * background job the line launches takes the claims made for the
+ * commands inside it onto a hand-off of its own (`Decisions.split`),
+ * since its gates run after the line has returned and it ends on its
+ * own clock. Compared by identity, because the hand-off is the line.
  *
  * A line the executor evaluates from inside another (`$( )`, `eval`,
  * `source`, `xargs`) is a line of its own with a hand-off of its own,
@@ -308,13 +311,6 @@ export interface HandOff {
   readonly parent: HandOff | null
   /** The node this line's text was evaluated from, null for a typed line. */
   readonly origin: Occurrence | null
-  /**
-   * How many runs still own the claims: the line itself, plus every
-   * background job it launched, each of which reaches its gates after
-   * the line has returned. The last holder to finish spends what the
-   * gates did not.
-   */
-  holders: number
 }
 
 /**

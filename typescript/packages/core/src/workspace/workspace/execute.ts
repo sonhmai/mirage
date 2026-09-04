@@ -266,7 +266,7 @@ async function runLine(
   // nested evaluation runs on one made under it, standing at the node
   // whose text it evaluates, so what this line's pass claimed for the
   // words a command runs is spent by the line that runs them.
-  const handed: HandOff = options.handed ?? { claimed: [], holders: 1, parent: null, origin: null }
+  const handed: HandOff = options.handed ?? { claimed: [], parent: null, origin: null }
 
   const executeFn: ExecuteFn = async (cmd, opts) => {
     // The executor's internal evals ($(), eval, source, xargs) are
@@ -286,7 +286,6 @@ async function runLine(
     if (routingDecision !== null) innerOpts.routingDecision = routingDecision
     innerOpts.handed = {
       claimed: [],
-      holders: 1,
       parent: handed,
       origin: opts.node === undefined ? null : occurrenceOf(opts.node, handed),
     }

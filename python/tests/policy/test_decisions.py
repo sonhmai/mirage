@@ -17,7 +17,8 @@ import dataclasses
 
 import pytest
 
-from mirage.policy.decisions import Decisions, ask_rule, covers, decision_id
+from mirage.policy.decisions import (Decisions, ask_rule, covers, decision_id,
+                                     encloses)
 from mirage.policy.match import Outcome
 from mirage.policy.types import (Abandoned, Ask, Claimant, CommandContext,
                                  CommandRule, Decision, Deny, HandOff,
@@ -354,11 +355,47 @@ async def test_a_grant_one_line_claimed_is_not_on_offer_to_another():
     assert await ledger.resolve(_ctx(), ask, None, _at(second), True) is None
 
 
+def test_encloses_reads_a_span_and_the_lines_evaluated_inside_it():
+    line = "sleep 1 && cat s & ls"
+    scope = Occurrence(None, line, 0, 18)
+    inside = Occurrence(None, line, 11, 16)
+    assert encloses(scope, inside)
+    assert encloses(scope, Occurrence(inside, "cat s", 0, 5))
+    assert not encloses(scope, Occurrence(None, line, 19, 21))
+    assert not encloses(scope, Occurrence(None, "cat s", 0, 5))
+
+
 @pytest.mark.asyncio
-async def test_a_borrowed_hand_off_is_spent_by_its_last_holder():
-    """A background job borrows the line's hand-off before the line
-    returns, so the line's own revoke leaves the claims standing for
-    the job's gates, and the job's revoke spends them."""
+async def test_a_split_hands_a_jobs_claims_to_a_run_of_its_own():
+    """A background job takes the claims made inside its span onto a
+    hand-off of its own, so the line's end, a release for a question
+    left waiting included, lets go of the line's claims alone, and the
+    job's stay reserved until the job spends them."""
+    ledger = Decisions()
+    ask = Ask("sign-off", rule=RULE)
+    handed = HandOff()
+    for index in (0, 1):
+        waiting = await ledger.resolve(_ctx(), ask)
+        assert isinstance(waiting, Pending)
+        await ledger.answer(waiting.id, Outcome.ALLOW)
+        assert await ledger.resolve(_ctx(), ask, None, _at(handed, index),
+                                    True) is None
+    job = ledger.split("s", handed, Occurrence(None, "line", 1, 2))
+    assert [c.occurrence.start for c in handed.claimed] == [0]
+    assert [c.occurrence.start for c in job.claimed] == [1]
+    ledger.release("s", handed)
+    # The line's grant is on offer again; the job's is not.
+    assert await ledger.resolve(_ctx(), ask, None, _at(HandOff(), 0),
+                                True) is None
+    assert isinstance(ledger.held(_ctx(), ask, _at(HandOff(), 1)), Pending)
+    assert await ledger.resolve(_ctx(), ask, None, _at(job, 1)) is None
+    assert len(ledger.list("s")) == 1
+    await ledger.revoke("s", job)
+    assert len(ledger.list("s")) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_jobs_unspent_grant_is_spent_when_the_job_ends():
     ledger = Decisions()
     ask = Ask("sign-off", rule=RULE)
     waiting = await ledger.resolve(_ctx(), ask)
@@ -366,11 +403,10 @@ async def test_a_borrowed_hand_off_is_spent_by_its_last_holder():
     await ledger.answer(waiting.id, Outcome.ALLOW)
     handed = HandOff()
     assert await ledger.resolve(_ctx(), ask, None, _at(handed), True) is None
-    ledger.borrow(handed)
+    job = ledger.split("s", handed, Occurrence(None, "line", 0, 1))
     await ledger.revoke("s", handed)
     assert len(ledger.list("s")) == 1
-    assert await ledger.resolve(_ctx(), ask, None, _at(handed)) is None
-    await ledger.revoke("s", handed)
+    await ledger.revoke("s", job)
     assert ledger.list("s") == ()
 
 

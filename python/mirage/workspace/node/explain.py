@@ -35,9 +35,9 @@ from mirage.workspace.node.admission import (Refused, admit, classified_words,
                                              gate, redirect_paths,
                                              statement_redirects)
 from mirage.workspace.node.inner_lines import Word, inner_lines
-from mirage.workspace.node.occurrence import (Frame, body_frame, line_frame,
-                                              occurrence_in, root_frame,
-                                              whole_occurrence)
+from mirage.workspace.node.occurrence import (Frame, argv_frame, body_frame,
+                                              line_frame, occurrence_in,
+                                              root_frame, whole_occurrence)
 from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir
 
@@ -171,7 +171,9 @@ async def _judge_words(
     here. Omitting them made the dry run answer ALLOW for a line the
     run then refused. A line the command runs (``eval``, ``sh -c``) is
     parsed on its own and read under the command's occurrence, exactly
-    as the nested evaluation will stand when it runs.
+    as the nested evaluation will stand when it runs; words a command
+    runs (``command``, ``env``, ``timeout``, ``xargs``) are read as the
+    one line the builtin hands the evaluator, spelled as it spells it.
 
     Args:
         words (list[Word]): the command's words, name first.
@@ -215,7 +217,7 @@ async def _judge_words(
         else:
             argv = list(inner.argv)
             within = whole_occurrence(
-                line_frame(" ".join(w.value for w in argv), occurrence))
+                argv_frame([w.value for w in argv], occurrence))
             out.extend(await _judge_words(argv, within, session, registry,
                                           namespace, agent_id))
     return out

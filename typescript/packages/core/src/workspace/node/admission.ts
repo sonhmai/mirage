@@ -79,7 +79,14 @@ import {
 import type { Session } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { innerLines, innerReadable, wordValue, type Word } from './inner_lines.ts'
-import { type Frame, lineFrame, occurrenceIn, rootFrame, wholeOccurrence } from './occurrence.ts'
+import {
+  argvFrame,
+  type Frame,
+  lineFrame,
+  occurrenceIn,
+  rootFrame,
+  wholeOccurrence,
+} from './occurrence.ts'
 
 /**
  * What the command plane prints when a line does not get to run: 127
@@ -578,7 +585,7 @@ async function admitWords(
           : {
               line: claimant.line,
               occurrence: wholeOccurrence(
-                lineFrame(inner.argv.map(wordValue).join(' '), claimant.occurrence),
+                argvFrame(inner.argv.map(wordValue), claimant.occurrence),
               ),
             }
       innerRefusal = await admitWords(

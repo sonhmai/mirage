@@ -21,46 +21,57 @@ import {
   Workspace,
   parseSessionProfile,
 } from "@struktoai/mirage-node";
-import type { AskHandler, Decision } from "@struktoai/mirage-node";
 
-// One profile, one rule. `allow` is what the session may run at all;
-// `ask` puts one of those commands to a person before it runs.
+// Two rules that ask: one about a path, one about a whole command.
 const ROLE = parseSessionProfile(
   {
     commands: {
-      allow: ["ls", "rm"],
-      ask: [{ reason: "deletes are reviewed", commands: ["rm"] }],
+      allow: ["ls", "cat", "rm"],
+      ask: [
+        { reason: "secrets are reviewed", commands: { cat: ["/data/secret.txt"] } },
+        { reason: "deletes are reviewed", commands: ["rm"] },
+      ],
     },
   },
   "profile `agent`",
 );
 
-/**
- * The host answering inline: the ledger awaits this while the line
- * waits, the way a tool-approval prompt works. ALLOW at ONCE passes this
- * line only; SESSION would pass every rm for the rest of the session.
- */
-const reviewer: AskHandler = (record: Decision): Promise<Decision> => {
-  console.log(`approve? ${record.command} ${record.argv.join(" ")}`);
-  return Promise.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE });
-};
-
 async function run(ws: Workspace, line: string): Promise<void> {
   await ws.fs.writeFile("/data/a.txt", "a\n");
+  await ws.fs.writeFile("/data/secret.txt", "s\n");
   const res = await ws.execute(line, { sessionId: "agent" });
   const how = res.refusal === null ? "ran" : `refused (${res.refusal.kind})`;
   console.log(`${line}: ${how}, exit ${String(res.exitCode)}`);
 }
 
 async function main(): Promise<void> {
+  // No `onAsk`: nobody answers inline, so an asked line is refused for
+  // now and its question waits in the ledger under an id the agent is
+  // told to quote.
   const ws = new Workspace(
     { "/data/": new RAMResource() },
-    { mode: MountMode.WRITE, profiles: { agent: ROLE }, onAsk: reviewer },
+    { mode: MountMode.WRITE, profiles: { agent: ROLE } },
   );
   ws.createSession("agent", { profile: "agent" });
   try {
+    await run(ws, "cat /data/secret.txt");
     await run(ws, "rm /data/a.txt");
-    // Once means once: the same line asks again.
+    // The host reads the queue, one record per question and oldest
+    // first, and answers each by id. ONCE passes one retry of that line;
+    // SESSION passes every line the rule covers from now on.
+    for (const waiting of ws.decisions.pending("agent")) {
+      const scope = waiting.command === "cat" ? Scope.ONCE : Scope.SESSION;
+      const words = waiting.argv.join(" ");
+      console.log(
+        `host: ${waiting.id} asks ${waiting.command} ${words} (${waiting.reason}): allow ${scope}`,
+      );
+      await ws.decisions.answer(waiting.id, Outcome.ALLOW, scope);
+    }
+    // Each retry consumes its answer.
+    await run(ws, "cat /data/secret.txt");
+    await run(ws, "rm /data/a.txt");
+    // The once grant is spent; the session grant still covers rm.
+    await run(ws, "cat /data/secret.txt");
     await run(ws, "rm /data/a.txt");
   } finally {
     await ws.close();

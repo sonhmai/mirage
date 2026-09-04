@@ -296,8 +296,9 @@ async def execute_line(
                                           cancel)
             if refused is not None:
                 # A question left waiting holds the line for its retry,
-                # which has to find the grants standing; any other
-                # refusal ends the line.
+                # which has to find the grants standing, so they are
+                # released rather than spent; any other refusal ends
+                # the line.
                 held = is_pending(refused)
                 io = IOResult(exit_code=refused.exit_code,
                               stderr=refused.stderr,
@@ -376,9 +377,13 @@ async def execute_line(
                 stdin,
                 cancel,
                 routing_decision=decision,
+                handed=handed,
             )
         finally:
-            if not held:
+            if held:
+                ws._registry.decisions.release(effective_session.session_id,
+                                               handed)
+            else:
                 await ws._registry.decisions.revoke(
                     effective_session.session_id, handed)
         # A record a nested line earned is the line's to report when

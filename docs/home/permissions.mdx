@@ -298,7 +298,8 @@ refused instead, nothing runs and the refusal spends the grant, so the
 next line spelling that command asks again. A grant the run never
 reaches (a `&&` that short-circuited before the command) is spent when
 the line ends, for the same reason. A command spelled twice on one line
-is two questions: one `once` grant answers one spelling.
+is two questions: one `once` grant answers one spelling, and a grant one
+line has claimed is not on offer to a line judged at the same time.
 
 ## Dry runs
 
@@ -332,9 +333,13 @@ and
 [policy_yaml.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/policy_yaml.ts).
 Both tables are pinned the same way.
 
-The ask example runs one guarded `rm` under both kinds of host: an
-`on_ask` reviewer that allows it once inline, so the same line asks
-again, and a ledger answered out of band by id with a session grant, so
-nothing asks again:
+The ask examples show the two kinds of host. An `on_ask` reviewer
+allows one guarded `rm` inline, once, so the same line asks again:
 [ask.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/ask.py),
 [ask.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/ask.ts).
+With no reviewer, two asked lines wait in the ledger, and the host reads
+`pending` as a queue, one record per question, and answers each by id,
+the `cat` once and the `rm` for the session, so their retries run and
+only the `cat` asks again:
+[ask_pending.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/ask_pending.py),
+[ask_pending.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/ask_pending.ts).

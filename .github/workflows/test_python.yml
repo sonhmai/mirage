@@ -167,6 +167,7 @@ jobs:
             integ/truth/watch_delta.json
             integ/truth/permissions.json
             integ/truth/ask.json
+            integ/truth/ask_pending.json
             integ/truth/python/custom_command.json
             integ/truth/custom_resource.json
             integ/truth/custom_cli.json

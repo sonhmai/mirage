@@ -237,21 +237,25 @@ async def test_a_hand_off_spends_nothing_for_the_pass_that_follows():
 
     ledger = Decisions(on_ask=allow)
     ask = Ask("sign-off", rule=RULE)
-    assert await ledger.resolve(_ctx(), ask, None, HandOff()) is None
-    assert await ledger.resolve(_ctx(), ask) is None
+    line = HandOff()
+    assert await ledger.resolve(_ctx(), ask, None, line, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, line) is None
     assert len(asked) == 1
     assert await ledger.resolve(_ctx(), ask) is None
     assert len(asked) == 2
 
     other = CommandRule(reason="twice over", commands=("git push", ))
     both = Ask("sign-off", rules=(RULE, other))
-    # The first rule is granted before the hand-off; the second during
-    # it.
-    assert await ledger.resolve(_ctx(), ask, None, HandOff()) is None
-    assert await ledger.resolve(_ctx(), both, None, HandOff()) is None
+    # The first rule is granted to a line that was then held, which
+    # releases its claim; the second during this line's own pass.
+    earlier = HandOff()
+    assert await ledger.resolve(_ctx(), ask, None, earlier, True) is None
+    ledger.release("s", earlier)
+    line = HandOff()
+    assert await ledger.resolve(_ctx(), both, None, line, True) is None
     assert len(asked) == 4
     # The gate finds both standing and asks nothing.
-    assert await ledger.resolve(_ctx(), both) is None
+    assert await ledger.resolve(_ctx(), both, None, line) is None
     assert len(asked) == 4
     assert ledger.list("s") == ()
 
@@ -271,7 +275,7 @@ async def test_a_revoked_hand_off_is_asked_again():
     ledger = Decisions(on_ask=allow)
     ask = Ask("sign-off", rule=RULE)
     handed = HandOff()
-    assert await ledger.resolve(_ctx(), ask, None, handed) is None
+    assert await ledger.resolve(_ctx(), ask, None, handed, True) is None
     assert len(ledger.list("s")) == 1
     assert handed.claimed == list(ledger.list("s"))
     await ledger.revoke("s", handed)
@@ -297,15 +301,40 @@ async def test_a_hand_off_claims_a_grant_for_one_occurrence():
     ledger = Decisions(on_ask=allow)
     ask = Ask("sign-off", rule=RULE)
     handed = HandOff()
-    assert await ledger.resolve(_ctx(), ask, None, handed) is None
-    assert await ledger.resolve(_ctx(), ask, None, handed) is None
+    assert await ledger.resolve(_ctx(), ask, None, handed, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, handed, True) is None
     assert len(asked) == 2
     assert len(handed.claimed) == 2
     assert len(ledger.list("s")) == 2
-    assert await ledger.resolve(_ctx(), ask) is None
-    assert await ledger.resolve(_ctx(), ask) is None
+    assert await ledger.resolve(_ctx(), ask, None, handed) is None
+    assert await ledger.resolve(_ctx(), ask, None, handed) is None
     assert len(asked) == 2
     assert ledger.list("s") == ()
+
+
+@pytest.mark.asyncio
+async def test_a_grant_one_line_claimed_is_not_on_offer_to_another():
+    """Two lines judged at once cannot both pass on one nod: the
+    grant the first line claimed is invisible to the second line's pass
+    and to a gate outside any line, and only the first line's own gate
+    spends it."""
+    ledger = Decisions()
+    ask = Ask("sign-off", rule=RULE)
+    waiting = await ledger.resolve(_ctx(), ask)
+    assert isinstance(waiting, Pending)
+    await ledger.answer(waiting.id, Outcome.ALLOW)
+    first, second = HandOff(), HandOff()
+    assert await ledger.resolve(_ctx(), ask, None, first, True) is None
+    assert isinstance(await ledger.resolve(_ctx(), ask, None, second, True),
+                      Pending)
+    assert isinstance(await ledger.resolve(_ctx(), ask), Pending)
+    assert await ledger.resolve(_ctx(), ask, None, first) is None
+    assert len(ledger.pending("s")) == 1
+    assert len(ledger.list("s")) == 1
+    # Released at the line's end, a claim no longer hides anything.
+    await ledger.revoke("s", first)
+    await ledger.answer(ledger.pending("s")[0].id, Outcome.ALLOW)
+    assert await ledger.resolve(_ctx(), ask, None, second, True) is None
 
 
 @pytest.mark.asyncio
@@ -319,7 +348,7 @@ async def test_revoke_hands_back_a_grant_given_before_the_pass():
     assert isinstance(waiting, Pending)
     await ledger.answer(waiting.id, Outcome.ALLOW)
     handed = HandOff()
-    assert await ledger.resolve(_ctx(), ask, None, handed) is None
+    assert await ledger.resolve(_ctx(), ask, None, handed, True) is None
     assert len(handed.claimed) == 1
     await ledger.revoke("s", handed)
     assert ledger.list("s") == ()

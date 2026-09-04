@@ -431,6 +431,7 @@ export async function prejudgeLine(
         // a grant the host gives here is handed to the per-command gate that
         // runs the line, which spends it: one question per run, not per pass.
         handed,
+        true,
       )
       if (!(answered instanceof Admitted)) return answered
       // The host answered this one inline. The rest of the line has not
@@ -489,7 +490,7 @@ async function verdictRefuses(
   // handOff: this pass exists to decide whether a secret is fetched, and the
   // gate behind it still has to admit the line. An answer given here is left
   // standing for that gate, which consumes it — so the host is asked once.
-  const action = await registry.decisions.resolve(ctx, asked, signal, handed)
+  const action = await registry.decisions.resolve(ctx, asked, signal, handed, true)
   if (action !== null && action.kind === 'abandoned') throw makeAbortError()
   return action !== null
 }

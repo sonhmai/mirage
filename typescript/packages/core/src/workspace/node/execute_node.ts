@@ -75,6 +75,7 @@ import { executeCommand } from './command_dispatch.ts'
 import { executeAssignment } from './assignment.ts'
 import { executeDeclaration } from './declaration.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
+import type { HandOff } from '../../policy/types.ts'
 import type { SessionView } from '../../ops/types.ts'
 import { ensureVarVisible, sessionElements, sessionView, visibleEnv } from '../session/state.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
@@ -254,6 +255,11 @@ export interface ExecuteNodeDeps {
   routingDecision?: RouteDecision
   signal?: AbortSignal
   /**
+   * The line's hand-off, carried to every command's gate so it spends
+   * the grants claimed for this line and never another's.
+   */
+  handed?: HandOff
+  /**
    * Parse one line into a tree. Only alias expansion needs it: an alias
    * rewrites the head word textually and the result is read as a fresh
    * line, so a value holding a pipe is a pipe. Absent (a unit test
@@ -372,6 +378,7 @@ export async function executeNode(
       deps.signal,
       deps.reparse,
       agentId,
+      deps.handed,
     )
   }
 

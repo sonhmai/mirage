@@ -179,6 +179,10 @@ export class Decisions {
   private readonly sessions: SessionDecisionsQuery | null
   private readonly onAsk: AskHandler | null
   private readonly memory = new Map<string, Decision[]>()
+  // The hand-offs holding a claim, per session: a reservation is a fact
+  // about a line running in this process, so it lives here and not in
+  // the store the records persist to.
+  private readonly live = new Map<string, Set<HandOff>>()
 
   constructor(sessions: SessionDecisionsQuery | null = null, onAsk: AskHandler | null = null) {
     this.sessions = sessions
@@ -252,15 +256,19 @@ export class Decisions {
    * @param ask the chain's Ask.
    * @param signal the run's abort signal, so a question outlives
    *   neither its run's deadline nor a caller's kill.
-   * @param handOff the line's hand-off for a pass that judges it on
-   *   behalf of the one that runs it — the env pre-pass, and the
-   *   compound-line pass that judges every command before any runs.
-   *   Nothing is spent here: every ONCE grant behind the command, the
-   *   one the host gives now and any already on file, is claimed on it
-   *   for the gate behind the pass, which runs the line and spends
-   *   them. A claimed grant is not seen again by the same pass, so a
-   *   command spelled twice on one line is asked twice. Null for that
-   *   gate.
+   * @param handed the line's hand-off, null outside a line (a bare
+   *   chain, a whole line a runtime takes). A grant another live
+   *   hand-off has claimed is not on offer to this line at all,
+   *   whichever pass reads it.
+   * @param judging true for a pass that judges the line on behalf of
+   *   the one that runs it — the env pre-pass, and the compound-line
+   *   pass that judges every command before any runs. Nothing is spent
+   *   then: every ONCE grant behind the command, the one the host gives
+   *   now and any already on file, is claimed on `handed` for the gate
+   *   behind the pass, which runs the line and spends them. A claimed
+   *   grant is not seen again by the same pass, so a command spelled
+   *   twice on one line is asked twice. False for that gate, which sees
+   *   its own line's claims and spends them.
    * @returns the refusal, the question left waiting, an Abandoned for a
    *   run killed mid-question, or null to run.
    */
@@ -268,12 +276,13 @@ export class Decisions {
     ctx: CommandContext,
     ask: Ask,
     signal?: AbortSignal,
-    handOff: HandOff | null = null,
+    handed: HandOff | null = null,
+    judging = false,
   ): Promise<Deny | Pending | Abandoned | null> {
     const rules = ask.rules ?? [askRule(ctx, ask)]
     const argv = [ctx.command, ...ctx.argv]
     const sessionId = ctx.sessionId ?? ''
-    const held = this.standing(sessionId, handOff)
+    const held = this.standing(sessionId, handed, judging)
     const answers = rules.map(
       (rule) => [rule, Decisions.settled(held, rule, argv, ctx.cwd)] as const,
     )
@@ -299,9 +308,17 @@ export class Decisions {
     // inline settled its record during the loop above: without the re-read,
     // the grant it gave THIS line would still be standing for the next
     // identical one, and whoever allowed once would have allowed twice.
-    const once = this.onceAnswers(sessionId, rules, argv, ctx.cwd, handOff)
-    if (handOff === null) await this.spend(sessionId, once)
-    else handOff.claimed.push(...once)
+    const once = this.onceAnswers(sessionId, rules, argv, ctx.cwd, handed, judging)
+    if (!judging || handed === null) {
+      await this.spend(sessionId, once)
+      return null
+    }
+    handed.claimed.push(...once)
+    if (once.length > 0) {
+      const live = this.live.get(sessionId) ?? new Set<HandOff>()
+      live.add(handed)
+      this.live.set(sessionId, live)
+    }
     return null
   }
 
@@ -326,18 +343,47 @@ export class Decisions {
    */
   async revoke(sessionId: string, handed: HandOff): Promise<void> {
     await this.spend(sessionId, [...handed.claimed])
-    handed.claimed.length = 0
+    this.release(sessionId, handed)
   }
 
   /**
-   * The session's records as one pass may read them: every one, less
-   * the grants the pass already claimed for an earlier command of its
-   * line. The gate claims nothing and reads everything.
+   * Let go of a hand-off's claims without spending them.
+   *
+   * For a line held on a question still waiting: its retry is a new
+   * line with a hand-off of its own, and it has to find the grants this
+   * one claimed standing, or the human is asked again for what they
+   * already allowed. Left live, the held line would hide them from every
+   * line after it.
    */
-  private standing(sessionId: string, handOff: HandOff | null): readonly Decision[] {
+  release(sessionId: string, handed: HandOff): void {
+    handed.claimed.length = 0
+    this.live.get(sessionId)?.delete(handed)
+  }
+
+  /**
+   * The session's records as one line may read them.
+   *
+   * A grant claimed by another live line is not on offer: it is that
+   * line's to spend, and reading it here would let two lines judged at
+   * once both pass on one nod, the second of them running its earlier
+   * commands before its gate found the grant gone. A grant this line
+   * claimed is on offer to its gate, which spends it, and not to its
+   * own judging pass, so a command spelled twice on the line is asked
+   * twice.
+   */
+  private standing(
+    sessionId: string,
+    handed: HandOff | null,
+    judging: boolean,
+  ): readonly Decision[] {
     const held = this.records(sessionId)
-    if (handOff === null) return held
-    return held.filter((r) => !handOff.claimed.some((c) => c === r))
+    const taken: Decision[] = []
+    for (const other of this.live.get(sessionId) ?? []) {
+      if (other !== handed) taken.push(...other.claimed)
+    }
+    if (judging && handed !== null) taken.push(...handed.claimed)
+    if (taken.length === 0) return held
+    return held.filter((r) => !taken.some((t) => t === r))
   }
 
   /** Every ONCE answer standing behind this line, as the ledger holds it now. */
@@ -346,9 +392,10 @@ export class Decisions {
     rules: readonly CommandRule[],
     argv: readonly string[],
     cwd: string,
-    handOff: HandOff | null,
+    handed: HandOff | null,
+    judging: boolean,
   ): Decision[] {
-    const held = this.standing(sessionId, handOff)
+    const held = this.standing(sessionId, handed, judging)
     return rules
       .map((rule) => Decisions.settled(held, rule, argv, cwd))
       .filter((r): r is Decision => r !== null && r.scope === Scope.ONCE)

@@ -295,7 +295,7 @@ class Decision:
     note: str = ""
 
 
-@dataclass(slots=True)
+@dataclass(eq=False, slots=True)
 class HandOff:
     """The ONCE grants a line's judging passes matched to its commands,
     for the run behind them to spend.
@@ -305,9 +305,12 @@ class HandOff:
     host gave it inline just now or out of band before the pass, is
     claimed here instead of spent. A claimed grant is invisible to the
     next command the same pass judges, so two spellings of one command
-    on a line each need a nod of their own; the run spends each grant at
-    the gate it was claimed for, and whatever the run never reaches is
-    spent when the line ends (``Decisions.revoke``).
+    on a line each need a nod of their own, and invisible to every other
+    line of the session while this one lives, so two lines judged at
+    once cannot both run on one nod; the run spends each grant at the
+    gate it was claimed for, and whatever the run never reaches is spent
+    when the line ends (``Decisions.revoke``). Compared by identity,
+    because the hand-off is the line.
 
     Args:
         claimed (list[Decision]): the grants matched so far, in the

@@ -292,8 +292,12 @@ async function runLine(
     })
   }
 
+  // The line's hand-off: the grants its judging passes claim for its
+  // gates, which the gates spend from and the line's end sweeps.
+  const handed: HandOff = { claimed: [] }
   const deps = {
     dispatch,
+    handed,
     registry: env.registry,
     namespace: env.namespace,
     jobTable: env.jobTable,
@@ -335,6 +339,7 @@ async function runLine(
           stdin,
           (line) => parser.parse(line),
           nested,
+          handed,
         ),
       env.sessions,
     )
@@ -356,6 +361,7 @@ async function runParsedLine(
   stdin: ByteSource | null,
   reparse: (line: string) => TSNodeLike,
   nested: NestedRefusal,
+  handed: HandOff,
 ): Promise<ExecuteResult> {
   const callAgentId = options.agentId ?? env.agentId ?? ''
   // The line-reader decision (GNU: history is appended where the typed
@@ -385,9 +391,6 @@ async function runParsedLine(
   // because expansion is what consumes the values. A SecretsError
   // folds like any failed line: the line exits 1 and never runs.
   const writesGated = await env.registry.policies.wantsFor('preSession', effectiveSession.sessionId)
-  // The grants the judging passes claim for the gates ride one hand-off,
-  // and whatever the run never spends is swept once the line ends.
-  const handed: HandOff = { claimed: [] }
   const fillManaged = async (
     nodes: TSNodeLike[],
     whole: boolean,
@@ -541,7 +544,8 @@ async function runParsedLine(
     )
     if (prejudged !== null) {
       // A question left waiting holds the line for its retry, which has
-      // to find the grants standing; any other refusal ends the line.
+      // to find the grants standing, so they are released rather than
+      // spent; any other refusal ends the line.
       held = isPending(prejudged)
       targetSession.lastExitCode = prejudged.exitCode
       return new ExecuteResult(
@@ -580,7 +584,8 @@ async function runParsedLine(
       return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
     }
   } finally {
-    if (!held) await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
+    if (held) env.registry.decisions.release(effectiveSession.sessionId, handed)
+    else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
   }
   const [[materialized, io], opRecords] = execResult
   // A record a nested line earned is the line's to report when its own

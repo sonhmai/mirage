@@ -22,7 +22,7 @@ from mirage.context import (redirect_paths_for, reset_admission,
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import PolicyDenied, resolve_limit
-from mirage.policy.types import SessionContext
+from mirage.policy.types import HandOff, SessionContext
 from mirage.runtime.routing import RouteDecision
 from mirage.shell.bytes import encode_text
 from mirage.shell.parse import find_syntax_error, parse, syntax_error_result
@@ -72,6 +72,7 @@ async def execute_command(
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision | None = None,
     agent_id: str = "",
+    handed: HandOff | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Dispatch a command node by name."""
     name = get_command_name(node)
@@ -194,7 +195,7 @@ async def execute_command(
                                             namespace, execute_fn, node, parts,
                                             name, session, stdin, call_stack,
                                             job_table, cancel,
-                                            routing_decision, agent_id)
+                                            routing_decision, agent_id, handed)
     finally:
         for k, prev in saved_env_overrides.items():
             if prev is None:
@@ -219,6 +220,7 @@ async def _dispatch_command_body(
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision | None = None,
     agent_id: str = "",
+    handed: HandOff | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     parent = node.parent
     if parent is None or parent.type != NT.REDIRECTED_STATEMENT:
@@ -286,7 +288,8 @@ async def _dispatch_command_body(
                      routing_decision,
                      row=node.start_point[0],
                      agent_id=agent_id,
-                     redirects=redirect_paths_for(node.id))
+                     redirects=redirect_paths_for(node.id),
+                     handed=handed)
     # Capture xtrace before the body runs so `set -x` itself is not
     # traced (bash enables tracing only for the following commands).
     xtrace = bool(session.shell_options.get("xtrace"))
@@ -322,6 +325,7 @@ async def _run_argv(
     row: int = 0,
     agent_id: str = "",
     redirects: tuple[PathSpec, ...] = (),
+    handed: HandOff | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler.
 
@@ -377,7 +381,8 @@ async def _run_argv(
                               agent_id,
                               stdin,
                               redirects=redirects,
-                              cancel=cancel)
+                              cancel=cancel,
+                              handed=handed)
         if isinstance(verdict, Refused):
             cmd_str = " ".join([name, *argv.args])
             return None, IOResult(exit_code=verdict.exit_code,

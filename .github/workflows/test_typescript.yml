@@ -122,6 +122,7 @@ jobs:
           run integ/truth/policy.json
           run integ/truth/policy_yaml.json
           run integ/truth/ask.json
+          run integ/truth/ask_pending.json
           run integ/truth/typescript/custom_command.json
           run integ/truth/custom_resource.json
           run integ/truth/custom_cli.json

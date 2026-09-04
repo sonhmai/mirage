@@ -13,17 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import dataclasses
 
-from mirage import Decision, MountMode, Outcome, Scope, Workspace
+from mirage import MountMode, Outcome, Scope, Workspace
 from mirage.resource.ram import RAMResource
 
-# One profile, one rule. `allow` is what the session may run at all;
-# `ask` puts one of those commands to a person before it runs.
+# Two rules that ask: one about a path, one about a whole command.
 ROLE = {
     "commands": {
-        "allow": ["ls", "rm"],
+        "allow": ["ls", "cat", "rm"],
         "ask": [{
+            "reason": "secrets are reviewed",
+            "commands": {
+                "cat": ["/data/secret.txt"]
+            }
+        }, {
             "reason": "deletes are reviewed",
             "commands": ["rm"]
         }],
@@ -31,35 +34,39 @@ ROLE = {
 }
 
 
-async def reviewer(record: Decision) -> Decision:
-    """The host answering inline: the ledger awaits this while the line
-    waits, the way a tool-approval prompt works. ALLOW at ONCE passes
-    this line only; SESSION would pass every rm for the rest of the
-    session.
-
-    Args:
-        record (Decision): the question, with no outcome yet.
-    """
-    print(f"approve? {record.command} {' '.join(record.argv)}")
-    return dataclasses.replace(record, outcome=Outcome.ALLOW, scope=Scope.ONCE)
-
-
 async def run(ws: Workspace, line: str) -> None:
     await ws.fs.write("/data/a.txt", b"a\n")
+    await ws.fs.write("/data/secret.txt", b"s\n")
     res = await ws.execute(line, session_id="agent")
     how = "ran" if res.refusal is None else f"refused ({res.refusal.kind})"
     print(f"{line}: {how}, exit {res.exit_code}")
 
 
 async def main() -> None:
+    # No `on_ask`: nobody answers inline, so an asked line is refused for
+    # now and its question waits in the ledger under an id the agent is
+    # told to quote.
     ws = Workspace({"/data/": RAMResource()},
                    mode=MountMode.WRITE,
-                   profiles={"agent": ROLE},
-                   on_ask=reviewer)
+                   profiles={"agent": ROLE})
     ws.create_session("agent", profile="agent")
     try:
+        await run(ws, "cat /data/secret.txt")
         await run(ws, "rm /data/a.txt")
-        # Once means once: the same line asks again.
+        # The host reads the queue, one record per question and oldest
+        # first, and answers each by id. ONCE passes one retry of that
+        # line; SESSION passes every line the rule covers from now on.
+        for waiting in ws.decisions.pending("agent"):
+            scope = Scope.ONCE if waiting.command == "cat" else Scope.SESSION
+            words = " ".join(waiting.argv)
+            print(f"host: {waiting.id} asks {waiting.command} {words}"
+                  f" ({waiting.reason}): allow {scope.value}")
+            await ws.decisions.answer(waiting.id, Outcome.ALLOW, scope)
+        # Each retry consumes its answer.
+        await run(ws, "cat /data/secret.txt")
+        await run(ws, "rm /data/a.txt")
+        # The once grant is spent; the session grant still covers rm.
+        await run(ws, "cat /data/secret.txt")
         await run(ws, "rm /data/a.txt")
     finally:
         await ws.close()

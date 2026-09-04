@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import dataclasses
 
 import pytest
@@ -530,6 +531,26 @@ async def test_a_command_spelled_twice_on_a_line_needs_two_answers(ws):
     assert ran.exit_code == 0
     assert ran.stdout == b"s\ns\n"
     assert ws.decisions.list("s") == ()
+
+
+@pytest.mark.asyncio
+async def test_two_lines_judged_at_once_cannot_both_run_on_one_nod(ws):
+    # One out-of-band answer, two identical compound lines executed
+    # concurrently on the session. The line whose pass claims the grant
+    # first runs; the other must be held whole, not run its ls and then
+    # find the grant gone at its cat.
+    line = "ls /data && cat /data/secret.txt"
+    first = await ws.execute(line, session_id="s")
+    assert first.refusal is not None and first.refusal.kind == "pending"
+    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    ran, held = sorted(await asyncio.gather(ws.execute(line, session_id="s"),
+                                            ws.execute(line, session_id="s")),
+                       key=lambda r: r.exit_code)
+    assert ran.exit_code == 0
+    assert ran.stdout == b"a.txt\nprod\nsecret.txt\ns\n"
+    assert held.exit_code == 126
+    assert held.stdout == b""
+    assert held.refusal is not None and held.refusal.kind == "pending"
 
 
 @pytest.mark.asyncio

@@ -176,6 +176,10 @@ class Decisions:
         self._sessions = sessions
         self._on_ask = on_ask
         self._memory: dict[str, tuple[Decision, ...]] = {}
+        # The hand-offs holding a claim, per session: a reservation is
+        # a fact about a line running in this process, so it lives here
+        # and not in the store the records persist to.
+        self._live: dict[str, list[HandOff]] = {}
 
     def list(self, session_id: str = "") -> tuple[Decision, ...]:
         """Every record, oldest first: questions waiting and questions
@@ -247,7 +251,8 @@ class Decisions:
         ctx: CommandContext,
         ask: Ask,
         cancel: asyncio.Event | None = None,
-        hand_off: HandOff | None = None,
+        handed: HandOff | None = None,
+        judging: bool = False,
     ) -> Deny | Pending | Abandoned | None:
         """The executor's branch for an Ask: settled records answer it,
         else the question is raised now.
@@ -275,16 +280,21 @@ class Decisions:
             cancel (asyncio.Event | None): the run's kill channel, so a
                 question outlives neither its run's deadline nor a
                 caller's kill.
-            hand_off (HandOff | None): the line's hand-off for a pass
-                that judges it on behalf of the one that runs it -- the
-                env pre-pass, and the compound-line pass that judges
-                every command before any runs. Nothing is spent here:
-                every ONCE grant behind the command, the one the host
-                gives now and any already on file, is claimed on it for
-                the gate behind the pass, which runs the line and
-                spends them. A claimed grant is not seen again by the
-                same pass, so a command spelled twice on one line is
-                asked twice. None for that gate.
+            handed (HandOff | None): the line's hand-off, None outside a
+                line (a bare chain, a whole line a runtime takes). A
+                grant another live hand-off has claimed is not on offer
+                to this line at all, whichever pass reads it.
+            judging (bool): True for a pass that judges the line on
+                behalf of the one that runs it -- the env pre-pass, and
+                the compound-line pass that judges every command before
+                any runs. Nothing is spent then: every ONCE grant behind
+                the command, the one the host gives now and any already
+                on file, is claimed on ``handed`` for the gate behind
+                the pass, which runs the line and spends them. A
+                claimed grant is not seen again by the same pass, so a
+                command spelled twice on one line is asked twice. False
+                for that gate, which sees its own line's claims and
+                spends them.
 
         Returns:
             None to run the line, a Deny to refuse it, a Pending when
@@ -293,7 +303,7 @@ class Decisions:
         """
         rules = ask.rules or (ask_rule(ctx, ask), )
         argv = (ctx.command, *ctx.argv)
-        held = self._standing(ctx.session_id, hand_off)
+        held = self._standing(ctx.session_id, handed, judging)
         answers = [(rule, self._settled(held, rule, argv, ctx.cwd))
                    for rule in rules]
         refused = next((rule for rule, r in answers
@@ -319,12 +329,15 @@ class Decisions:
         # without the re-read, the grant it gave THIS line would still be
         # standing for the next identical one, and whoever allowed once
         # would have allowed twice.
-        once = self._once_answers(ctx.session_id, rules, argv, ctx.cwd,
-                                  hand_off)
-        if hand_off is None:
+        once = self._once_answers(ctx.session_id, rules, argv, ctx.cwd, handed,
+                                  judging)
+        if not judging or handed is None:
             await self._spend(ctx.session_id, once)
-        else:
-            hand_off.claimed.extend(once)
+            return None
+        handed.claimed.extend(once)
+        live = self._live.setdefault(ctx.session_id, [])
+        if once and not any(h is handed for h in live):
+            live.append(handed)
         return None
 
     async def revoke(self, session_id: str, handed: HandOff) -> None:
@@ -349,24 +362,53 @@ class Decisions:
             handed (HandOff): the line's hand-off.
         """
         await self._spend(session_id, tuple(handed.claimed))
-        handed.claimed.clear()
+        self.release(session_id, handed)
 
-    def _standing(self, session_id: str,
-                  hand_off: HandOff | None) -> tuple[Decision, ...]:
-        """The session's records as one pass may read them: every one,
-        less the grants the pass already claimed for an earlier
-        command of its line.
+    def release(self, session_id: str, handed: HandOff) -> None:
+        """Let go of a hand-off's claims without spending them.
+
+        For a line held on a question still waiting: its retry is a new
+        line with a hand-off of its own, and it has to find the grants
+        this one claimed standing, or the human is asked again for what
+        they already allowed. Left live, the held line would hide them
+        from every line after it.
+
+        Args:
+            session_id (str): the session the line was judged in.
+            handed (HandOff): the line's hand-off.
+        """
+        handed.claimed.clear()
+        live = self._live.get(session_id, [])
+        self._live[session_id] = [h for h in live if h is not handed]
+
+    def _standing(self, session_id: str, handed: HandOff | None,
+                  judging: bool) -> tuple[Decision, ...]:
+        """The session's records as one line may read them.
+
+        A grant claimed by another live line is not on offer: it is
+        that line's to spend, and reading it here would let two lines
+        judged at once both pass on one nod, the second of them running
+        its earlier commands before its gate found the grant gone. A
+        grant this line claimed is on offer to its gate, which spends
+        it, and not to its own judging pass, so a command spelled twice
+        on the line is asked twice.
 
         Args:
             session_id (str): the asking session.
-            hand_off (HandOff | None): the line's hand-off, None for the
-                gate, which claims nothing and reads everything.
+            handed (HandOff | None): the line's hand-off, None outside a
+                line.
+            judging (bool): whether the reader is a judging pass.
         """
         held = self._records(session_id)
-        if hand_off is None:
+        taken: list[Decision] = []
+        for other in self._live.get(session_id, ()):
+            if other is not handed:
+                taken.extend(other.claimed)
+        if judging and handed is not None:
+            taken.extend(handed.claimed)
+        if not taken:
             return held
-        return tuple(r for r in held
-                     if not any(r is c for c in hand_off.claimed))
+        return tuple(r for r in held if not any(r is t for t in taken))
 
     def _once_answers(
         self,
@@ -374,7 +416,8 @@ class Decisions:
         rules: Sequence[CommandRule],
         argv: tuple[str, ...],
         cwd: str,
-        hand_off: HandOff | None,
+        handed: HandOff | None,
+        judging: bool,
     ) -> tuple[Decision, ...]:
         """Every ONCE answer standing behind this line, as the ledger
         holds it now.
@@ -384,13 +427,13 @@ class Decisions:
             rules (Sequence[CommandRule]): the rules the ask named.
             argv (tuple[str, ...]): the line, command name first.
             cwd (str): the directory the line was typed in.
-            hand_off (HandOff | None): the line's hand-off, whose
-                claimed grants are not standing for this command.
+            handed (HandOff | None): the line's hand-off.
+            judging (bool): whether the reader is a judging pass.
 
         Returns:
             tuple[Decision, ...]: the settled ONCE records.
         """
-        held = self._standing(session_id, hand_off)
+        held = self._standing(session_id, handed, judging)
         found = (self._settled(held, rule, argv, cwd) for rule in rules)
         return tuple(r for r in found
                      if r is not None and r.scope is Scope.ONCE)

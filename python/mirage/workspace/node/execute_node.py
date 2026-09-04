@@ -19,7 +19,7 @@ from typing import Any, Callable
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.ops.types import SessionView
-from mirage.policy import PolicyDenied
+from mirage.policy import HandOff, PolicyDenied
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.arith import evaluate_arith
@@ -264,6 +264,7 @@ async def execute_node(
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision | None = None,
     sink: JobConsole | None = None,
+    handed: HandOff | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Walk tree-sitter AST and dispatch each node.
 
@@ -279,6 +280,9 @@ async def execute_node(
         stdin (Any): input stream.
         call_stack (CallStack): shell call stack.
         cancel (asyncio.Event | None): event used to abort mid-flight.
+        handed (HandOff | None): the line's hand-off, carried to every
+            command's gate so it spends the grants claimed for this
+            line and never another's.
         sink (JobConsole | None): console to write this node's output to
             as it is produced. When set, the node emits and returns no
             stdout; when None it returns stdout as a value, which is
@@ -314,7 +318,8 @@ async def execute_node(
                       execute_fn,
                       agent_id,
                       cancel=cancel,
-                      routing_decision=routing_decision)
+                      routing_decision=routing_decision,
+                      handed=handed)
 
     kind = node_kind(node)
 
@@ -357,7 +362,8 @@ async def execute_node(
                                      job_table,
                                      cancel=cancel,
                                      routing_decision=routing_decision,
-                                     agent_id=agent_id)
+                                     agent_id=agent_id,
+                                     handed=handed)
 
     # ── pipeline ────────────────────────────────
     if kind == NodeKind.PIPELINE:
@@ -460,7 +466,8 @@ async def execute_node(
                               agent_id,
                               cancel=cancel,
                               routing_decision=routing_decision,
-                              sink=sink)
+                              sink=sink,
+                              handed=handed)
         return await handle_subshell(sub_recurse, list(node.children), session,
                                      stdin, cs, sub_table, agent_id, dispatch)
 

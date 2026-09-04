@@ -47,7 +47,7 @@ import { handleCommand } from '../executor/command.ts'
 import { type AliasMark, aliasCommandText } from '../executor/builtins/alias/index.ts'
 import { findSyntaxError } from '../../shell/parse/index.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
-import { PolicyDenied, resolveLimit } from '../../policy/index.ts'
+import { PolicyDenied, resolveLimit, type HandOff } from '../../policy/index.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import {
@@ -104,6 +104,8 @@ export async function executeCommand(
   reparse?: (line: string) => TSNodeLike,
   // The agent the line is attributed to, which an approval request names.
   agentId = '',
+  // The line's hand-off, which its gate spends from.
+  handed?: HandOff,
 ): Promise<Result> {
   const name = getCommandName(node)
   const [assignmentNodes, nonPrefixParts] = splitEnvPrefix(getParts(node))
@@ -259,6 +261,7 @@ export async function executeCommand(
       routingDecision,
       signal,
       agentId,
+      handed,
     )
   } finally {
     for (const [k, prev] of savedEnvOverrides) {
@@ -295,6 +298,7 @@ async function runCommandBody(
   routingDecision?: RouteDecision,
   signalIn?: AbortSignal,
   agentId = '',
+  handed?: HandOff,
 ): Promise<Result> {
   let stdin = stdinIn
   // A background job's kill channel rides the session; fold it in so
@@ -395,6 +399,7 @@ async function runCommandBody(
       node.startPosition?.row ?? 0,
       agentId,
       redirectPathsFor(node),
+      handed,
     ),
     timeout,
     argv.name !== '' ? argv.name : '?',
@@ -459,6 +464,8 @@ async function runArgv(
   // because their I/O runs on the shell's own fds outside the admitted
   // command's gate window.
   redirects: readonly PathSpec[] = [],
+  // The line's hand-off, which its gate spends from.
+  handed?: HandOff,
 ): Promise<Result> {
   const name = argv.name
 
@@ -506,6 +513,7 @@ async function runArgv(
       stdin,
       redirects,
       signal,
+      handed ?? null,
     )
     if (!(verdict instanceof Admitted)) {
       return [

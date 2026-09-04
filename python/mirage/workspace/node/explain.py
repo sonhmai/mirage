@@ -485,7 +485,8 @@ async def prejudge_line(
                 # itself, so a grant the host gives here is handed to the
                 # per-command gate that runs the line, which spends it:
                 # one question per run, not per pass.
-                hand_off=handed)
+                handed=handed,
+                judging=True)
             if isinstance(answered, Refused):
                 return answered
             # The host answered this one inline. The rest of the line
@@ -555,7 +556,7 @@ async def _verdict_refuses(
     # the gate behind it still has to admit the line. An answer given here is
     # left standing for that gate, which consumes it -- so the host is asked
     # once.
-    action = await registry.decisions.resolve(ctx, asked, cancel, handed)
+    action = await registry.decisions.resolve(ctx, asked, cancel, handed, True)
     if isinstance(action, Abandoned):
         raise MirageAbortError()
     return action is not None

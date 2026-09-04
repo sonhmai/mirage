@@ -247,10 +247,12 @@ export interface Decision {
  * host gave it inline just now or out of band before the pass, is
  * claimed here instead of spent. A claimed grant is invisible to the
  * next command the same pass judges, so two spellings of one command
- * on a line each need a nod of their own; the run spends each grant at
- * the gate it was claimed for, and whatever the run never reaches is
- * spent when the line ends (`Decisions.revoke`). Mirrors the Python
- * HandOff.
+ * on a line each need a nod of their own, and invisible to every other
+ * line of the session while this one lives, so two lines judged at once
+ * cannot both run on one nod; the run spends each grant at the gate it
+ * was claimed for, and whatever the run never reaches is spent when the
+ * line ends (`Decisions.revoke`). Compared by identity, because the
+ * hand-off is the line. Mirrors the Python HandOff.
  */
 export interface HandOff {
   /** The grants matched so far, in the order the commands were judged. */

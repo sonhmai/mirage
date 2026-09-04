@@ -321,7 +321,8 @@ async def admit(
     stdin: ByteSource | None = None,
     redirects: Sequence[PathSpec] = (),
     cancel: asyncio.Event | None = None,
-    hand_off: HandOff | None = None,
+    handed: HandOff | None = None,
+    judging: bool = False,
 ) -> Refused | Admitted:
     """The command plane's admission of one command: visibility, then
     the policy chain, then the decision ledger.
@@ -356,13 +357,16 @@ async def admit(
             only so a question put to a host cannot outlive the run
             that raised it. Nothing else here waits on anything outside
             mirage.
-        hand_off (HandOff | None): the line's hand-off, for a pass that
-            judges the command on behalf of the gate that runs it
-            (``prejudge_line``): the grants behind the command are
-            claimed on it for that gate to spend, so one question
-            covers one run rather than one pass. A refusal needs no
-            such care -- the record refuses the agent's retry from the
-            ledger either way. None for the gate.
+        handed (HandOff | None): the line's hand-off, None outside a
+            line. The gate spends the grants claimed on it and never
+            one claimed by another line; a judging pass claims on it.
+        judging (bool): True for a pass that judges the command on
+            behalf of the gate that runs it (``prejudge_line``): the
+            grants behind the command are claimed on ``handed`` for
+            that gate to spend, so one question covers one run rather
+            than one pass. A refusal needs no such care -- the record
+            refuses the agent's retry from the ledger either way. False
+            for the gate.
     """
     gated = await gate(name, args, operands, session, registry, namespace,
                        agent_id, stdin, redirects)
@@ -373,7 +377,7 @@ async def admit(
     # the ledger answers it from the session's records or the host, so
     # an answer never re-opens a deny.
     action: Deny | Pending | Abandoned | None = (
-        await registry.decisions.resolve(ctx, asked, cancel, hand_off)
+        await registry.decisions.resolve(ctx, asked, cancel, handed, judging)
         if isinstance(asked, Ask) else asked)
     # The ledger stopped waiting on a host because this run was killed
     # while it was deciding. That is the kill landing late, not a ruling,

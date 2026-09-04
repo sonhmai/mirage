@@ -468,6 +468,29 @@ describe('prejudge', () => {
     expect(w.decisions.list('s')).toEqual([])
   })
 
+  it('holds the second of two lines judged at once on one nod', async () => {
+    // One out-of-band answer, two identical compound lines executed
+    // concurrently on the session. The line whose pass claims the grant
+    // first runs; the other must be held whole, not run its ls and then
+    // find the grant gone at its cat.
+    const w = await ws()
+    const line = 'ls /data && cat /data/secret.txt'
+    const first = await w.execute(line, { sessionId: 's' })
+    expect(first.refusal?.kind).toBe('pending')
+    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    const both = await Promise.all([
+      w.execute(line, { sessionId: 's' }),
+      w.execute(line, { sessionId: 's' }),
+    ])
+    const [ran, held] = [...both].sort((a, b) => a.exitCode - b.exitCode)
+    if (ran === undefined || held === undefined) throw new Error('unreachable')
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('a.txt\nprod\nsecret.txt\ns\n')
+    expect(held.exitCode).toBe(126)
+    expect(DEC.decode(held.stdout)).toBe('')
+    expect(held.refusal?.kind).toBe('pending')
+  })
+
   it('spends a grant given before a line it then refuses', async () => {
     // The cat was answered out of band while the line waited; its retry is
     // then refused by the rm. That grant was given to this line as surely

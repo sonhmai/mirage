@@ -68,14 +68,21 @@ async def test_newer_and_newermt_in_the_shell():
         "printf x > /w/d/sub/c.txt; touch -d '2020-01-01 00:00:00' "
         "/w/d/a.txt; cd /w",
         session_id="s")
-    assert await _out(ws, "find d -newer d/a.txt | sort") == (
-        "d\nd/b.txt\nd/sub\nd/sub/c.txt\n", "", 0)
-    assert await _out(ws, "find d -newer nope") == (
-        "", "find: 'nope': No such file or directory\n", 1)
+    assert await _out(
+        ws,
+        "find d -newer d/a.txt | sort") == ("d\nd/b.txt\nd/sub\nd/sub/c.txt\n",
+                                            "", 0)
+    assert await _out(
+        ws,
+        "find d -newer nope") == ("",
+                                  "find: 'nope': No such file or directory\n",
+                                  1)
     assert await _out(ws, "find d -newermt 2099-01-01") == ("", "", 0)
-    assert await _out(ws, 'find d -newermt 2020-01-01 -name "*.txt" | sort'
-                      ) == ("d/b.txt\nd/sub/c.txt\n", "", 0)
-    assert await _out(ws, 'find d -newer d/a.txt -name "*.txt" -exec cat {} \;'
-                      ) == ("bbx", "", 0)
+    assert await _out(ws,
+                      'find d -newermt 2020-01-01 -name "*.txt" | sort') == (
+                          "d/b.txt\nd/sub/c.txt\n", "", 0)
+    assert await _out(
+        ws, r'find d -newer d/a.txt -name "*.txt" -exec cat {} \;') == ("bbx",
+                                                                        "", 0)
     assert await _out(ws, "find -newer d/a.txt | sort") == (
         ".\n./d\n./d/b.txt\n./d/sub\n./d/sub/c.txt\n", "", 0)

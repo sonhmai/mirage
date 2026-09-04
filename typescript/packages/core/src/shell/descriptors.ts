@@ -42,5 +42,5 @@ export function unsupportedDescriptor(redirects: readonly Redirect[]): number | 
  * shell-attributed error follows.
  */
 export function badDescriptorLine(fd: number): Uint8Array {
-  return new TextEncoder().encode(`${fd}: Bad file descriptor\n`)
+  return new TextEncoder().encode(`${String(fd)}: Bad file descriptor\n`)
 }

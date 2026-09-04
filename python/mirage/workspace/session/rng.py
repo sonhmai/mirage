@@ -55,9 +55,8 @@ def next_random(session: Session, stored: str | None) -> int | None:
         stored (str | None): the store's current value for RANDOM, from
             the visible env.
     """
-    if session._random_seed == RANDOM_UNSET or (stored is None and
-                                                session._random_seed
-                                                is not None):
+    if session._random_seed == RANDOM_UNSET or (
+            stored is None and session._random_seed is not None):
         return None
     if stored is not None and stored != session._random_seed:
         session._random_state = seed_from(stored)

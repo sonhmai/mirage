@@ -29,8 +29,14 @@ def test_seed_from_reads_the_word_as_an_integer():
 def test_seeded_sequence_is_deterministic_and_bounded():
     a = Session(session_id="a")
     b = Session(session_id="b")
-    seq_a = [next_random(a, "42" if i == 0 else a.vars[RANDOM].value) for i in range(5)]
-    seq_b = [next_random(b, "42" if i == 0 else b.vars[RANDOM].value) for i in range(5)]
+    seq_a = [
+        next_random(a, "42" if i == 0 else a.vars[RANDOM].value)
+        for i in range(5)
+    ]
+    seq_b = [
+        next_random(b, "42" if i == 0 else b.vars[RANDOM].value)
+        for i in range(5)
+    ]
     assert seq_a == seq_b
     assert all(v is not None and 0 <= v <= RANDOM_MAX for v in seq_a)
     # The LCG from seed 42, so the two languages can pin one sequence.
@@ -55,7 +61,8 @@ def test_unset_after_a_read_strips_the_meaning():
 @pytest.mark.asyncio
 async def test_random_expands_in_the_shell():
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute('RANDOM=42; a=$RANDOM; RANDOM=42; b=$RANDOM; echo $a $b')
+    io = await ws.execute(
+        'RANDOM=42; a=$RANDOM; RANDOM=42; b=$RANDOM; echo $a $b')
     assert await io.stdout_str() == "19081 19081\n"
     io = await ws.execute('echo $RANDOM $RANDOM')
     x, y = (await io.stdout_str()).split()

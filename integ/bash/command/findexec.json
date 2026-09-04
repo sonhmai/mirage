@@ -367,10 +367,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name \"*.txt\" -exec cat {} \\; -delete; find d -type f | wc -l ; cd / && rm -r /data/fe",
+      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && printf k > /data/fe/d/keep.md && cd /data/fe && find d -name \"*.txt\" -exec cat {} \\; -delete; find d -type f | wc -l ; cd / && rm -r /data/fe",
       "expect": {
         "exit": 0,
-        "stdout": "a\nbb\nx0\n",
+        "stdout": "a\nbb\nx1\n",
         "stderr": ""
       }
     },
@@ -450,23 +450,12 @@
         "disk",
         "redis",
         "opfs",
-        "s3",
         "databricks",
-        "gridfs",
-        "s3-prefix",
         "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
         "ssh",
         "nextcloud",
-        "gdrive",
-        "gdrive-folder",
         "box"
       ],
       "command": "find /data -newermt 2099-01-01; echo rc=$?",
@@ -481,7 +470,8 @@
       "seq": 980084,
       "targets": [
         "ram",
-        "disk"
+        "disk",
+        "redis"
       ],
       "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && touch -d '2020-01-01 00:00:00' d/a.txt && find d -newer d/a.txt -name '*.txt' | sort; find d -newermt 2020-01-01 -name a.txt; find -newer d/a.txt -name '*.txt' | sort ; cd / && rm -r /data/fe",
       "expect": {

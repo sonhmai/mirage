@@ -18,11 +18,13 @@ import { FileStat, FileType, MountMode } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { resolveNewerRefs } from './find_refs.ts'
 
-async function stat(virtual: string): Promise<FileStat | null> {
+function stat(virtual: string): Promise<FileStat | null> {
   if (virtual === '/w/ref') {
-    return new FileStat({ name: 'ref', type: FileType.FILE, modified: '2020-01-01T00:00:00Z' })
+    return Promise.resolve(
+      new FileStat({ name: 'ref', type: FileType.FILE, modified: '2020-01-01T00:00:00Z' }),
+    )
   }
-  return null
+  return Promise.resolve(null)
 }
 
 describe('resolveNewerRefs', () => {
@@ -48,7 +50,13 @@ describe('resolveNewerRefs', () => {
 
   it("reports a missing reference in GNU's words", async () => {
     const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
-    const [tokens, err] = await resolveNewerRefs(['-newer', 'nope'], ['nope'], ws.registry, '/w', stat)
+    const [tokens, err] = await resolveNewerRefs(
+      ['-newer', 'nope'],
+      ['nope'],
+      ws.registry,
+      '/w',
+      stat,
+    )
     expect(tokens).toEqual(['-newer', 'nope'])
     expect(new TextDecoder().decode(err ?? new Uint8Array())).toBe(
       "find: 'nope': No such file or directory\n",

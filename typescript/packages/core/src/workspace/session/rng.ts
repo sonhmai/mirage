@@ -36,7 +36,7 @@ export function seedFrom(word: string): number {
  * stirred with the session id so two sessions born in one tick differ. */
 function initialSeed(sessionId: string): number {
   let hash = 0
-  for (const ch of sessionId) hash = (Math.imul(hash, 31) + ch.codePointAt(0)!) >>> 0
+  for (const ch of sessionId) hash = (Math.imul(hash, 31) + (ch.codePointAt(0) ?? 0)) >>> 0
   return ((Date.now() % RANDOM_MODULUS) ^ hash) >>> 0
 }
 
@@ -55,13 +55,16 @@ function initialSeed(sessionId: string): number {
  * plane's door.
  */
 export function nextRandom(session: Session, stored: string | undefined): number | null {
-  if (session.randomSeed === RANDOM_UNSET || (stored === undefined && session.randomSeed !== null)) {
+  if (
+    session.randomSeed === RANDOM_UNSET ||
+    (stored === undefined && session.randomSeed !== null)
+  ) {
     return null
   }
   if (stored !== undefined && stored !== session.randomSeed) {
     session.randomState = seedFrom(stored)
-  } else if (session.randomState === null) {
-    session.randomState = initialSeed(session.sessionId)
+  } else {
+    session.randomState ??= initialSeed(session.sessionId)
   }
   const state = (Math.imul(session.randomState, RANDOM_MULTIPLIER) + RANDOM_INCREMENT) >>> 0
   session.randomState = state

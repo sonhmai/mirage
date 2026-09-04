@@ -75,6 +75,43 @@ async def test_closed_stderr_and_stdin_are_quiet():
 
 
 @pytest.mark.asyncio
+async def test_a_numeric_target_is_routed_by_the_claimed_descriptor():
+    ws = await _ws()
+    io = await ws.execute("cat /data/missing 2<&-; echo code=$?")
+    assert await io.stdout_str() == "code=1\n"
+    assert await io.stderr_str() == ""
+    io = await ws.execute("echo x 1<&-; echo code=$?")
+    assert await io.stdout_str() == "code=1\n"
+    assert await io.stderr_str() == "echo: write error: Bad file descriptor\n"
+    io = await ws.execute("cat /data/missing 2<&1; echo code=$?")
+    assert await io.stdout_str() == (
+        "cat: /data/missing: No such file or directory\ncode=1\n")
+    assert await io.stderr_str() == ""
+
+
+@pytest.mark.asyncio
+async def test_a_bare_zero_before_the_operator_is_the_descriptor():
+    ws = await _ws()
+    io = await ws.execute("echo x 0>&-; echo code=$?")
+    assert await io.stdout_str() == "x\ncode=0\n"
+    io = await ws.execute("cat 0</data/a.txt; echo code=$?")
+    assert await io.stdout_str() == "acode=0\n"
+    io = await ws.execute("echo 0 >&-; echo code=$?")
+    assert await io.stdout_str() == "code=1\n"
+    assert await io.stderr_str() == "echo: write error: Bad file descriptor\n"
+
+
+@pytest.mark.asyncio
+async def test_exec_closes_by_the_claimed_descriptor():
+    ws = await _ws()
+    io = await ws.execute("exec 2<&-; cat /data/missing; echo code=$?")
+    assert await io.stdout_str() == "code=1\n"
+    assert await io.stderr_str() == ""
+    io = await ws.execute("exec 0>&-; echo x; echo code=$?")
+    assert await io.stdout_str() == "x\ncode=0\n"
+
+
+@pytest.mark.asyncio
 async def test_self_dups_change_nothing():
     ws = await _ws()
     io = await ws.execute("echo x 1>&1; echo y 2>&2; cat <&0 </data/a.txt")

@@ -20,7 +20,7 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
-import { FD_BOTH, FD_CLOSE } from '../../shell/constants.ts'
+import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from '../../shell/constants.ts'
 import { badDescriptorLine, unsupportedDescriptor } from '../../shell/descriptors.ts'
 import { getText } from '../../shell/helpers.ts'
 import { type Redirect, RedirectKind } from '../../shell/types.ts'
@@ -100,12 +100,15 @@ export async function handleRedirect(
   let cmdStdin: ByteSource | null = stdin
 
   for (const r of redirects) {
+    if (typeof r.target === 'number') {
+      // A numeric target is routed by the descriptor the redirect claims,
+      // never by the operator's direction: `<&-` and `0>&-` both close
+      // stdin, and `2<&-` is stderr's business below. A dup onto stdin
+      // (`<&0`, `0<&1`) changes nothing.
+      if (r.fd === FD_STDIN && r.target === FD_CLOSE) cmdStdin = new Uint8Array()
+      continue
+    }
     if (r.kind === RedirectKind.STDIN) {
-      if (typeof r.target === 'number') {
-        // `<&-` closes stdin; `<&0` duplicates it onto itself.
-        if (r.target === FD_CLOSE) cmdStdin = new Uint8Array()
-        continue
-      }
       const scope = ensureScope(r.target)
       let data: unknown
       try {
@@ -179,36 +182,30 @@ export async function handleRedirect(
   const fileScopes = new Map<string, PathSpec>()
 
   for (const r of redirects) {
-    if (
-      r.kind === RedirectKind.STDIN ||
-      r.kind === RedirectKind.HEREDOC ||
-      r.kind === RedirectKind.HERESTRING
-    ) {
+    if (r.kind === RedirectKind.HEREDOC || r.kind === RedirectKind.HERESTRING) continue
+
+    if (typeof r.target === 'number') {
+      // Keyed on the descriptor claimed, not the operator: bash reads
+      // `2<&1` as `2>&1` and `1<&-` as `>&-`. Stdin's dups and close were
+      // applied above; a dup of a descriptor onto itself (1>&1, 2>&2) or
+      // onto stdin changes nothing, and every other number was refused
+      // above.
+      if (r.fd === FD_STDIN) continue
+      if (r.target === FD_CLOSE) {
+        // >&- / 2>&- — the descriptor is closed from here on
+        if (r.fd === FD_STDERR) fd2 = CLOSED
+        else fd1 = CLOSED
+      } else if (r.fd === FD_STDERR && r.target === FD_STDOUT) {
+        // 2>&1 — fd2 follows wherever fd1 points right now
+        fd2 = fd1
+      } else if (r.fd === FD_STDOUT && r.target === FD_STDERR) {
+        // >&2 or 1>&2 — fd1 follows wherever fd2 points right now
+        fd1 = fd2
+      }
       continue
     }
 
-    // 2>&1 — fd2 follows wherever fd1 points right now
-    if (r.kind === RedirectKind.STDERR_TO_STDOUT && typeof r.target === 'number') {
-      fd2 = fd1
-      continue
-    }
-
-    // >&2 or 1>&2 — fd1 follows wherever fd2 points right now
-    if (r.fd === 1 && r.target === 2) {
-      fd1 = fd2
-      continue
-    }
-
-    // >&- / 2>&- — the descriptor is closed from here on
-    if (r.target === FD_CLOSE) {
-      if (r.kind === RedirectKind.STDERR) fd2 = CLOSED
-      else fd1 = CLOSED
-      continue
-    }
-
-    // a dup of a descriptor onto itself (1>&1, 2>&2) changes nothing;
-    // every other number was refused above
-    if (typeof r.target === 'number') continue
+    if (r.kind === RedirectKind.STDIN) continue
 
     if (refused) {
       // The gate refused the line, so it performs no file I/O: the

@@ -373,6 +373,40 @@
         "stdout": "seeded 19081\nvaries\n[]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "random_child_shell_reseeds",
+      "seq": 980051,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "RANDOM=42; a=$RANDOM; RANDOM=42; (: $RANDOM); b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept; unset RANDOM; (echo \"[$RANDOM]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "parent kept\n[]\n",
+        "stderr": ""
+      }
     }
   ]
 }

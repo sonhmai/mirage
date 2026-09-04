@@ -79,6 +79,9 @@ const ROW_ACTIONS: ReadonlyMap<string, RowActionKind> = new Map([
   ['-delete', 'delete'],
 ])
 
+const EXEC_PLACEMENT =
+  'find: -exec is supported only in a top-level -a chain, not under -o, ! or parentheses'
+
 /** The `-exec` actions of an expression, in order. */
 export function execActions(actions: readonly FindAction[]): ExecAction[] {
   return actions.filter((a): a is ExecAction => a.kind === 'exec')
@@ -335,9 +338,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       // which is an AND with every test; under `-o`, `!` or parentheses
       // GNU would run it per position, and silently running it on the
       // wrong set is worse than refusing.
-      throw new FindParseError(
-        'find: -exec is supported only in a top-level -a chain, not under -o, ! or parentheses',
-      )
+      throw new FindParseError(EXEC_PLACEMENT)
     }
     return { kind: 'exec', argv, batch }
   }
@@ -463,7 +464,14 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       if (tok !== '-o' && tok !== '-or') break
       advance()
       afterOperator(tok)
-      if (nested === 0) inOr = true
+      if (nested === 0) {
+        inOr = true
+        // An action already parsed sits on the left of this `-o`, which
+        // is the same detachment from the tree seen from the other side:
+        // `-exec false {} ; -o -print` would run the action and then
+        // print nothing.
+        if (execActions(g.actions).length > 0) throw new FindParseError(EXEC_PLACEMENT)
+      }
       terms.push(andExpr())
     }
     const [firstTerm, ...restTerms] = terms

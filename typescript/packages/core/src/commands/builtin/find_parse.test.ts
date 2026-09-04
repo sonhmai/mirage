@@ -130,6 +130,20 @@ describe('parseFindExpression', () => {
     expect(() => parseFindExpression(['(', '-name', 'a'])).toThrow(FindParseError)
   })
 
+  it('refuses -exec outside a top-level -a chain, on either side of -o', () => {
+    const placement =
+      'find: -exec is supported only in a top-level -a chain, not under -o, ! or parentheses'
+    for (const tokens of [
+      ['-name', 'a', '-o', '-exec', 'echo', '{}', ';'],
+      ['-exec', 'false', '{}', ';', '-o', '-print'],
+      ['!', '-exec', 'false', ';'],
+      ['(', '-exec', 'false', ';', ')'],
+    ]) {
+      expect(() => parseFindExpression(tokens)).toThrow(placement)
+    }
+    expect(parseFindExpression(['-type', 'f', '-exec', 'echo', '{}', ';']).actions).toHaveLength(1)
+  })
+
   it('throws FindParseError on invalid numeric / size args', () => {
     expect(() => parseFindExpression(['-maxdepth', 'abc'])).toThrow(FindParseError)
     expect(() => parseFindExpression(['-mindepth', 'x'])).toThrow(FindParseError)

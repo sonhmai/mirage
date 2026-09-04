@@ -18,6 +18,7 @@ from mirage import MountMode, RAMResource, Workspace
 from mirage.shell.constants import RANDOM, RANDOM_MAX
 from mirage.workspace.session import Session
 from mirage.workspace.session.rng import next_random, seed_from
+from mirage.workspace.session.state import seed_var
 
 
 def test_seed_from_reads_the_word_as_an_integer():
@@ -58,6 +59,29 @@ def test_unset_after_a_read_strips_the_meaning():
     assert next_random(s, None) is None
 
 
+def test_a_child_shell_reseeds_and_the_parent_gets_its_state_back():
+    s = Session(session_id="s")
+    parent = [next_random(s, "42"), next_random(s, s.vars[RANDOM].value)]
+    saved = s.snapshot()
+    child = next_random(s, s.vars[RANDOM].value)
+    assert s._random_state is not None
+    s.restore(saved)
+    assert next_random(s, s.vars[RANDOM].value) == 15269
+    assert parent == [19081, 17033] and child != 15269
+
+
+def test_a_child_shell_does_not_replay_a_pending_seed():
+    s = Session(session_id="s")
+    seed_var(s, RANDOM, "42")
+    s.snapshot()
+    assert s._random_seed == "42" and s._random_state is None
+    unset = Session(session_id="u")
+    next_random(unset, None)
+    assert next_random(unset, None) is None
+    unset.snapshot()
+    assert next_random(unset, None) is None
+
+
 @pytest.mark.asyncio
 async def test_random_expands_in_the_shell():
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
@@ -67,5 +91,8 @@ async def test_random_expands_in_the_shell():
     io = await ws.execute('echo $RANDOM $RANDOM')
     x, y = (await io.stdout_str()).split()
     assert x != y and x.isdigit() and y.isdigit()
+    io = await ws.execute(
+        'RANDOM=42; a=$RANDOM; RANDOM=42; (: $RANDOM); b=$RANDOM; echo $a $b')
+    assert await io.stdout_str() == "19081 19081\n"
     io = await ws.execute('unset RANDOM; echo "[$RANDOM]"')
     assert await io.stdout_str() == "[]\n"

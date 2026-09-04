@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SHELL_ARGV0 } from '../../shell/constants.ts'
+import { RANDOM, RANDOM_UNSET, SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { EnvVarSchema, type EnvEntries } from '../../secrets/config.ts'
 import type { ShellArray } from '../../shell/array.ts'
@@ -65,6 +65,8 @@ export interface ChildShellState {
   execStderrAppend: boolean
   execStdin: Uint8Array | null
   execOpened: Set<string>
+  randomState: number | null
+  randomSeed: string | null
 }
 
 /**
@@ -385,7 +387,8 @@ export class Session {
   // statement boundary that closes it to claim. Null between them.
   pipeStatusPending: readonly number[] | null = null
   // `$RANDOM`'s generator state and the seed word it last consumed
-  // (`session/rng.ts`). Transient: a child shell reseeds, as bash's does.
+  // (`session/rng.ts`). A child shell reseeds, as bash's does, and the
+  // parent gets its own state back (`snapshot` / `restore`).
   randomState: number | null = null
   randomSeed: string | null = null
   positionalArgs: string[]
@@ -631,7 +634,7 @@ export class Session {
    * their null prototype across the round trip.
    */
   snapshot(): ChildShellState {
-    return {
+    const saved: ChildShellState = {
       cwd: this.cwd,
       logicalCwd: this.logicalCwd,
       sourceDepth: this.sourceDepth,
@@ -653,7 +656,19 @@ export class Session {
       execStderrAppend: this.execStderrAppend,
       execStdin: this.execStdin,
       execOpened: new Set(this.execOpened),
+      randomState: this.randomState,
+      randomSeed: this.randomSeed,
     }
+    // A child shell reseeds `$RANDOM`, as bash's does: the generator
+    // starts fresh, and the seed word follows the stored value so an
+    // assignment the parent made is not replayed as a reseed. `unset
+    // RANDOM` stays unset.
+    if (this.randomSeed !== RANDOM_UNSET) {
+      const word = this.vars[RANDOM]?.value
+      this.randomSeed = typeof word === 'string' ? word : null
+      this.randomState = null
+    }
+    return saved
   }
 
   /** Put back a snapshot, ending a child shell. */
@@ -678,6 +693,8 @@ export class Session {
     this.execStderr = state.execStderr
     this.execStderrAppend = state.execStderrAppend
     this.execStdin = state.execStdin
+    this.randomState = state.randomState
+    this.randomSeed = state.randomSeed
     this.execOpened = state.execOpened
   }
 

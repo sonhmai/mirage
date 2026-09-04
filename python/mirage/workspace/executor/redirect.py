@@ -25,7 +25,8 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
-from mirage.shell.constants import FD_BOTH, FD_CLOSE
+from mirage.shell.constants import (FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN,
+                                    FD_STDOUT)
 from mirage.shell.descriptors import (bad_descriptor_line,
                                       unsupported_descriptor)
 from mirage.shell.helpers import get_text
@@ -119,12 +120,15 @@ async def handle_redirect(
         return _shell_failure(bad_descriptor_line(bad_fd))
     cmd_stdin = stdin
     for r in redirects:
+        if isinstance(r.target, int):
+            # A numeric target is routed by the descriptor the redirect
+            # claims, never by the operator's direction: `<&-` and `0>&-`
+            # both close stdin, and `2<&-` is stderr's business below.
+            # A dup onto stdin (`<&0`, `0<&1`) changes nothing.
+            if r.fd == FD_STDIN and r.target == FD_CLOSE:
+                cmd_stdin = b""
+            continue
         if r.kind == RedirectKind.STDIN:
-            if isinstance(r.target, int):
-                # `<&-` closes stdin; `<&0` duplicates it onto itself.
-                if r.target == FD_CLOSE:
-                    cmd_stdin = b""
-                continue
             scope = _ensure_scope(r.target)
             try:
                 file_data, _ = await dispatch("read", scope)
@@ -189,32 +193,32 @@ async def handle_redirect(
     file_scopes: dict[str, PathSpec] = {}
 
     for r in redirects:
-        if r.kind in (RedirectKind.STDIN, RedirectKind.HEREDOC,
-                      RedirectKind.HERESTRING):
+        if r.kind in (RedirectKind.HEREDOC, RedirectKind.HERESTRING):
             continue
 
-        # 2>&1 — fd2 follows wherever fd1 points right now
-        if r.kind == RedirectKind.STDERR_TO_STDOUT and isinstance(
-                r.target, int):
-            fd2 = fd1
-            continue
-
-        # >&2 or 1>&2 — fd1 follows wherever fd2 points right now
-        if r.fd == 1 and isinstance(r.target, int) and r.target == 2:
-            fd1 = fd2
-            continue
-
-        # >&- / 2>&- — the descriptor is closed from here on
-        if isinstance(r.target, int) and r.target == FD_CLOSE:
-            if r.kind == RedirectKind.STDERR:
-                fd2 = _CLOSED
-            else:
-                fd1 = _CLOSED
-            continue
-
-        # a dup of a descriptor onto itself (1>&1, 2>&2) changes nothing;
-        # every other number was refused above
         if isinstance(r.target, int):
+            # Keyed on the descriptor claimed, not the operator: bash
+            # reads `2<&1` as `2>&1` and `1<&-` as `>&-`. Stdin's dups
+            # and close were applied above; a dup of a descriptor onto
+            # itself (1>&1, 2>&2) or onto stdin changes nothing, and
+            # every other number was refused above.
+            if r.fd == FD_STDIN:
+                continue
+            if r.target == FD_CLOSE:
+                # >&- / 2>&- — the descriptor is closed from here on
+                if r.fd == FD_STDERR:
+                    fd2 = _CLOSED
+                else:
+                    fd1 = _CLOSED
+            elif r.fd == FD_STDERR and r.target == FD_STDOUT:
+                # 2>&1 — fd2 follows wherever fd1 points right now
+                fd2 = fd1
+            elif r.fd == FD_STDOUT and r.target == FD_STDERR:
+                # >&2 or 1>&2 — fd1 follows wherever fd2 points right now
+                fd1 = fd2
+            continue
+
+        if r.kind == RedirectKind.STDIN:
             continue
 
         if refused:

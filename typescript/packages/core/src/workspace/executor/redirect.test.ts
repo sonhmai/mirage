@@ -315,6 +315,52 @@ describe('fd-table routing end-to-end', () => {
 // GNU bash 5.2.37 pinned: both `cat < missing` and `echo x > /nosuchdir/f`
 // answer "bash: line 1: <target>: No such file or directory", exit 1, and
 // never name the command. mirage drops the "bash: line N:" prefix, matching
+describe('handleRedirect numeric targets', () => {
+  it('routes a close or dup by the descriptor claimed, not the operator', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      expect(await runResult(ws, 'cat /data/missing 2<&-; echo code=$?')).toEqual([
+        0,
+        'code=1\n',
+        '',
+      ])
+      expect(await runResult(ws, 'echo x 1<&-; echo code=$?')).toEqual([
+        0,
+        'code=1\n',
+        'echo: write error: Bad file descriptor\n',
+      ])
+      expect(await runResult(ws, 'cat /data/missing 2<&1; echo code=$?')).toEqual([
+        0,
+        'cat: /data/missing: No such file or directory\ncode=1\n',
+        '',
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reads a bare 0 touching the operator as the descriptor', async () => {
+    const { ws } = await makeIntegrationWS({ 'a.txt': 'a' })
+    try {
+      expect(await runResult(ws, 'echo x 0>&-; echo code=$?')).toEqual([0, 'x\ncode=0\n', ''])
+      expect(await runResult(ws, 'cat 0</data/a.txt; echo code=$?')).toEqual([0, 'acode=0\n', ''])
+      expect(await runResult(ws, 'echo 0 >&-; echo code=$?')).toEqual([
+        0,
+        'code=1\n',
+        'echo: write error: Bad file descriptor\n',
+      ])
+      expect(await runResult(ws, 'exec 2<&-; cat /data/missing; echo code=$?')).toEqual([
+        0,
+        'code=1\n',
+        '',
+      ])
+      expect(await runResult(ws, 'exec 0>&-; echo x; echo code=$?')).toEqual([0, 'x\ncode=0\n', ''])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 // the house style of the other shell-attributed error
 // ("nosuchcmd: command not found").
 describe('handleRedirect missing < source', () => {

@@ -39,6 +39,30 @@ def get_command_name(node: tree_sitter.Node) -> str:
     return ""
 
 
+def claimed_descriptor(command: tree_sitter.Node,
+                       last: tree_sitter.Node) -> int | None:
+    """The descriptor a bare ``0`` before a redirect operator names.
+
+    tree-sitter-bash reads ``0>&-`` and ``0<f`` as an operand ``0``
+    followed by an undecorated redirect, where it gives every other
+    digit string its ``file_descriptor`` node. bash's rule is that a
+    digit string touching the operator is the descriptor, so the number
+    is one when it ends exactly where a sibling ``file_redirect``
+    begins; ``cat a 0 >&-`` keeps its operand.
+
+    Args:
+        command (tree_sitter.Node): the command node the number is in.
+        last (tree_sitter.Node): the command's last child.
+    """
+    if last.type != NT.NUMBER or command.parent is None:
+        return None
+    for sibling in command.parent.named_children:
+        if (sibling.type == NT.FILE_REDIRECT
+                and sibling.start_byte == last.end_byte):
+            return int(get_text(last))
+    return None
+
+
 def get_parts(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     """Get command parts as child nodes.
 
@@ -54,6 +78,9 @@ def get_parts(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     parts: list[tree_sitter.Node] = []
     for position, c in enumerate(children):
         if c.is_named and c.type not in _SKIP:
+            if position == len(children) - 1 and claimed_descriptor(
+                    node, c) is not None:
+                continue
             parts.append(c)
         elif c.type == "$":
             nxt = children[position +
@@ -302,20 +329,22 @@ _REDIRECT_OPERATORS = (
     | frozenset({NT.REDIRECT_OUT, NT.REDIRECT_CLOBBER, NT.REDIRECT_APPEND}))
 
 
-def _parse_file_redirect(child: tree_sitter.Node) -> Redirect:
+def _parse_file_redirect(child: tree_sitter.Node,
+                         fd: int | None = None) -> Redirect:
     """Parse a single file_redirect node into a Redirect.
 
     The operator token decides the shape and the explicit descriptor,
     when there is one, is kept as typed: `3<f` claims fd 3 and `<&3`
     duplicates from it, and both are refused downstream rather than
-    read as stdin (`shell/descriptors.py`). Three forms carry an int
+    read as stdin (`shell/descriptors.py`). ``fd`` is the descriptor
+    the grammar left as the command's last operand (`claimed_descriptor`),
+    which a ``file_descriptor`` child overrides. Three forms carry an int
     target: a dup (`2>&1`, `>&2`, `<&0`) names the descriptor it copies,
     a close (`>&-`, `<&-`) carries FD_CLOSE, and `&>` claims FD_BOTH.
     `2>&1` alone keeps the STDERR_TO_STDOUT kind the fd router keys on;
     every other output redirect is STDOUT or STDERR by the descriptor
     it claims.
     """
-    fd: int | None = None
     target: str | int = ""
     target_node = None
     op: str | None = None
@@ -396,12 +425,16 @@ def get_redirects(
     command = nc[0] if nc and nc[0].type not in _REDIRECT_NODE_TYPES else None
     redirects: list[Redirect] = []
 
+    claimed: int | None = None
     if command is not None and command.type == NT.COMMAND:
         for child in command.named_children:
             if child.type == NT.HERESTRING_REDIRECT:
                 redirects.append(_parse_herestring_redirect(child))
+        if command.children:
+            claimed = claimed_descriptor(command, command.children[-1])
 
     recover_herestring = False
+    command_end = -1 if command is None else command.end_byte
     for child in nc if command is None else nc[1:]:
         if child.type == "ERROR" and get_text(child) == "<<":
             recover_herestring = True
@@ -440,7 +473,9 @@ def get_redirects(
         if recover_herestring:
             redirects.append(_parse_herestring_redirect(child))
         else:
-            redirects.append(_parse_file_redirect(child))
+            # Only the redirect touching the operand can own it.
+            fd = claimed if child.start_byte == command_end else None
+            redirects.append(_parse_file_redirect(child, fd))
         recover_herestring = False
 
     return command, redirects

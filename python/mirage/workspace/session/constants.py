@@ -109,4 +109,6 @@ CHILD_SHELL_FIELDS: tuple[str, ...] = (
     "_exec_opened",
     "_getopts_pos",
     "_getopts_optind",
+    "_random_state",
+    "_random_seed",
 )

@@ -254,6 +254,9 @@ def test_exec_per_match_and_batched():
     (["(", "-exec", "false", ";", ")"
       ], "find: -exec is supported only in a top-level -a chain, not under "
      "-o, ! or parentheses"),
+    (["-exec", "false", "{}", ";", "-o", "-print"
+      ], "find: -exec is supported only in a top-level -a chain, not under "
+     "-o, ! or parentheses"),
     (["-exec", "echo", "{}", ";", "-printf", "%p"
       ], "find: -exec cannot be combined with -printf"),
     (["-newermt", "nope"],

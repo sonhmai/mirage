@@ -31,6 +31,25 @@ export function getCommandName(node: TSNodeLike): string {
 
 const SKIP_PARTS: ReadonlySet<string> = new Set([NT.FILE_REDIRECT, NT.HERESTRING_REDIRECT])
 
+/**
+ * The descriptor a bare `0` before a redirect operator names.
+ *
+ * tree-sitter-bash reads `0>&-` and `0<f` as an operand `0` followed by an
+ * undecorated redirect, where it gives every other digit string its
+ * `file_descriptor` node. bash's rule is that a digit string touching the
+ * operator is the descriptor, so the number is one when it ends exactly
+ * where a sibling `file_redirect` begins; `cat a 0 >&-` keeps its operand.
+ */
+export function claimedDescriptor(command: TSNodeLike, last: TSNodeLike): number | null {
+  if (last.type !== NT.NUMBER || command.parent == null) return null
+  for (const sibling of command.parent.namedChildren) {
+    if (sibling.type === NT.FILE_REDIRECT && sibling.startIndex === last.endIndex) {
+      return parseInt(getText(last), 10)
+    }
+  }
+  return null
+}
+
 export function getParts(node: TSNodeLike): TSNodeLike[] {
   // A bare `$` word is an anonymous token rather than a named child, but
   // bash passes it through as a literal argument (`echo $` prints `$`), so
@@ -43,6 +62,7 @@ export function getParts(node: TSNodeLike): TSNodeLike[] {
     const c = children[position]
     if (c === undefined) continue
     if (c.isNamed === true && !SKIP_PARTS.has(c.type)) {
+      if (position === children.length - 1 && claimedDescriptor(node, c) !== null) continue
       parts.push(c)
     } else if (c.type === '$') {
       const nxt = children[position + 1]
@@ -288,8 +308,11 @@ const REDIRECT_OPERATORS: ReadonlySet<string> = new Set([
  * STDERR_TO_STDOUT kind the fd router keys on; every other output redirect
  * is STDOUT or STDERR by the descriptor it claims.
  */
-function parseFileRedirect(child: TSNodeLike): Redirect {
-  let fd: number | null = null
+function parseFileRedirect(child: TSNodeLike, claimed: number | null = null): Redirect {
+  // `claimed` is the descriptor the grammar left as the command's last
+  // operand (`claimedDescriptor`), which a `file_descriptor` child
+  // overrides.
+  let fd: number | null = claimed
   let target: string | number = ''
   let targetNode: TSNodeLike | null = null
   let op: string | null = null
@@ -376,15 +399,19 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] 
   const command = first !== undefined && !REDIRECT_NODE_TYPES.has(first.type) ? first : null
   const redirects: Redirect[] = []
 
+  let claimed: number | null = null
   if (command !== null && command.type === NT.COMMAND) {
     for (const child of command.namedChildren) {
       if (child.type === NT.HERESTRING_REDIRECT) {
         redirects.push(parseHerestringRedirect(child))
       }
     }
+    const last = command.children[command.children.length - 1]
+    if (last !== undefined) claimed = claimedDescriptor(command, last)
   }
 
   let recoverHerestring = false
+  const commandEnd = command === null ? -1 : command.endIndex
   for (let i = command === null ? 0 : 1; i < nc.length; i++) {
     const child = nc[i]
     if (child === undefined) continue
@@ -435,7 +462,12 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] 
       continue
     }
 
-    redirects.push(recoverHerestring ? parseHerestringRedirect(child) : parseFileRedirect(child))
+    if (recoverHerestring) {
+      redirects.push(parseHerestringRedirect(child))
+    } else {
+      // Only the redirect touching the operand can own it.
+      redirects.push(parseFileRedirect(child, child.startIndex === commandEnd ? claimed : null))
+    }
     recoverHerestring = false
   }
 

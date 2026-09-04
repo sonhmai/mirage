@@ -18,7 +18,8 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
-from mirage.shell.constants import FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDOUT
+from mirage.shell.constants import (FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN,
+                                    FD_STDOUT)
 from mirage.shell.descriptors import (bad_descriptor_line,
                                       unsupported_descriptor)
 from mirage.shell.types import Redirect, RedirectKind
@@ -91,39 +92,33 @@ async def install_exec_redirects(
     if bad_fd is not None:
         return _exec_failure(bad_descriptor_line(bad_fd))
     for r in redirects:
-        if r.kind == RedirectKind.STDIN:
-            scope = _to_scope(r.target) if isinstance(r.target,
-                                                      str) else r.target
-            if isinstance(r.target, int):
-                # `<&-` closes the shell's stdin; `<&0` restores it.
+        if isinstance(r.target, int):
+            # Keyed on the descriptor claimed, not the operator's
+            # direction: `2<&-` closes stderr and `0>&-` stdin, as in
+            # bash. `<&0` restores stdin; a dup of a descriptor onto
+            # itself changes nothing.
+            if r.fd == FD_STDIN:
                 session.exec_stdin = b"" if r.target == FD_CLOSE else None
-                continue
+            elif r.target == FD_CLOSE:
+                if r.fd == FD_STDERR:
+                    session.exec_stderr = CLOSED
+                else:
+                    session.exec_stdout = CLOSED
+            elif r.fd == FD_STDERR and r.target == FD_STDOUT:
+                session.exec_stderr = session.exec_stdout
+                session.exec_stderr_append = session.exec_stdout_append
+            elif r.fd == FD_STDOUT and r.target == FD_STDERR:
+                session.exec_stdout = session.exec_stderr
+                session.exec_stdout_append = session.exec_stderr_append
+            continue
+        scope = _to_scope(r.target) if isinstance(r.target, str) else r.target
+        if r.kind == RedirectKind.STDIN:
             try:
                 data, _ = await dispatch("read", scope)
             except FS_ERRORS as exc:
                 return _exec_error(scope.raw_path, exc)
             session.exec_stdin = await materialize(data) or b""
             continue
-        if r.kind == RedirectKind.STDERR_TO_STDOUT and isinstance(
-                r.target, int):
-            session.exec_stderr = session.exec_stdout
-            session.exec_stderr_append = session.exec_stdout_append
-            continue
-        if (r.fd == FD_STDOUT and isinstance(r.target, int)
-                and r.target == FD_STDERR):
-            session.exec_stdout = session.exec_stderr
-            session.exec_stdout_append = session.exec_stderr_append
-            continue
-        if isinstance(r.target, int) and r.target == FD_CLOSE:
-            # `>&-` / `2>&-`: close the descriptor (stdin closed above).
-            if r.kind == RedirectKind.STDERR:
-                session.exec_stderr = CLOSED
-            else:
-                session.exec_stdout = CLOSED
-            continue
-        if isinstance(r.target, int):
-            continue
-        scope = _to_scope(r.target) if isinstance(r.target, str) else r.target
         path = scope.virtual
         try:
             if await _open_target(dispatch, session, scope, r.append):

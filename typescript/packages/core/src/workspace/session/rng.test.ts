@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { RANDOM, RANDOM_MAX } from '../../shell/constants.ts'
+import { makeVar } from '../../shell/variable.ts'
 import { nextRandom, seedFrom } from './rng.ts'
 import { Session } from './session.ts'
 
@@ -43,6 +44,31 @@ describe('RANDOM generator', () => {
     expect(stored(s)).toBe(String(first))
     const again = new Session({ sessionId: 't' })
     expect(nextRandom(again, '7')).toBe(first)
+  })
+
+  it('reseeds in a child shell and hands the parent its state back', () => {
+    const s = new Session({ sessionId: 's' })
+    const parent = [nextRandom(s, '42'), nextRandom(s, stored(s))]
+    const saved = s.snapshot()
+    const child = nextRandom(s, stored(s))
+    expect(s.randomState).not.toBeNull()
+    s.restore(saved)
+    expect(nextRandom(s, stored(s))).toBe(15269)
+    expect(parent).toEqual([19081, 17033])
+    expect(child).not.toBe(15269)
+  })
+
+  it('does not replay a pending seed in the child, and keeps unset unset', () => {
+    const s = new Session({ sessionId: 's' })
+    s.vars[RANDOM] = makeVar('42')
+    s.snapshot()
+    expect(s.randomSeed).toBe('42')
+    expect(s.randomState).toBeNull()
+    const unset = new Session({ sessionId: 'u' })
+    nextRandom(unset, undefined)
+    expect(nextRandom(unset, undefined)).toBeNull()
+    unset.snapshot()
+    expect(nextRandom(unset, undefined)).toBeNull()
   })
 
   it('unset after a read strips the meaning', () => {

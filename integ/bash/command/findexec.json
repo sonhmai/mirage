@@ -479,6 +479,40 @@
         "stdout": "d/b.txt\nd/sub/c.txt\n./d/b.txt\n./d/sub/c.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "find_exec_before_or_refused",
+      "seq": 980085,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -exec false {} \\; -o -print; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "find: -exec is supported only in a top-level -a chain, not under -o, ! or parentheses\n"
+      }
     }
   ]
 }

@@ -24,7 +24,7 @@ from mirage.policy.types import (AdmissionRules, Decision, HideReason,
                                  ProfileScript)
 from mirage.secrets.config import EnvVar
 from mirage.shell.array import ShellArray
-from mirage.shell.constants import SHELL_ARGV0
+from mirage.shell.constants import RANDOM, RANDOM_UNSET, SHELL_ARGV0
 from mirage.shell.types import FunctionBody
 from mirage.shell.variable import (ManagedRef, ShellVar, VarAttr,
                                    attrs_from_letters, stored_attrs,
@@ -329,7 +329,8 @@ class Session:
     _pipe_status_pending: tuple[int, ...] | None = field(default=None,
                                                          repr=False)
     # `$RANDOM`'s generator state and the seed word it last consumed
-    # (`session/rng.py`). Transient: a child shell reseeds, as bash's does.
+    # (`session/rng.py`). A child shell reseeds, as bash's does, and the
+    # parent gets its own state back (`snapshot` / `restore`).
     _random_state: int | None = field(default=None, repr=False)
     _random_seed: str | None = field(default=None, repr=False)
     # Alias bookkeeping. bash expands an alias when it *parses* the line
@@ -618,10 +619,20 @@ class Session:
         Args:
             None
         """
-        return {
+        saved = {
             name: copy_state(getattr(self, name))
             for name in CHILD_SHELL_FIELDS
         }
+        # A child shell reseeds `$RANDOM`, as bash's does: the generator
+        # starts fresh, and the seed word follows the stored value so an
+        # assignment the parent made is not replayed as a reseed. `unset
+        # RANDOM` stays unset.
+        if self._random_seed != RANDOM_UNSET:
+            var = self.vars.get(RANDOM)
+            self._random_seed = (var.value if var is not None
+                                 and isinstance(var.value, str) else None)
+            self._random_state = None
+        return saved
 
     def restore(self, state: dict[str, Any]) -> None:
         """Put back a snapshot, ending a child shell.

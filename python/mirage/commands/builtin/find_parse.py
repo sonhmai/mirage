@@ -321,10 +321,12 @@ def _parse_exec(state: _State) -> ExecAction:
         # which is an AND with every test; under `-o`, `!` or parentheses
         # GNU would run it per position, and silently running it on the
         # wrong set is worse than refusing.
-        raise FindParseError(
-            "find: -exec is supported only in a top-level -a chain, "
-            "not under -o, ! or parentheses")
+        raise FindParseError(_EXEC_PLACEMENT)
     return ExecAction(argv=tuple(argv), batch=batch)
+
+
+_EXEC_PLACEMENT = ("find: -exec is supported only in a top-level -a chain, "
+                   "not under -o, ! or parentheses")
 
 
 def _peek(state: _State) -> str | None:
@@ -497,6 +499,12 @@ def _parse_or(state: _State) -> PredNode:
         _after_operator(state, tok)
         if state.nested == 0:
             state.in_or = True
+            # An action already parsed sits on the left of this `-o`,
+            # which is the same detachment from the tree seen from the
+            # other side: `-exec false {} ; -o -print` would run the
+            # action and then print nothing.
+            if state.expr.execs:
+                raise FindParseError(_EXEC_PLACEMENT)
         terms.append(_parse_and(state))
     return terms[0] if len(terms) == 1 else Or(terms)
 

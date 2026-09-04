@@ -15,7 +15,7 @@
 import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDOUT } from '../../../../shell/constants.ts'
+import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from '../../../../shell/constants.ts'
 import { badDescriptorLine, unsupportedDescriptor } from '../../../../shell/descriptors.ts'
 import { type Redirect, RedirectKind } from '../../../../shell/types.ts'
 import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
@@ -80,13 +80,26 @@ export async function installExecRedirects(
   const badFd = unsupportedDescriptor(redirects)
   if (badFd !== null) return execFailure(badDescriptorLine(badFd))
   for (const r of redirects) {
-    if (r.kind === RedirectKind.STDIN) {
-      if (typeof r.target === 'number') {
-        // `<&-` closes the shell's stdin; `<&0` restores it.
+    if (typeof r.target === 'number') {
+      // Keyed on the descriptor claimed, not the operator's direction:
+      // `2<&-` closes stderr and `0>&-` stdin, as in bash. `<&0` restores
+      // stdin; a dup of a descriptor onto itself changes nothing.
+      if (r.fd === FD_STDIN) {
         session.execStdin = r.target === FD_CLOSE ? new Uint8Array() : null
-        continue
+      } else if (r.target === FD_CLOSE) {
+        if (r.fd === FD_STDERR) session.execStderr = CLOSED
+        else session.execStdout = CLOSED
+      } else if (r.fd === FD_STDERR && r.target === FD_STDOUT) {
+        session.execStderr = session.execStdout
+        session.execStderrAppend = session.execStdoutAppend
+      } else if (r.fd === FD_STDOUT && r.target === FD_STDERR) {
+        session.execStdout = session.execStderr
+        session.execStdoutAppend = session.execStderrAppend
       }
-      const scope = scopeOf(r.target)
+      continue
+    }
+    const scope = scopeOf(r.target)
+    if (r.kind === RedirectKind.STDIN) {
       try {
         const [data] = await dispatch('read', scope)
         session.execStdin = await materialize(data as ByteSource)
@@ -96,24 +109,6 @@ export async function installExecRedirects(
       }
       continue
     }
-    if (r.kind === RedirectKind.STDERR_TO_STDOUT && typeof r.target === 'number') {
-      session.execStderr = session.execStdout
-      session.execStderrAppend = session.execStdoutAppend
-      continue
-    }
-    if (r.fd === FD_STDOUT && r.target === FD_STDERR) {
-      session.execStdout = session.execStderr
-      session.execStdoutAppend = session.execStderrAppend
-      continue
-    }
-    if (r.target === FD_CLOSE) {
-      // `>&-` / `2>&-`: close the descriptor (stdin closed above).
-      if (r.kind === RedirectKind.STDERR) session.execStderr = CLOSED
-      else session.execStdout = CLOSED
-      continue
-    }
-    if (typeof r.target === 'number') continue
-    const scope = scopeOf(r.target)
     const path = scope.virtual
     try {
       if (await openTarget(dispatch, session, scope, r.append)) session.execOpened.add(path)

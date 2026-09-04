@@ -18,7 +18,7 @@ import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { divertStatement } from './builtins/exec/index.ts'
-import { finishStatement } from './statement.ts'
+import { finishStatement, recordStatus } from './statement.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
@@ -92,6 +92,10 @@ export async function handlePipe(
   }
 
   const lastIo = ios[ios.length - 1] ?? new IOResult()
+  // Parked for the boundary that closes this statement to claim as
+  // `${PIPESTATUS[@]}`: the raw per-segment statuses, before pipefail
+  // rewrites the pipeline's own.
+  session.pipeStatusPending = ios.map((io) => io.exitCode)
   if (session.shellOptions.pipefail === true) {
     let rightmostFailure = 0
     for (let k = ios.length - 1; k >= 0; k--) {
@@ -161,7 +165,7 @@ export async function handleConnection(
   const children = [leftExec]
 
   if (op === NT.AND) {
-    const leftBytes = await finishStatement(leftStdout, leftIo, session)
+    const leftBytes = await finishStatement(leftStdout, leftIo, session, left)
     if (leftIo.exitCode !== 0) {
       // The failing command is left of the final `&&`, which bash
       // exempts from `set -e`.
@@ -189,7 +193,7 @@ export async function handleConnection(
   }
 
   if (op === NT.OR) {
-    const leftBytes = await finishStatement(leftStdout, leftIo, session)
+    const leftBytes = await finishStatement(leftStdout, leftIo, session, left)
     if (leftIo.exitCode === 0) {
       return [
         leftBytes,
@@ -214,7 +218,7 @@ export async function handleConnection(
   }
 
   // ; (semicolon) or other: run both regardless
-  const leftBytes = await finishStatement(leftStdout, leftIo, session)
+  const leftBytes = await finishStatement(leftStdout, leftIo, session, left)
   let rightStdout: ByteSource | null
   let rightIo: IOResult
   let rightExec: ExecutionNode
@@ -290,7 +294,7 @@ export async function handleSubshell(
         if (bgStdout !== null) allStdout.push(bgStdout)
         mergedIo = await mergedIo.merge(bgIo)
         // Seed $? for later body commands (mirrors program loop).
-        session.lastExitCode = bgIo.exitCode
+        recordStatus(session, bgIo.exitCode)
         lastExec = bgExec
         i += 2
         continue
@@ -310,7 +314,7 @@ export async function handleSubshell(
         const sigIo = new IOResult({ exitCode: err.containedCode, stderr: err.stderr })
         mergedIo = await mergedIo.merge(sigIo)
         mergedIo.exitCode = err.containedCode
-        session.lastExitCode = err.containedCode
+        recordStatus(session, err.containedCode)
         lastExec = new ExecutionNode({
           command: '()',
           exitCode: err.containedCode,
@@ -318,7 +322,7 @@ export async function handleSubshell(
         })
         break
       }
-      stdout = await finishStatement(stdout, io, session)
+      stdout = await finishStatement(stdout, io, session, child)
       if (dispatch !== undefined && (session.execStdout !== null || session.execStderr !== null)) {
         const bytes = stdout === null ? null : await materialize(stdout)
         stdout = await divertStatement(dispatch, session, bytes, io)

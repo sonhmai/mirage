@@ -22,6 +22,7 @@ from mirage.policy.types import SessionContext
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
                                 array_values)
+from mirage.shell.constants import PIPESTATUS, RANDOM, RANDOM_UNSET
 from mirage.shell.errors import ArithError
 from mirage.shell.types import ElementOps
 from mirage.shell.variable import (ShellValue, ShellVar, VarAttr, coerce_value,
@@ -223,12 +224,18 @@ class _VisibleArrays(Mapping[str, ShellArray]):
         name = deref(self._session, name)
         if var_hidden(self._session.hidden_vars, name):
             raise KeyError(name)
+        if name == PIPESTATUS:
+            return [str(code) for code in self._session.pipe_status]
         var = self._session.vars[name]
         if not isinstance(var.value, list):
             raise KeyError(name)
         return var.value
 
     def __iter__(self) -> Iterator[str]:
+        # PIPESTATUS answers a lookup (and so `in`, which Mapping derives
+        # from the lookup) and never lists: bash's `declare -p PIPESTATUS`
+        # is `not found`, and an assignment to it is ignored, which this
+        # view honors by answering the session's record before the store.
         hidden = self._session.hidden_vars
         for name, var in self._session.vars.items():
             if isinstance(var.value, list) and not var_hidden(hidden, name):
@@ -577,6 +584,9 @@ async def unset_var(session: Session,
                        value=None,
                        session_id=session.session_id))
     session.vars.pop(name, None)
+    if name == RANDOM:
+        # bash: unsetting RANDOM strips its special meaning for good.
+        session._random_seed = RANDOM_UNSET
 
 
 def seed_var(session: Session, name: str, value: ShellValue) -> None:

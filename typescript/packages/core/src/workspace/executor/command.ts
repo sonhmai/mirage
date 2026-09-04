@@ -38,7 +38,13 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/index.ts'
 import { fanOutTraversal, runWithFanout, shouldFanOut } from './fanout.ts'
-import { findExprTail, parseFindExpression } from '../../commands/builtin/find_parse.ts'
+import {
+  findExprTail,
+  parseFindExpression,
+  type FindExpr,
+} from '../../commands/builtin/find_parse.ts'
+import { resolveNewerRefs } from './find_refs.ts'
+import type { ExecuteFn } from '../expand/node.ts'
 import { FindParseError } from '../../commands/errors.ts'
 import { maybeWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { resolveProducer, resolveLimit } from '../../policy/index.ts'
@@ -59,7 +65,7 @@ import {
   mergeScopes,
   pathFlagScopes,
 } from './command/routing.ts'
-import { runOnMount, type RunOnMountCtx } from './command/run.ts'
+import { findStartPoints, runOnMount, type RunOnMountCtx } from './command/run.ts'
 import type { Result } from './command/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
@@ -96,6 +102,7 @@ export async function handleCommand(
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
   routingDecision?: RouteDecision,
+  executeFn?: ExecuteFn,
 ): Promise<Result> {
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
@@ -207,8 +214,9 @@ export async function handleCommand(
   let findExprTokens: string[] | null = null
   if (cmdName === 'find') {
     findExprTokens = findExprTail(rawArgv)
+    let findExpr: FindExpr
     try {
-      parseFindExpression(findExprTokens)
+      findExpr = parseFindExpression(findExprTokens)
     } catch (err) {
       if (err instanceof FindParseError) {
         const errBytes = new TextEncoder().encode(`${err.message}\n`)
@@ -219,6 +227,26 @@ export async function handleCommand(
         ]
       }
       throw err
+    }
+    if (findExpr.newer.length > 0) {
+      // Every -newer reference is statted through the dispatcher here,
+      // once, before any backend parses the expression.
+      const [rewritten, refErr] = await resolveNewerRefs(
+        findExprTokens,
+        findExpr.newer,
+        registry,
+        session.cwd,
+        (path: string) => pathStat(dispatch, path, null),
+        namespace ?? null,
+      )
+      if (refErr !== null) {
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: refErr }),
+          new ExecutionNode({ command: cmdStr, stderr: refErr, exitCode: 1 }),
+        ]
+      }
+      findExprTokens = rewritten
     }
   }
 
@@ -271,6 +299,7 @@ export async function handleCommand(
       ...(ensureOpen !== undefined ? { ensureOpen } : {}),
       ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
       ...(routingDecision !== undefined ? { routingDecision } : {}),
+      ...(executeFn !== undefined ? { executeFn } : {}),
     }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
@@ -285,6 +314,8 @@ export async function handleCommand(
       csNs,
       ensureOpen,
       (path: string) => pathStat(dispatch, path, null),
+      executeFn,
+      session.sessionId,
     )
     const [csStdout, csIo, csExec] = await handleCrossMount(
       cmdName,
@@ -370,7 +401,7 @@ export async function handleCommand(
     ]
   }
   const parsedLine = parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
-  const { paths, flagKwargs, warnings: parseWarnings } = parsedLine
+  const { paths: parsedPaths, flagKwargs, warnings: parseWarnings } = parsedLine
   const textsRaw = parsedLine.texts
   const refusal = optionError(cmdName, parsedLine)
   if (refusal !== null) {
@@ -382,6 +413,12 @@ export async function handleCommand(
     ]
   }
   const texts = findExprTokens ?? textsRaw
+  // The start points are the path words before the expression; the
+  // spec's rest slot would otherwise read an -exec word as one.
+  const paths =
+    findExprTokens !== null
+      ? findStartPoints(parts.slice(1), findExprTokens, mount.specFor(cmdName), session.cwd)
+      : parsedPaths
   if (findExprTokens !== null) {
     // `multiple: true` on find value-flags makes parseToKwargs emit arrays;
     // bespoke backend wrappers read these as scalars. Migrated backends read
@@ -416,6 +453,8 @@ export async function handleCommand(
       ensureOpen,
       namespaceViewOf(registry, namespace ?? null, dispatch),
       (path: string) => pathStat(dispatch, path, null),
+      executeFn,
+      session.sessionId,
     )
     if (warnBytes !== null) {
       const existing = await materialize(fanIo.stderr)
@@ -433,6 +472,7 @@ export async function handleCommand(
     ...(ensureOpen !== undefined ? { ensureOpen } : {}),
     ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
     ...(routingDecision !== undefined ? { routingDecision } : {}),
+    ...(executeFn !== undefined ? { executeFn } : {}),
   }
   const [rawStdout, io] = await runOnMount(runCtx, cmdName, paths, texts, flagKwargs, {
     stdin,

@@ -77,6 +77,43 @@ interface KindNodeLike {
   children?: readonly { type: string }[] | { type: string }[]
 }
 
+// Statement kinds that are not pipelines of their own: they run other
+// statements and report the last one's status, so `${PIPESTATUS[@]}`
+// after them is whatever the last pipeline inside them left (bash:
+// `{ false | true; }` keeps `1 0`, `! false | true` keeps `1 0`, and so
+// does a redirected pipeline). Everything else, a simple command, a
+// function call, a subshell, an assignment, a `(( ))`, is a pipeline of
+// one segment and stamps its own status. A list is not here: its left
+// side is closed by the list handler and its right side by the list's
+// own boundary, so `false | true && true` reports the `true`.
+const PIPELINE_TRANSPARENT_KINDS: ReadonlySet<NodeKind> = new Set([
+  NodeKind.REDIRECT,
+  NodeKind.COMPOUND,
+  NodeKind.IF,
+  NodeKind.FOR,
+  NodeKind.CFOR,
+  NodeKind.SELECT,
+  NodeKind.WHILE,
+  NodeKind.UNTIL,
+  NodeKind.CASE,
+  NodeKind.NEGATED,
+  NodeKind.FUNCTION_DEF,
+])
+
+/**
+ * Whether a statement leaves `PIPESTATUS` to the pipelines inside it
+ * rather than stamping its own exit status.
+ */
+export function pipelineTransparent(node: KindNodeLike): boolean {
+  const kind = nodeKind(node)
+  if (kind === NodeKind.COMPOUND) {
+    // `(( ))` parses as a compound statement too, and it is a command of
+    // its own, not a group.
+    return node.children?.[0]?.type !== NT.ARITH_OPEN
+  }
+  return PIPELINE_TRANSPARENT_KINDS.has(kind)
+}
+
 /**
  * Classify a tree-sitter node into the shared statement kind, or
  * UNSUPPORTED for node types neither walker implements (tree-sitter

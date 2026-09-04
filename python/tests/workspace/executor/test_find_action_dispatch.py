@@ -20,6 +20,8 @@ effect or output reformat.
 """
 import asyncio
 
+import pytest
+
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
@@ -216,3 +218,90 @@ def test_delete_removes_emptied_directories() -> None:
         await ws.close()
 
     _run(_go())
+
+
+# ── -exec ──────────────────────────────────────────────────
+
+
+async def _exec_ws() -> Workspace:
+    ws = _ws()
+    ws.create_session("s")
+    await ws.execute(
+        "mkdir -p /w/d/sub; printf 'a\\n' > /w/d/a.txt; "
+        "printf 'bb\\n' > /w/d/b.txt; printf x > /w/d/sub/c.txt; cd /w",
+        session_id="s")
+    return ws
+
+
+async def _run_line(ws: Workspace, line: str) -> tuple[str, str, int]:
+    r = await ws.execute(line, session_id="s")
+    return await r.stdout_str(), await r.stderr_str(), r.exit_code
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line,stdout,stderr,code", [
+    (r'find d -name "*.txt" -exec echo got {} \;',
+     "got d/a.txt\ngot d/b.txt\ngot d/sub/c.txt\n", "", 0),
+    ('find d -name "*.txt" -exec echo got {} +',
+     "got d/a.txt d/b.txt d/sub/c.txt\n", "", 0),
+    (r'find d -name "*.txt" -exec false \;', "", "", 0),
+    ('find d -name "*.txt" -exec false {} +', "", "", 1),
+    (r'find d -name "*.txt" -exec false \; -print', "", "", 0),
+    (r'find d -name "*.txt" -exec echo {} \; -print',
+     "d/a.txt\nd/a.txt\nd/b.txt\nd/b.txt\nd/sub/c.txt\nd/sub/c.txt\n", "", 0),
+    (r'find d -name "*.txt" -exec nosuchcmd {} \;', "",
+     "find: 'nosuchcmd': No such file or directory\n" * 3, 0),
+    (r'find d -name "*.txt" -exec echo x{}y \;',
+     "xd/a.txty\nxd/b.txty\nxd/sub/c.txty\n", "", 0),
+    (r'find d -name "*.txt" -exec echo pre {} \; -exec echo post {} \;',
+     "pre d/a.txt\npost d/a.txt\npre d/b.txt\npost d/b.txt\n"
+     "pre d/sub/c.txt\npost d/sub/c.txt\n", "", 0),
+    (r'find d -name "*.txt" -exec echo "a b" {} \;',
+     "a b d/a.txt\na b d/b.txt\na b d/sub/c.txt\n", "", 0),
+    ('find d -name "*.txt" -exec sh -c "echo err >&2; exit 3" {} +', "",
+     "err\n", 1),
+    (r'find d -name "*.txt" -exec echo {} \; -exec false \; -print',
+     "d/a.txt\nd/b.txt\nd/sub/c.txt\n", "", 0),
+    (r'find d -name "*.txt" -exec grep -q x {} \; -print', "d/sub/c.txt\n", "",
+     0),
+    ('find d -name "*.txt" -exec echo {} + -print',
+     "d/a.txt\nd/b.txt\nd/sub/c.txt\nd/a.txt d/b.txt d/sub/c.txt\n", "", 0),
+    ('find d -name nomatch -exec echo batch {} +', "", "", 0),
+    ('find d \\( -name a.txt -o -name b.txt \\) -exec echo {} \\;',
+     "d/a.txt\nd/b.txt\n", "", 0),
+    (r'find -name a.txt -exec echo {} \;', "./d/a.txt\n", "", 0),
+    (r'find /w/d -name b.txt -exec echo abs {} \;', "abs /w/d/b.txt\n", "", 0),
+])
+async def test_exec_matches_gnu(line, stdout, stderr, code):
+    # Pinned against GNU findutils on debian:stable-slim.
+    ws = await _exec_ws()
+    assert await _run_line(ws, line) == (stdout, stderr, code)
+
+
+@pytest.mark.asyncio
+async def test_exec_with_print0_interleaves():
+    ws = await _exec_ws()
+    out, _, code = await _run_line(
+        ws, r'find d -name a.txt -exec echo {} \; -print0')
+    assert out == "d/a.txt\nd/a.txt\0"
+    assert code == 0
+
+
+@pytest.mark.asyncio
+async def test_exec_then_delete_removes_accepted_rows():
+    ws = await _exec_ws()
+    out, err, code = await _run_line(
+        ws, r'find d -name "*.txt" -exec cat {} \; -delete')
+    assert (out, err, code) == ("a\nbb\nx", "", 0)
+    listing, _, _ = await _run_line(ws, "find d -type f")
+    assert listing == ""
+
+
+@pytest.mark.asyncio
+async def test_exec_line_substitution():
+    from mirage.commands.builtin.find_parse import ExecAction
+    from mirage.workspace.executor.find_action_dispatch import exec_line
+    per = ExecAction(("echo", "x{}y", "{}"), batch=False)
+    assert exec_line(per, ["a b"]) == "echo 'xa by' 'a b'"
+    batch = ExecAction(("echo", "{}", "tail"), batch=True)
+    assert exec_line(batch, ["a", "b c"]) == "echo a 'b c' tail"

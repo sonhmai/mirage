@@ -15,6 +15,8 @@
 import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDOUT } from '../../../../shell/constants.ts'
+import { badDescriptorLine, unsupportedDescriptor } from '../../../../shell/descriptors.ts'
 import { type Redirect, RedirectKind } from '../../../../shell/types.ts'
 import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -43,7 +45,13 @@ export function handleExecCommand(args: string[], _session: Session): Result {
 
 function execError(label: string, err: unknown): Result {
   const strerror = isFsError(err) ? (fsStrerror(err) ?? '') : ''
-  const line = new TextEncoder().encode(strerror !== '' ? `${label}: ${strerror}\n` : `${label}\n`)
+  return execFailure(
+    new TextEncoder().encode(strerror !== '' ? `${label}: ${strerror}\n` : `${label}\n`),
+  )
+}
+
+/** The shell-attributed refusal of an `exec` redirect line. */
+function execFailure(line: Uint8Array): Result {
   return [
     null,
     new IOResult({ exitCode: 1, stderr: line }),
@@ -59,17 +67,23 @@ function scopeOf(target: unknown): PathSpec {
  * Point the shell's own streams at files for the rest of the shell. `exec
  * > file` diverts later stdout, `2> file` stderr, `< file` stdin, `>>`
  * appends; `2>&1`/`>&2` copy one target onto the other; `>&-` closes.
- * The output file is opened now, as bash opens it at exec time.
+ * The output file is opened now, as bash opens it at exec time. A
+ * descriptor above 2 (`exec 3>f`, `exec 3>&-`) is refused with `3: Bad
+ * file descriptor`: the shell has no descriptor table, and the old
+ * fall-through aliased it onto stdout, which is what `exec 3>&-` closed.
  */
 export async function installExecRedirects(
   dispatch: DispatchFn,
   session: Session,
   redirects: Redirect[],
 ): Promise<Result> {
+  const badFd = unsupportedDescriptor(redirects)
+  if (badFd !== null) return execFailure(badDescriptorLine(badFd))
   for (const r of redirects) {
     if (r.kind === RedirectKind.STDIN) {
       if (typeof r.target === 'number') {
-        session.execStdin = null
+        // `<&-` closes the shell's stdin; `<&0` restores it.
+        session.execStdin = r.target === FD_CLOSE ? new Uint8Array() : null
         continue
       }
       const scope = scopeOf(r.target)
@@ -87,14 +101,13 @@ export async function installExecRedirects(
       session.execStderrAppend = session.execStdoutAppend
       continue
     }
-    if (r.fd === 1 && r.target === 2) {
+    if (r.fd === FD_STDOUT && r.target === FD_STDERR) {
       session.execStdout = session.execStderr
       session.execStdoutAppend = session.execStderrAppend
       continue
     }
-    if (typeof r.target === 'number' && r.target === -1) {
-      // `>&-` / `<&-`: close the descriptor. The STDIN kind is handled
-      // in the first branch, so only the two output kinds reach here.
+    if (r.target === FD_CLOSE) {
+      // `>&-` / `2>&-`: close the descriptor (stdin closed above).
       if (r.kind === RedirectKind.STDERR) session.execStderr = CLOSED
       else session.execStdout = CLOSED
       continue
@@ -109,7 +122,11 @@ export async function installExecRedirects(
       return execError(scope.rawPath, err)
     }
     const streams =
-      r.fd === -1 ? ['stdout', 'stderr'] : r.kind === RedirectKind.STDERR ? ['stderr'] : ['stdout']
+      r.fd === FD_BOTH
+        ? ['stdout', 'stderr']
+        : r.kind === RedirectKind.STDERR
+          ? ['stderr']
+          : ['stdout']
     for (const stream of streams) {
       if (stream === 'stderr') {
         session.execStderr = path

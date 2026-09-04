@@ -20,6 +20,9 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { FD_BOTH, FD_CLOSE } from '../../shell/constants.ts'
+import { badDescriptorLine, unsupportedDescriptor } from '../../shell/descriptors.ts'
+import { getText } from '../../shell/helpers.ts'
 import { type Redirect, RedirectKind } from '../../shell/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -33,7 +36,11 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 const TO_STDOUT = Symbol('stdout')
 const TO_STDERR = Symbol('stderr')
-type FdDest = typeof TO_STDOUT | typeof TO_STDERR | string
+// Where `>&-` points a descriptor: bytes written there are dropped, and a
+// command whose stdout was closed reports the write failure the way GNU
+// echo does.
+const CLOSED = Symbol('closed')
+type FdDest = typeof TO_STDOUT | typeof TO_STDERR | typeof CLOSED | string
 
 /**
  * Handle all redirect patterns: >, >>, <, 2>, 2>&1, &>, >&2, <<<.
@@ -45,6 +52,16 @@ type FdDest = typeof TO_STDOUT | typeof TO_STDERR | string
  * truncated unless appending) when the redirect is processed, even if
  * the stream ends up empty — including the command-less `> file` form
  * (command is null).
+ *
+ * A redirect naming a descriptor above 2 is refused before anything opens,
+ * in bash's own words for a descriptor that is not open (`3: Bad file
+ * descriptor`, exit 1, the command never runs and the rest of the line
+ * goes on). bash would open `3>f` itself; mirage models no descriptor
+ * table, so claiming fd 3 and duplicating from it are refused alike rather
+ * than silently aliased onto stdout. `>&-` closes a stream for the
+ * command: its stdout is dropped and, if it wrote any, `<cmd>: write
+ * error: Bad file descriptor` exits 1; a closed stdin reads as empty, a
+ * documented approximation of EBADF.
  *
  * A redirect target that cannot be opened is a shell error, not a command
  * error — on both the `<` read and the `>` write side. bash reports it itself
@@ -78,10 +95,17 @@ export async function handleRedirect(
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
 ): Promise<Result> {
+  const badFd = unsupportedDescriptor(redirects)
+  if (badFd !== null) return shellFailure(badDescriptorLine(badFd))
   let cmdStdin: ByteSource | null = stdin
 
   for (const r of redirects) {
     if (r.kind === RedirectKind.STDIN) {
+      if (typeof r.target === 'number') {
+        // `<&-` closes stdin; `<&0` duplicates it onto itself.
+        if (r.target === FD_CLOSE) cmdStdin = new Uint8Array()
+        continue
+      }
       const scope = ensureScope(r.target)
       let data: unknown
       try {
@@ -175,7 +199,15 @@ export async function handleRedirect(
       continue
     }
 
-    // other numeric dups (3>&1, ...) are not simulated
+    // >&- / 2>&- — the descriptor is closed from here on
+    if (r.target === FD_CLOSE) {
+      if (r.kind === RedirectKind.STDERR) fd2 = CLOSED
+      else fd1 = CLOSED
+      continue
+    }
+
+    // a dup of a descriptor onto itself (1>&1, 2>&2) changes nothing;
+    // every other number was refused above
     if (typeof r.target === 'number') continue
 
     if (refused) {
@@ -199,7 +231,7 @@ export async function handleRedirect(
       fileBufs.set(path, new Uint8Array())
     }
 
-    if (r.fd === -1) {
+    if (r.fd === FD_BOTH) {
       // &> / &>>
       fd1 = path
       fd2 = path
@@ -220,9 +252,15 @@ export async function handleRedirect(
       outStdout = concat([outStdout, data])
     } else if (dest === TO_STDERR) {
       outStderr = concat([outStderr, data])
-    } else {
+    } else if (dest !== CLOSED) {
       fileBufs.set(dest, concat([fileBufs.get(dest) ?? new Uint8Array(), data]))
     }
+  }
+  if (fd1 === CLOSED && stdoutData.byteLength > 0 && command !== null) {
+    // GNU echo: `echo x >&-` fails the write and exits 1. Only stdout
+    // reports; a closed stderr has nowhere to report to.
+    outStderr = concat([outStderr, closedWriteLine(command)])
+    io.exitCode = 1
   }
 
   const writeFiles = async (): Promise<void> => {
@@ -281,15 +319,29 @@ function redirectErrorLine(scope: PathSpec, err: unknown): Uint8Array {
   return new TextEncoder().encode(strerror !== null ? `${label}: ${strerror}\n` : `${label}\n`)
 }
 
+/** GNU's line for a write onto a closed stdout, in the command's name. */
+function closedWriteLine(command: TSNodeLike): Uint8Array {
+  const words = getText(command)
+    .split(/\s+/)
+    .filter((w) => w !== '')
+  const name = words[0] ?? 'redirect'
+  return new TextEncoder().encode(`${name}: write error: Bad file descriptor\n`)
+}
+
+/** Shell-attributed IOResult for a `<` source that cannot be read. */
+function redirectFailure(scope: PathSpec, err: unknown): Result {
+  return shellFailure(redirectErrorLine(scope, err))
+}
+
 /**
- * Shell-attributed IOResult for a `<` source that cannot be read.
+ * Shell-attributed IOResult that replaces the command's whole run.
  *
  * bash never runs the command and stops processing redirects at the first
  * failure, so this replaces the whole result. Returning an IOResult rather
  * than rethrowing is what keeps the rest of the line alive.
  */
-function redirectFailure(scope: PathSpec, err: unknown): Result {
-  const io = new IOResult({ exitCode: 1, stderr: redirectErrorLine(scope, err) })
+function shellFailure(line: Uint8Array): Result {
+  const io = new IOResult({ exitCode: 1, stderr: line })
   return [null, io, new ExecutionNode({ command: 'redirect', exitCode: 1 })]
 }
 

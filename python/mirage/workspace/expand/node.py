@@ -21,7 +21,7 @@ import tree_sitter
 from mirage.ops.types import SessionView
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.call_stack import CallStack
-from mirage.shell.errors import ArithError
+from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.escapes import (decode_ansi_c, unescape_dquoted,
                                   unescape_unquoted)
 from mirage.shell.helpers import get_text
@@ -134,6 +134,28 @@ def _find_first(node: tree_sitter.Node, ntype: str) -> tree_sitter.Node | None:
         if found is not None:
             return found
     return None
+
+
+def arith_exit(expr: str, exc: ArithError) -> ExitSignal:
+    """The fatal shape of an arithmetic expansion error.
+
+    bash aborts the whole line on a bad ``$((...))`` in a
+    non-interactive shell, exactly as it does for ``${var:?}``: the
+    command never runs, the line exits 1, and a subshell or pipeline
+    segment containing it reports 1. The old return of the expansion's
+    own text printed ``$((1/0))`` with exit 0, the silent wrong answer
+    the fail-loud rule forbids. The diagnostic is the expression as
+    expanded (``1/0`` for ``$((1/$x))`` with ``x=0``), trimmed, in the
+    house style that drops bash's ``line N:`` prefix and its
+    ``(error token is ...)`` suffix, the same shape ``(( ))`` reports.
+
+    Args:
+        expr (str): the expression text handed to the evaluator.
+        exc (ArithError): what the evaluator refused.
+    """
+    return ExitSignal(1,
+                      stderr=f"bash: {expr.strip()}: {exc}\n".encode(),
+                      contained_code=1)
 
 
 async def expand_arith(
@@ -374,8 +396,8 @@ async def expand_node_marked(
             result = evaluate_arith(expr,
                                     visible_env(session),
                                     elements=session_elements(session))
-        except ArithError:
-            return get_text(ts_node)
+        except ArithError as exc:
+            raise arith_exit(get_text(ts_node)[3:-2], exc) from exc
         for write in result.writes:
             await expansion_write(session, view, write.name, write.key,
                                   write.value)

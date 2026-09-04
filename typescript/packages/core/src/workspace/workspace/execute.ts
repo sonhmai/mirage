@@ -36,6 +36,7 @@ import { RouteDeny, type RouteDecision } from '../../runtime/routing/index.ts'
 import { refusalOf, renderDeny, type Deny } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
+import { recordStatus } from '../executor/statement.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -131,7 +132,7 @@ async function deniedResult(
   const deny: Deny = { kind: 'deny', reason, scope: 'command' }
   const [msg, exitCode] = renderDeny(cmdName, deny)
   const refusal = refusalOf(deny)
-  session.lastExitCode = exitCode
+  recordStatus(session, exitCode)
   if (options.record !== false) {
     await env.observer.logExecution(
       command,
@@ -439,7 +440,7 @@ async function runParsedLine(
     } catch (err) {
       if (isControlFlowError(err)) throw err
       const failed = failureResult(err)
-      targetSession.lastExitCode = failed.exitCode
+      recordStatus(targetSession, failed.exitCode)
       return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
     }
   }
@@ -457,7 +458,7 @@ async function runParsedLine(
       killed,
     )
     if (refused !== null) {
-      targetSession.lastExitCode = refused.exitCode
+      recordStatus(targetSession, refused.exitCode)
       if (isLine) {
         await env.observer.logExecution(
           command,
@@ -489,7 +490,7 @@ async function runParsedLine(
       env.registry.policies,
       () => env.invalidateAllAfterRemote(),
     )
-    targetSession.lastExitCode = result.exitCode
+    recordStatus(targetSession, result.exitCode)
     if (isLine) {
       const lineIo = new IOResult({
         exitCode: result.exitCode,
@@ -527,7 +528,7 @@ async function runParsedLine(
     killed,
   )
   if (prejudged !== null) {
-    targetSession.lastExitCode = prejudged.exitCode
+    recordStatus(targetSession, prejudged.exitCode)
     return new ExecuteResult(
       new Uint8Array(),
       prejudged.stderr,
@@ -561,14 +562,16 @@ async function runParsedLine(
     // the caller.
     if (isControlFlowError(err)) throw err
     const failed = failureResult(err)
-    targetSession.lastExitCode = failed.exitCode
+    recordStatus(targetSession, failed.exitCode)
     return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
   }
   const [[materialized, io], opRecords] = execResult
   // A record a nested line earned is the line's to report when its own
   // tree earned none (see NestedRefusal).
   io.refusal ??= nested.latest
-  targetSession.lastExitCode = io.exitCode
+  // The program loop stamped each statement; the line as a whole is a
+  // wrapper around them, like a group.
+  recordStatus(targetSession, io.exitCode, true)
   let stdoutBytes: Uint8Array
   try {
     await env.dispatcher.applyIo(io, opRecords)
@@ -587,7 +590,7 @@ async function runParsedLine(
         ? `${cmdName}: ${errorVirtualPath(err)}: ${strerror}\n`
         : `${err instanceof Error ? err.message : String(err)}\n`,
     )
-    targetSession.lastExitCode = 1
+    recordStatus(targetSession, 1)
     stdoutBytes = new Uint8Array()
   }
   const stderrBytes = await materialize(io.stderr)

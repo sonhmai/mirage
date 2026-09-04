@@ -38,6 +38,7 @@ import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { Session } from '../../session/session.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
+import type { ExecuteFn } from '../../expand/node.ts'
 import { pathAllowed } from '../../../context/session_context.ts'
 import { CommandTimeoutError } from '../../../commands/errors.ts'
 import { UsageError } from '../../../commands/errors.ts'
@@ -46,6 +47,8 @@ import { formatFsError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 import type { Flags } from './types.ts'
+import { parseFlags } from './flags.ts'
+import type { CommandSpec } from '../../../commands/spec/types.ts'
 
 export interface RunOnMountCtx {
   registry: MountRegistry
@@ -55,6 +58,26 @@ export interface RunOnMountCtx {
   ensureOpen?: (resource: Resource) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
   routingDecision?: RouteDecision
+  // Runs a line in the session, for find's `-exec`.
+  executeFn?: ExecuteFn
+}
+
+/**
+ * find's start points: the path operands typed before its expression.
+ * The expression tail is the parser's, so a word inside it (an `-exec`
+ * command word, a `-newer` reference) is never a start point even when
+ * the rest slot's PATH kind would have read it as one. Only the head is
+ * parsed against the spec, so what it yields as path operands is exactly
+ * the start points.
+ */
+export function findStartPoints(
+  argv: readonly (string | PathSpec)[],
+  exprTokens: readonly string[],
+  spec: CommandSpec | null,
+  cwd: string,
+): PathSpec[] {
+  const head = argv.slice(0, argv.length - exprTokens.length)
+  return parseFlags(head, spec, 'find', cwd).paths
 }
 
 interface RunOnMountOpts {
@@ -212,8 +235,16 @@ export async function runOnMount(
   flagKwargs: Flags,
   opts: RunOnMountOpts = {},
 ): Promise<[ByteSource | null, IOResult]> {
-  const { registry, session, dispatch, namespace, ensureOpen, runtimeBindings, routingDecision } =
-    ctx
+  const {
+    registry,
+    session,
+    dispatch,
+    namespace,
+    ensureOpen,
+    runtimeBindings,
+    routingDecision,
+    executeFn,
+  } = ctx
   const hint = opts.resolveHint ?? null
   let mount = opts.mount ?? null
   if (mount === null) {
@@ -295,13 +326,17 @@ export async function runOnMount(
     })
     let stdout = initialStdout
     if (cmdName === 'find') {
-      const [newStdout, actionErr] = await applyFindActions(
+      const [newStdout, actionErr, actionExit] = await applyFindActions(
         stdout,
-        flags,
+        texts,
         registry,
         session.cwd,
-        childMounts,
-        statPath,
+        {
+          ...(executeFn !== undefined ? { executeFn } : {}),
+          sessionId: session.sessionId,
+          childMounts,
+          statPath,
+        },
       )
       stdout = newStdout
       if (actionErr.length > 0) {
@@ -310,8 +345,8 @@ export async function runOnMount(
         merged.set(existing, 0)
         merged.set(actionErr, existing.length)
         io.stderr = merged
-        if (io.exitCode === 0) io.exitCode = 1
       }
+      if (io.exitCode === 0) io.exitCode = actionExit
     }
     const prefix = rstripSlash(mount.prefix)
     if (prefix !== '') {

@@ -24,6 +24,7 @@ from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
                                 array_indices, array_slice, array_values)
 from mirage.shell.call_stack import CallStack
+from mirage.shell.constants import RANDOM
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import get_text
@@ -35,6 +36,7 @@ from mirage.workspace.session import (Session, ensure_var_visible,
                                       visible_arrays, visible_env)
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.errors import ReadonlyVariableError
+from mirage.workspace.session.rng import next_random
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.session.state import (nameref_target, session_elements,
                                             visible_assocs)
@@ -220,6 +222,10 @@ def _lookup_var(var: str,
         local_val = call_stack.get_local(var)
         if local_val is not None:
             return local_val
+    if var == RANDOM:
+        drawn = next_random(session, env.get(RANDOM))
+        if drawn is not None:
+            return str(drawn)
     arrays = visible_arrays(session)
     if var in arrays:
         return array_get(arrays[var], 0)

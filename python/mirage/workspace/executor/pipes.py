@@ -29,7 +29,7 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.types import NodeType as NT
 from mirage.workspace.executor.builtins.exec import divert_statement
 from mirage.workspace.executor.jobs import handle_background
-from mirage.workspace.executor.statement import finish_statement
+from mirage.workspace.executor.statement import finish_statement, record_status
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -91,6 +91,10 @@ async def handle_pipe(
             await close_quietly(s)
 
     last_io = ios[-1]
+    # Parked for the boundary that closes this statement to claim as
+    # `${PIPESTATUS[@]}`: the raw per-segment statuses, before pipefail
+    # rewrites the pipeline's own.
+    session._pipe_status_pending = tuple(io.exit_code for io in ios)
     if session.shell_options.get("pipefail"):
         rightmost_failure = next(
             (io.exit_code for io in reversed(ios) if io.exit_code != 0), 0)
@@ -149,7 +153,8 @@ async def handle_connection(
     children = [left_exec]
 
     if op == NT.AND:
-        left_bytes = await finish_statement(left_stdout, left_io, session)
+        left_bytes = await finish_statement(left_stdout, left_io, session,
+                                            left)
         if left_io.exit_code != 0:
             # The failing command is left of the final `&&`, which bash
             # exempts from `set -e`.
@@ -170,7 +175,8 @@ async def handle_connection(
                                                children=children)
 
     if op == NT.OR:
-        left_bytes = await finish_statement(left_stdout, left_io, session)
+        left_bytes = await finish_statement(left_stdout, left_io, session,
+                                            left)
         if left_io.exit_code == 0:
             return left_bytes, left_io, ExecutionNode(
                 op="||", exit_code=left_io.exit_code, children=children)
@@ -188,7 +194,7 @@ async def handle_connection(
                                                children=children)
 
     # semicolon or other
-    left_bytes = await finish_statement(left_stdout, left_io, session)
+    left_bytes = await finish_statement(left_stdout, left_io, session, left)
     try:
         right_stdout, right_io, right_exec = await execute_node(
             right, session, stdin, call_stack)
@@ -258,7 +264,7 @@ async def handle_subshell(
                     or "", stdin, call_stack)
                 merged_io = await merged_io.merge(io)
                 # Seed $? for later body commands (mirrors program loop).
-                session.last_exit_code = io.exit_code
+                record_status(session, io.exit_code)
                 if stdout is not None:
                     all_stdout.append(stdout)
                 i += 2
@@ -279,12 +285,12 @@ async def handle_subshell(
                                   stderr=sig.stderr or None)
                 merged_io = await merged_io.merge(sig_io)
                 merged_io.exit_code = sig.contained_code
-                session.last_exit_code = sig.contained_code
+                record_status(session, sig.contained_code)
                 last_exec = ExecutionNode(command="()",
                                           exit_code=sig.contained_code,
                                           stderr=sig.stderr)
                 break
-            stdout = await finish_statement(stdout, io, session)
+            stdout = await finish_statement(stdout, io, session, child)
             if dispatch is not None and (session.exec_stdout is not None
                                          or session.exec_stderr is not None):
                 materialized = await materialize(stdout)

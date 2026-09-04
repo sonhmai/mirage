@@ -21,7 +21,8 @@ import { PolicyDenied } from '../../policy/errors.ts'
 import { type Policies } from '../../policy/index.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { ArithError, ReadonlyError } from '../../shell/errors.ts'
-import { finishStatement } from './statement.ts'
+import { finishStatement, recordStatus } from './statement.ts'
+import { pipelineTransparent } from '../../shell/node_kind.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import type { PathSpec } from '../../types.ts'
@@ -90,7 +91,7 @@ async function executeBody(
     try {
       const [rawStdout, io, execNode] = await executeNode(cmd, session, stdin, callStack)
       lastExec = execNode
-      const stdout = await finishStatement(rawStdout, io, session)
+      const stdout = await finishStatement(rawStdout, io, session, cmd)
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
       if (
@@ -149,7 +150,7 @@ export async function handleIf(
   for (const [condition, body] of branches) {
     const [condStdout, condIo] = await executeNode(condition, session, stdin, callStack)
     await applyBarrier(condStdout, condIo, BarrierPolicy.STATUS)
-    session.lastExitCode = condIo.exitCode
+    recordStatus(session, condIo.exitCode, pipelineTransparent(condition))
     if (condIo.exitCode === 0) {
       return executeBody(executeNode, body, session, stdin, callStack)
     }
@@ -267,7 +268,7 @@ async function conditionLoop(
       }
       const [condStdout, condIo] = await executeNode(condition, session, stdin, callStack)
       await applyBarrier(condStdout, condIo, BarrierPolicy.STATUS)
-      session.lastExitCode = condIo.exitCode
+      recordStatus(session, condIo.exitCode, pipelineTransparent(condition))
       if (breakOnZero && condIo.exitCode === 0) {
         hitLimit = false
         break
@@ -467,7 +468,7 @@ export async function handleCase(
       const [rawStdout, io, execNode] = await executeNode(stmt, session, stageStdin, callStack)
       stageStdin = null
       lastExec = execNode
-      const stdout = await finishStatement(rawStdout, io, session)
+      const stdout = await finishStatement(rawStdout, io, session, stmt)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
     }

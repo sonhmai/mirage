@@ -21,6 +21,7 @@ import type { MountEntry } from '../mount/mount.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
 import { applyFindActions } from './find_action_dispatch.ts'
+import type { ExecuteFn } from '../expand/node.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { keep } from '../../commands/builtin/find_eval.ts'
@@ -344,6 +345,8 @@ export async function fanOutTraversal(
   // mount is not a reason for `find` to stop seeing one.
   ns?: NamespaceView,
   statPath: StatPath | null = null,
+  executeFn?: ExecuteFn,
+  sessionId = '',
 ): Promise<Result> {
   const targetPath = paths[0]?.virtual ?? cwd
   let descendants = allowedDescendants(registry, targetPath)
@@ -526,13 +529,17 @@ export async function fanOutTraversal(
   }
 
   if (cmdName === 'find') {
-    const [newCombined, actionErr] = await applyFindActions(
+    const [newCombined, actionErr, actionExit] = await applyFindActions(
       combined,
-      flags,
+      texts,
       registry,
       cwd,
-      ns?.childMounts ?? null,
-      statPath,
+      {
+        ...(executeFn !== undefined ? { executeFn } : {}),
+        sessionId,
+        childMounts: ns?.childMounts ?? null,
+        statPath,
+      },
     )
     combined = newCombined
     if (actionErr.length > 0) {
@@ -541,8 +548,8 @@ export async function fanOutTraversal(
       merged.set(existing, 0)
       merged.set(actionErr, existing.length)
       mergedIo.stderr = merged
-      if (finalIoExit === 0) finalIoExit = 1
     }
+    if (finalIoExit === 0) finalIoExit = actionExit
   }
 
   mergedIo.exitCode = finalIoExit
@@ -576,6 +583,8 @@ export function runWithFanout(
   ns: NamespaceView | undefined,
   ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
   statPath: StatPath | null = null,
+  executeFn?: ExecuteFn,
+  sessionId = '',
 ): RunSingle {
   return async (cmdName, paths, texts, flagKwargs, opts) => {
     const stdin = opts?.stdin ?? null
@@ -604,6 +613,8 @@ export function runWithFanout(
       ensureOpen,
       ns,
       statPath,
+      executeFn,
+      sessionId,
     )
     return [stdout, io]
   }

@@ -598,7 +598,7 @@ export async function executeNode(
       if (child.type === NT.COMMENT) continue
       const [rawStdout, io, execNode] = await stream(child, session, stdin, callStack)
       lastExec = execNode
-      const stdout = await finishStatement(rawStdout, io, session)
+      const stdout = await finishStatement(rawStdout, io, session, child)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
       if (

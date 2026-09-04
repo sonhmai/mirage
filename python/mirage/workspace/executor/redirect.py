@@ -25,6 +25,10 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
+from mirage.shell.constants import FD_BOTH, FD_CLOSE
+from mirage.shell.descriptors import (bad_descriptor_line,
+                                      unsupported_descriptor)
+from mirage.shell.helpers import get_text
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
@@ -41,14 +45,18 @@ class _Fd(Enum):
 
     An enum, not a sentinel object: the same variable also holds a
     virtual path string once a redirect lands, and a member can never
-    collide with one.
+    collide with one. CLOSED is where `>&-` points a descriptor: bytes
+    written there are dropped, and a command whose stdout was closed
+    reports the write failure the way GNU echo does.
     """
     TO_STDOUT = auto()
     TO_STDERR = auto()
+    CLOSED = auto()
 
 
 _TO_STDOUT = _Fd.TO_STDOUT
 _TO_STDERR = _Fd.TO_STDERR
+_CLOSED = _Fd.CLOSED
 
 
 async def handle_redirect(
@@ -69,6 +77,17 @@ async def handle_redirect(
     truncated unless appending) when the redirect is processed, even
     if the stream ends up empty — including the command-less
     `> file` form (command is None).
+
+    A redirect naming a descriptor above 2 is refused before anything
+    opens, in bash's own words for a descriptor that is not open
+    (``3: Bad file descriptor``, exit 1, the command never runs and the
+    rest of the line goes on). bash would open ``3>f`` itself; mirage
+    models no descriptor table, so claiming fd 3 and duplicating from
+    it are refused alike rather than silently aliased onto stdout.
+    ``>&-`` closes a stream for the command: its stdout is dropped and,
+    if it wrote any, ``<cmd>: write error: Bad file descriptor`` exits
+    1; a closed stdin reads as empty, a documented approximation of
+    EBADF.
 
     A redirect target that cannot be opened is a shell error, not a
     command error — on both the ``<`` read and the ``>`` write side.
@@ -95,9 +114,17 @@ async def handle_redirect(
     while bash fails at open time and never runs it; the write error
     and exit 1 are reported either way.
     """
+    bad_fd = unsupported_descriptor(redirects)
+    if bad_fd is not None:
+        return _shell_failure(bad_descriptor_line(bad_fd))
     cmd_stdin = stdin
     for r in redirects:
         if r.kind == RedirectKind.STDIN:
+            if isinstance(r.target, int):
+                # `<&-` closes stdin; `<&0` duplicates it onto itself.
+                if r.target == FD_CLOSE:
+                    cmd_stdin = b""
+                continue
             scope = _ensure_scope(r.target)
             try:
                 file_data, _ = await dispatch("read", scope)
@@ -177,7 +204,16 @@ async def handle_redirect(
             fd1 = fd2
             continue
 
-        # other numeric dups (3>&1, ...) are not simulated
+        # >&- / 2>&- — the descriptor is closed from here on
+        if isinstance(r.target, int) and r.target == FD_CLOSE:
+            if r.kind == RedirectKind.STDERR:
+                fd2 = _CLOSED
+            else:
+                fd1 = _CLOSED
+            continue
+
+        # a dup of a descriptor onto itself (1>&1, 2>&2) changes nothing;
+        # every other number was refused above
         if isinstance(r.target, int):
             continue
 
@@ -200,7 +236,7 @@ async def handle_redirect(
         else:
             file_bufs[path] = bytearray()
 
-        if r.fd == -1:  # &> / &>>
+        if r.fd == FD_BOTH:  # &> / &>>
             fd1 = path
             fd2 = path
         elif r.kind == RedirectKind.STDERR:
@@ -217,6 +253,11 @@ async def handle_redirect(
             out_stderr += data
         elif isinstance(dest, str):
             file_bufs[dest] += data
+    if fd1 is _CLOSED and stdout_data and command is not None:
+        # GNU echo: `echo x >&-` fails the write and exits 1. Only stdout
+        # reports; a closed stderr has nowhere to report to.
+        out_stderr += _closed_write_line(command)
+        io.exit_code = 1
 
     # Bound again for the writes, because the admission that judged
     # these targets ended with the command and the op doors below see
@@ -281,9 +322,30 @@ def _redirect_error_line(scope: PathSpec, exc: OSError) -> bytes:
     return (f"{label}: {strerror}\n" if strerror else f"{label}\n").encode()
 
 
+def _closed_write_line(command: tree_sitter.Node) -> bytes:
+    """GNU's line for a write onto a closed stdout, in the command's name.
+
+    Args:
+        command (tree_sitter.Node): the command whose stdout was closed.
+    """
+    words = get_text(command).split()
+    name = words[0] if words else "redirect"
+    return f"{name}: write error: Bad file descriptor\n".encode()
+
+
 def _redirect_failure(scope: PathSpec,
                       exc: OSError) -> tuple[None, IOResult, ExecutionNode]:
     """Shell-attributed IOResult for a ``<`` source that cannot be read.
+
+    Args:
+        scope (PathSpec): The redirect source that could not be read.
+        exc (OSError): The filesystem error raised by the read.
+    """
+    return _shell_failure(_redirect_error_line(scope, exc))
+
+
+def _shell_failure(line: bytes) -> tuple[None, IOResult, ExecutionNode]:
+    """Shell-attributed IOResult that replaces the command's whole run.
 
     bash never runs the command and stops processing redirects at the
     first failure, so this replaces the whole result. Returning an
@@ -293,10 +355,9 @@ def _redirect_failure(scope: PathSpec,
     (``cd /data && cat < missing`` used to report ``cd:``).
 
     Args:
-        scope (PathSpec): The redirect source that could not be read.
-        exc (OSError): The filesystem error raised by the read.
+        line (bytes): the diagnostic, already in the shell's voice.
     """
-    io = IOResult(exit_code=1, stderr=_redirect_error_line(scope, exc))
+    io = IOResult(exit_code=1, stderr=line)
     return None, io, ExecutionNode(command="redirect", exit_code=1)
 
 

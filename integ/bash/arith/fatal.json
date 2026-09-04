@@ -1,0 +1,140 @@
+{
+  "cases": [
+    {
+      "id": "arith_expansion_divzero_is_fatal",
+      "seq": 980020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo $((1/0)); echo after",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: 1/0: division by 0\n"
+      }
+    },
+    {
+      "id": "arith_expansion_divzero_short_circuit",
+      "seq": 980021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo $((1/0)) && echo and || echo or",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: 1/0: division by 0\n"
+      }
+    },
+    {
+      "id": "arith_expansion_negative_exponent",
+      "seq": 980022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo $((2**-1)); echo after",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: 2**-1: exponent less than 0\n"
+      }
+    },
+    {
+      "id": "arith_expansion_contained_by_subshell",
+      "seq": 980023,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(echo $((1/0))) 2>/dev/null; echo sub=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub=1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

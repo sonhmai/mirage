@@ -56,6 +56,36 @@ ARITH_MAX_DEPTH = 16
 # `Session.argv0` is the one place the two are folded together.
 SHELL_ARGV0 = "mirage"
 
+# The descriptors the shell models: stdin, stdout and stderr, and no
+# table above them. A redirect naming any other number is refused
+# before it does anything (`shell/descriptors.py`), because the old
+# fall-through aliased fd 3 onto stdout and `exec 3>&-` closed the
+# session's stdout. FD_BOTH is `Redirect.fd` for `&>`; FD_CLOSE is
+# `Redirect.target` for `>&-`.
+FD_STDIN = 0
+FD_STDOUT = 1
+FD_STDERR = 2
+FD_BOTH = -1
+FD_CLOSE = -1
+SHELL_FDS = frozenset({FD_STDIN, FD_STDOUT, FD_STDERR})
+
+# The two dynamic variables the shell answers itself: PIPESTATUS reads
+# the session's record of the last pipeline (`Session.pipe_status`) and
+# RANDOM steps a generator (`session/rng.py`). Neither lives in the
+# variable store.
+PIPESTATUS = "PIPESTATUS"
+RANDOM = "RANDOM"
+# bash's classic generator: an LCG stepped once per read, whose value is
+# the middle 15 bits. Identical in both languages, so a seeded sequence
+# is the same sequence everywhere.
+RANDOM_MULTIPLIER = 1103515245
+RANDOM_INCREMENT = 12345
+RANDOM_MODULUS = 1 << 32
+RANDOM_MAX = 32767
+# What `Session._random_seed` holds once `unset RANDOM` has stripped the
+# name of its meaning: no generated word is ever empty.
+RANDOM_UNSET = ""
+
 # Node types whose failure never triggers `set -e` by shape alone.
 # Lists are NOT exempt: bash exits when the command after the final
 # `&&`/`||` fails; short-circuit failures set Session.errexit_immune

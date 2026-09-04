@@ -376,6 +376,18 @@ export class Session {
   // frozen things in bash, and each refuses in its own voice.
   readonlyFunctions: Set<string>
   lastExitCode: number
+  // `${PIPESTATUS[@]}`: the exit status of every segment of the last
+  // pipeline, where a simple command is a one-segment pipeline. Written
+  // only through `recordStatus` (`executor/statement.ts`), the one door
+  // `$?` goes through as well, so the two can never disagree.
+  pipeStatus: readonly number[] = []
+  // A pipeline's per-segment statuses, parked by `handlePipe` for the
+  // statement boundary that closes it to claim. Null between them.
+  pipeStatusPending: readonly number[] | null = null
+  // `$RANDOM`'s generator state and the seed word it last consumed
+  // (`session/rng.ts`). Transient: a child shell reseeds, as bash's does.
+  randomState: number | null = null
+  randomSeed: string | null = null
   positionalArgs: string[]
   // What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
   // sets it to the script file it is running, or to the name given after
@@ -536,6 +548,7 @@ export class Session {
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
+    forked.pipeStatus = [...this.pipeStatus]
     forked.getoptsPos = this.getoptsPos
     forked.getoptsOptind = this.getoptsOptind
     forked.abortSignal = this.abortSignal

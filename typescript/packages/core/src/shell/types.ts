@@ -118,6 +118,9 @@ export const NodeType = Object.freeze({
   REDIRECT_APPEND: '>>',
   REDIRECT_IN: '<',
   REDIRECT_STDERR: '>&',
+  REDIRECT_DUP_IN: '<&',
+  REDIRECT_CLOSE_OUT: '>&-',
+  REDIRECT_CLOSE_IN: '<&-',
   REDIRECT_BOTH: '&>',
   REDIRECT_BOTH_APPEND: '&>>',
   HEREDOC_START_TOKEN: '<<',
@@ -184,9 +187,9 @@ export const RedirectKind = Object.freeze({
 export type RedirectKind = (typeof RedirectKind)[keyof typeof RedirectKind]
 
 export interface RedirectInit {
-  // The descriptor the redirect claims, -1 for `&>`.
+  // The descriptor the redirect claims, FD_BOTH (-1) for `&>`.
   fd: number
-  // The target path, or the dup'd fd number.
+  // The target path, the dup'd fd number, or FD_CLOSE (-1) for `>&-`.
   target: unknown
   // The tree-sitter node the target came from.
   targetNode?: unknown

@@ -17,6 +17,7 @@ import type { ByteSource } from '../../../../io/types.ts'
 import type { FileStat } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import { resolvePath, resolveSymlinks } from '../../../../utils/path.ts'
+import { isoTimestamp } from '../../../../utils/dates.ts'
 import { resolvePathStat } from '../links/index.ts'
 import { toScope, scopePath } from '../scope.ts'
 import { elementIsSet } from '../../../session/elements.ts'
@@ -104,12 +105,12 @@ function toInt(ctx: CondContext, text: string): bigint {
   return BigInt(trimmed)
 }
 
-export function applyBinary(
+export async function applyBinary(
   ctx: CondContext,
   left: string | PathSpec,
   op: string,
   right: string | PathSpec,
-): boolean {
+): Promise<boolean> {
   const lt = scopePath(left)
   const rt = scopePath(right)
   if (op === '=' || op === '==') return lt === rt
@@ -118,8 +119,48 @@ export function applyBinary(
   if (compare !== undefined) {
     return compare(toInt(ctx, lt), toInt(ctx, rt))
   }
-  if (FILE_PAIR_BINARY.has(op)) {
-    throw new CondError(`${ctx.name}: ${op}: unsupported operator`)
-  }
+  if (FILE_PAIR_BINARY.has(op)) return applyFilePair(ctx, op, left, right)
   throw new CondError(`${ctx.name}: ${op}: binary operator expected`)
+}
+
+/** Stat one file-pair operand, null when it names nothing. An empty word
+ * names nothing, as it does for the unary file tests. */
+async function pairStat(ctx: CondContext, val: string | PathSpec): Promise<FileStat | null> {
+  if (!(val instanceof PathSpec) && scopePath(val) === '') return null
+  const [, stat] = await pathKind(ctx, val)
+  return stat
+}
+
+/**
+ * Evaluate `-nt`, `-ot` and `-ef`, with bash's absence rules.
+ *
+ * `-nt` is true when the left file exists and either the right does not
+ * or the left's mtime is strictly later; `-ot` is the mirror. Equal
+ * mtimes, or one the backend does not report, make both false. `-ef` is
+ * true when both exist and resolve, symlinks followed, to the same
+ * virtual path: mirage has no device and inode pair, and a path names
+ * exactly one entry across the mount table, so the resolved spelling is
+ * the identity. Pinned against GNU bash 5.2.
+ */
+export async function applyFilePair(
+  ctx: CondContext,
+  op: string,
+  left: string | PathSpec,
+  right: string | PathSpec,
+): Promise<boolean> {
+  let lstat = await pairStat(ctx, left)
+  let rstat = await pairStat(ctx, right)
+  if (op === '-ef') {
+    if (lstat === null || rstat === null) return false
+    return (
+      operandScope(ctx, left).virtual.replace(/\/+$/, '') ===
+      operandScope(ctx, right).virtual.replace(/\/+$/, '')
+    )
+  }
+  if (op === '-ot') [lstat, rstat] = [rstat, lstat]
+  if (lstat === null) return false
+  if (rstat === null) return true
+  const lt = isoTimestamp(lstat.modified)
+  const rt = isoTimestamp(rstat.modified)
+  return lt !== null && rt !== null && lt > rt
 }

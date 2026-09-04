@@ -19,7 +19,8 @@ from mirage.shell.array import make_array
 from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY, INT_COMPARATORS, UNARY_OPS)
-from mirage.workspace.executor.builtins.condition.operators import apply_unary
+from mirage.workspace.executor.builtins.condition.operators import (
+    apply_file_pair, apply_unary)
 from mirage.workspace.session import visible_env
 from mirage.workspace.session.state import seed_var, session_elements
 
@@ -99,5 +100,5 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
             raise CondError("mirage: syntax error in conditional expression")
         return compare(li, ri)
     if node.op in FILE_PAIR_BINARY:
-        raise CondError(f"{ctx.name}: {node.op}: unsupported operator")
+        return await apply_file_pair(ctx, node.op, node.left, node.right)
     raise CondError("mirage: conditional binary operator expected")

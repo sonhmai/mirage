@@ -232,6 +232,11 @@ class Session:
     # voice.
     readonly_functions: set[str] = field(default_factory=set)
     last_exit_code: int = 0
+    # `${PIPESTATUS[@]}`: the exit status of every segment of the last
+    # pipeline, where a simple command is a one-segment pipeline. Written
+    # only through `record_status` (`executor/statement.py`), the one
+    # door `$?` goes through as well, so the two can never disagree.
+    pipe_status: tuple[int, ...] = ()
     shell_options: dict[str, bool] = field(default_factory=dict)
     # `shopt` options, kept apart from `set -o` ones because bash keeps
     # two vocabularies (`shopt -o` is the bridge). Only the names set
@@ -319,6 +324,14 @@ class Session:
     # `x=abc` exits 0).
     _cmdsub_seq: int = field(default=0, repr=False)
     _cmdsub_status: int = field(default=0, repr=False)
+    # A pipeline's per-segment statuses, parked by `handle_pipe` for the
+    # statement boundary that closes it to claim. None between them.
+    _pipe_status_pending: tuple[int, ...] | None = field(default=None,
+                                                         repr=False)
+    # `$RANDOM`'s generator state and the seed word it last consumed
+    # (`session/rng.py`). Transient: a child shell reseeds, as bash's does.
+    _random_state: int | None = field(default=None, repr=False)
+    _random_seed: str | None = field(default=None, repr=False)
     # Alias bookkeeping. bash expands an alias when it *parses* the line
     # that uses it, so a definition takes effect from the next line read
     # (`alias x=..; x` on one line finds no `x`; the same two statements

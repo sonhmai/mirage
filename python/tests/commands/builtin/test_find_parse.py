@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from mirage.commands.builtin.find_eval import (And, Empty, Name, Not, Or, Path,
@@ -139,7 +141,7 @@ def _ent(name="a", kind="f"):
 @pytest.mark.parametrize("tokens", [
     ["-boguspredicate"],
     ["-regex", ".*deep.*"],
-    ["-newer", "data/a.txt"],
+    ["-perm", "644"],
     ["-prune"],
     ["-nam", "*.txt"],
 ])
@@ -220,3 +222,87 @@ def test_printf_missing_argument():
 def test_printf_combines_with_tests():
     expr = parse_find_expression(["-name", "*.txt", "-printf", "%f\\n"])
     assert expr.printf == "%f\\n"
+
+
+def test_exec_per_match_and_batched():
+    from mirage.commands.builtin.find_parse import ExecAction
+    expr = parse_find_expression(
+        ["-name", "*.txt", "-exec", "echo", "got", "{}", ";"])
+    assert expr.execs == [ExecAction(("echo", "got", "{}"), batch=False)]
+    # The action is a TrueNode in the tree, as every action is.
+    assert expr.tree == And([Name("*.txt"), TrueNode()])
+    expr = parse_find_expression(["-exec", "echo", "{}", "+"])
+    assert expr.execs == [ExecAction(("echo", "{}"), batch=True)]
+
+
+@pytest.mark.parametrize("tokens,message", [
+    (["-exec"], "find: missing argument to `-exec'"),
+    (["-exec", ";"], "find: missing argument to `-exec'"),
+    (["-exec", "echo", "{}"], "find: missing argument to `-exec'"),
+    (["-exec", "echo", "{}", "x", "+"], "find: missing argument to `-exec'"),
+    (["-exec", "echo", "x{}y", "+"
+      ], "find: In '-exec ... {} +' the '{}' must appear by itself, but you "
+     "specified 'x{}y'"),
+    (["-exec", "echo", "{}", "{}", "+"
+      ], "find: Only one instance of {} is supported with -exec ... +"),
+    (["-name", "a", "-o", "-exec", "echo", "{}", ";"
+      ], "find: -exec is supported only in a top-level -a chain, not under "
+     "-o, ! or parentheses"),
+    (["!", "-exec", "false", ";"
+      ], "find: -exec is supported only in a top-level -a chain, not under "
+     "-o, ! or parentheses"),
+    (["(", "-exec", "false", ";", ")"
+      ], "find: -exec is supported only in a top-level -a chain, not under "
+     "-o, ! or parentheses"),
+    (["-exec", "echo", "{}", ";", "-printf", "%p"
+      ], "find: -exec cannot be combined with -printf"),
+    (["-newermt", "nope"],
+     "find: I cannot figure out how to interpret 'nope' as a date or time"),
+    (["-newer"], "find: missing argument to '-newer'"),
+])
+def test_exec_and_newer_refusals(tokens, message):
+    with pytest.raises(FindParseError, match=re.escape(message)):
+        parse_find_expression(tokens)
+
+
+def test_exec_allowed_after_a_parenthesized_or():
+    expr = parse_find_expression([
+        "(", "-name", "a", "-o", "-name", "b", ")", "-exec", "echo", "{}", ";"
+    ])
+    assert len(expr.execs) == 1
+    assert expr.tree == And([Or([Name("a"), Name("b")]), TrueNode()])
+
+
+def test_actions_are_recorded_in_order():
+    from mirage.commands.builtin.find_parse import ExecAction, RowAction
+    expr = parse_find_expression(
+        ["-delete", "-exec", "echo", "{}", ";", "-print0", "-ls", "-print"])
+    assert expr.actions == [
+        RowAction("delete"),
+        ExecAction(("echo", "{}")),
+        RowAction("print0"),
+        RowAction("ls"),
+        RowAction("print"),
+    ]
+
+
+def test_newer_records_the_reference_and_newermt_a_strict_bound():
+    from mirage.commands.builtin.find_parse import strictly_after
+    expr = parse_find_expression(["-newer", "d/a.txt", "-name", "*.txt"])
+    assert expr.newer == ["d/a.txt"]
+    assert expr.mtime_min is None
+    expr = parse_find_expression(["-newermt", "2020-01-01"])
+    assert expr.mtime_min == strictly_after(1577836800.0)
+    assert expr.mtime_min > 1577836800.0
+    assert expr.mtime_max is None
+
+
+def test_exec_spans_cover_the_action_words():
+    from mirage.commands.builtin.find_parse import exec_spans
+    argv = [
+        "/d", "-exec", "echo", "{}", ";", "-name", "x", "-exec", "a", "{}",
+        "+", "-print"
+    ]
+    assert exec_spans(argv) == [(1, 4), (7, 10)]
+    assert exec_spans(["-exec", "a", "b"]) == [(0, 2)]
+    assert exec_spans(["-name", "x"]) == []

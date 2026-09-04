@@ -146,7 +146,7 @@ describe('parseFindExpression', () => {
   })
 
   it('throws on unsupported predicates', () => {
-    for (const toks of [['-regex', '.*'], ['-newer', 'a'], ['-prune'], ['-nam', 'x']]) {
+    for (const toks of [['-regex', '.*'], ['-perm', '644'], ['-prune'], ['-nam', 'x']]) {
       expect(() => parseFindExpression(toks)).toThrow(FindParseError)
     }
   })

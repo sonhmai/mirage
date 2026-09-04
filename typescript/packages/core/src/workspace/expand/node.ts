@@ -22,7 +22,7 @@ import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { evaluateArith } from '../../shell/arith.ts'
-import { ArithError } from '../../shell/errors.ts'
+import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from '../../shell/escapes.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
 import { expandBraces, expansionWrite, lookupVar } from './variable.ts'
@@ -162,6 +162,27 @@ async function substituteDollarRefs(
 // arithmetic evaluation), while bare variable names stay as names so the
 // evaluator can resolve and assign them (`$(( y = 3 ))` needs `y`, not
 // its value).
+/**
+ * The fatal shape of an arithmetic expansion error.
+ *
+ * bash aborts the whole line on a bad `$((...))` in a non-interactive
+ * shell, exactly as it does for `${var:?}`: the command never runs, the
+ * line exits 1, and a subshell or pipeline segment containing it reports
+ * 1. The old return of the expansion's own text printed `$((1/0))` with
+ * exit 0, the silent wrong answer the fail-loud rule forbids. The
+ * diagnostic is the expression as typed, trimmed, in the house style that
+ * drops bash's `line N:` prefix and its `(error token is ...)` suffix, the
+ * same shape `(( ))` reports.
+ */
+export function arithExit(expr: string, err: ArithError): ExitSignal {
+  return new ExitSignal(
+    1,
+    new TextEncoder().encode(`bash: ${expr.trim()}: ${err.message}\n`),
+    null,
+    1,
+  )
+}
+
 export async function expandArith(
   tsNode: TSNodeLike,
   session: Session,
@@ -336,7 +357,7 @@ export async function expandNodeMarked(
           arith = evaluateArith(expr, visibleEnv(session), 0, sessionElements(session))
         } catch (err) {
           if (!(err instanceof ArithError)) throw err
-          return prefix + rawSub
+          throw arithExit(expr, err)
         }
         for (const write of arith.writes) {
           await expansionWrite(session, view, write.name, write.key, write.value)
@@ -367,7 +388,7 @@ export async function expandNodeMarked(
     try {
       result = evaluateArith(expr, visibleEnv(session), 0, sessionElements(session))
     } catch (err) {
-      if (err instanceof ArithError) return tsNode.text
+      if (err instanceof ArithError) throw arithExit(tsNode.text.slice(3, -2), err)
       throw err
     }
     for (const write of result.writes) {

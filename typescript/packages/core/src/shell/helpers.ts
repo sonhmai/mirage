@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expandTilde } from '../utils/path.ts'
+import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from './constants.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from './escapes.ts'
 import type { TSNodeLike } from './types.ts'
 import { NodeType as NT, ProcessSubDirection, Redirect, RedirectKind } from './types.ts'
@@ -257,36 +258,48 @@ const TARGET_TYPES: ReadonlySet<string> = new Set([
   NT.PROCESS_SUBSTITUTION,
 ])
 
+const INPUT_OPERATORS: ReadonlySet<string> = new Set([
+  NT.REDIRECT_IN,
+  NT.REDIRECT_DUP_IN,
+  NT.REDIRECT_CLOSE_IN,
+])
+const CLOSE_OPERATORS: ReadonlySet<string> = new Set([NT.REDIRECT_CLOSE_OUT, NT.REDIRECT_CLOSE_IN])
+const DUP_OPERATORS: ReadonlySet<string> = new Set([NT.REDIRECT_STDERR, NT.REDIRECT_DUP_IN])
+const BOTH_OPERATORS: ReadonlySet<string> = new Set([NT.REDIRECT_BOTH, NT.REDIRECT_BOTH_APPEND])
+const REDIRECT_OPERATORS: ReadonlySet<string> = new Set([
+  ...INPUT_OPERATORS,
+  ...CLOSE_OPERATORS,
+  ...DUP_OPERATORS,
+  ...BOTH_OPERATORS,
+  NT.REDIRECT_OUT,
+  NT.REDIRECT_CLOBBER,
+  NT.REDIRECT_APPEND,
+])
+
+/**
+ * Parse a single file_redirect node into a Redirect.
+ *
+ * The operator token decides the shape and the explicit descriptor, when
+ * there is one, is kept as typed: `3<f` claims fd 3 and `<&3` duplicates
+ * from it, and both are refused downstream rather than read as stdin
+ * (`shell/descriptors.ts`). Three forms carry a numeric target: a dup
+ * (`2>&1`, `>&2`, `<&0`) names the descriptor it copies, a close (`>&-`,
+ * `<&-`) carries FD_CLOSE, and `&>` claims FD_BOTH. `2>&1` alone keeps the
+ * STDERR_TO_STDOUT kind the fd router keys on; every other output redirect
+ * is STDOUT or STDERR by the descriptor it claims.
+ */
 function parseFileRedirect(child: TSNodeLike): Redirect {
-  let fd = 1
+  let fd: number | null = null
   let target: string | number = ''
   let targetNode: TSNodeLike | null = null
-  let kind: RedirectKind = RedirectKind.STDOUT
-  let append = false
-  let clobber = false
+  let op: string | null = null
   let dupFd: number | null = null
 
   for (const c of child.children) {
     if (c.type === NT.FILE_DESCRIPTOR) {
       fd = parseInt(getText(c), 10)
-    } else if (c.type === NT.REDIRECT_OUT) {
-      // default STDOUT
-    } else if (c.type === NT.REDIRECT_CLOBBER) {
-      clobber = true
-    } else if (c.type === NT.REDIRECT_APPEND) {
-      append = true
-    } else if (c.type === NT.REDIRECT_IN) {
-      kind = RedirectKind.STDIN
-      fd = 0
-    } else if (c.type === NT.REDIRECT_STDERR) {
-      kind = RedirectKind.STDERR_TO_STDOUT
-    } else if (c.type === NT.REDIRECT_BOTH) {
-      kind = RedirectKind.STDOUT
-      fd = -1
-    } else if (c.type === NT.REDIRECT_BOTH_APPEND) {
-      kind = RedirectKind.STDOUT
-      fd = -1
-      append = true
+    } else if (REDIRECT_OPERATORS.has(c.type)) {
+      op = c.type
     } else if (c.type === NT.NUMBER) {
       dupFd = parseInt(getText(c), 10)
     }
@@ -300,35 +313,41 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
     }
   }
 
-  if (dupFd !== null && kind === RedirectKind.STDERR_TO_STDOUT) {
-    if (fd === 2 && dupFd === 1) {
-      kind = RedirectKind.STDERR_TO_STDOUT
-      target = dupFd
-    } else if (fd === 1 && dupFd === 2) {
-      kind = RedirectKind.STDOUT
-      fd = 1
-      target = 2
-    } else {
-      target = dupFd
-    }
-  }
-
-  if (fd === -1) {
+  // `>&word` with a word rather than a number is bash's other spelling
+  // of `&>word`.
+  if (
+    (op !== null && BOTH_OPERATORS.has(op)) ||
+    (op === NT.REDIRECT_STDERR && dupFd === null && targetNode !== null)
+  ) {
     return new Redirect({
-      fd: -1,
+      fd: FD_BOTH,
       target,
       targetNode,
       kind: RedirectKind.STDOUT,
-      append,
-      clobber,
+      append: op === NT.REDIRECT_BOTH_APPEND,
     })
   }
 
-  if (fd === 2 && kind !== RedirectKind.STDERR_TO_STDOUT) {
-    kind = RedirectKind.STDERR
-  }
+  const input = op !== null && INPUT_OPERATORS.has(op)
+  fd ??= input ? FD_STDIN : FD_STDOUT
+  if (op !== null && CLOSE_OPERATORS.has(op)) target = FD_CLOSE
+  else if (op !== null && DUP_OPERATORS.has(op) && dupFd !== null) target = dupFd
 
-  return new Redirect({ fd, target, targetNode, kind, append, clobber })
+  let kind: RedirectKind
+  if (input) kind = RedirectKind.STDIN
+  else if (fd === FD_STDERR && target === FD_STDOUT && op === NT.REDIRECT_STDERR) {
+    kind = RedirectKind.STDERR_TO_STDOUT
+  } else if (fd === FD_STDERR) kind = RedirectKind.STDERR
+  else kind = RedirectKind.STDOUT
+
+  return new Redirect({
+    fd,
+    target,
+    targetNode,
+    kind,
+    append: op === NT.REDIRECT_APPEND,
+    clobber: op === NT.REDIRECT_CLOBBER,
+  })
 }
 
 function parseHerestringRedirect(child: TSNodeLike): Redirect {

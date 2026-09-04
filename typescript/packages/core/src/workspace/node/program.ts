@@ -19,7 +19,9 @@ import { ExitSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { getText } from '../../shell/helpers.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
+import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { NodeType as NT } from '../../shell/types.ts'
+import { recordStatus } from '../executor/statement.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
 import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
@@ -164,7 +166,7 @@ async function runProgram(
       lastExec = bgExec
       // Launching a job is itself a statement: bash sets $? to 0
       // (the launch status), so `false; cmd & echo $?` prints 0.
-      session.lastExitCode = bgIo.exitCode
+      recordStatus(session, bgIo.exitCode)
       i += 2
     } else {
       let s: ByteSource | null
@@ -185,7 +187,7 @@ async function runProgram(
           const sigIo = new IOResult({ exitCode: err.exitCode, stderr: err.stderr })
           mergedIo = await mergedIo.merge(sigIo)
           mergedIo.exitCode = err.exitCode
-          session.lastExitCode = err.exitCode
+          recordStatus(session, err.exitCode)
           lastExec = new ExecutionNode({
             command: 'exit',
             exitCode: err.exitCode,
@@ -202,7 +204,7 @@ async function runProgram(
             mergedIo = await mergedIo.merge(new IOResult({ stderr: err.stderr }))
           }
           mergedIo.exitCode = err.exitCode
-          session.lastExitCode = err.exitCode
+          recordStatus(session, err.exitCode)
           lastExec = new ExecutionNode({ command: 'return', exitCode: err.exitCode })
           break
         }
@@ -212,7 +214,7 @@ async function runProgram(
           // statement, like bash (which clamps the level to the depth).
           if (err.stdout !== null) allStdout.push(err.stdout)
           mergedIo = await mergedIo.merge(err.io)
-          session.lastExitCode = err.io.exitCode
+          recordStatus(session, err.io.exitCode)
           i += 1
           continue
         }
@@ -253,7 +255,7 @@ async function runProgram(
         ioResult.exitCode = drainExit
         execNode.exitCode = drainExit
       }
-      session.lastExitCode = ioResult.exitCode
+      recordStatus(session, ioResult.exitCode, pipelineTransparent(child))
       io = ioResult
       lastExec = execNode
       i += 1

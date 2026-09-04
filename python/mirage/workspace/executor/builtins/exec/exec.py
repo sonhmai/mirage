@@ -18,6 +18,9 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
+from mirage.shell.constants import FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDOUT
+from mirage.shell.descriptors import (bad_descriptor_line,
+                                      unsupported_descriptor)
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
@@ -74,19 +77,26 @@ async def install_exec_redirects(
     appending) now, as bash opens it at `exec` time, so `exec > f`
     leaves an empty `f` even if nothing is written afterwards. A target
     that cannot be opened is bash's shell-attributed error and leaves
-    the redirects unchanged.
+    the redirects unchanged. So is a descriptor above 2 (`exec 3>f`,
+    `exec 3>&-`): the shell has no descriptor table, so the line is
+    refused with `3: Bad file descriptor` rather than aliased onto
+    stdout, which is what `exec 3>&-` used to close.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
         session (Session): shell session state.
         redirects (list[Redirect]): the expanded redirects.
     """
+    bad_fd = unsupported_descriptor(redirects)
+    if bad_fd is not None:
+        return _exec_failure(bad_descriptor_line(bad_fd))
     for r in redirects:
         if r.kind == RedirectKind.STDIN:
             scope = _to_scope(r.target) if isinstance(r.target,
                                                       str) else r.target
             if isinstance(r.target, int):
-                session.exec_stdin = None
+                # `<&-` closes the shell's stdin; `<&0` restores it.
+                session.exec_stdin = b"" if r.target == FD_CLOSE else None
                 continue
             try:
                 data, _ = await dispatch("read", scope)
@@ -99,16 +109,15 @@ async def install_exec_redirects(
             session.exec_stderr = session.exec_stdout
             session.exec_stderr_append = session.exec_stdout_append
             continue
-        if r.fd == 1 and isinstance(r.target, int) and r.target == 2:
+        if (r.fd == FD_STDOUT and isinstance(r.target, int)
+                and r.target == FD_STDERR):
             session.exec_stdout = session.exec_stderr
             session.exec_stdout_append = session.exec_stderr_append
             continue
-        if isinstance(r.target, int) and r.target == -1:
-            # `>&-` / `<&-`: close the descriptor.
+        if isinstance(r.target, int) and r.target == FD_CLOSE:
+            # `>&-` / `2>&-`: close the descriptor (stdin closed above).
             if r.kind == RedirectKind.STDERR:
                 session.exec_stderr = CLOSED
-            elif r.kind == RedirectKind.STDIN:
-                session.exec_stdin = b""
             else:
                 session.exec_stdout = CLOSED
             continue
@@ -122,7 +131,7 @@ async def install_exec_redirects(
         except FS_ERRORS as exc:
             return _exec_error(scope.raw_path, exc)
         streams = ((["stderr"] if r.kind == RedirectKind.STDERR else
-                    ["stdout"]) if r.fd != -1 else ["stdout", "stderr"])
+                    ["stdout"]) if r.fd != FD_BOTH else ["stdout", "stderr"])
         for stream in streams:
             setattr(session, f"exec_{stream}", path)
             setattr(session, f"exec_{stream}_append", r.append)
@@ -159,7 +168,16 @@ async def _open_target(dispatch: DispatchFn, session: Session, scope: PathSpec,
 def _exec_error(label: str,
                 exc: OSError) -> tuple[None, IOResult, ExecutionNode]:
     strerror = fs_strerror(exc)
-    err = (f"{label}: {strerror}\n" if strerror else f"{label}\n").encode()
+    return _exec_failure(
+        (f"{label}: {strerror}\n" if strerror else f"{label}\n").encode())
+
+
+def _exec_failure(err: bytes) -> tuple[None, IOResult, ExecutionNode]:
+    """The shell-attributed refusal of an `exec` redirect line.
+
+    Args:
+        err (bytes): the diagnostic, already in the shell's voice.
+    """
     return None, IOResult(exit_code=1,
                           stderr=err), ExecutionNode(command="exec",
                                                      exit_code=1,

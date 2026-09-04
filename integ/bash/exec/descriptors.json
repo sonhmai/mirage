@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "exec_fd3_refused_keeps_stdout",
+      "seq": 980010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "exec 3>/data/exec3.txt; echo code=$?; echo still; test -e /data/exec3.txt; echo exists=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\nstill\nexists=1\n",
+        "stderr": "3: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "exec_close_fd3_refused_keeps_stdout",
+      "seq": 980011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "exec 3>&-; echo code=$?; echo still",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\nstill\n",
+        "stderr": "3: Bad file descriptor\n"
+      }
+    }
+  ]
+}

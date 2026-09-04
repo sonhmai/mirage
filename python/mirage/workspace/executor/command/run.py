@@ -16,7 +16,7 @@ import functools
 
 from mirage.commands.config import ExecContext
 from mirage.commands.errors import CommandTimeoutError, UsageError
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.types import CommandSpec, FlagValue
 from mirage.commands.spec.usage import read_fail_exit
 from mirage.context import path_allowed
 from mirage.io import IOResult
@@ -34,13 +34,14 @@ from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.builtins.links import (link_target_stat,
                                                       path_exists,
                                                       path_readdir, path_stat)
+from mirage.workspace.executor.command.flags import parse_flags
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.session import Session, env_snapshot, session_view
-from mirage.workspace.types import ExecutionNode
+from mirage.workspace.types import ExecuteLine, ExecutionNode
 
 
 async def exec_node(cmd_str: str, io: IOResult,
@@ -105,6 +106,27 @@ def line_runtime_for(
     if isinstance(runtime, VFSRuntime):
         return None, None
     return runtime, None
+
+
+def find_start_points(argv: list[str | PathSpec], expr_tokens: list[str],
+                      spec: CommandSpec | None, cwd: str) -> list[PathSpec]:
+    """find's start points: the path operands typed before its expression.
+
+    The expression tail is the parser's, so a word inside it (an
+    ``-exec`` command word, a ``-newer`` reference) is never a start
+    point even when the rest slot's PATH kind would have read it as one.
+    Only the head is parsed against the spec, so what it yields as path
+    operands is exactly the start points.
+
+    Args:
+        argv (list[str | PathSpec]): the classified words after `find`.
+        expr_tokens (list[str]): the expression tail, as `find_expr_tail`
+            cut it off the same words.
+        spec (CommandSpec | None): find's spec on the mount.
+        cwd (str): the session's working directory.
+    """
+    head = argv[:len(argv) - len(expr_tokens)]
+    return parse_flags(head, spec, "find", cwd).paths
 
 
 def scalar_find_flags(
@@ -332,6 +354,7 @@ async def run_on_mount(
     resolve_hint: PathSpec | None = None,
     mount: MountEntry | None = None,
     routing_decision: RouteDecision | None = None,
+    execute_fn: ExecuteLine | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run one already-parsed command on the mount that owns its paths.
 
@@ -357,6 +380,8 @@ async def run_on_mount(
             is empty (a stream command running in stdin mode).
         mount: Pre-resolved mount; skips resolution and session mode
             checks, which the caller already performed.
+        execute_fn (ExecuteLine | None): runs a line in the session, for
+            find's ``-exec``.
     """
     if mount is None:
         resolve_paths = paths or ([resolve_hint] if resolve_hint else [])
@@ -435,18 +460,20 @@ async def run_on_mount(
                               stderr=format_fs_error(cmd_name, exc, paths))
 
     if cmd_name == "find":
-        stdout, action_err = await _apply_find_actions(
+        stdout, action_err, action_exit = await _apply_find_actions(
             stdout,
-            flag_kwargs,
+            texts,
             registry,
             session.cwd,
+            execute_fn=execute_fn,
+            session_id=session.session_id,
             child_mounts=ns.child_mounts,
             stat_path=stat_path)
         if action_err:
             existing = await materialize(io.stderr) if io.stderr else b""
             io.stderr = existing + action_err
-            if io.exit_code == 0:
-                io.exit_code = 1
+        if io.exit_code == 0:
+            io.exit_code = action_exit
 
     prefix = mount.prefix.rstrip("/")
     if prefix:

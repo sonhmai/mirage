@@ -19,7 +19,7 @@ import { makeArray } from '../../../../shell/array.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { visibleEnv } from '../../../session/state.ts'
 import { FILE_PAIR_BINARY, INT_COMPARATORS, UNARY_OPS } from './constants.ts'
-import { applyUnary } from './operators.ts'
+import { applyFilePair, applyUnary } from './operators.ts'
 import { CondError } from './types.ts'
 import type { CondContext, CondNode } from './types.ts'
 
@@ -42,7 +42,10 @@ export async function evalCond(ctx: CondContext, node: CondNode): Promise<boolea
   return node.value !== ''
 }
 
-function evalCondBinary(ctx: CondContext, node: Extract<CondNode, { kind: 'binary' }>): boolean {
+async function evalCondBinary(
+  ctx: CondContext,
+  node: Extract<CondNode, { kind: 'binary' }>,
+): Promise<boolean> {
   // == and != always fnmatch: the builder already rendered the right
   // side into the glob dialect, quoted segments escaped, so a
   // wholly-literal pattern matches exactly itself.
@@ -89,8 +92,6 @@ function evalCondBinary(ctx: CondContext, node: Extract<CondNode, { kind: 'binar
     }
     return compare(li, ri)
   }
-  if (FILE_PAIR_BINARY.has(node.op)) {
-    throw new CondError(`${ctx.name}: ${node.op}: unsupported operator`)
-  }
+  if (FILE_PAIR_BINARY.has(node.op)) return applyFilePair(ctx, node.op, node.left, node.right)
   throw new CondError('mirage: conditional binary operator expected')
 }

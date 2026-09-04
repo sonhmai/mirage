@@ -444,7 +444,7 @@ function wordHints(
   const spec = specForCommand(joined, registry, session.cwd)
   if (spec === null) return [null, null]
   const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
-  const wordKinds = [...extra, ...specWordKinds(spec, [...line.slice(consumed)])]
+  const wordKinds = [...extra, ...specWordKinds(spec, [...line.slice(consumed)], joined)]
   const bases = specWordBases(spec, [...line.slice(consumed)], session.cwd)
   const wordBases =
     bases === null ? null : [...new Array<string | null>(consumed - 1).fill(null), ...bases]

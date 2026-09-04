@@ -12,16 +12,53 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import tree_sitter
+
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
+from mirage.shell.node_kind import pipeline_transparent
 from mirage.workspace.session import Session
+
+
+def record_status(session: Session,
+                  code: int,
+                  *,
+                  transparent: bool = False) -> None:
+    """Record a finished statement's exit status: ``$?`` and
+    ``${PIPESTATUS[@]}`` together.
+
+    The one door every status write goes through, so the two can never
+    disagree. ``handle_pipe`` parks its per-segment statuses on the
+    session, and the boundary that closes the pipeline claims them here;
+    a boundary with nothing parked stamps its own one-element status,
+    which is what a simple command, a function call or a subshell
+    leaves in bash. A *transparent* statement (a group, a list, a loop,
+    a negation, a redirected pipeline: see ``pipeline_transparent``)
+    claims what was parked but never overwrites, because bash reports
+    the last pipeline that ran *inside* it (``{ false | true; }`` keeps
+    ``1 0``).
+
+    Args:
+        session (Session): shell session receiving the status.
+        code (int): the statement's exit status.
+        transparent (bool): whether the statement is not a pipeline of
+            its own.
+    """
+    session.last_exit_code = code
+    pending = session._pipe_status_pending
+    session._pipe_status_pending = None
+    if pending is not None:
+        session.pipe_status = pending
+    elif not transparent:
+        session.pipe_status = (code, )
 
 
 async def finish_statement(
     stdout: ByteSource | None,
     io: IOResult,
     session: Session,
+    node: tree_sitter.Node | None = None,
 ) -> ByteSource | None:
     """Finalize a completed statement and seed $? for the next one.
 
@@ -36,10 +73,15 @@ async def finish_statement(
         stdout (ByteSource | None): the statement's possibly-lazy stdout.
         io (IOResult): the statement's result; exit_code may still be
             provisional until the barrier runs.
-        session (Session): shell session receiving last_exit_code.
+        session (Session): shell session receiving the status.
+        node (tree_sitter.Node | None): the statement that finished,
+            which decides whether it stamps ``PIPESTATUS`` itself; None
+            (a caller without the node) stamps.
     """
     result = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-    session.last_exit_code = io.exit_code
+    record_status(session,
+                  io.exit_code,
+                  transparent=node is not None and pipeline_transparent(node))
     return result
 
 

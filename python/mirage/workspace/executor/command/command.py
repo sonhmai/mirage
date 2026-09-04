@@ -45,6 +45,7 @@ from mirage.workspace.executor.command.routing import (CWD_DEFAULT_RAW,
 from mirage.workspace.executor.command.types import ExecuteNodeFn
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
                                               _should_fan_out, run_with_fanout)
+from mirage.workspace.executor.find_refs import resolve_newer_refs
 from mirage.workspace.executor.jobs import (handle_disown, handle_fg,
                                             handle_jobs, handle_kill,
                                             handle_ps, handle_wait)
@@ -55,11 +56,11 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.storage import make_storage_key
 from mirage.workspace.session import Session
 from mirage.workspace.session.state import session_view
-from mirage.workspace.types import ExecutionNode
+from mirage.workspace.types import ExecuteLine, ExecutionNode
 
 from mirage.workspace.executor.command.run import (  # isort: skip
-    drop_service_caches, exec_node, namespace_view_of, run_on_mount,
-    scalar_find_flags)
+    drop_service_caches, exec_node, find_start_points, namespace_view_of,
+    run_on_mount, scalar_find_flags)
 
 # One handler per JOB_BUILTINS member; lookup already narrowed the name.
 JOB_HANDLERS = {
@@ -83,11 +84,14 @@ async def handle_command(
     job_table: JobTable | None = None,
     namespace: Namespace | None = None,
     routing_decision: RouteDecision | None = None,
+    execute_fn: ExecuteLine | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a simple command.
 
     Parts are already classified: strings for text,
-    PathSpec for paths. Dispatches to mount.execute_cmd.
+    PathSpec for paths. Dispatches to mount.execute_cmd. ``execute_fn``
+    runs a line in the session, which is how find's ``-exec`` runs its
+    command.
     """
     if not parts:
         return None, IOResult(), ExecutionNode(command="", exit_code=0)
@@ -187,7 +191,7 @@ async def handle_command(
     if cmd_name == "find":
         find_expr_tokens = find_expr_tail(raw_argv)
         try:
-            parse_find_expression(find_expr_tokens)
+            find_expr = parse_find_expression(find_expr_tokens)
         except FindParseError as exc:
             msg = f"{exc}\n"
             return None, IOResult(exit_code=1,
@@ -195,6 +199,18 @@ async def handle_command(
                                       command=cmd_str,
                                       exit_code=1,
                                       stderr=msg.encode())
+        if find_expr.newer and dispatch is not None:
+            # Every -newer reference is statted through the dispatcher
+            # here, once, before any backend parses the expression.
+            find_expr_tokens, ref_err = await resolve_newer_refs(
+                find_expr_tokens, find_expr.newer, registry, session.cwd,
+                functools.partial(path_stat, dispatch), namespace)
+            if ref_err is not None:
+                return None, IOResult(exit_code=1,
+                                      stderr=ref_err), ExecutionNode(
+                                          command=cmd_str,
+                                          exit_code=1,
+                                          stderr=ref_err)
 
     # Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
     # exactly like a positional destination would. A create-mode tar is
@@ -239,15 +255,21 @@ async def handle_command(
                                        session,
                                        dispatch,
                                        namespace,
-                                       routing_decision=routing_decision)
+                                       routing_decision=routing_decision,
+                                       execute_fn=execute_fn)
         cross_ns = namespace_view_of(registry, namespace, dispatch)
         # A per-operand native run is single-mount by construction, so a
         # traversal operand holding nested mounts has to fan out inside
         # it, exactly as the same operand would on a line of its own.
-        run_operand = functools.partial(
-            run_with_fanout, run_single, registry, session.cwd, cross_ns,
-            functools.partial(path_stat, dispatch)
-            if dispatch is not None else None)
+        run_operand = functools.partial(run_with_fanout,
+                                        run_single,
+                                        registry,
+                                        session.cwd,
+                                        cross_ns,
+                                        functools.partial(path_stat, dispatch)
+                                        if dispatch is not None else None,
+                                        execute_fn=execute_fn,
+                                        session_id=session.session_id)
         stdout, io = await handle_cross_mount(
             cmd_name,
             cross_scopes,
@@ -332,6 +354,10 @@ async def handle_command(
     if find_expr_tokens is not None:
         texts = find_expr_tokens
         flag_kwargs = scalar_find_flags(flag_kwargs)
+        # The start points are the path words before the expression;
+        # the spec's rest slot would otherwise read an -exec word as one.
+        paths = find_start_points(parts[1:], find_expr_tokens,
+                                  mount.spec_for(cmd_name), session.cwd)
 
     warn_bytes = ("".join(
         f"{cmd_name}: {w}\n"
@@ -354,7 +380,9 @@ async def handle_command(
             stdin,
             ns=namespace_view_of(registry, namespace, dispatch),
             stat_path=(functools.partial(path_stat, dispatch)
-                       if dispatch is not None else None))
+                       if dispatch is not None else None),
+            execute_fn=execute_fn,
+            session_id=session.session_id)
         if warn_bytes:
             existing = await materialize(io.stderr) if io.stderr else b""
             io.stderr = warn_bytes + existing
@@ -371,7 +399,8 @@ async def handle_command(
                                     flag_kwargs,
                                     stdin=stdin,
                                     mount=mount,
-                                    routing_decision=routing_decision)
+                                    routing_decision=routing_decision,
+                                    execute_fn=execute_fn)
 
     if warn_bytes:
         existing = await materialize(io.stderr) if io.stderr else b""

@@ -16,6 +16,8 @@ import shlex
 
 import tree_sitter
 
+from mirage.shell.constants import (FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN,
+                                    FD_STDOUT)
 from mirage.shell.escapes import (decode_ansi_c, unescape_dquoted,
                                   unescape_unquoted)
 from mirage.shell.types import FunctionBody
@@ -289,38 +291,41 @@ _TARGET_TYPES = frozenset({
     NT.PROCESS_SUBSTITUTION,
 })
 
+_INPUT_OPERATORS = frozenset(
+    {NT.REDIRECT_IN, NT.REDIRECT_DUP_IN, NT.REDIRECT_CLOSE_IN})
+_CLOSE_OPERATORS = frozenset({NT.REDIRECT_CLOSE_OUT, NT.REDIRECT_CLOSE_IN})
+_DUP_OPERATORS = frozenset({NT.REDIRECT_STDERR, NT.REDIRECT_DUP_IN})
+_BOTH_OPERATORS = frozenset({NT.REDIRECT_BOTH, NT.REDIRECT_BOTH_APPEND})
+_REDIRECT_OPERATORS = (
+    _INPUT_OPERATORS | _CLOSE_OPERATORS | _DUP_OPERATORS
+    | _BOTH_OPERATORS
+    | frozenset({NT.REDIRECT_OUT, NT.REDIRECT_CLOBBER, NT.REDIRECT_APPEND}))
+
 
 def _parse_file_redirect(child: tree_sitter.Node) -> Redirect:
-    """Parse a single file_redirect node into a Redirect."""
-    fd = 1
+    """Parse a single file_redirect node into a Redirect.
+
+    The operator token decides the shape and the explicit descriptor,
+    when there is one, is kept as typed: `3<f` claims fd 3 and `<&3`
+    duplicates from it, and both are refused downstream rather than
+    read as stdin (`shell/descriptors.py`). Three forms carry an int
+    target: a dup (`2>&1`, `>&2`, `<&0`) names the descriptor it copies,
+    a close (`>&-`, `<&-`) carries FD_CLOSE, and `&>` claims FD_BOTH.
+    `2>&1` alone keeps the STDERR_TO_STDOUT kind the fd router keys on;
+    every other output redirect is STDOUT or STDERR by the descriptor
+    it claims.
+    """
+    fd: int | None = None
     target: str | int = ""
     target_node = None
-    kind = RedirectKind.STDOUT
-    append = False
-    clobber = False
-    dup_fd = None
+    op: str | None = None
+    dup_fd: int | None = None
 
     for c in child.children:
         if c.type == NT.FILE_DESCRIPTOR:
             fd = int(get_text(c))
-        elif c.type == NT.REDIRECT_OUT:
-            pass
-        elif c.type == NT.REDIRECT_CLOBBER:
-            clobber = True
-        elif c.type == NT.REDIRECT_APPEND:
-            append = True
-        elif c.type == NT.REDIRECT_IN:
-            kind = RedirectKind.STDIN
-            fd = 0
-        elif c.type == NT.REDIRECT_STDERR:
-            kind = RedirectKind.STDERR_TO_STDOUT
-        elif c.type == NT.REDIRECT_BOTH:
-            kind = RedirectKind.STDOUT
-            fd = -1
-        elif c.type == NT.REDIRECT_BOTH_APPEND:
-            kind = RedirectKind.STDOUT
-            fd = -1
-            append = True
+        elif c.type in _REDIRECT_OPERATORS:
+            op = c.type
         elif c.type == NT.NUMBER:
             dup_fd = int(get_text(c))
 
@@ -330,34 +335,38 @@ def _parse_file_redirect(child: tree_sitter.Node) -> Redirect:
             target_node = c
             break
 
-    if dup_fd is not None and kind == RedirectKind.STDERR_TO_STDOUT:
-        if fd == 2 and dup_fd == 1:
-            kind = RedirectKind.STDERR_TO_STDOUT
-            target = dup_fd
-        elif fd == 1 and dup_fd == 2:
-            kind = RedirectKind.STDOUT
-            fd = 1
-            target = 2
-        else:
-            target = dup_fd
-
-    if fd == -1:
-        return Redirect(fd=-1,
+    # `>&word` with a word rather than a number is bash's other spelling
+    # of `&>word`.
+    if op in _BOTH_OPERATORS or (op == NT.REDIRECT_STDERR and dup_fd is None
+                                 and target_node is not None):
+        return Redirect(fd=FD_BOTH,
                         target=target,
                         target_node=target_node,
                         kind=RedirectKind.STDOUT,
-                        append=append,
-                        clobber=clobber)
+                        append=op == NT.REDIRECT_BOTH_APPEND)
 
-    if fd == 2 and kind != RedirectKind.STDERR_TO_STDOUT:
+    if fd is None:
+        fd = FD_STDIN if op in _INPUT_OPERATORS else FD_STDOUT
+    if op in _CLOSE_OPERATORS:
+        target = FD_CLOSE
+    elif op in _DUP_OPERATORS and dup_fd is not None:
+        target = dup_fd
+
+    if op in _INPUT_OPERATORS:
+        kind = RedirectKind.STDIN
+    elif fd == FD_STDERR and target == FD_STDOUT and op == NT.REDIRECT_STDERR:
+        kind = RedirectKind.STDERR_TO_STDOUT
+    elif fd == FD_STDERR:
         kind = RedirectKind.STDERR
+    else:
+        kind = RedirectKind.STDOUT
 
     return Redirect(fd=fd,
                     target=target,
                     target_node=target_node,
                     kind=kind,
-                    append=append,
-                    clobber=clobber)
+                    append=op == NT.REDIRECT_APPEND,
+                    clobber=op == NT.REDIRECT_CLOBBER)
 
 
 def _parse_herestring_redirect(child: tree_sitter.Node) -> Redirect:

@@ -62,7 +62,7 @@ export async function executeShellFunction(
         const [rawStdout, io, execNode] = await executeNode(cmdNode, session, stdin, cs)
         // $? tracks each statement inside the body, so a bare `return`
         // (and mid-function $?) sees the last command.
-        const stdout = await finishStatement(rawStdout, io, session)
+        const stdout = await finishStatement(rawStdout, io, session, cmdNode)
         if (stdout !== null) allStdout.push(stdout)
         mergedIo = await mergedIo.merge(io)
         lastExec = execNode

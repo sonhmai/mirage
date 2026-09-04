@@ -26,9 +26,10 @@ from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.errors import ArithError, ReadonlyError
+from mirage.shell.node_kind import pipeline_transparent
 from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
-from mirage.workspace.executor.statement import finish_statement
+from mirage.workspace.executor.statement import finish_statement, record_status
 from mirage.workspace.session import Session
 from mirage.workspace.session.state import seed_var, session_view
 from mirage.workspace.types import ExecutionNode
@@ -82,7 +83,7 @@ async def _execute_body(
             raise ContinueSignal(stdout=combined,
                                  io=merged_io,
                                  levels=sig.levels)
-        stdout = await finish_statement(stdout, io, session)
+        stdout = await finish_statement(stdout, io, session, cmd)
         all_stdout.append(stdout)
         merged_io = await merged_io.merge(io)
         if (io.exit_code != 0 and session.shell_options.get("errexit")
@@ -147,7 +148,9 @@ async def handle_if(
         cond_stdout, cond_io, _ = await execute_node(condition, session, stdin,
                                                      call_stack)
         await apply_barrier(cond_stdout, cond_io, BarrierPolicy.STATUS)
-        session.last_exit_code = cond_io.exit_code
+        record_status(session,
+                      cond_io.exit_code,
+                      transparent=pipeline_transparent(condition))
         if cond_io.exit_code == 0:
             return await _execute_body(execute_node, body, session, stdin,
                                        call_stack)
@@ -262,7 +265,9 @@ async def _condition_loop(
             cond_stdout, cond_io, _ = await execute_node(
                 condition, session, stdin, call_stack)
             await apply_barrier(cond_stdout, cond_io, BarrierPolicy.STATUS)
-            session.last_exit_code = cond_io.exit_code
+            record_status(session,
+                          cond_io.exit_code,
+                          transparent=pipeline_transparent(condition))
             if break_on_zero and cond_io.exit_code == 0:
                 hit_limit = False
                 break
@@ -461,7 +466,7 @@ async def handle_case(
             stdout, io, last_exec = await execute_node(stmt, session, stdin,
                                                        call_stack)
             stdin = None
-            stdout = await finish_statement(stdout, io, session)
+            stdout = await finish_statement(stdout, io, session, stmt)
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)

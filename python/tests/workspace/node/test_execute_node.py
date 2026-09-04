@@ -501,8 +501,10 @@ def test_read_from_bytes():
 
 
 def test_shift():
+    # bash: shifting past `$#` (here, with no positionals at all) is a
+    # silent exit 1.
     _, io, _, _, _, _ = _exec("shift")
-    assert io.exit_code == 0
+    assert io.exit_code == 1
 
 
 # ── trap ────────────────────────────────────────

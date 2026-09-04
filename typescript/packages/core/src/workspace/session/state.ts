@@ -16,6 +16,7 @@ import type { SessionView } from '../../ops/types.ts'
 import { PolicyDenied, preSessionGate, type Policies } from '../../policy/index.ts'
 import { evaluateArith } from '../../shell/arith.ts'
 import { arrayExtent, arrayGet, arrayHas, arrayValues, type ShellArray } from '../../shell/array.ts'
+import { PIPESTATUS, RANDOM, RANDOM_UNSET } from '../../shell/constants.ts'
 import { ArithError } from '../../shell/errors.ts'
 import type { ElementOps } from '../../shell/types.ts'
 import { varHidden } from '../../utils/hidden.ts'
@@ -175,6 +176,12 @@ export function visibleArrays(session: Session): Record<string, ShellArray> {
     if (Array.isArray(v.value) && !varHidden(session.hiddenVars, name)) {
       out[name] = v.value
     }
+  }
+  // PIPESTATUS is the session's record, never the store's: an assignment
+  // to it is ignored, as bash ignores one, because the record answers
+  // before the store.
+  if (!varHidden(session.hiddenVars, PIPESTATUS)) {
+    out[PIPESTATUS] = session.pipeStatus.map((code) => String(code))
   }
   return out
 }
@@ -435,6 +442,8 @@ async function unsetVar(
 
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete session.vars[name]
+  // bash: unsetting RANDOM strips its special meaning for good.
+  if (name === RANDOM) session.randomSeed = RANDOM_UNSET
 }
 
 /**

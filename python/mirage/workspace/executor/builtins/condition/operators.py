@@ -14,6 +14,7 @@
 
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.dates import iso_timestamp
 from mirage.utils.path import resolve_path, resolve_symlinks
 from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS, UNSUPPORTED_UNARY)
@@ -151,5 +152,56 @@ async def apply_binary(ctx: CondContext, left: str | PathSpec, op: str,
     if compare is not None:
         return compare(to_int(ctx, lt), to_int(ctx, rt))
     if op in FILE_PAIR_BINARY:
-        raise CondError(f"{ctx.name}: {op}: unsupported operator")
+        return await apply_file_pair(ctx, op, left, right)
     raise CondError(f"{ctx.name}: {op}: binary operator expected")
+
+
+async def _pair_stat(ctx: CondContext, val: str | PathSpec) -> FileStat | None:
+    """Stat one file-pair operand, None when it names nothing.
+
+    An empty word names nothing, as it does for the unary file tests.
+
+    Args:
+        ctx (CondContext): evaluation context.
+        val (str | PathSpec): operand as typed or classified.
+    """
+    if not isinstance(val, PathSpec) and not _scope_path(val):
+        return None
+    _, stat = await path_kind(ctx, val)
+    return stat
+
+
+async def apply_file_pair(ctx: CondContext, op: str, left: str | PathSpec,
+                          right: str | PathSpec) -> bool:
+    """Evaluate ``-nt``, ``-ot`` and ``-ef``, with bash's absence rules.
+
+    ``-nt`` is true when the left file exists and either the right does
+    not or the left's mtime is strictly later; ``-ot`` is the mirror.
+    Equal mtimes, or one the backend does not report, make both false.
+    ``-ef`` is true when both exist and resolve, symlinks followed, to
+    the same virtual path: mirage has no device and inode pair, and a
+    path names exactly one entry across the mount table, so the resolved
+    spelling is the identity. Pinned against GNU bash 5.2.
+
+    Args:
+        ctx (CondContext): evaluation context.
+        op (str): ``-nt``, ``-ot`` or ``-ef``.
+        left (str | PathSpec): left operand.
+        right (str | PathSpec): right operand.
+    """
+    lstat = await _pair_stat(ctx, left)
+    rstat = await _pair_stat(ctx, right)
+    if op == "-ef":
+        if lstat is None or rstat is None:
+            return False
+        return (operand_scope(ctx, left).virtual.rstrip("/") == operand_scope(
+            ctx, right).virtual.rstrip("/"))
+    if op == "-ot":
+        lstat, rstat = rstat, lstat
+    if lstat is None:
+        return False
+    if rstat is None:
+        return True
+    lt = iso_timestamp(lstat.modified)
+    rt = iso_timestamp(rstat.modified)
+    return lt is not None and rt is not None and lt > rt

@@ -23,7 +23,9 @@ import {
   arrayValues,
 } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { RANDOM } from '../../shell/constants.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
+import { nextRandom } from '../session/rng.ts'
 import { NodeType as NT, type ElementOps, type TSNodeLike } from '../../shell/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { SessionView } from '../../ops/types.ts'
@@ -193,6 +195,10 @@ export function lookupVar(
   if (callStack) {
     const localVal = callStack.getLocal(name)
     if (localVal !== null) return localVal
+  }
+  if (name === RANDOM) {
+    const drawn = nextRandom(session, env[RANDOM])
+    if (drawn !== null) return String(drawn)
   }
   // A name reference resolves to its target before the store is read.
   name = deref(session, name) || name

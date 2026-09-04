@@ -521,7 +521,7 @@ async def execute_node(
             if child.type == NT.COMMENT:
                 continue
             stdout, io, last_exec = await stream(child, session, stdin, cs)
-            stdout = await finish_statement(stdout, io, session)
+            stdout = await finish_statement(stdout, io, session, child)
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)

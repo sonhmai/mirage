@@ -83,7 +83,7 @@ async def run_shell_function(
                 break
             # $? tracks each statement inside the body, so a bare
             # `return` (and mid-function $?) sees the last command.
-            stdout = await finish_statement(stdout, io, session)
+            stdout = await finish_statement(stdout, io, session, cmd)
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)

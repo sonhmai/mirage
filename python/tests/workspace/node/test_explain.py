@@ -855,22 +855,23 @@ async def test_a_held_line_keeps_its_jobs_grant_reserved(ws):
 
 
 @pytest.mark.asyncio
-async def test_touching_backtick_pairs_are_read_as_the_lines_they_run():
+async def test_touching_backtick_pairs_hold_the_line_as_the_lines_they_run(ws):
     # tree-sitter lexes the two pairs as one node whose subtree is one
-    # merged command that never runs. The pass judged that spelling and
-    # claimed for it, so the cat's gate, running its own pair as a line,
-    # found nothing and asked again after the echo had run.
-    asked: list[str] = []
-    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
-    try:
-        ran = await ws.execute(
-            "echo x && echo `cat /data/secret.txt` `echo ok`", session_id="s")
-        assert ran.exit_code == 0
-        assert ran.stdout == b"x\ns ok\n"
-        assert len(asked) == 1
-        assert ws.decisions.list("s") == ()
-    finally:
-        await ws.close()
+    # merged command that never runs. Judged on that spelling, the pass
+    # saw no readable cat and nothing held the line: the echo ran, and
+    # only then did the cat's gate, running its own pair as a line, ask.
+    # Read as the lines the evaluator runs, the pass asks first and
+    # holds the whole line.
+    line = "echo x && echo `cat /data/secret.txt` `echo ok`"
+    first = await ws.execute(line, session_id="s")
+    assert first.exit_code == 126
+    assert first.stdout == b""
+    assert first.refusal is not None and first.refusal.kind == "pending"
+    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    ran = await ws.execute(line, session_id="s")
+    assert ran.exit_code == 0
+    assert ran.stdout == b"x\ns ok\n"
+    assert ws.decisions.list("s") == ()
 
 
 @pytest.mark.asyncio

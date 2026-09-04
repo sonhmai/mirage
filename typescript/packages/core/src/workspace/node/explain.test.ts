@@ -783,19 +783,23 @@ describe('prejudge scope', () => {
     expect(w.decisions.pending('s')).toHaveLength(w.decisions.list('s').length)
   })
 
-  it('reads touching backtick pairs as the lines they run', async () => {
+  it('holds a line with touching backtick pairs as the lines they run', async () => {
     // tree-sitter lexes the two pairs as one node whose subtree is one
-    // merged command that never runs. The pass judged that spelling and
-    // claimed for it, so the cat's gate, running its own pair as a line,
-    // found nothing and asked again after the echo had run.
-    const asked: string[] = []
-    const w = await inlineWs(answering(asked, Outcome.ALLOW))
-    const ran = await w.execute('echo x && echo `cat /data/secret.txt` `echo ok`', {
-      sessionId: 's',
-    })
+    // merged command that never runs. Judged on that spelling, the pass
+    // saw no readable cat and nothing held the line: the echo ran, and
+    // only then did the cat's gate, running its own pair as a line, ask.
+    // Read as the lines the evaluator runs, the pass asks first and
+    // holds the whole line.
+    const w = await ws()
+    const line = 'echo x && echo `cat /data/secret.txt` `echo ok`'
+    const first = await w.execute(line, { sessionId: 's' })
+    expect(first.exitCode).toBe(126)
+    expect(DEC.decode(first.stdout)).toBe('')
+    expect(first.refusal?.kind).toBe('pending')
+    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    const ran = await w.execute(line, { sessionId: 's' })
     expect(ran.exitCode).toBe(0)
     expect(DEC.decode(ran.stdout)).toBe('x\ns ok\n')
-    expect(asked).toHaveLength(1)
     expect(w.decisions.list('s')).toEqual([])
   })
 

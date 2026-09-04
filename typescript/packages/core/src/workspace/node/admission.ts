@@ -365,6 +365,12 @@ export async function admit(
   // cannot outlive the run that raised it. Nothing else here waits on
   // anything outside mirage.
   signal?: AbortSignal,
+  // True for a pass that judges the command on behalf of the gate that
+  // runs it (`prejudgeLine`): a grant the host gives inline is left
+  // standing for that gate to spend, so one question covers one run
+  // rather than one pass. A refusal needs no such care — the record
+  // refuses the agent's retry from the ledger either way.
+  handOff = false,
 ): Promise<Refused | Admitted> {
   const gated = await gate(
     name,
@@ -384,7 +390,7 @@ export async function admit(
   // never re-opens a deny.
   const action =
     asked !== null && asked.kind === 'ask'
-      ? await registry.decisions.resolve(ctx, asked, signal)
+      ? await registry.decisions.resolve(ctx, asked, signal, handOff)
       : asked
   // The ledger stopped waiting on a host because this run was killed
   // while it was deciding. That is the kill landing late, not a ruling,

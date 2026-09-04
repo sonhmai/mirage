@@ -347,7 +347,10 @@ function isVerdict(expl: Explanation): boolean {
  * The pass is read-only (`explainWords`), so it spends no grant and
  * records no request; a command it refuses on is then put through the
  * real gate, which is where an ask is recorded, exactly once, for a line
- * that will not run.
+ * that will not run. That admission hands off: a grant the host gives
+ * inline is left standing for the per-command gate, which runs the line
+ * and spends it, so a compound line costs the human one question per
+ * run rather than one per pass.
  *
  * Every command is judged whether or not the session carries a document.
  * A coded policy refuses on its own account, and one is always
@@ -405,6 +408,10 @@ export async function prejudgeLine(
         // command the redirects belong to.
         index === 0 ? targets : [],
         signal,
+        // This pass judges on the gate's behalf and runs nothing itself, so
+        // a grant the host gives here is handed to the per-command gate that
+        // runs the line, which spends it: one question per run, not per pass.
+        true,
       )
       if (!(answered instanceof Admitted)) return answered
       // The host answered this one inline. The rest of the line has not

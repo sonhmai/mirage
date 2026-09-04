@@ -184,10 +184,10 @@ async def test_a_host_that_answers_inside_the_line_leaves_nothing_waiting():
 
 
 @pytest.mark.asyncio
-async def test_an_inline_answer_is_spent_by_the_line_that_asked():
-    """The host answers while the line waits, so the answer belongs to
+async def test_an_inline_grant_is_spent_by_the_line_that_asked():
+    """The host answers while the line waits, so the grant belongs to
     that line: allowing once must not let the next identical line
-    through unasked, and refusing once must not refuse it either."""
+    through unasked."""
     asked = []
 
     async def allow(record: Decision) -> Decision:
@@ -201,6 +201,10 @@ async def test_an_inline_answer_is_spent_by_the_line_that_asked():
     assert await ledger.resolve(_ctx(), Ask("sign-off", rule=RULE)) is None
     assert len(asked) == 2
 
+    # A refusal is the other way round, by design: the human who said no
+    # is not asked about the agent's immediate retry. The record stands
+    # to refuse that retry, is spent by it, and the run after is a new
+    # question.
     refusals = []
 
     async def deny(record: Decision) -> Decision:
@@ -210,19 +214,46 @@ async def test_an_inline_answer_is_spent_by_the_line_that_asked():
                                    scope=Scope.ONCE)
 
     refused = Decisions(on_ask=deny)
-    for _ in range(2):
+    for expected in (1, 1, 2):
         action = await refused.resolve(_ctx(), Ask("sign-off", rule=RULE))
         assert isinstance(action, Deny)
-    assert len(refusals) == 2
+        assert len(refusals) == expected
 
-    # The pass that asks on another pass's behalf leaves its answer
-    # standing, so the gate behind it consumes the same one.
-    handed = Decisions(on_ask=allow)
-    asked.clear()
-    assert await handed.resolve(_ctx(), Ask("sign-off", rule=RULE), None,
-                                True) is None
-    assert await handed.resolve(_ctx(), Ask("sign-off", rule=RULE)) is None
+
+@pytest.mark.asyncio
+async def test_a_hand_off_spends_nothing_for_the_pass_that_follows():
+    """The pass that judges a line on the gate's behalf asks and leaves
+    the answer standing; the gate runs the line and spends it. One
+    question per run, and a grant already on file when the hand-off
+    began is left exactly as untouched as the one the host gives during
+    it."""
+    asked = []
+
+    async def allow(record: Decision) -> Decision:
+        asked.append(record.id)
+        return dataclasses.replace(record,
+                                   outcome=Outcome.ALLOW,
+                                   scope=Scope.ONCE)
+
+    ledger = Decisions(on_ask=allow)
+    ask = Ask("sign-off", rule=RULE)
+    assert await ledger.resolve(_ctx(), ask, None, True) is None
+    assert await ledger.resolve(_ctx(), ask) is None
     assert len(asked) == 1
+    assert await ledger.resolve(_ctx(), ask) is None
+    assert len(asked) == 2
+
+    other = CommandRule(reason="twice over", commands=("git push", ))
+    both = Ask("sign-off", rules=(RULE, other))
+    # The first rule is granted before the hand-off; the second during
+    # it.
+    assert await ledger.resolve(_ctx(), ask, None, True) is None
+    assert await ledger.resolve(_ctx(), both, None, True) is None
+    assert len(asked) == 4
+    # The gate finds both standing and asks nothing.
+    assert await ledger.resolve(_ctx(), both) is None
+    assert len(asked) == 4
+    assert ledger.list("s") == ()
 
 
 @pytest.mark.asyncio

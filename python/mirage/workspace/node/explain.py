@@ -381,7 +381,10 @@ async def prejudge_line(
     The pass is read-only (:func:`explain_line`), so it spends no grant
     and records no request; a command it refuses on is then put through
     the real gate, which is where an ask is recorded, exactly once, for
-    a line that will not run.
+    a line that will not run. That admission hands off: a grant the
+    host gives inline is left standing for the per-command gate, which
+    runs the line and spends it, so a compound line costs the human one
+    question per run rather than one per pass.
 
     Every command is judged whether or not the session carries a
     document. A coded policy refuses on its own account, and one is
@@ -441,7 +444,12 @@ async def prejudge_line(
                 # and the lines it runs after it, so only the first
                 # explanation is the command the redirects belong to.
                 redirects=targets if index == 0 else (),
-                cancel=cancel)
+                cancel=cancel,
+                # This pass judges on the gate's behalf and runs nothing
+                # itself, so a grant the host gives here is handed to the
+                # per-command gate that runs the line, which spends it:
+                # one question per run, not per pass.
+                hand_off=True)
             if isinstance(answered, Refused):
                 return answered
             # The host answered this one inline. The rest of the line

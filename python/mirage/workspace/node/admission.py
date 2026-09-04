@@ -320,6 +320,7 @@ async def admit(
     stdin: ByteSource | None = None,
     redirects: Sequence[PathSpec] = (),
     cancel: asyncio.Event | None = None,
+    hand_off: bool = False,
 ) -> Refused | Admitted:
     """The command plane's admission of one command: visibility, then
     the policy chain, then the decision ledger.
@@ -354,6 +355,12 @@ async def admit(
             only so a question put to a host cannot outlive the run
             that raised it. Nothing else here waits on anything outside
             mirage.
+        hand_off (bool): True for a pass that judges the command on
+            behalf of the gate that runs it (``prejudge_line``): a grant
+            the host gives inline is left standing for that gate to
+            spend, so one question covers one run rather than one pass.
+            A refusal needs no such care -- the record refuses the
+            agent's retry from the ledger either way.
     """
     gated = await gate(name, args, operands, session, registry, namespace,
                        agent_id, stdin, redirects)
@@ -364,8 +371,8 @@ async def admit(
     # the ledger answers it from the session's records or the host, so
     # an answer never re-opens a deny.
     action: Deny | Pending | Abandoned | None = (
-        await registry.decisions.resolve(ctx, asked, cancel) if isinstance(
-            asked, Ask) else asked)
+        await registry.decisions.resolve(ctx, asked, cancel, hand_off)
+        if isinstance(asked, Ask) else asked)
     # The ledger stopped waiting on a host because this run was killed
     # while it was deciding. That is the kill landing late, not a ruling,
     # so it joins every other abandoned wait rather than being rendered

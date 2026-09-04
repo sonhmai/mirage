@@ -313,26 +313,45 @@ async def test_a_coded_policy_holds_the_line_without_a_document(coded):
     assert "/data/a.txt" in await coded.fs.readdir("/data")
 
 
-async def _allow_once(record):
-    """Answer every question ALLOW the moment it is raised.
+def _answering(asked: list[str], outcome: Outcome, scope: Scope = Scope.ONCE):
+    """A host answering every question the same way, counting what it
+    was asked.
 
     Args:
-        record (Decision): the question the ledger raised.
-        cancel (asyncio.Event | None): the run's kill channel, unused.
+        asked (list[str]): where each question's id is appended.
+        outcome (Outcome): the answer given.
+        scope (Scope): how far it reaches.
     """
-    return dataclasses.replace(record, outcome=Outcome.ALLOW, scope=Scope.ONCE)
+
+    async def host(record):
+        asked.append(record.id)
+        return dataclasses.replace(record, outcome=outcome, scope=scope)
+
+    return host
+
+
+async def _inline_workspace(on_ask) -> Workspace:
+    """The same world as the ``ws`` fixture, with a host that answers an
+    ask inline.
+
+    Args:
+        on_ask (AskHandler): the host.
+    """
+    workspace = Workspace({"/data/": RAMResource()},
+                          mode=MountMode.WRITE,
+                          profiles={"r": PROFILE},
+                          on_ask=on_ask)
+    await workspace.execute("mkdir -p /data/prod")
+    await workspace.fs.write("/data/prod/x.txt", b"x\n")
+    await workspace.fs.write("/data/a.txt", b"a\n")
+    await workspace.fs.write("/data/secret.txt", b"s\n")
+    workspace.create_session("s", profile="r")
+    return workspace
 
 
 @pytest_asyncio.fixture()
 async def inline():
-    workspace = Workspace({"/data/": RAMResource()},
-                          mode=MountMode.WRITE,
-                          profiles={"r": PROFILE},
-                          on_ask=_allow_once)
-    await workspace.execute("mkdir -p /data/prod")
-    await workspace.fs.write("/data/prod/x.txt", b"x\n")
-    await workspace.fs.write("/data/secret.txt", b"s\n")
-    workspace.create_session("s", profile="r")
+    workspace = await _inline_workspace(_answering([], Outcome.ALLOW))
     yield workspace
     await workspace.close()
 
@@ -350,6 +369,50 @@ async def test_an_answered_ask_does_not_end_the_scan(inline):
     assert b"production data is protected" in (ran.stderr or b"")
     assert b"s\n" not in (ran.stdout or b"")
     assert "/data/prod/x.txt" in await inline.fs.readdir("/data/prod")
+
+
+@pytest.mark.asyncio
+async def test_a_compound_line_answered_inline_asks_once_per_run():
+    # Two passes read this line: the one that judges every command
+    # before any runs, and the per-command gate, which runs it. The host
+    # answers the cat in the first, and that one nod has to carry the
+    # line through the gate, or the human is asked twice for one run. It
+    # carries no further: the next identical line is a new question.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        line = "rm /data/a.txt && cat /data/secret.txt"
+        ran = await ws.execute(line, session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout == b"s\n"
+        assert len(asked) == 1
+        await ws.fs.write("/data/a.txt", b"a\n")
+        again = await ws.execute(line, session_id="s")
+        assert again.exit_code == 0
+        assert len(asked) == 2
+        # Both grants were spent by the lines they were given for.
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_compound_line_is_refused_again_without_asking():
+    # The human who said no is not asked about the agent's immediate
+    # retry: the refusal stands to refuse it from the record, is spent
+    # by it, and the run after that is an open question again. The same
+    # rule the per-command gate keeps for a one-command line.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.DENY))
+    try:
+        line = "rm /data/a.txt && cat /data/secret.txt"
+        for expected in (1, 1, 2):
+            ran = await ws.execute(line, session_id="s")
+            assert ran.exit_code == 126
+            assert len(asked) == expected
+        assert "/data/a.txt" in await ws.fs.readdir("/data")
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

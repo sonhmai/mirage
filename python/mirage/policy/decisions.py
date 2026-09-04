@@ -206,10 +206,13 @@ class Decisions:
                      note: str = "") -> None:
         """Answer a waiting record, yes or no.
 
-        ALLOW at ONCE passes the retry of the exact line and is consumed
-        by it; at SESSION it passes every line the rule covers for the
-        rest of the session. DENY refuses the retry in the deny voice,
-        once, and asking again raises a new record.
+        ALLOW at ONCE passes the one line it was given for and is
+        consumed by it -- the line that asked, when the host answers
+        while it waits, or that line's retry when the answer comes
+        later; at SESSION it passes every line the rule covers for the
+        rest of the session. DENY refuses the retry of the line in the
+        deny voice, once, whether the host answered inline or later,
+        and asking again raises a new record.
 
         Args:
             decision_id (str): the id the agent was told to quote.
@@ -252,14 +255,19 @@ class Decisions:
         Every rule the ask names has to be answered, because each won a
         subject of its own and a nod covers the subject it was given
         for. They are asked one at a time, the retry of the line raising
-        the next, and a ONCE answer is only spent once the whole line is
+        the next, and a ONCE grant is only spent once the whole line is
         answered: spending one while another is still waiting would make
         the first question come back on every retry. Once the line IS
-        answered, every ONCE answer behind it is spent -- the ones
-        already on file and the ones a host gave inline moments ago
-        alike -- so an answer never outlives the line it was given for.
-        The exception is ``hand_off``, for the pass that asks on another
-        pass's behalf.
+        answered, the pass that runs it spends every ONCE grant behind
+        it, the ones already on file and the one a host gave inline
+        moments ago alike, so a nod never outlives the line it was given
+        for.
+
+        A refusal is deliberately not spent by the line it was given
+        for. The record stands to refuse the agent's immediate retry of
+        the same line from the ledger, and is spent by that retry, so a
+        human who said no is not asked twice about it; the run after
+        that is an open question again.
 
         Args:
             ctx (CommandContext): the asked line.
@@ -267,14 +275,13 @@ class Decisions:
             cancel (asyncio.Event | None): the run's kill channel, so a
                 question outlives neither its run's deadline nor a
                 caller's kill.
-            hand_off (bool): True when a later pass on this same line
-                will read the ledger after this one -- the env pre-pass
-                raises the question and the gate behind it consumes the
-                answer -- so an answer given inline is left standing for
-                that pass instead of being spent here. False for the
-                gate itself, which is the pass that runs the line: an
-                answer it was given belongs to the line it was given for
-                and to no other.
+            hand_off (bool): True for a pass that judges the line on
+                behalf of the one that runs it -- the env pre-pass, and
+                the compound-line pass that judges every command before
+                any runs -- so nothing is spent here: every grant, the
+                one the host gives now and any already on file, is left
+                standing for the gate behind it, which runs the line
+                and spends them. False for that gate.
 
         Returns:
             None to run the line, a Deny to refuse it, a Pending when
@@ -286,39 +293,33 @@ class Decisions:
         held = self._records(ctx.session_id)
         answers = [(rule, self._settled(held, rule, argv, ctx.cwd))
                    for rule in rules]
-        spent = tuple(r for _rule, r in answers
-                      if r is not None and r.scope is Scope.ONCE)
         refused = next((rule for rule, r in answers
                         if r is not None and r.outcome is Outcome.DENY), None)
         if refused is not None:
-            await self._spend(ctx.session_id, spent)
+            # A standing refusal refuses this line in place, whichever
+            # pass reads it: a line that does not run has no later pass
+            # to hand anything to.
+            await self._spend(
+                ctx.session_id,
+                tuple(r for _rule, r in answers
+                      if r is not None and r.scope is Scope.ONCE))
             return Deny(refused.reason)
         for rule, record in answers:
             if record is not None:
                 continue
             action = await self._raise(ctx, rule, argv, cancel)
-            if action is None:
-                continue
-            # A refusal the host gave while this line waited refused THIS
-            # line, so it is spent by it -- unless a later pass on the
-            # same line still has to read it, which is the pass that
-            # refuses in place. A question left waiting, or a killed run,
-            # answered nothing and spends nothing.
-            if isinstance(action, Deny) and not hand_off:
-                await self._spend(
-                    ctx.session_id,
-                    self._once_answers(ctx.session_id, rules, argv, ctx.cwd))
-            return action
-        # Every rule is answered and the line may run. Unless another pass
-        # on this same line is still to come, the ledger is read again
-        # rather than trusting the entry snapshot, because a host that
-        # answered inline settled its record during the loop above:
-        # without that, the grant it gave THIS line would still be
+            if action is not None:
+                return action
+        # Every rule is answered and the line may run. The ledger is read
+        # again rather than trusting the entry snapshot, because a host
+        # that answered inline settled its record during the loop above:
+        # without the re-read, the grant it gave THIS line would still be
         # standing for the next identical one, and whoever allowed once
         # would have allowed twice.
-        await self._spend(
-            ctx.session_id, spent if hand_off else self._once_answers(
-                ctx.session_id, rules, argv, ctx.cwd))
+        if not hand_off:
+            await self._spend(
+                ctx.session_id,
+                self._once_answers(ctx.session_id, rules, argv, ctx.cwd))
         return None
 
     def _once_answers(

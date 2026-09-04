@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { Outcome, Scope } from '../../policy/index.ts'
-import type { Action, CommandContext, Policy } from '../../policy/index.ts'
+import type { Action, AskHandler, CommandContext, Policy } from '../../policy/index.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
@@ -53,6 +53,30 @@ async function ws(): Promise<Workspace> {
   await w.execute('echo s > /data/secret.txt')
   w.createSession('s', { profile: 'r' })
   return w
+}
+
+/** The same world as `ws`, with a host that answers an ask inline. */
+async function inlineWs(onAsk: AskHandler): Promise<Workspace> {
+  const parser = await getTestParser()
+  const w = new Workspace(
+    { '/data': new RAMResource() },
+    { mode: MountMode.WRITE, shellParser: parser, profiles: { r: PROFILE }, onAsk },
+  )
+  open.push(w)
+  await w.execute('mkdir -p /data/prod')
+  await w.execute('echo x > /data/prod/x.txt')
+  await w.execute('echo a > /data/a.txt')
+  await w.execute('echo s > /data/secret.txt')
+  w.createSession('s', { profile: 'r' })
+  return w
+}
+
+/** A host answering every question the same way, counting what it was asked. */
+function answering(asked: string[], outcome: Outcome, scope = Scope.ONCE): AskHandler {
+  return (record) => {
+    asked.push(record.id)
+    return Promise.resolve({ ...record, outcome, scope })
+  }
 }
 
 describe('explain', () => {
@@ -304,27 +328,49 @@ describe('prejudge', () => {
     // line is fine" let the later deny run behind an approval, which is
     // the half-line behavior in its worst form, since the agent was told
     // yes.
-    const parser = await getTestParser()
-    const w = new Workspace(
-      { '/data': new RAMResource() },
-      {
-        mode: MountMode.WRITE,
-        shellParser: parser,
-        profiles: { r: PROFILE },
-        onAsk: (record) =>
-          Promise.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE }),
-      },
-    )
-    open.push(w)
-    await w.execute('mkdir -p /data/prod')
-    await w.execute('echo x > /data/prod/x.txt')
-    await w.execute('echo s > /data/secret.txt')
-    w.createSession('s', { profile: 'r' })
+    const w = await inlineWs(answering([], Outcome.ALLOW))
     const ran = await w.execute('cat /data/secret.txt && rm /data/prod/x.txt', { sessionId: 's' })
     expect(ran.exitCode).not.toBe(0)
     expect(DEC.decode(ran.stderr)).toContain('production data is protected')
     expect(DEC.decode(ran.stdout)).not.toContain('s')
     expect(await w.fs.readdir('/data/prod')).toContain('/data/prod/x.txt')
+  })
+
+  it('asks once for a compound line answered inline, and again for the next', async () => {
+    // Two passes read this line: this one, which judges every command
+    // before any runs, and the per-command gate, which runs it. The host
+    // answers the cat here, and that one nod has to carry the line through
+    // the gate, or the human is asked twice for one run. It carries no
+    // further: the next identical line is a new question.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const line = 'rm /data/a.txt && cat /data/secret.txt'
+    const ran = await w.execute(line, { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('s\n')
+    expect(asked).toHaveLength(1)
+    await w.execute('echo a > /data/a.txt', { sessionId: 's' })
+    const again = await w.execute(line, { sessionId: 's' })
+    expect(again.exitCode).toBe(0)
+    expect(asked).toHaveLength(2)
+    // Both grants were spent by the lines they were given for.
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('refuses the retry of a compound line just refused without asking again', async () => {
+    // The human who said no is not asked about the agent's immediate retry:
+    // the refusal stands to refuse it from the record, is spent by it, and
+    // the run after that is an open question again. The same rule the
+    // per-command gate keeps for a one-command line.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.DENY))
+    const line = 'rm /data/a.txt && cat /data/secret.txt'
+    for (const expected of [1, 1, 2]) {
+      const ran = await w.execute(line, { sessionId: 's' })
+      expect(ran.exitCode).toBe(126)
+      expect(asked).toHaveLength(expected)
+    }
+    expect(await w.fs.readdir('/data')).toContain('/data/a.txt')
   })
 })
 

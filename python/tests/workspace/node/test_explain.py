@@ -852,3 +852,38 @@ async def test_a_held_line_keeps_its_jobs_grant_reserved(ws):
     waited = await ws.execute("wait", session_id="s")
     assert waited.exit_code == 0
     assert len(ws.decisions.pending("s")) == len(ws.decisions.list("s"))
+
+
+@pytest.mark.asyncio
+async def test_touching_backtick_pairs_are_read_as_the_lines_they_run():
+    # tree-sitter lexes the two pairs as one node whose subtree is one
+    # merged command that never runs. The pass judged that spelling and
+    # claimed for it, so the cat's gate, running its own pair as a line,
+    # found nothing and asked again after the echo had run.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute(
+            "echo x && echo `cat /data/secret.txt` `echo ok`", session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout == b"x\ns ok\n"
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_two_backtick_pairs_of_one_node_are_two_occurrences():
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute(
+            "echo `cat /data/secret.txt` `cat /data/secret.txt`",
+            session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout == b"s s\n"
+        assert len(asked) == 2
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()

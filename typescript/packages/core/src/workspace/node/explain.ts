@@ -52,6 +52,7 @@ import {
   lineFrame,
   occurrenceIn,
   rootFrame,
+  segmentFrames,
   wholeOccurrence,
 } from './occurrence.ts'
 
@@ -275,7 +276,13 @@ function wordsOf(node: TSNodeLike, home: string | null): Word[] {
  * "escapes" means, and because `&` is not a wrapper node: it is a token
  * following its command, visible only to whoever holds the sibling list.
  */
-function* walkNode(node: TSNodeLike, session: Session, home: string | null, frame: Frame): Walk {
+function* walkNode(
+  node: TSNodeLike,
+  session: Session,
+  home: string | null,
+  frame: Frame,
+  reparse: (line: string) => TSNodeLike,
+): Walk {
   if (node.type === NodeType.COMMAND) {
     let walked = session
     const words = wordsOf(node, home)
@@ -289,7 +296,7 @@ function* walkNode(node: TSNodeLike, session: Session, home: string | null, fram
       walked = afterCd(words, session)
     }
     // A substitution among the words runs in its own shell.
-    for (const child of node.children) yield* walkNode(child, session, home, frame)
+    for (const child of node.children) yield* walkNode(child, session, home, frame, reparse)
     return walked
   }
   if (FORK_SCOPES.has(node.type)) {
@@ -297,15 +304,25 @@ function* walkNode(node: TSNodeLike, session: Session, home: string | null, fram
     // line that evaluates it parses the body alone, under the
     // substitution's node, and the commands in it have to be placed
     // here exactly where that line will place them.
+    const segments = segmentFrames(node, frame)
+    if (segments.length > 0) {
+      // A backtick region is read as the evaluator runs it: one line per
+      // pair, parsed on its own, because tree-sitter lexes touching pairs
+      // as one node whose subtree is not what runs.
+      for (const inner of segments) {
+        yield* walkNode(reparse(inner.text), session, home, inner, reparse)
+      }
+      return session
+    }
     const inner = bodyFrame(node, frame)
-    yield* walkChildren(node, session, home, inner ?? frame)
+    yield* walkChildren(node, session, home, inner ?? frame, reparse)
     return session
   }
   if (node.type === NodeType.PIPELINE) {
-    for (const child of node.children) yield* walkNode(child, session, home, frame)
+    for (const child of node.children) yield* walkNode(child, session, home, frame, reparse)
     return session
   }
-  return yield* walkChildren(node, session, home, frame)
+  return yield* walkChildren(node, session, home, frame, reparse)
 }
 
 /**
@@ -317,13 +334,14 @@ function* walkChildren(
   session: Session,
   home: string | null,
   frame: Frame,
+  reparse: (line: string) => TSNodeLike,
 ): Walk {
   let walked = session
   const children = node.children
   for (let index = 0; index < children.length; index += 1) {
     const child = children[index]
     if (child === undefined) continue
-    const ended = yield* walkNode(child, walked, home, frame)
+    const ended = yield* walkNode(child, walked, home, frame, reparse)
     if (children[index + 1]?.type === '&') continue
     walked = ended
   }
@@ -363,9 +381,10 @@ function afterCd(words: readonly Word[], session: Session): Session {
 function* walkedLine(
   root: TSNodeLike,
   session: Session,
+  reparse: (line: string) => TSNodeLike,
   frame: Frame | null = null,
 ): Generator<Walked> {
-  yield* walkNode(root, session, homeDir(session), frame ?? rootFrame(root, null))
+  yield* walkNode(root, session, homeDir(session), frame ?? rootFrame(root, null), reparse)
 }
 
 /**
@@ -472,7 +491,7 @@ export async function prejudgeLine(
 ): Promise<Refused | null> {
   const judged: [Walked, Judged[]][] = []
   const frame = rootFrame(root, handed.origin)
-  for (const item of walkedLine(root, session, frame)) {
+  for (const item of walkedLine(root, session, reparse, frame)) {
     if (item.words[0]?.text === null) continue
     judged.push([
       item,
@@ -611,8 +630,13 @@ function definesFunction(node: TSNodeLike): boolean {
  * expand, a `$NAME` anywhere -- returns null, and the caller keeps the
  * node, because some part of it may still run and read.
  */
-function soleLiteralCommand(node: TSNodeLike, session: Session, frame: Frame): Walked | null {
-  const items = [...walkedLine(node, session, frame)]
+function soleLiteralCommand(
+  node: TSNodeLike,
+  session: Session,
+  frame: Frame,
+  reparse: (line: string) => TSNodeLike,
+): Walked | null {
+  const items = [...walkedLine(node, session, reparse, frame)]
   const item = items[0]
   if (items.length !== 1 || item === undefined) return null
   if ([...item.words, ...item.redirects].some((word) => word.text === null)) return null
@@ -712,7 +736,7 @@ export async function unrefusedNodes(
     // Each node is read in the frame of its own tree: the line's, or
     // the one a stored body or alias expansion was parsed from, which
     // is the frame its gate will read it in.
-    const item = soleLiteralCommand(node, session, rootFrame(node, handed.origin))
+    const item = soleLiteralCommand(node, session, rootFrame(node, handed.origin), reparse)
     if (item === null) {
       out.push(node)
       continue
@@ -775,7 +799,7 @@ async function judgeLine(
   frame: Frame,
 ): Promise<Judged[]> {
   const out: Judged[] = []
-  for (const item of walkedLine(root, session, frame)) {
+  for (const item of walkedLine(root, session, reparse, frame)) {
     out.push(
       ...(await judgeWords(
         item.words,

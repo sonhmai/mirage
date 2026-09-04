@@ -1,17 +1,19 @@
 import type { Claimant, HandOff, Occurrence } from '../../policy/types.ts'
+import { splitBacktickRegion } from '../../shell/backticks.ts'
 import { shellJoin } from '../../shell/join.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 
 /**
  * What opens and closes a substitution's body, in the order the openers
  * are tried; the body between them is the text a nested line is parsed
- * from.
+ * from. A backtick region is not here: tree-sitter lexes touching pairs
+ * as one node, so it is split into lines (`segmentFrames`) rather than
+ * framed as one body.
  */
 export const SUBSTITUTION_DELIMITERS: readonly (readonly [string, string])[] = [
   ['$(', ')'],
   ['<(', ')'],
   ['>(', ')'],
-  ['`', '`'],
 ]
 
 /**
@@ -97,10 +99,10 @@ export function wholeOccurrence(frame: Frame): Occurrence {
 
 /**
  * The frame of a substitution's body, as the nested line that evaluates
- * it will parse it: `$( )`, `<( )`, `>( )` or a backtick region, with
- * the whitespace tree-sitter folds into the opening token set aside as
- * expansion sets it aside. Null for a node that is not a substitution
- * the evaluator would run.
+ * it will parse it: `$( )`, `<( )` or `>( )`, with the whitespace
+ * tree-sitter folds into the opening token set aside as expansion sets
+ * it aside. Null for a node that is not a substitution the evaluator
+ * would run.
  */
 export function bodyFrame(node: TSNodeLike, frame: Frame): Frame | null {
   const text = node.text
@@ -117,12 +119,56 @@ export function bodyFrame(node: TSNodeLike, frame: Frame): Frame | null {
 }
 
 /**
+ * The occurrence of one span of a node's text, for a node that holds
+ * several lines: a backtick region, which tree-sitter lexes as one node
+ * when the pairs touch and the evaluator splits again. Each pair is its
+ * own place on the line, as it would be had the grammar kept them
+ * apart.
+ */
+export function partOf(occurrence: Occurrence, start: number, end: number): Occurrence {
+  return {
+    parent: occurrence.parent,
+    source: occurrence.source,
+    start: occurrence.start + start,
+    end: occurrence.start + end,
+  }
+}
+
+/**
+ * The frames of the lines a backtick region runs, one per pair, each to
+ * be parsed on its own under the pair's own place on the line; empty
+ * for a node that is not a backtick region.
+ *
+ * The region's subtree is not what runs: tree-sitter lexes touching
+ * pairs as one node and merges their commands into one, so the pass
+ * reads the region as the evaluator does, split by the one lexer both
+ * share (`splitBacktickRegion`), with the folded whitespace set aside
+ * first as expansion sets it aside.
+ */
+export function segmentFrames(node: TSNodeLike, frame: Frame): Frame[] {
+  const text = node.text
+  const prefix = text.length - text.trimStart().length
+  const raw = text.slice(prefix)
+  if (!(raw.startsWith('`') && raw.endsWith('`'))) return []
+  const at = occurrenceIn(node, frame)
+  return splitBacktickRegion(raw)
+    .filter((s) => s.command)
+    .map((s) => lineFrame(s.text, partOf(at, prefix + s.start, prefix + s.end)))
+}
+
+/**
  * Where a node the executor runs stands, on the line it runs in: the
  * line's hand-off carries as `origin` the node the line's text was
- * evaluated from.
+ * evaluated from. `span` is the part of the node's text that runs, when
+ * the node holds several lines.
  */
-export function occurrenceOf(node: TSNodeLike, handed: HandOff): Occurrence {
-  return occurrenceIn(node, rootFrame(node, handed.origin))
+export function occurrenceOf(
+  node: TSNodeLike,
+  handed: HandOff,
+  span?: readonly [number, number],
+): Occurrence {
+  const at = occurrenceIn(node, rootFrame(node, handed.origin))
+  return span === undefined ? at : partOf(at, span[0], span[1])
 }
 
 /**

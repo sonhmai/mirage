@@ -37,7 +37,8 @@ from mirage.workspace.node.admission import (Refused, admit, classified_words,
 from mirage.workspace.node.inner_lines import Word, inner_lines
 from mirage.workspace.node.occurrence import (Frame, argv_frame, body_frame,
                                               line_frame, occurrence_in,
-                                              root_frame, whole_occurrence)
+                                              root_frame, segment_frames,
+                                              whole_occurrence)
 from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir
 
@@ -321,7 +322,9 @@ def _walk_node(node: Any, session: Session, home: str | None,
     A substitution's body is walked in a frame of its own
     (``body_frame``): the nested line that evaluates it parses the body
     alone, under the substitution's node, and the commands in it have
-    to be placed here exactly where that line will place them.
+    to be placed here exactly where that line will place them. A
+    backtick region is walked as the lines it runs (``segment_frames``),
+    each parsed here as the evaluator parses it.
 
     Args:
         node (Any): the tree-sitter node to walk.
@@ -341,6 +344,16 @@ def _walk_node(node: Any, session: Session, home: str | None,
             yield from _walk_node(child, session, home, frame)
         return walked
     if node.type in FORK_SCOPES:
+        segments = segment_frames(node, frame)
+        if segments:
+            # A backtick region is read as the evaluator runs it: one
+            # line per pair, parsed on its own, because tree-sitter
+            # lexes touching pairs as one node whose subtree is not
+            # what runs.
+            for segment in segments:
+                yield from _walk_node(parse(segment.text), session, home,
+                                      segment)
+            return session
         inner = body_frame(node, frame)
         yield from _walk_children(node, session, home,
                                   frame if inner is None else inner)

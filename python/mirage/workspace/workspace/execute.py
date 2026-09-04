@@ -96,6 +96,7 @@ async def recurse(
     handed: HandOff,
     cmd: str,
     node: Any = None,
+    span: tuple[int, int] | None = None,
     **opts: Any,
 ) -> Any:
     """The executor's internal eval ($(), source, eval, xargs, ...).
@@ -125,8 +126,12 @@ async def recurse(
             caller has none, which leaves the inner line's commands
             standing nowhere the pass could have placed them, so its
             gates ask afresh.
+        span (tuple[int, int] | None): the span of ``cmd`` within the
+            node's text when the node holds several lines (a backtick
+            region, whose touching pairs tree-sitter lexes as one
+            node), so each stands at its own place.
     """
-    origin = occurrence_of(node, handed) if node is not None else None
+    origin = occurrence_of(node, handed, span) if node is not None else None
     io = await ws.execute(cmd,
                           cancel=cancel,
                           record=False,

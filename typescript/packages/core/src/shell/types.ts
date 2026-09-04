@@ -393,3 +393,18 @@ export interface TSNodeLike {
   /** Field lookup (`variable_assignment.name`), as web-tree-sitter spells it. */
   childForFieldName?(fieldName: string): TSNodeLike | null
 }
+
+/**
+ * One piece of a backtick region as the evaluator lexes it: a command a
+ * pair encloses, or the literal text between two pairs. `text` is the
+ * segment's text, a command's with its escapes resolved, as the nested
+ * line parses it; `start` and `end` span its raw text in the region
+ * (for a command, up to the closing backtick). Mirrors the Python
+ * BacktickSegment.
+ */
+export interface BacktickSegment {
+  readonly text: string
+  readonly command: boolean
+  readonly start: number
+  readonly end: number
+}

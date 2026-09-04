@@ -12,7 +12,9 @@ import {
   lineFrame,
   occurrenceIn,
   occurrenceOf,
+  partOf,
   rootFrame,
+  segmentFrames,
   wholeOccurrence,
 } from './occurrence.ts'
 
@@ -113,13 +115,38 @@ describe('occurrence', () => {
     expect(walked).toEqual(ran)
   })
 
-  it('sets a folded prefix and backticks aside', async () => {
-    const line = 'echo "$a `cat /data/secret.txt`"'
+  it('reads a backtick region as one line per pair', async () => {
+    // tree-sitter lexes touching pairs as one node whose subtree merges
+    // the two commands into one; the evaluator splits the region and
+    // runs each pair as a line of its own, standing at the pair's own
+    // span on the line, and the pass reads it the same way.
+    const line = 'echo `cat /data/secret.txt` `echo ok`'
     const root = await parse(line)
     const frame = rootFrame(root, null)
-    const inner = body(first(root, NodeType.COMMAND_SUBSTITUTION), frame)
+    const sub = first(root, NodeType.COMMAND_SUBSTITUTION)
+    expect(bodyFrame(sub, frame)).toBeNull()
+    const frames = segmentFrames(sub, frame)
+    expect(frames.map((f) => f.text)).toEqual(['cat /data/secret.txt', 'echo ok'])
+    for (const inner of frames) {
+      expect(inner.base).toBe(0)
+      const parent = inner.parent
+      if (parent === null) throw new Error('no parent')
+      expect(line.slice(parent.start, parent.end)).toBe(inner.text)
+    }
+    // What the nested line computes when expansion hands the executor
+    // the pair's span within the node.
+    expect(occurrenceOf(sub, fresh(), [1, 21])).toEqual(frames[0]?.parent)
+    expect(partOf(occurrenceIn(sub, frame), 1, 21)).toEqual(frames[0]?.parent)
+  })
+
+  it('sets a folded prefix aside before a region is split', async () => {
+    const line = 'echo "$a `cat /data/secret.txt`"'
+    const root = await parse(line)
+    const [inner] = segmentFrames(first(root, NodeType.COMMAND_SUBSTITUTION), rootFrame(root, null))
+    const parent = inner?.parent ?? null
+    if (inner === undefined || parent === null) throw new Error('no segment')
     expect(inner.text).toBe('cat /data/secret.txt')
-    expect(line.slice(inner.base, inner.base + inner.text.length)).toBe(inner.text)
+    expect(line.slice(parent.start, parent.end)).toBe(inner.text)
   })
 
   it('has no body frame for a node that is no substitution', async () => {

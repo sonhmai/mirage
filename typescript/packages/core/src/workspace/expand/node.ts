@@ -22,6 +22,7 @@ import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { evaluateArith } from '../../shell/arith.ts'
+import { splitBacktickRegion } from '../../shell/backticks.ts'
 import { ArithError } from '../../shell/errors.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from '../../shell/escapes.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
@@ -37,7 +38,12 @@ import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
  */
 export type ExecuteFn = (
   command: string,
-  opts: { sessionId: string; stdin?: ByteSource | null; node?: TSNodeLike },
+  opts: {
+    sessionId: string
+    stdin?: ByteSource | null
+    node?: TSNodeLike
+    span?: readonly [number, number]
+  },
 ) => Promise<IOResult>
 
 // Whitespace tree-sitter folds into an expansion's opening token.
@@ -52,59 +58,31 @@ export function foldedWhitespace(node: TSNodeLike): string {
   return raw.slice(0, raw.length - raw.trimStart().length)
 }
 
-// Split a backtick region into segments, each flagged as a command or as
-// literal text. tree-sitter-bash lexes the gap between two backtick
-// substitutions as a single token when that gap is empty or
-// whitespace-only, so `a` `b` arrives as ONE command_substitution node
-// holding both commands and the text between them. Re-lexing the node's
-// own text on unescaped backticks recovers the real segments; a single
-// pair simply yields one command segment.
-//
-// Inside a command, POSIX keeps the backslash literal except before `$`,
-// a backtick and `\`, where it escapes. Consuming those pairs whole is
-// what makes the parity right: `\\` is one escaped backslash, so a
-// backtick straight after it still closes the region rather than reading
-// as an escaped backtick.
-function splitBacktickSegments(raw: string): [string, boolean][] {
-  const segments: [string, boolean][] = []
-  const ESCAPABLE = new Set(['$', '`', '\\'])
-  let buf = ''
-  let inCommand = false
-  let i = 0
-  while (i < raw.length) {
-    const next = raw[i + 1]
-    if (raw[i] === '\\' && inCommand && next !== undefined && ESCAPABLE.has(next)) {
-      buf += next
-      i += 2
-      continue
-    }
-    if (raw[i] === '`') {
-      segments.push([buf, inCommand])
-      buf = ''
-      inCommand = !inCommand
-      i += 1
-      continue
-    }
-    buf += raw.charAt(i)
-    i += 1
-  }
-  segments.push([buf, inCommand])
-  return segments.filter(([text, cmd]) => text !== '' || cmd)
-}
-
+/**
+ * Expand a backtick region, one nested line per pair. `offset` is where
+ * `raw` (the region's text, the folded prefix stripped) starts in the
+ * node's text.
+ */
 async function expandBacktickRegion(
   raw: string,
   session: Session,
   executeFn: ExecuteFn,
   node: TSNodeLike,
+  offset: number,
 ): Promise<string> {
   let out = ''
-  for (const [text, isCommand] of splitBacktickSegments(raw)) {
-    if (!isCommand) {
-      out += text
+  for (const segment of splitBacktickRegion(raw)) {
+    if (!segment.command) {
+      out += segment.text
       continue
     }
-    const io = await executeFn(text, { sessionId: session.sessionId, node })
+    // Each pair is its own place on the line: the node holds every
+    // touching pair, so the span within it says which one runs.
+    const io = await executeFn(segment.text, {
+      sessionId: session.sessionId,
+      node,
+      span: [offset + segment.start, offset + segment.end],
+    })
     out += (await io.stdoutStr()).replace(/\n+$/, '')
     session.cmdsubSeq += 1
     session.cmdsubStatus = io.exitCode
@@ -322,8 +300,10 @@ export async function expandNodeMarked(
     const rawSub = tsNode.text.slice(prefix.length)
     if (rawSub.startsWith('`') && rawSub.endsWith('`')) {
       // Backtick regions are re-lexed here rather than trusted from the
-      // grammar, which merges adjacent pairs (see splitBacktickSegments).
-      return prefix + (await expandBacktickRegion(rawSub, session, executeFn, tsNode))
+      // grammar, which merges adjacent pairs (see splitBacktickRegion).
+      return (
+        prefix + (await expandBacktickRegion(rawSub, session, executeFn, tsNode, prefix.length))
+      )
     }
     if (rawSub.startsWith('$((') && rawSub.endsWith('))')) {
       // Inside heredoc bodies tree-sitter parses `$((expr))` as a

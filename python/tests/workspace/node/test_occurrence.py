@@ -19,7 +19,8 @@ from mirage.shell.types import NodeType
 from mirage.workspace.node.occurrence import (Frame, argv_frame, body_frame,
                                               claimant_for, line_frame,
                                               occurrence_in, occurrence_of,
-                                              root_frame, whole_occurrence)
+                                              part_of, root_frame,
+                                              segment_frames, whole_occurrence)
 
 
 def _first(node, kind: str):
@@ -97,15 +98,37 @@ def test_a_substitution_body_is_read_as_the_nested_line_parses_it():
     assert walked == ran
 
 
-def test_a_folded_prefix_and_backticks_are_set_aside():
+def test_a_backtick_region_is_one_line_per_pair():
+    # tree-sitter lexes touching pairs as one node whose subtree merges
+    # the two commands into one; the evaluator splits the region and
+    # runs each pair as a line of its own, standing at the pair's own
+    # span on the line, and the pass reads it the same way.
+    line = "echo `cat /data/secret.txt` `echo ok`"
+    ast = parse(line)
+    frame = root_frame(ast, None)
+    sub = _first(ast, NodeType.COMMAND_SUBSTITUTION)
+    assert body_frame(sub, frame) is None
+    first, second = segment_frames(sub, frame)
+    assert (first.text, second.text) == ("cat /data/secret.txt", "echo ok")
+    for inner in (first, second):
+        assert inner.base == 0
+        assert inner.parent is not None
+        assert line[inner.parent.start:inner.parent.end] == inner.text
+    # What the nested line computes when expansion hands the executor
+    # the pair's span within the node.
+    assert occurrence_of(sub, HandOff(), (1, 21)) == first.parent
+    assert part_of(occurrence_in(sub, frame), 1, 21) == first.parent
+
+
+def test_a_folded_prefix_is_set_aside_before_a_region_is_split():
     line = 'echo "$a `cat /data/secret.txt`"'
     ast = parse(line)
     frame = root_frame(ast, None)
     sub = _first(ast, NodeType.COMMAND_SUBSTITUTION)
-    body = body_frame(sub, frame)
-    assert body is not None
-    assert body.text == "cat /data/secret.txt"
-    assert line[body.base:body.base + len(body.text)] == body.text
+    inner, = segment_frames(sub, frame)
+    assert inner.text == "cat /data/secret.txt"
+    assert inner.parent is not None
+    assert line[inner.parent.start:inner.parent.end] == inner.text
 
 
 def test_a_node_that_is_no_substitution_has_no_body_frame():

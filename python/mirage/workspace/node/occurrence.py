@@ -18,12 +18,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from mirage.policy import Claimant, HandOff, Occurrence
+from mirage.shell.backticks import split_backtick_region
 from mirage.shell.helpers import get_text
 
 # What opens and closes a substitution's body, in the order the
 # openers are tried; the body between them is the text a nested line
-# is parsed from.
-SUBSTITUTION_DELIMITERS = (("$(", ")"), ("<(", ")"), (">(", ")"), ("`", "`"))
+# is parsed from. A backtick region is not here: tree-sitter lexes
+# touching pairs as one node, so it is split into lines
+# (``segment_frames``) rather than framed as one body.
+SUBSTITUTION_DELIMITERS = (("$(", ")"), ("<(", ")"), (">(", ")"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,9 +138,9 @@ def whole_occurrence(frame: Frame) -> Occurrence:
 
 def body_frame(node: Any, frame: Frame) -> Frame | None:
     """The frame of a substitution's body, as the nested line that
-    evaluates it will parse it: ``$( )``, ``<( )``, ``>( )`` or a
-    backtick region, with the whitespace tree-sitter folds into the
-    opening token set aside as expansion sets it aside.
+    evaluates it will parse it: ``$( )``, ``<( )`` or ``>( )``, with
+    the whitespace tree-sitter folds into the opening token set aside
+    as expansion sets it aside.
 
     Args:
         node (Any): the substitution node.
@@ -158,15 +161,63 @@ def body_frame(node: Any, frame: Frame) -> Frame | None:
     return None
 
 
-def occurrence_of(node: Any, handed: HandOff) -> Occurrence:
+def part_of(occurrence: Occurrence, start: int, end: int) -> Occurrence:
+    """The occurrence of one span of a node's text, for a node that
+    holds several lines: a backtick region, which tree-sitter lexes as
+    one node when the pairs touch and the evaluator splits again. Each
+    pair is its own place on the line, as it would be had the grammar
+    kept them apart.
+
+    Args:
+        occurrence (Occurrence): the node's place.
+        start (int): where the span starts in the node's text.
+        end (int): the index after its last character.
+    """
+    return Occurrence(occurrence.parent, occurrence.source,
+                      occurrence.start + start, occurrence.start + end)
+
+
+def segment_frames(node: Any, frame: Frame) -> list[Frame]:
+    """The frames of the lines a backtick region runs, one per pair,
+    each to be parsed on its own under the pair's own place on the
+    line; empty for a node that is not a backtick region.
+
+    The region's subtree is not what runs: tree-sitter lexes touching
+    pairs as one node and merges their commands into one, so the pass
+    reads the region as the evaluator does, split by the one lexer
+    both share (``split_backtick_region``), with the folded whitespace
+    set aside first as expansion sets it aside.
+
+    Args:
+        node (Any): the substitution node.
+        frame (Frame): the scope the region was walked in.
+    """
+    text = get_text(node)
+    prefix = len(text) - len(text.lstrip())
+    raw = text[prefix:]
+    if not (raw.startswith("`") and raw.endswith("`")):
+        return []
+    at = occurrence_in(node, frame)
+    return [
+        line_frame(s.text, part_of(at, prefix + s.start, prefix + s.end))
+        for s in split_backtick_region(raw) if s.command
+    ]
+
+
+def occurrence_of(node: Any,
+                  handed: HandOff,
+                  span: tuple[int, int] | None = None) -> Occurrence:
     """Where a node the executor runs stands, on the line it runs in.
 
     Args:
         node (Any): the node about to run or be evaluated.
         handed (HandOff): the line's hand-off, whose ``origin`` is the
             node the line's text was evaluated from.
+        span (tuple[int, int] | None): the span within the node's text
+            that runs, when the node holds several lines.
     """
-    return occurrence_in(node, root_frame(node, handed.origin))
+    at = occurrence_in(node, root_frame(node, handed.origin))
+    return at if span is None else part_of(at, *span)
 
 
 def claimant_for(node: Any, handed: HandOff | None) -> Claimant | None:

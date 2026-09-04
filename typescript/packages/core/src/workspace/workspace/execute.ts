@@ -287,7 +287,7 @@ async function runLine(
     innerOpts.handed = {
       claimed: [],
       parent: handed,
-      origin: opts.node === undefined ? null : occurrenceOf(opts.node, handed),
+      origin: opts.node === undefined ? null : occurrenceOf(opts.node, handed, opts.span),
     }
     // `command NAME` re-runs the inner line and must forward the pipe
     // stdin so `... | command cat` filters the upstream output; the same

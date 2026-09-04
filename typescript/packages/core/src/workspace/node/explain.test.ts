@@ -782,4 +782,32 @@ describe('prejudge scope', () => {
     expect(waited.exitCode).toBe(0)
     expect(w.decisions.pending('s')).toHaveLength(w.decisions.list('s').length)
   })
+
+  it('reads touching backtick pairs as the lines they run', async () => {
+    // tree-sitter lexes the two pairs as one node whose subtree is one
+    // merged command that never runs. The pass judged that spelling and
+    // claimed for it, so the cat's gate, running its own pair as a line,
+    // found nothing and asked again after the echo had run.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute('echo x && echo `cat /data/secret.txt` `echo ok`', {
+      sessionId: 's',
+    })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('x\ns ok\n')
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('reads two backtick pairs of one node as two occurrences', async () => {
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute('echo `cat /data/secret.txt` `cat /data/secret.txt`', {
+      sessionId: 's',
+    })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('s s\n')
+    expect(asked).toHaveLength(2)
+    expect(w.decisions.list('s')).toEqual([])
+  })
 })

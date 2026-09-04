@@ -52,6 +52,7 @@ export async function handlePipe(
       let stdout: ByteSource | null
       let io: IOResult
       let childExec: ExecutionNode
+      const saved = session.snapshot()
       try {
         ;[stdout, io, childExec] = await executeNode(cmd, session, currentStdin, callStack)
       } catch (err) {
@@ -65,6 +66,8 @@ export async function handlePipe(
           exitCode: err.containedCode,
           stderr: err.stderr,
         })
+      } finally {
+        session.restore(saved)
       }
       ios.push(io)
       childNodes.push(childExec)

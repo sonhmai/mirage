@@ -135,6 +135,36 @@
         "stdout": "sub=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "arith_reports_expanded_variable",
+      "seq": 980107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "x=0; echo $((1/$x)); echo after",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: 1/0: division by 0\n"
+      }
+    },
+    {
+      "id": "arith_reports_expanded_braces",
+      "seq": 980108,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "x=0; echo $((1/${x})); echo after",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: 1/0: division by 0\n"
+      }
     }
   ]
 }

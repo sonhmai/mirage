@@ -1,4 +1,5 @@
 import re
+import time
 
 import pytest
 
@@ -309,3 +310,40 @@ def test_exec_spans_cover_the_action_words():
     assert exec_spans(argv) == [(1, 4), (7, 10)]
     assert exec_spans(["-exec", "a", "b"]) == [(0, 2)]
     assert exec_spans(["-name", "x"]) == []
+
+
+@pytest.mark.parametrize("operand,seconds", [('yesterday', 86400),
+                                             ('24 hours ago', 86400),
+                                             ('now', 0)])
+def test_newermt_accepts_relative_dates(operand, seconds):
+    before = time.time()
+    expr = parse_find_expression(['-newermt', operand])
+    assert before - seconds <= expr.mtime_min <= time.time() - seconds
+
+
+def test_newermt_accepts_an_epoch_timestamp():
+    expr = parse_find_expression(['-newermt', '@1700000000'])
+    assert 1700000000 < expr.mtime_min < 1700000000.001
+
+
+@pytest.mark.parametrize('action', [
+    ['-exec', 'echo', '{}', ';'],
+    ['-exec', 'echo', '{}', '+'],
+    ['-print'],
+    ['-delete'],
+    ['-printf', '%p'],
+])
+@pytest.mark.parametrize('test', [
+    ['-name', '*.txt'],
+    ['-type', 'f'],
+    ['-size', '+1c'],
+    ['-newermt', 'yesterday'],
+    ['-newer', 'ref'],
+    ['-empty'],
+    ['!', '-name', '*.txt'],
+    ['(', '-name', '*.txt', ')'],
+])
+def test_predicate_after_action_is_refused(action, test):
+    with pytest.raises(FindParseError,
+                       match='tests after actions are not supported'):
+        parse_find_expression(action + test)

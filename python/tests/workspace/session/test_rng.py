@@ -96,3 +96,29 @@ async def test_random_expands_in_the_shell():
     assert await io.stdout_str() == "19081 19081\n"
     io = await ws.execute('unset RANDOM; echo "[$RANDOM]"')
     assert await io.stdout_str() == "[]\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("child", [
+    'echo $RANDOM | cat >/dev/null',
+    'echo x | { read x; : $RANDOM; }',
+    'x=$(echo $RANDOM)',
+    'x=`echo $RANDOM`',
+    'x=$(echo $RANDOM # trailing comment\n)',
+    'x=$(echo $(echo $RANDOM))',
+    'x=$(: $RANDOM; exit 7)',
+    'echo x | { : $RANDOM; exit 7; }',
+])
+@pytest.mark.parametrize("draw_first", [False, True])
+async def test_child_random_reads_preserve_the_parent_sequence(
+        child, draw_first):
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        prefix = 'RANDOM=42; ' + (': $RANDOM; ' if draw_first else '')
+        io = await ws.execute(prefix + child + '; echo $RANDOM')
+        assert io.exit_code == 0
+        assert await io.stdout_str() == ('17033\n'
+                                         if draw_first else '19081\n')
+        assert await io.stderr_str() == ''
+    finally:
+        await ws.close()

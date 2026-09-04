@@ -51,6 +51,7 @@ async def handle_pipe(
 
     try:
         for i, cmd in enumerate(commands):
+            saved = session.snapshot()
             try:
                 stdout, io, child_exec = await execute_node(
                     cmd, session, current_stdin, call_stack)
@@ -63,6 +64,8 @@ async def handle_pipe(
                 child_exec = ExecutionNode(command=get_text(cmd),
                                            exit_code=sig.contained_code,
                                            stderr=sig.stderr)
+            finally:
+                session.restore(saved)
             ios.append(io)
             child_nodes.append(child_exec)
 

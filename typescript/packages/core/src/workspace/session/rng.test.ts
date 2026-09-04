@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
 import { RANDOM, RANDOM_MAX } from '../../shell/constants.ts'
 import { makeVar } from '../../shell/variable.ts'
 import { nextRandom, seedFrom } from './rng.ts'
@@ -76,4 +77,30 @@ describe('RANDOM generator', () => {
     expect(nextRandom(s, undefined)).not.toBeNull()
     expect(nextRandom(s, undefined)).toBeNull()
   })
+})
+
+describe('child RANDOM isolation', () => {
+  for (const drawFirst of [false, true]) {
+    it.each([
+      'echo $RANDOM | cat >/dev/null',
+      'echo x | { read x; : $RANDOM; }',
+      'x=$(echo $RANDOM)',
+      'x=`echo $RANDOM`',
+      'x=$(echo $RANDOM # trailing comment\n)',
+      'x=$(echo $(echo $RANDOM))',
+      'x=$(: $RANDOM; exit 7)',
+      'echo x | { : $RANDOM; exit 7; }',
+    ])(`preserves parent state after %s (draw first: ${String(drawFirst)})`, async (child) => {
+      const { ws } = await makeIntegrationWS()
+      try {
+        const prefix = 'RANDOM=42; ' + (drawFirst ? ': $RANDOM; ' : '')
+        const io = await ws.execute(prefix + child + '; echo $RANDOM')
+        expect(io.exitCode).toBe(0)
+        expect(io.stdoutText).toBe(drawFirst ? '17033\n' : '19081\n')
+        expect(io.stderrText).toBe('')
+      } finally {
+        await ws.close()
+      }
+    })
+  }
 })

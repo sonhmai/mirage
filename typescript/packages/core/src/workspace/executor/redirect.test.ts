@@ -593,3 +593,24 @@ describe('handleRedirect unwritable > target', () => {
     ).rejects.toThrow('backend exploded')
   })
 })
+
+describe('descriptor zero duplication', () => {
+  it.each([
+    ['echo x 1>&0', '', 'echo: write error: Bad file descriptor\n', 1],
+    ['echo x 2>&0 1>&2', '', '', 1],
+    ['echo x 0>&1 1>&0', 'x\n', '', 0],
+    ['echo x 1>&0 0>&1', '', 'echo: write error: Bad file descriptor\n', 1],
+    ['echo x 1>&0 2>&1', '', '', 1],
+    ['echo x 1>&0 2>/data/err; cat /data/err', 'echo: write error: Bad file descriptor\n', '', 0],
+    ['echo x 0>/data/out 1>&0; cat /data/out', 'x\n', '', 0],
+    ['cat </data/a.txt 1<&0 0<&1 1>/data/out; cat /data/out', 'a', '', 0],
+    ['cat </data/a.txt 0<&1', '', '', 0],
+  ])('tracks direction and order: %s', async (line, out, err, code) => {
+    const { ws } = await makeIntegrationWS({ 'a.txt': 'a' })
+    try {
+      expect(await runResult(ws, line)).toEqual([code, out, err])
+    } finally {
+      await ws.close()
+    }
+  })
+})

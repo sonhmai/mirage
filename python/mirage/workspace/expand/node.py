@@ -105,7 +105,7 @@ async def _expand_backtick_region(
         if not is_command:
             parts.append(text)
             continue
-        io = await execute_fn(text, session_id=session.session_id)
+        io = await execute_fn(f"( {text}\n)", session_id=session.session_id)
         parts.append((await io.stdout_str()).rstrip("\n"))
         session._cmdsub_seq += 1
         session._cmdsub_status = io.exit_code
@@ -173,7 +173,12 @@ async def expand_arith(
     (``$(( y = 3 ))`` needs ``y``, not its value).
     """
     parts = []
+    raw = ts_node.text or b""
+    end = 0
     for child in ts_node.children:
+        start = child.start_byte - ts_node.start_byte
+        parts.append(raw[end:start].decode("utf-8"))
+        end = child.end_byte - ts_node.start_byte
         if child.type in ARITH_DELIMITERS:
             continue
         if child.type in (NT.BINARY_EXPRESSION, NT.UNARY_EXPRESSION,
@@ -206,7 +211,8 @@ async def expand_arith(
                                            execute_fn,
                                            call_stack,
                                            view=view))
-    return " ".join(parts)
+    parts.append(raw[end:].decode("utf-8"))
+    return "".join(parts).strip()
 
 
 async def _arith_subscript(
@@ -372,7 +378,7 @@ async def expand_node_marked(
         inner = raw[2:-1]
         if not inner.strip():
             return prefix
-        io = await execute_fn(inner, session_id=session.session_id)
+        io = await execute_fn(f"( {inner}\n)", session_id=session.session_id)
         text = (await io.stdout_str()).rstrip("\n")
         # Record the substitution's status: an assignment-only
         # statement whose value ran substitutions reports the last
@@ -397,7 +403,7 @@ async def expand_node_marked(
                                     visible_env(session),
                                     elements=session_elements(session))
         except ArithError as exc:
-            raise arith_exit(get_text(ts_node)[3:-2], exc) from exc
+            raise arith_exit(expr, exc) from exc
         for write in result.writes:
             await expansion_write(session, view, write.name, write.key,
                                   write.value)

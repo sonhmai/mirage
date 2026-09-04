@@ -30,7 +30,7 @@ def test_arith_exit_shape():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("line,err", [
     ("echo $((1/0)); echo after", "bash: 1/0: division by 0\n"),
-    ("x=0; echo $((1/$x)); echo after", "bash: 1/$x: division by 0\n"),
+    ("x=0; echo $((1/$x)); echo after", "bash: 1/0: division by 0\n"),
     ("echo $((2**-1)); echo after", "bash: 2**-1: exponent less than 0\n"),
     ("x=$((1%0)); echo after", "bash: 1%0: division by 0\n"),
 ])

@@ -513,6 +513,51 @@
         "stdout": "rc=1\n",
         "stderr": "find: -exec is supported only in a top-level -a chain, not under -o, ! or parentheses\n"
       }
+    },
+    {
+      "id": "find_exec_isolates_caller",
+      "seq": 980100,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "mkdir -p /data/fe/d; touch /data/fe/d/a /data/fe/d/b; cd /data/fe; KEEP=parent; mutate() { echo \"$KEEP:$PWD\"; KEEP=child; cd /; }; find d -type f -exec mutate \\; ; echo \"$KEEP:$PWD\"; cd /; rm -r /data/fe",
+      "expect": {
+        "exit": 0,
+        "stdout": "parent:/data/fe\nparent:/data/fe\nparent:/data/fe\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_test_after_exec_refused",
+      "seq": 980101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "find /data -exec echo seen {} \\; -name \"*.txt\" -print; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "find: -name: tests after actions are not supported\n"
+      }
+    },
+    {
+      "id": "find_newermt_gnu_dates",
+      "seq": 980102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "mkdir -p /data/fe; touch /data/fe/a; for t in yesterday \"24 hours ago\" @1700000000; do find /data/fe -type f -newermt \"$t\"; done; rm -r /data/fe",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fe/a\n/data/fe/a\n/data/fe/a\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -305,3 +305,50 @@ async def test_exec_line_substitution():
     assert exec_line(per, ["a b"]) == "echo 'xa by' 'a b'"
     batch = ExecAction(("echo", "{}", "tail"), batch=True)
     assert exec_line(batch, ["a", "b c"]) == "echo a 'b c' tail"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action,terminator",
+    [(action, r"\;")
+     for action in ('cd /', 'unset KEEP', 'export KEEP=child', 'set -- child',
+                    'set -u', 'mutate', 'mutate_exit')] +
+    [(action, '{} +') for action in ('batch', 'mutate', 'mutate_exit')])
+async def test_exec_isolates_each_invocation(action, terminator):
+    ws = await _exec_ws()
+    try:
+        await ws.execute(
+            'batch() { KEEP=child; cd /; set -- child; set -u; }; '
+            'KEEP=parent; set -- original; '
+            'mutate() { echo "$KEEP:$PWD"; KEEP=child; cd /; }; '
+            'mutate_exit() { KEEP=child; cd /; exit 7; }',
+            session_id='s')
+        io = await ws.execute(
+            f'find d -name "*.txt" -exec {action} {terminator}; '
+            'echo "$KEEP:$PWD:$1"; echo "${UNSET_FOR_TEST}"',
+            session_id='s')
+        out = await io.stdout_str()
+        assert out.endswith('parent:/w:original\n\n')
+        if action == 'mutate' and terminator == '\\;':
+            assert out == 'parent:/w\n' * 3 + 'parent:/w:original\n\n'
+        assert await io.stderr_str() == ''
+        assert io.exit_code == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action",
+                         ['-exec touch marker \\;', '-print', '-delete'])
+async def test_find_refuses_a_test_after_an_action_before_side_effects(action):
+    ws = await _exec_ws()
+    try:
+        out, err, code = await _run_line(
+            ws, f"find d {action} -name '*.txt' -print")
+        assert (out, err, code) == (
+            '', 'find: -name: tests after actions are not supported\n', 1)
+        out, err, code = await _run_line(
+            ws, 'test ! -e marker && test -e d/a.txt')
+        assert code == 0
+    finally:
+        await ws.close()

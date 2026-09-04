@@ -632,3 +632,20 @@ describe('workspace: complex nested patterns', () => {
     await ws.close()
   })
 })
+
+describe('expanded arithmetic diagnostics', () => {
+  it.each(['x=0; echo $((1/$x)); echo after', 'x=0; echo $((1/${x})); echo after'])(
+    'reports the evaluated expression: %s',
+    async (line) => {
+      const { ws } = await makeWorkspace()
+      try {
+        const io = await ws.execute(line)
+        expect(io.exitCode).toBe(1)
+        expect(io.stdoutText).toBe('')
+        expect(io.stderrText).toBe('bash: 1/0: division by 0\n')
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+})

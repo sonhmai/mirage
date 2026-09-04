@@ -90,7 +90,8 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
         out (list[bytes]): where the run's stdout is appended.
         errors (list[bytes]): where its stderr is appended.
     """
-    io = await execute_fn(exec_line(action, paths), session_id=session_id)
+    io = await execute_fn(f"( {exec_line(action, paths)} )",
+                          session_id=session_id)
     if io.stdout is not None:
         data = await materialize(io.stdout)
         if data:

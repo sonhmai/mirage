@@ -118,15 +118,10 @@ async def handle_redirect(
     bad_fd = unsupported_descriptor(redirects)
     if bad_fd is not None:
         return _shell_failure(bad_descriptor_line(bad_fd))
-    cmd_stdin = stdin
+    inputs: list[ByteSource | None] = [stdin, b"", b""]
     for r in redirects:
         if isinstance(r.target, int):
-            # A numeric target is routed by the descriptor the redirect
-            # claims, never by the operator's direction: `<&-` and `0>&-`
-            # both close stdin, and `2<&-` is stderr's business below.
-            # A dup onto stdin (`<&0`, `0<&1`) changes nothing.
-            if r.fd == FD_STDIN and r.target == FD_CLOSE:
-                cmd_stdin = b""
+            inputs[r.fd] = b"" if r.target == FD_CLOSE else inputs[r.target]
             continue
         if r.kind == RedirectKind.STDIN:
             scope = _ensure_scope(r.target)
@@ -134,10 +129,10 @@ async def handle_redirect(
                 file_data, _ = await dispatch("read", scope)
             except FS_ERRORS as exc:
                 return _redirect_failure(scope, exc)
-            cmd_stdin = file_data
+            inputs[r.fd] = file_data
         elif r.kind == RedirectKind.HEREDOC:
-            cmd_stdin = encode_text(r.target) if isinstance(r.target,
-                                                            str) else r.target
+            inputs[r.fd] = encode_text(r.target) if isinstance(
+                r.target, str) else r.target
         elif r.kind == RedirectKind.HERESTRING:
             text = r.target
             if isinstance(text, str):
@@ -145,9 +140,13 @@ async def handle_redirect(
                     text = text[1:-1]
                 elif text.startswith("'") and text.endswith("'"):
                     text = text[1:-1]
-                cmd_stdin = encode_text(text + "\n")
+                inputs[r.fd] = encode_text(text + "\n")
             else:
-                cmd_stdin = text
+                inputs[r.fd] = text
+
+        else:
+            for fd in ([FD_STDOUT, FD_STDERR] if r.fd == FD_BOTH else [r.fd]):
+                inputs[fd] = b""
 
     # Before the command, because bash decides an open before it forks:
     # `set -C; touch marker > existing` creates no marker at all. Running
@@ -177,7 +176,8 @@ async def handle_redirect(
         token = set_redirect_paths(command.id, targets)
         try:
             stdout, io, exec_node = await execute_node(command, session,
-                                                       cmd_stdin, call_stack)
+                                                       inputs[FD_STDIN],
+                                                       call_stack)
         finally:
             reset_redirect_paths(token)
         refused = exec_node.refused
@@ -187,38 +187,18 @@ async def handle_redirect(
         stdout_data = await materialize(barriered) or b""
         stderr_data = await materialize(io.stderr) or b""
 
-    fd1: _Fd | str = _TO_STDOUT
-    fd2: _Fd | str = _TO_STDERR
+    fds: list[_Fd | str] = [_CLOSED, _TO_STDOUT, _TO_STDERR]
     file_bufs: dict[str, bytearray] = {}
     file_scopes: dict[str, PathSpec] = {}
 
     for r in redirects:
-        if r.kind in (RedirectKind.HEREDOC, RedirectKind.HERESTRING):
-            continue
-
         if isinstance(r.target, int):
-            # Keyed on the descriptor claimed, not the operator: bash
-            # reads `2<&1` as `2>&1` and `1<&-` as `>&-`. Stdin's dups
-            # and close were applied above; a dup of a descriptor onto
-            # itself (1>&1, 2>&2) or onto stdin changes nothing, and
-            # every other number was refused above.
-            if r.fd == FD_STDIN:
-                continue
-            if r.target == FD_CLOSE:
-                # >&- / 2>&- — the descriptor is closed from here on
-                if r.fd == FD_STDERR:
-                    fd2 = _CLOSED
-                else:
-                    fd1 = _CLOSED
-            elif r.fd == FD_STDERR and r.target == FD_STDOUT:
-                # 2>&1 — fd2 follows wherever fd1 points right now
-                fd2 = fd1
-            elif r.fd == FD_STDOUT and r.target == FD_STDERR:
-                # >&2 or 1>&2 — fd1 follows wherever fd2 points right now
-                fd1 = fd2
+            fds[r.fd] = _CLOSED if r.target == FD_CLOSE else fds[r.target]
             continue
 
-        if r.kind == RedirectKind.STDIN:
+        if r.kind in (RedirectKind.STDIN, RedirectKind.HEREDOC,
+                      RedirectKind.HERESTRING):
+            fds[r.fd] = _CLOSED
             continue
 
         if refused:
@@ -240,28 +220,25 @@ async def handle_redirect(
         else:
             file_bufs[path] = bytearray()
 
-        if r.fd == FD_BOTH:  # &> / &>>
-            fd1 = path
-            fd2 = path
-        elif r.kind == RedirectKind.STDERR:
-            fd2 = path
+        if r.fd == FD_BOTH:
+            fds[FD_STDOUT] = path
+            fds[FD_STDERR] = path
         else:
-            fd1 = path
+            fds[r.fd] = path
 
+    if fds[FD_STDOUT] is _CLOSED and stdout_data and command is not None:
+        stderr_data += _closed_write_line(command)
+        io.exit_code = 1
     out_stdout = bytearray()
     out_stderr = bytearray()
-    for data, dest in ((stdout_data, fd1), (stderr_data, fd2)):
+    for data, dest in ((stdout_data, fds[FD_STDOUT]), (stderr_data,
+                                                       fds[FD_STDERR])):
         if dest is _TO_STDOUT:
             out_stdout += data
         elif dest is _TO_STDERR:
             out_stderr += data
         elif isinstance(dest, str):
             file_bufs[dest] += data
-    if fd1 is _CLOSED and stdout_data and command is not None:
-        # GNU echo: `echo x >&-` fails the write and exits 1. Only stdout
-        # reports; a closed stderr has nowhere to report to.
-        out_stderr += _closed_write_line(command)
-        io.exit_code = 1
 
     # Bound again for the writes, because the admission that judged
     # these targets ended with the command and the op doors below see

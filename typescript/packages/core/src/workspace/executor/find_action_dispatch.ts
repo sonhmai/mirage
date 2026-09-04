@@ -86,7 +86,7 @@ async function runExec(
   out: Uint8Array[],
   errors: Uint8Array[],
 ): Promise<boolean> {
-  const io = await executeFn(execLine(action, paths), { sessionId })
+  const io = await executeFn(`( ${execLine(action, paths)} )`, { sessionId })
   if (io.stdout !== null) {
     const data = await materialize(io.stdout)
     if (data.byteLength > 0) out.push(data)

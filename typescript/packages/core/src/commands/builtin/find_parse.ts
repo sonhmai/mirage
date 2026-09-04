@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FindParseError } from '../errors.ts'
-import { isoTimestamp } from '../../utils/dates.ts'
+import { parseDateExpr } from '../../utils/dates.ts'
 import type { PredNode } from './find_eval.ts'
 
 // The word an `-exec` argument that stands for the match is spelled as.
@@ -133,16 +133,15 @@ export function strictlyAfter(timestamp: number): number {
   return view.getFloat64(0)
 }
 
-/** One `-newermt` argument as the reference epoch time: ISO 8601 (a date,
- * or a date and time with or without a zone; a naive one is UTC). */
+/** One `-newermt` argument as a GNU date expression; naive times are UTC. */
 export function parseNewermt(value: string): number {
-  const ts = isoTimestamp(value)
-  if (ts === null) {
+  const ts = parseDateExpr(value, true)
+  if (ts === null || !Number.isFinite(ts.getTime()) || value.trim() === '@') {
     throw new FindParseError(
       `find: I cannot figure out how to interpret '${value}' as a date or time`,
     )
   }
-  return ts
+  return ts.getTime() / 1000
 }
 
 /**
@@ -346,6 +345,13 @@ export function parseFindExpression(tokens: string[]): FindExpr {
   function primary(): PredNode {
     const tok = advance()
     if (tok === undefined) throw new FindParseError('find: expected predicate')
+    if (
+      (g.actions.length > 0 || g.printf !== null) &&
+      (tok === '-empty' ||
+        (VALUE_PREDICATES.has(tok) && !['-printf', '-maxdepth', '-mindepth'].includes(tok)))
+    ) {
+      throw new FindParseError(`find: ${tok}: tests after actions are not supported`)
+    }
     if (VALUE_PREDICATES.has(tok)) {
       const value = advance()
       if (value === undefined) throw new FindParseError(`find: missing argument to '${tok}'`)

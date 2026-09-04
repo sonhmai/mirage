@@ -407,6 +407,66 @@
         "stdout": "parent kept\n[]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "random_pipeline_keeps_parent",
+      "seq": 980103,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "RANDOM=42; a=$RANDOM; RANDOM=42; echo $RANDOM | cat >/dev/null; b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept",
+      "expect": {
+        "exit": 0,
+        "stdout": "parent kept\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "random_cmdsub_keeps_parent",
+      "seq": 980104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "RANDOM=42; a=$RANDOM; RANDOM=42; x=$(echo $RANDOM); b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept",
+      "expect": {
+        "exit": 0,
+        "stdout": "parent kept\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "random_backticks_keep_parent",
+      "seq": 980105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "RANDOM=42; a=$RANDOM; RANDOM=42; x=`echo $RANDOM`; b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept",
+      "expect": {
+        "exit": 0,
+        "stdout": "parent kept\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "random_child_keeps_advanced_parent",
+      "seq": 980106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "RANDOM=42; a=$RANDOM; b=$RANDOM; RANDOM=42; a=$RANDOM; echo x | { read x; : $RANDOM; }; x=$(echo $RANDOM); c=$RANDOM; [ \"$b\" = \"$c\" ] && echo parent kept",
+      "expect": {
+        "exit": 0,
+        "stdout": "parent kept\n",
+        "stderr": ""
+      }
     }
   ]
 }

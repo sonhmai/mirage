@@ -96,7 +96,7 @@ async function expandBacktickRegion(
       out += text
       continue
     }
-    const io = await executeFn(text, { sessionId: session.sessionId })
+    const io = await executeFn(`( ${text}\n)`, { sessionId: session.sessionId })
     out += (await io.stdoutStr()).replace(/\n+$/, '')
     session.cmdsubSeq += 1
     session.cmdsubStatus = io.exitCode
@@ -191,7 +191,12 @@ export async function expandArith(
   view?: SessionView,
 ): Promise<string> {
   const parts: string[] = []
+  const base = tsNode.startIndex ?? 0
+  let end = 0
   for (const child of tsNode.children) {
+    const start = (child.startIndex ?? base + end) - base
+    parts.push(tsNode.text.slice(end, start))
+    end = (child.endIndex ?? base + start + child.text.length) - base
     if (ARITH_DELIMITERS.has(child.type)) continue
     if (
       child.type === NT.BINARY_EXPRESSION ||
@@ -219,7 +224,8 @@ export async function expandArith(
       parts.push(await expandNode(child, session, executeFn, callStack, view))
     }
   }
-  return parts.join(' ')
+  parts.push(tsNode.text.slice(end))
+  return parts.join('').trim()
 }
 
 /**
@@ -371,7 +377,7 @@ export async function expandNodeMarked(
     // assignments, control flow).
     const inner = rawSub.slice(2, -1)
     if (inner.trim() === '') return prefix
-    const io = await executeFn(inner, { sessionId: session.sessionId })
+    const io = await executeFn(`( ${inner}\n)`, { sessionId: session.sessionId })
     const text = (await io.stdoutStr()).replace(/\n+$/, '')
     // Record the substitution's status: an assignment-only statement
     // whose value ran substitutions reports the last one's status as
@@ -388,7 +394,7 @@ export async function expandNodeMarked(
     try {
       result = evaluateArith(expr, visibleEnv(session), 0, sessionElements(session))
     } catch (err) {
-      if (err instanceof ArithError) throw arithExit(tsNode.text.slice(3, -2), err)
+      if (err instanceof ArithError) throw arithExit(expr, err)
       throw err
     }
     for (const write of result.writes) {

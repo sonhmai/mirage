@@ -305,6 +305,51 @@
         "stdout": "x\ncode=0\ncode=1\n",
         "stderr": "echo: write error: Bad file descriptor\n"
       }
+    },
+    {
+      "id": "stdout_from_stdin_fails_write",
+      "seq": 980109,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "echo x 1>&0; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "echo: write error: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "stdin_dup_tracks_output_route",
+      "seq": 980110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "echo x 0>&1 1>&0; echo x 2>&0 1>&2; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\nrc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stdin_dup_file_route",
+      "seq": 980111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "echo x 0>/data/fd0-out 1>&0; cat /data/fd0-out; rm /data/fd0-out",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -2779,9 +2779,10 @@ def test_printf_in_function():
 
 def test_sort_in_while_read():
     stdout, _, _, session, _, _ = _exec_with_stdin(
-        "sort | while read LINE; do export LAST=$LINE; done",
+        "sort | while read LINE; do export LAST=$LINE; echo $LAST; done",
         stdin=b"banana\napple\n")
-    assert session.env.get("LAST") is not None
+    assert stdout == b"ok\n"
+    assert session.env.get("LAST") is None
 
 
 def test_echo_redirect_then_cat():

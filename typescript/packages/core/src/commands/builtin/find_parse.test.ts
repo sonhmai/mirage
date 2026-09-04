@@ -234,3 +234,48 @@ describe('find -printf parsing', () => {
     expect(expr.printf).toBe('%f\\n')
   })
 })
+
+describe('-newermt GNU dates', () => {
+  it.each([
+    ['yesterday', 86400],
+    ['24 hours ago', 86400],
+    ['now', 0],
+  ] as const)('accepts %s', (operand, seconds) => {
+    const before = Date.now() / 1000
+    const expr = parseFindExpression(['-newermt', operand])
+    expect(expr.mtimeMin).toBeGreaterThanOrEqual(before - seconds)
+    expect(expr.mtimeMin).toBeLessThanOrEqual(Date.now() / 1000 - seconds + 0.001)
+  })
+  it('accepts epoch timestamps', () => {
+    const expr = parseFindExpression(['-newermt', '@1700000000'])
+    expect(expr.mtimeMin).toBeGreaterThan(1700000000)
+    expect(expr.mtimeMin).toBeLessThan(1700000000.001)
+  })
+})
+
+describe('tests after actions', () => {
+  for (const action of [
+    ['-exec', 'echo', '{}', ';'],
+    ['-exec', 'echo', '{}', '+'],
+    ['-print'],
+    ['-delete'],
+    ['-printf', '%p'],
+  ]) {
+    it.each(
+      [
+        ['-name', '*.txt'],
+        ['-type', 'f'],
+        ['-size', '+1c'],
+        ['-newermt', 'yesterday'],
+        ['-newer', 'ref'],
+        ['-empty'],
+        ['!', '-name', '*.txt'],
+        ['(', '-name', '*.txt', ')'],
+      ].map((test) => [test]),
+    )(`refuses a later test after ${action.join(' ')}`, (test) => {
+      expect(() => parseFindExpression([...action, ...test])).toThrow(
+        'tests after actions are not supported',
+      )
+    })
+  }
+})

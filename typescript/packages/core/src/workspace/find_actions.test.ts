@@ -169,3 +169,61 @@ describe('find action layer', () => {
     })
   })
 })
+
+describe('find -exec isolation', () => {
+  for (const terminator of ['\\;', '{} +']) {
+    const actions =
+      terminator === '{} +'
+        ? ['batch', 'mutate', 'mutate_exit']
+        : [
+            'cd /',
+            'unset KEEP',
+            'export KEEP=child',
+            'set -- child',
+            'set -u',
+            'mutate',
+            'mutate_exit',
+          ]
+    it.each(actions)(`isolates %s ${terminator}`, async (action) => {
+      const ws = await singleMountWs()
+      try {
+        await ws.execute(
+          'batch() { KEEP=child; cd /; set -- child; set -u; }; mkdir -p /w/d; touch /w/d/a.txt /w/d/b.txt; cd /w; KEEP=parent; set -- original; ' +
+            'mutate() { echo "$KEEP:$PWD"; KEEP=child; cd /; }; ' +
+            'mutate_exit() { KEEP=child; cd /; exit 7; }',
+        )
+        const io = await ws.execute(
+          `find d -name '*.txt' -exec ${action} ${terminator}; ` +
+            'echo "$KEEP:$PWD:$1"; echo "${UNSET_FOR_TEST}"',
+        )
+        expect(io.stdoutText.endsWith('parent:/w:original\n\n')).toBe(true)
+        if (action === 'mutate' && terminator === '\\;') {
+          expect(io.stdoutText).toBe('parent:/w\n'.repeat(2) + 'parent:/w:original\n\n')
+        }
+        expect(io.stderrText).toBe('')
+        expect(io.exitCode).toBe(0)
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+
+  it.each(['-exec touch marker \\;', '-print', '-delete'])(
+    'refuses a later test before %s has side effects',
+    async (action) => {
+      const ws = await singleMountWs()
+      try {
+        await ws.execute('mkdir -p /w/d; touch /w/d/a.txt; cd /w')
+        const io = await ws.execute(`find d ${action} -name '*.txt' -print`)
+        expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([
+          '',
+          'find: -name: tests after actions are not supported\n',
+          1,
+        ])
+        expect((await ws.execute('test ! -e marker && test -e d/a.txt')).exitCode).toBe(0)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+})

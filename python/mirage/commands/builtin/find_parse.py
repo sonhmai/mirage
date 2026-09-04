@@ -21,7 +21,7 @@ from typing import Literal
 from mirage.commands.builtin.find_eval import (And, Empty, Name, Not, Or, Path,
                                                PredNode, TrueNode, Type)
 from mirage.commands.errors import FindParseError
-from mirage.utils.dates import iso_timestamp
+from mirage.utils.dates import parse_date_expr
 
 # The word an `-exec` argument that stands for the match is spelled as.
 EXEC_PLACEHOLDER = "{}"
@@ -272,14 +272,16 @@ def parse_newermt(value: str) -> float:
     """One ``-newermt`` argument as the reference epoch time.
 
     Args:
-        value (str): the timestamp as typed; ISO 8601 (a date, or a date
-            and time with or without a zone; a naive one is UTC).
+        value (str): a GNU date expression, with naive times read as UTC.
     """
-    ts = iso_timestamp(value)
+    try:
+        ts = parse_date_expr(value, utc=True)
+    except (ValueError, OverflowError, OSError):
+        ts = None
     if ts is None:
         raise FindParseError("find: I cannot figure out how to interpret "
                              f"'{value}' as a date or time")
-    return ts
+    return ts.timestamp()
 
 
 def _parse_exec(state: _State) -> ExecAction:
@@ -390,6 +392,11 @@ def _parse_primary(state: _State) -> PredNode:
     tok = _advance(state)
     if tok is None:
         raise FindParseError("find: expected predicate")
+    if ((state.expr.actions or state.expr.printf is not None) and
+        (tok == "-empty"
+         or tok in _VALUE_PREDICATES - {"-printf", "-maxdepth", "-mindepth"})):
+        raise FindParseError(
+            f"find: {tok}: tests after actions are not supported")
     if tok in _VALUE_PREDICATES:
         value = _advance(state)
         if value is None:

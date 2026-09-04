@@ -97,15 +97,11 @@ export async function handleRedirect(
 ): Promise<Result> {
   const badFd = unsupportedDescriptor(redirects)
   if (badFd !== null) return shellFailure(badDescriptorLine(badFd))
-  let cmdStdin: ByteSource | null = stdin
+  const inputs: (ByteSource | null)[] = [stdin, new Uint8Array(), new Uint8Array()]
 
   for (const r of redirects) {
     if (typeof r.target === 'number') {
-      // A numeric target is routed by the descriptor the redirect claims,
-      // never by the operator's direction: `<&-` and `0>&-` both close
-      // stdin, and `2<&-` is stderr's business below. A dup onto stdin
-      // (`<&0`, `0<&1`) changes nothing.
-      if (r.fd === FD_STDIN && r.target === FD_CLOSE) cmdStdin = new Uint8Array()
+      inputs[r.fd] = r.target === FD_CLOSE ? new Uint8Array() : (inputs[r.target] ?? null)
       continue
     }
     if (r.kind === RedirectKind.STDIN) {
@@ -117,9 +113,9 @@ export async function handleRedirect(
         if (!isFsError(err)) throw err
         return redirectFailure(scope, err)
       }
-      cmdStdin = data as ByteSource | null
+      inputs[r.fd] = data as ByteSource | null
     } else if (r.kind === RedirectKind.HEREDOC) {
-      cmdStdin = typeof r.target === 'string' ? encodeText(r.target) : (r.target as ByteSource)
+      inputs[r.fd] = typeof r.target === 'string' ? encodeText(r.target) : (r.target as ByteSource)
     } else if (r.kind === RedirectKind.HERESTRING) {
       const text = r.target
       if (typeof text === 'string') {
@@ -127,9 +123,13 @@ export async function handleRedirect(
         if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
           t = t.slice(1, -1)
         }
-        cmdStdin = encodeText(`${t}\n`)
+        inputs[r.fd] = encodeText(`${t}\n`)
       } else {
-        cmdStdin = text as ByteSource
+        inputs[r.fd] = text as ByteSource
+      }
+    } else {
+      for (const fd of r.fd === FD_BOTH ? [FD_STDOUT, FD_STDERR] : [r.fd]) {
+        inputs[fd] = new Uint8Array()
       }
     }
   }
@@ -166,7 +166,7 @@ export async function handleRedirect(
       )
       .map((r) => ensureScope(r.target))
     const [stdout, execIo, execNode] = await runWithRedirectPaths(command, targets, () =>
-      executeNode(command, session, cmdStdin, callStack),
+      executeNode(command, session, inputs[FD_STDIN] ?? null, callStack),
     )
     io = execIo
     refused = execNode.refused
@@ -176,36 +176,23 @@ export async function handleRedirect(
     stderrData = await materialize(io.stderr)
   }
 
-  let fd1: FdDest = TO_STDOUT
-  let fd2: FdDest = TO_STDERR
+  const fds: FdDest[] = [CLOSED, TO_STDOUT, TO_STDERR]
   const fileBufs = new Map<string, Uint8Array>()
   const fileScopes = new Map<string, PathSpec>()
 
   for (const r of redirects) {
-    if (r.kind === RedirectKind.HEREDOC || r.kind === RedirectKind.HERESTRING) continue
-
     if (typeof r.target === 'number') {
-      // Keyed on the descriptor claimed, not the operator: bash reads
-      // `2<&1` as `2>&1` and `1<&-` as `>&-`. Stdin's dups and close were
-      // applied above; a dup of a descriptor onto itself (1>&1, 2>&2) or
-      // onto stdin changes nothing, and every other number was refused
-      // above.
-      if (r.fd === FD_STDIN) continue
-      if (r.target === FD_CLOSE) {
-        // >&- / 2>&- — the descriptor is closed from here on
-        if (r.fd === FD_STDERR) fd2 = CLOSED
-        else fd1 = CLOSED
-      } else if (r.fd === FD_STDERR && r.target === FD_STDOUT) {
-        // 2>&1 — fd2 follows wherever fd1 points right now
-        fd2 = fd1
-      } else if (r.fd === FD_STDOUT && r.target === FD_STDERR) {
-        // >&2 or 1>&2 — fd1 follows wherever fd2 points right now
-        fd1 = fd2
-      }
+      fds[r.fd] = r.target === FD_CLOSE ? CLOSED : (fds[r.target] ?? CLOSED)
       continue
     }
-
-    if (r.kind === RedirectKind.STDIN) continue
+    if (
+      r.kind === RedirectKind.STDIN ||
+      r.kind === RedirectKind.HEREDOC ||
+      r.kind === RedirectKind.HERESTRING
+    ) {
+      fds[r.fd] = CLOSED
+      continue
+    }
 
     if (refused) {
       // The gate refused the line, so it performs no file I/O: the
@@ -229,21 +216,22 @@ export async function handleRedirect(
     }
 
     if (r.fd === FD_BOTH) {
-      // &> / &>>
-      fd1 = path
-      fd2 = path
-    } else if (r.kind === RedirectKind.STDERR) {
-      fd2 = path
+      fds[FD_STDOUT] = path
+      fds[FD_STDERR] = path
     } else {
-      fd1 = path
+      fds[r.fd] = path
     }
   }
 
+  if (fds[FD_STDOUT] === CLOSED && stdoutData.byteLength > 0 && command !== null) {
+    stderrData = concat([stderrData, closedWriteLine(command)])
+    io.exitCode = 1
+  }
   let outStdout: Uint8Array = new Uint8Array()
   let outStderr: Uint8Array = new Uint8Array()
   for (const [data, dest] of [
-    [stdoutData, fd1],
-    [stderrData, fd2],
+    [stdoutData, fds[FD_STDOUT]],
+    [stderrData, fds[FD_STDERR]],
   ] as [Uint8Array, FdDest][]) {
     if (dest === TO_STDOUT) {
       outStdout = concat([outStdout, data])
@@ -252,12 +240,6 @@ export async function handleRedirect(
     } else if (dest !== CLOSED) {
       fileBufs.set(dest, concat([fileBufs.get(dest) ?? new Uint8Array(), data]))
     }
-  }
-  if (fd1 === CLOSED && stdoutData.byteLength > 0 && command !== null) {
-    // GNU echo: `echo x >&-` fails the write and exits 1. Only stdout
-    // reports; a closed stderr has nowhere to report to.
-    outStderr = concat([outStderr, closedWriteLine(command)])
-    io.exitCode = 1
   }
 
   const writeFiles = async (): Promise<void> => {

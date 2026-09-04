@@ -67,6 +67,7 @@ export interface ChildShellState {
   execOpened: Set<string>
   randomState: number | null
   randomSeed: string | null
+  pipeStatus: readonly number[]
 }
 
 /**
@@ -658,6 +659,9 @@ export class Session {
       execOpened: new Set(this.execOpened),
       randomState: this.randomState,
       randomSeed: this.randomSeed,
+      // Every pipeline segment sees the statuses of the pipeline before
+      // this one, however many statements of its own it runs.
+      pipeStatus: [...this.pipeStatus],
     }
     // A child shell reseeds `$RANDOM`, as bash's does: the generator
     // starts fresh, and the seed word follows the stored value so an
@@ -695,6 +699,7 @@ export class Session {
     this.execStdin = state.execStdin
     this.randomState = state.randomState
     this.randomSeed = state.randomSeed
+    this.pipeStatus = state.pipeStatus
     this.execOpened = state.execOpened
   }
 

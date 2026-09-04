@@ -27,6 +27,25 @@ def test_seed_from_reads_the_word_as_an_integer():
     assert seed_from("abc") == 0
 
 
+@pytest.mark.parametrize("seed,expected", [
+    ("1", [16807, 10791, 19566]),
+    ("0", [20814, 24386, 149]),
+    ("-1", [16807, 10791, 19566]),
+    ("4294967338", [17772, 26794, 1435]),
+    ("32768", [8403, 3502, 14043]),
+])
+def test_seeded_sequences_are_bash_5_2s(seed, expected):
+    # Pinned against bash 5.2.37 on debian:stable-slim. -1 truncates to
+    # 32 bits, 4294967338 is 42 past 2**32, and seed 32768 renders 0 on
+    # its first step, which the no-repeat rule redraws.
+    s = Session(session_id="s")
+    drawn = [
+        next_random(s, seed if i == 0 else s.vars[RANDOM].value)
+        for i in range(3)
+    ]
+    assert drawn == expected
+
+
 def test_seeded_sequence_is_deterministic_and_bounded():
     a = Session(session_id="a")
     b = Session(session_id="b")
@@ -40,8 +59,8 @@ def test_seeded_sequence_is_deterministic_and_bounded():
     ]
     assert seq_a == seq_b
     assert all(v is not None and 0 <= v <= RANDOM_MAX for v in seq_a)
-    # The LCG from seed 42, so the two languages can pin one sequence.
-    assert seq_a == [19081, 17033, 15269, 25461, 13856]
+    # bash 5.2's sequence from seed 42, so both languages pin bash's.
+    assert seq_a == [17772, 26794, 1435, 24388, 11074]
 
 
 def test_write_back_reseeds_only_on_a_new_word():
@@ -66,8 +85,8 @@ def test_a_child_shell_reseeds_and_the_parent_gets_its_state_back():
     child = next_random(s, s.vars[RANDOM].value)
     assert s._random_state is not None
     s.restore(saved)
-    assert next_random(s, s.vars[RANDOM].value) == 15269
-    assert parent == [19081, 17033] and child != 15269
+    assert next_random(s, s.vars[RANDOM].value) == 1435
+    assert parent == [17772, 26794] and child != 1435
 
 
 def test_a_child_shell_does_not_replay_a_pending_seed():
@@ -87,13 +106,13 @@ async def test_random_expands_in_the_shell():
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
     io = await ws.execute(
         'RANDOM=42; a=$RANDOM; RANDOM=42; b=$RANDOM; echo $a $b')
-    assert await io.stdout_str() == "19081 19081\n"
+    assert await io.stdout_str() == "17772 17772\n"
     io = await ws.execute('echo $RANDOM $RANDOM')
     x, y = (await io.stdout_str()).split()
     assert x != y and x.isdigit() and y.isdigit()
     io = await ws.execute(
         'RANDOM=42; a=$RANDOM; RANDOM=42; (: $RANDOM); b=$RANDOM; echo $a $b')
-    assert await io.stdout_str() == "19081 19081\n"
+    assert await io.stdout_str() == "17772 17772\n"
     io = await ws.execute('unset RANDOM; echo "[$RANDOM]"')
     assert await io.stdout_str() == "[]\n"
 
@@ -117,8 +136,8 @@ async def test_child_random_reads_preserve_the_parent_sequence(
         prefix = 'RANDOM=42; ' + (': $RANDOM; ' if draw_first else '')
         io = await ws.execute(prefix + child + '; echo $RANDOM')
         assert io.exit_code == 0
-        assert await io.stdout_str() == ('17033\n'
-                                         if draw_first else '19081\n')
+        assert await io.stdout_str() == ('26794\n'
+                                         if draw_first else '17772\n')
         assert await io.stderr_str() == ''
     finally:
         await ws.close()

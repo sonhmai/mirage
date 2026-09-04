@@ -370,7 +370,7 @@
       "command": "RANDOM=42; a=$RANDOM; RANDOM=42; b=$RANDOM; [ \"$a\" = \"$b\" ] && echo seeded $a; c=$RANDOM; d=$RANDOM; [ \"$c\" != \"$d\" ] && echo varies; unset RANDOM; echo \"[$RANDOM]\"",
       "expect": {
         "exit": 0,
-        "stdout": "seeded 19081\nvaries\n[]\n",
+        "stdout": "seeded 17772\nvaries\n[]\n",
         "stderr": ""
       }
     },
@@ -414,7 +414,26 @@
       "targets": [
         "ram",
         "disk",
-        "redis"
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "RANDOM=42; a=$RANDOM; RANDOM=42; echo $RANDOM | cat >/dev/null; b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept",
       "expect": {
@@ -429,7 +448,26 @@
       "targets": [
         "ram",
         "disk",
-        "redis"
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "RANDOM=42; a=$RANDOM; RANDOM=42; x=$(echo $RANDOM); b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept",
       "expect": {
@@ -444,7 +482,26 @@
       "targets": [
         "ram",
         "disk",
-        "redis"
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "RANDOM=42; a=$RANDOM; RANDOM=42; x=`echo $RANDOM`; b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept",
       "expect": {
@@ -459,12 +516,65 @@
       "targets": [
         "ram",
         "disk",
-        "redis"
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "RANDOM=42; a=$RANDOM; b=$RANDOM; RANDOM=42; a=$RANDOM; echo x | { read x; : $RANDOM; }; x=$(echo $RANDOM); c=$RANDOM; [ \"$b\" = \"$c\" ] && echo parent kept",
       "expect": {
         "exit": 0,
         "stdout": "parent kept\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipestatus_segments_see_the_previous_pipeline",
+      "seq": 980107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "false | true; { true; false; } | echo \"${PIPESTATUS[*]}\"; false | { true; false; }; echo \"${PIPESTATUS[*]}\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 0\n1 1\n",
         "stderr": ""
       }
     }

@@ -338,6 +338,24 @@ async def test_exec_isolates_each_invocation(action, terminator):
 
 
 @pytest.mark.asyncio
+async def test_exec_child_exit_127_is_not_a_missing_command():
+    ws = await _exec_ws()
+    try:
+        out, err, code = await _run_line(
+            ws,
+            "find d -maxdepth 0 -exec sh -c 'echo ownerr >&2; exit 127' \\;"
+            "; echo rc=$?")
+        assert (out, err, code) == ('rc=0\n', 'ownerr\n', 0)
+        out, err, code = await _run_line(
+            ws, 'find d -maxdepth 0 -exec nosuchcmd {} \\; ; echo rc=$?')
+        assert (out, err,
+                code) == ('rc=0\n',
+                          "find: 'nosuchcmd': No such file or directory\n", 0)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("action",
                          ['-exec touch marker \\;', '-print', '-delete'])
 async def test_find_refuses_a_test_after_an_action_before_side_effects(action):

@@ -75,11 +75,17 @@ SHELL_FDS = frozenset({FD_STDIN, FD_STDOUT, FD_STDERR})
 # variable store.
 PIPESTATUS = "PIPESTATUS"
 RANDOM = "RANDOM"
-# bash's classic generator: an LCG stepped once per read, whose value is
-# the middle 15 bits. Identical in both languages, so a seeded sequence
-# is the same sequence everywhere.
-RANDOM_MULTIPLIER = 1103515245
-RANDOM_INCREMENT = 12345
+# bash 5.2's generator (lib/sh/random.c): a Park-Miller minimal-standard
+# step through Schrage's method, the value folding the state's two
+# halves and keeping 15 bits, and a draw that never repeats the value
+# before it. A seed is the assigned integer truncated to 32 bits, and a
+# zero state steps from ZERO_SEED. Identical in both languages, so
+# `RANDOM=42` is the same sequence everywhere, and bash's.
+RANDOM_A = 16807
+RANDOM_Q = 127773
+RANDOM_R = 2836
+RANDOM_M = 0x7FFFFFFF
+RANDOM_ZERO_SEED = 123459876
 RANDOM_MODULUS = 1 << 32
 RANDOM_MAX = 32767
 # What `Session._random_seed` holds once `unset RANDOM` has stripped the

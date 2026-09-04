@@ -74,11 +74,17 @@ export const SHELL_FDS: ReadonlySet<number> = new Set([FD_STDIN, FD_STDOUT, FD_S
 // store.
 export const PIPESTATUS = 'PIPESTATUS'
 export const RANDOM = 'RANDOM'
-// bash's classic generator: an LCG stepped once per read, whose value is
-// the middle 15 bits. Identical in both languages, so a seeded sequence is
-// the same sequence everywhere.
-export const RANDOM_MULTIPLIER = 1103515245
-export const RANDOM_INCREMENT = 12345
+// bash 5.2's generator (lib/sh/random.c): a Park-Miller minimal-standard
+// step through Schrage's method, the value folding the state's two halves
+// and keeping 15 bits, and a draw that never repeats the value before it.
+// A seed is the assigned integer truncated to 32 bits, and a zero state
+// steps from ZERO_SEED. Identical in both languages, so `RANDOM=42` is the
+// same sequence everywhere, and bash's.
+export const RANDOM_A = 16807
+export const RANDOM_Q = 127773
+export const RANDOM_R = 2836
+export const RANDOM_M = 0x7fffffff
+export const RANDOM_ZERO_SEED = 123459876
 export const RANDOM_MODULUS = 2 ** 32
 export const RANDOM_MAX = 32767
 // What `Session.randomSeed` holds once `unset RANDOM` has stripped the name

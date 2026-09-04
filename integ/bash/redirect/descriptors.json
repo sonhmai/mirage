@@ -312,7 +312,21 @@
       "targets": [
         "ram",
         "disk",
-        "redis"
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo x 1>&0; echo rc=$?",
       "expect": {
@@ -327,7 +341,21 @@
       "targets": [
         "ram",
         "disk",
-        "redis"
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo x 0>&1 1>&0; echo x 2>&0 1>&2; echo rc=$?",
       "expect": {
@@ -342,7 +370,21 @@
       "targets": [
         "ram",
         "disk",
-        "redis"
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
       ],
       "command": "echo x 0>/data/fd0-out 1>&0; cat /data/fd0-out; rm /data/fd0-out",
       "expect": {

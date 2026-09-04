@@ -208,6 +208,25 @@ describe('find -exec isolation', () => {
     })
   }
 
+  it('keeps the stderr of a program that exits 127, and names only a missing one', async () => {
+    const ws = await singleMountWs()
+    try {
+      await ws.execute('mkdir -p /w/d; cd /w')
+      const own = await ws.execute(
+        "find d -maxdepth 0 -exec sh -c 'echo ownerr >&2; exit 127' \\; ; echo rc=$?",
+      )
+      expect([own.stdoutText, own.stderrText, own.exitCode]).toEqual(['rc=0\n', 'ownerr\n', 0])
+      const missing = await ws.execute('find d -maxdepth 0 -exec nosuchcmd {} \\; ; echo rc=$?')
+      expect([missing.stdoutText, missing.stderrText, missing.exitCode]).toEqual([
+        'rc=0\n',
+        "find: 'nosuchcmd': No such file or directory\n",
+        0,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it.each(['-exec touch marker \\;', '-print', '-delete'])(
     'refuses a later test before %s has side effects',
     async (action) => {

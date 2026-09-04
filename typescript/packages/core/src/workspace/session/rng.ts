@@ -14,11 +14,14 @@
 
 import {
   RANDOM,
-  RANDOM_INCREMENT,
+  RANDOM_A,
+  RANDOM_M,
   RANDOM_MAX,
   RANDOM_MODULUS,
-  RANDOM_MULTIPLIER,
+  RANDOM_Q,
+  RANDOM_R,
   RANDOM_UNSET,
+  RANDOM_ZERO_SEED,
 } from '../../shell/constants.ts'
 import { makeVar, withValue } from '../../shell/variable.ts'
 import type { Session } from './session.ts'
@@ -40,6 +43,28 @@ function initialSeed(sessionId: string): number {
   return ((Date.now() % RANDOM_MODULUS) ^ hash) >>> 0
 }
 
+/** One step of bash's generator (`intrand32`): Park-Miller through
+ * Schrage's method, a zero state stepping from the fixed seed. */
+export function stepState(state: number): number {
+  const ret = state === 0 ? RANDOM_ZERO_SEED : state
+  const high = Math.floor(ret / RANDOM_Q)
+  const low = ret - RANDOM_Q * high
+  const step = RANDOM_A * low - RANDOM_R * high
+  return step < 0 ? step + RANDOM_M : step
+}
+
+/** The `$RANDOM` value a state renders as (`brand`): the two 16-bit
+ * halves folded, keeping 15 bits. */
+export function valueOf(state: number): number {
+  return ((state >>> 16) ^ (state & 0xffff)) & RANDOM_MAX
+}
+
+/** The value the previous draw returned, read off the word it wrote
+ * back; 0 after a reseed, which is what `sbrand` resets it to. */
+function lastValue(seed: string | null): number {
+  return seed !== null && /^[0-9]+$/.test(seed) ? Number(seed) : 0
+}
+
 /**
  * Step `$RANDOM` and return its value, or null once it is unset.
  *
@@ -53,6 +78,10 @@ function initialSeed(sessionId: string): number {
  * says the same. The write-back is the shell's own bookkeeping on a name
  * it defines, not a user assignment, so it does not pass the session
  * plane's door.
+ *
+ * A draw never returns the value before it (bash's `get_random_number`
+ * redraws on a repeat), and a reseed or a fresh generator starts that
+ * comparison from 0, as `sbrand` does.
  */
 export function nextRandom(session: Session, stored: string | undefined): number | null {
   if (
@@ -61,14 +90,24 @@ export function nextRandom(session: Session, stored: string | undefined): number
   ) {
     return null
   }
+  let state: number
+  let last: number
   if (stored !== undefined && stored !== session.randomSeed) {
-    session.randomState = seedFrom(stored)
+    state = seedFrom(stored)
+    last = 0
+  } else if (session.randomState === null) {
+    state = initialSeed(session.sessionId)
+    last = 0
   } else {
-    session.randomState ??= initialSeed(session.sessionId)
+    state = session.randomState
+    last = lastValue(session.randomSeed)
   }
-  const state = (Math.imul(session.randomState, RANDOM_MULTIPLIER) + RANDOM_INCREMENT) >>> 0
+  let value: number
+  do {
+    state = stepState(state)
+    value = valueOf(state)
+  } while (value === last)
   session.randomState = state
-  const value = (state >>> 16) & RANDOM_MAX
   const word = String(value)
   const existing = session.vars[RANDOM]
   session.vars[RANDOM] = existing !== undefined ? withValue(existing, word) : makeVar(word)

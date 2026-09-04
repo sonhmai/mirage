@@ -15,9 +15,9 @@
 import time
 from dataclasses import replace
 
-from mirage.shell.constants import (RANDOM, RANDOM_INCREMENT, RANDOM_MAX,
-                                    RANDOM_MODULUS, RANDOM_MULTIPLIER,
-                                    RANDOM_UNSET)
+from mirage.shell.constants import (RANDOM, RANDOM_A, RANDOM_M, RANDOM_MAX,
+                                    RANDOM_MODULUS, RANDOM_Q, RANDOM_R,
+                                    RANDOM_UNSET, RANDOM_ZERO_SEED)
 from mirage.shell.variable import ShellVar
 from mirage.workspace.session.session import Session
 
@@ -36,6 +36,36 @@ def seed_from(word: str) -> int:
     return int(word) % RANDOM_MODULUS
 
 
+def step_state(state: int) -> int:
+    """One step of bash's generator (``intrand32``): Park-Miller through
+    Schrage's method, a zero state stepping from the fixed seed.
+
+    Args:
+        state (int): the generator state, a 32-bit value.
+    """
+    ret = RANDOM_ZERO_SEED if state == 0 else state
+    high = ret // RANDOM_Q
+    low = ret - RANDOM_Q * high
+    step = RANDOM_A * low - RANDOM_R * high
+    return step + RANDOM_M if step < 0 else step
+
+
+def value_of(state: int) -> int:
+    """The ``$RANDOM`` value a state renders as (``brand``): the two
+    16-bit halves folded, keeping 15 bits.
+
+    Args:
+        state (int): the generator state after a step.
+    """
+    return ((state >> 16) ^ (state & 0xFFFF)) & RANDOM_MAX
+
+
+def _last_value(seed: str | None) -> int:
+    """The value the previous draw returned, read off the word it wrote
+    back; 0 after a reseed, which is what ``sbrand`` resets it to."""
+    return int(seed) if seed is not None and seed.isdigit() else 0
+
+
 def next_random(session: Session, stored: str | None) -> int | None:
     """Step ``$RANDOM`` and return its value, or None once it is unset.
 
@@ -50,6 +80,10 @@ def next_random(session: Session, stored: str | None) -> int | None:
     write-back is the shell's own bookkeeping on a name it defines, not
     a user assignment, so it does not pass the session plane's door.
 
+    A draw never returns the value before it (bash's ``get_random_number``
+    redraws on a repeat), and a reseed or a fresh generator starts that
+    comparison from 0, as ``sbrand`` does.
+
     Args:
         session (Session): the session holding the generator state.
         stored (str | None): the store's current value for RANDOM, from
@@ -59,13 +93,20 @@ def next_random(session: Session, stored: str | None) -> int | None:
             stored is None and session._random_seed is not None):
         return None
     if stored is not None and stored != session._random_seed:
-        session._random_state = seed_from(stored)
+        state = seed_from(stored)
+        last = 0
     elif session._random_state is None:
-        session._random_state = time.time_ns() % RANDOM_MODULUS
-    state = (session._random_state * RANDOM_MULTIPLIER +
-             RANDOM_INCREMENT) % RANDOM_MODULUS
+        state = time.time_ns() % RANDOM_MODULUS
+        last = 0
+    else:
+        state = session._random_state
+        last = _last_value(session._random_seed)
+    while True:
+        state = step_state(state)
+        value = value_of(state)
+        if value != last:
+            break
     session._random_state = state
-    value = (state >> 16) & RANDOM_MAX
     word = str(value)
     existing = session.vars.get(RANDOM)
     session.vars[RANDOM] = (replace(existing, value=word)

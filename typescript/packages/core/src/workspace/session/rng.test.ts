@@ -31,11 +31,27 @@ describe('RANDOM generator', () => {
     expect(seedFrom('abc')).toBe(0)
   })
 
+  it.each([
+    ['1', [16807, 10791, 19566]],
+    ['0', [20814, 24386, 149]],
+    ['-1', [16807, 10791, 19566]],
+    ['4294967338', [17772, 26794, 1435]],
+    ['32768', [8403, 3502, 14043]],
+  ] as const)('seed %s draws bash 5.2 sequence', (seed, expected) => {
+    // Pinned against bash 5.2.37 on debian:stable-slim. -1 truncates to
+    // 32 bits, 4294967338 is 42 past 2**32, and seed 32768 renders 0 on
+    // its first step, which the no-repeat rule redraws.
+    const s = new Session({ sessionId: 's' })
+    const drawn: (number | null)[] = []
+    for (let i = 0; i < 3; i++) drawn.push(nextRandom(s, i === 0 ? seed : stored(s)))
+    expect(drawn).toEqual(expected)
+  })
+
   it('is deterministic per seed and pins the python sequence', () => {
     const s = new Session({ sessionId: 'a' })
     const seq: (number | null)[] = []
     for (let i = 0; i < 5; i++) seq.push(nextRandom(s, i === 0 ? '42' : stored(s)))
-    expect(seq).toEqual([19081, 17033, 15269, 25461, 13856])
+    expect(seq).toEqual([17772, 26794, 1435, 24388, 11074])
     for (const v of seq) expect(v !== null && v >= 0 && v <= RANDOM_MAX).toBe(true)
   })
 
@@ -54,9 +70,9 @@ describe('RANDOM generator', () => {
     const child = nextRandom(s, stored(s))
     expect(s.randomState).not.toBeNull()
     s.restore(saved)
-    expect(nextRandom(s, stored(s))).toBe(15269)
-    expect(parent).toEqual([19081, 17033])
-    expect(child).not.toBe(15269)
+    expect(nextRandom(s, stored(s))).toBe(1435)
+    expect(parent).toEqual([17772, 26794])
+    expect(child).not.toBe(1435)
   })
 
   it('does not replay a pending seed in the child, and keeps unset unset', () => {
@@ -96,7 +112,7 @@ describe('child RANDOM isolation', () => {
         const prefix = 'RANDOM=42; ' + (drawFirst ? ': $RANDOM; ' : '')
         const io = await ws.execute(prefix + child + '; echo $RANDOM')
         expect(io.exitCode).toBe(0)
-        expect(io.stdoutText).toBe(drawFirst ? '17033\n' : '19081\n')
+        expect(io.stdoutText).toBe(drawFirst ? '26794\n' : '17772\n')
         expect(io.stderrText).toBe('')
       } finally {
         await ws.close()

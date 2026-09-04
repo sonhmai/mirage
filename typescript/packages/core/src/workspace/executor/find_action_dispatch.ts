@@ -20,6 +20,8 @@ import { getCurrentSession, runWithSuspendedOpPolicies } from '../../context/ses
 import { preOpsGate } from '../../policy/policies.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { lookup } from '../lookup/lookup.ts'
+import { Consumer } from '../lookup/types.ts'
 import type { ChildMounts, StatPath } from '../../ops/types.ts'
 import {
   EXEC_PLACEHOLDER,
@@ -75,25 +77,31 @@ export function execLine(action: ExecAction, paths: readonly string[]): string {
 /**
  * Run one `-exec` invocation, collecting its streams. A command that
  * cannot be found is GNU's `find: 'cmd': No such file or directory` rather
- * than the shell's `command not found`, and counts as a failed run.
- * Returns whether the run succeeded, which is the action's truth value.
+ * than the shell's `command not found`, and counts as a failed run. That
+ * is decided by looking the head word up before the line runs (GNU fails
+ * in `execvp`), never from the exit status: a program that exists and
+ * exits 127 keeps its own stderr and is just a failed run. Returns
+ * whether the run succeeded, which is the action's truth value.
  */
 async function runExec(
   executeFn: ExecuteFn,
   sessionId: string,
+  registry: MountRegistry,
   action: ExecAction,
   paths: readonly string[],
   out: Uint8Array[],
   errors: Uint8Array[],
 ): Promise<boolean> {
+  const head = action.argv[0] ?? ''
+  const sess = getCurrentSession()
+  if (sess !== null && lookup(head, sess, registry) === Consumer.UNKNOWN) {
+    errors.push(enc.encode(`find: '${head}': No such file or directory\n`))
+    return false
+  }
   const io = await executeFn(`( ${execLine(action, paths)} )`, { sessionId })
   if (io.stdout !== null) {
     const data = await materialize(io.stdout)
     if (data.byteLength > 0) out.push(data)
-  }
-  if (io.exitCode === 127) {
-    errors.push(enc.encode(`find: '${action.argv[0] ?? ''}': No such file or directory\n`))
-    return false
   }
   const err = await materialize(io.stderr)
   if (err.byteLength > 0) errors.push(err)
@@ -242,7 +250,7 @@ export async function applyFindActions(
           continue
         }
         if (executeFn === undefined) break
-        if (!(await runExec(executeFn, sessionId, action, [path], out, errors))) break
+        if (!(await runExec(executeFn, sessionId, registry, action, [path], out, errors))) break
       } else if (action.kind === 'ls') {
         const before = errors.length
         const row = await lsRow(path, registry, cwd, childMounts, statPath, errors)
@@ -258,7 +266,7 @@ export async function applyFindActions(
   for (const [position, action] of expr.actions.entries()) {
     const paths = batches.get(position)
     if (action.kind !== 'exec' || paths === undefined || executeFn === undefined) continue
-    if (!(await runExec(executeFn, sessionId, action, paths, out, errors))) exitCode = 1
+    if (!(await runExec(executeFn, sessionId, registry, action, paths, out, errors))) exitCode = 1
   }
   if (toDelete.length > 0) {
     // Deepest-first so children are removed before parents. Skip

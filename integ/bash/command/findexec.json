@@ -520,7 +520,23 @@
       "targets": [
         "ram",
         "disk",
-        "redis"
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/fe/d; touch /data/fe/d/a /data/fe/d/b; cd /data/fe; KEEP=parent; mutate() { echo \"$KEEP:$PWD\"; KEEP=child; cd /; }; find d -type f -exec mutate \\; ; echo \"$KEEP:$PWD\"; cd /; rm -r /data/fe",
       "expect": {
@@ -535,7 +551,23 @@
       "targets": [
         "ram",
         "disk",
-        "redis"
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "find /data -exec echo seen {} \\; -name \"*.txt\" -print; echo rc=$?",
       "expect": {
@@ -550,13 +582,63 @@
       "targets": [
         "ram",
         "disk",
-        "redis"
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/fe; touch /data/fe/a; for t in yesterday \"24 hours ago\" @1700000000; do find /data/fe -type f -newermt \"$t\"; done; rm -r /data/fe",
       "expect": {
         "exit": 0,
         "stdout": "/data/fe/a\n/data/fe/a\n/data/fe/a\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "find_exec_child_exit_127_keeps_its_stderr",
+      "seq": 980103,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -maxdepth 0 -exec sh -c 'echo ownerr >&2; exit 127' \\; ; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": "ownerr\n"
       }
     }
   ]

@@ -26,6 +26,8 @@ from mirage.ops.types import ChildMounts, NamespaceView, StatPath
 from mirage.policy import pre_ops_gate
 from mirage.types import PathSpec
 from mirage.utils.path import resolve_path
+from mirage.workspace.lookup.lookup import lookup
+from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.types import ExecuteLine
 
@@ -73,33 +75,40 @@ def exec_line(action: ExecAction, paths: list[str]) -> str:
 
 
 async def _run_exec(execute_fn: ExecuteLine, session_id: str,
-                    action: ExecAction, paths: list[str], out: list[bytes],
+                    registry: MountRegistry, action: ExecAction,
+                    paths: list[str], out: list[bytes],
                     errors: list[bytes]) -> bool:
     """Run one ``-exec`` invocation, collecting its streams.
 
     A command that cannot be found is GNU's ``find: 'cmd': No such file
     or directory`` rather than the shell's ``command not found``, and
-    counts as a failed run. Returns whether the run succeeded, which is
+    counts as a failed run. That is decided by looking the head word up
+    before the line runs (GNU fails in ``execvp``), never from the exit
+    status: a program that exists and exits 127 keeps its own stderr and
+    is just a failed run. Returns whether the run succeeded, which is
     the action's truth value.
 
     Args:
         execute_fn (ExecuteLine): runs a line in the session.
         session_id (str): the session the line runs under.
+        registry (MountRegistry): where the head word is looked up.
         action (ExecAction): the action.
         paths (list[str]): the match, or every match for a batched run.
         out (list[bytes]): where the run's stdout is appended.
         errors (list[bytes]): where its stderr is appended.
     """
+    sess = get_current_session()
+    if sess is not None and lookup(action.argv[0], sess,
+                                   registry) is Consumer.UNKNOWN:
+        errors.append(
+            f"find: '{action.argv[0]}': No such file or directory\n".encode())
+        return False
     io = await execute_fn(f"( {exec_line(action, paths)} )",
                           session_id=session_id)
     if io.stdout is not None:
         data = await materialize(io.stdout)
         if data:
             out.append(data)
-    if io.exit_code == 127:
-        errors.append(
-            f"find: '{action.argv[0]}': No such file or directory\n".encode())
-        return False
     if io.stderr is not None:
         err = await materialize(io.stderr)
         if err:
@@ -254,8 +263,8 @@ async def _apply_find_actions(
                     batches.setdefault(position, []).append(path)
                     continue
                 assert execute_fn is not None
-                if not await _run_exec(execute_fn, session_id, action, [path],
-                                       out, errors):
+                if not await _run_exec(execute_fn, session_id, registry,
+                                       action, [path], out, errors):
                     break
             elif action.kind == "ls":
                 before = len(errors)
@@ -276,8 +285,8 @@ async def _apply_find_actions(
         if not isinstance(action, ExecAction) or not paths:
             continue
         assert execute_fn is not None
-        if not await _run_exec(execute_fn, session_id, action, paths, out,
-                               errors):
+        if not await _run_exec(execute_fn, session_id, registry, action, paths,
+                               out, errors):
             exit_code = 1
     if to_delete:
         # Deepest-first so children are removed before parents. Skip

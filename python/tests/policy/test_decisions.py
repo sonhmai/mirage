@@ -20,7 +20,7 @@ import pytest
 from mirage.policy.decisions import Decisions, ask_rule, covers, decision_id
 from mirage.policy.match import Outcome
 from mirage.policy.types import (Abandoned, Ask, CommandContext, CommandRule,
-                                 Decision, Deny, Pending, Scope)
+                                 Decision, Deny, HandOff, Pending, Scope)
 
 RULE = CommandRule(reason="sign-off", commands=("git push", ))
 
@@ -237,7 +237,7 @@ async def test_a_hand_off_spends_nothing_for_the_pass_that_follows():
 
     ledger = Decisions(on_ask=allow)
     ask = Ask("sign-off", rule=RULE)
-    assert await ledger.resolve(_ctx(), ask, None, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, HandOff()) is None
     assert await ledger.resolve(_ctx(), ask) is None
     assert len(asked) == 1
     assert await ledger.resolve(_ctx(), ask) is None
@@ -247,8 +247,8 @@ async def test_a_hand_off_spends_nothing_for_the_pass_that_follows():
     both = Ask("sign-off", rules=(RULE, other))
     # The first rule is granted before the hand-off; the second during
     # it.
-    assert await ledger.resolve(_ctx(), ask, None, True) is None
-    assert await ledger.resolve(_ctx(), both, None, True) is None
+    assert await ledger.resolve(_ctx(), ask, None, HandOff()) is None
+    assert await ledger.resolve(_ctx(), both, None, HandOff()) is None
     assert len(asked) == 4
     # The gate finds both standing and asks nothing.
     assert await ledger.resolve(_ctx(), both) is None
@@ -270,13 +270,60 @@ async def test_a_revoked_hand_off_is_asked_again():
 
     ledger = Decisions(on_ask=allow)
     ask = Ask("sign-off", rule=RULE)
-    before = ledger.list("s")
-    assert await ledger.resolve(_ctx(), ask, None, True) is None
+    handed = HandOff()
+    assert await ledger.resolve(_ctx(), ask, None, handed) is None
     assert len(ledger.list("s")) == 1
-    await ledger.revoke("s", before)
+    assert handed.claimed == list(ledger.list("s"))
+    await ledger.revoke("s", handed)
     assert ledger.list("s") == ()
+    assert handed.claimed == []
     assert await ledger.resolve(_ctx(), ask) is None
     assert len(asked) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_hand_off_claims_a_grant_for_one_occurrence():
+    """A command spelled twice on one line is two questions: the grant
+    the first spelling claimed is not standing for the second, and the
+    gate behind the pass spends one per spelling."""
+    asked = []
+
+    async def allow(record: Decision) -> Decision:
+        asked.append(record.id)
+        return dataclasses.replace(record,
+                                   outcome=Outcome.ALLOW,
+                                   scope=Scope.ONCE)
+
+    ledger = Decisions(on_ask=allow)
+    ask = Ask("sign-off", rule=RULE)
+    handed = HandOff()
+    assert await ledger.resolve(_ctx(), ask, None, handed) is None
+    assert await ledger.resolve(_ctx(), ask, None, handed) is None
+    assert len(asked) == 2
+    assert len(handed.claimed) == 2
+    assert len(ledger.list("s")) == 2
+    assert await ledger.resolve(_ctx(), ask) is None
+    assert await ledger.resolve(_ctx(), ask) is None
+    assert len(asked) == 2
+    assert ledger.list("s") == ()
+
+
+@pytest.mark.asyncio
+async def test_revoke_hands_back_a_grant_given_before_the_pass():
+    """A grant answered out of band is claimed by the pass that reads
+    it exactly as an inline one is, so a refusal hands it back too and
+    the next identical line is a question again."""
+    ledger = Decisions()
+    ask = Ask("sign-off", rule=RULE)
+    waiting = await ledger.resolve(_ctx(), ask)
+    assert isinstance(waiting, Pending)
+    await ledger.answer(waiting.id, Outcome.ALLOW)
+    handed = HandOff()
+    assert await ledger.resolve(_ctx(), ask, None, handed) is None
+    assert len(handed.claimed) == 1
+    await ledger.revoke("s", handed)
+    assert ledger.list("s") == ()
+    assert isinstance(await ledger.resolve(_ctx(), ask), Pending)
 
 
 @pytest.mark.asyncio

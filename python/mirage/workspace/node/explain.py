@@ -17,7 +17,8 @@ from collections.abc import Generator, Iterator, Sequence
 from typing import Any
 
 from mirage.policy import (Abandoned, Ask, CommandContext, Deny, Explanation,
-                           Pending, refusal_of, render_deny, render_pending)
+                           HandOff, Pending, refusal_of, render_deny,
+                           render_pending)
 from mirage.policy.match import Outcome, decide
 from mirage.shell import parse
 from mirage.shell.helpers import (get_parts, get_text, literal_word,
@@ -210,6 +211,23 @@ def _is_verdict(expl: Explanation) -> bool:
     return expl.rule is not None or expl.outcome is Outcome.ALLOW
 
 
+def _is_judged(expl: Explanation) -> bool:
+    """Whether the compound-line pass puts a command through the gate.
+
+    A verdict is, so the line is refused whole. So is a command that
+    would run, because "would run" may mean a standing grant answers
+    its ask, and only the gate can claim that grant for this line: read
+    but not claimed, one nod answered every spelling of the command on
+    the line, and a grant given to a line that was then refused stood
+    for the next one. What stays out is the rule-less DENY, which
+    :func:`_is_verdict` explains is answered where it happens.
+
+    Args:
+        expl (Explanation): one command's explanation.
+    """
+    return expl.exit_code == 0 or _is_verdict(expl)
+
+
 WalkItem = tuple[list[Word], tuple[Word, ...], Session]
 
 # A walk yields each command and returns the session its scope ends in,
@@ -340,6 +358,7 @@ async def prejudge_line(
     session: Session,
     registry: MountRegistry,
     namespace: Namespace | None,
+    handed: HandOff,
     agent_id: str = "",
     cancel: asyncio.Event | None = None,
 ) -> Refused | None:
@@ -381,15 +400,23 @@ async def prejudge_line(
     The pass is read-only (:func:`explain_line`), so it spends no grant
     and records no request; a command it refuses on is then put through
     the real gate, which is where an ask is recorded, exactly once, for
-    a line that will not run. That admission hands off: a grant the
-    host gives inline is left standing for the per-command gate, which
-    runs the line and spends it, so a compound line costs the human one
-    question per run rather than one per pass. When this pass then
-    refuses the line on a later command, no gate runs behind it, so
-    the pass hands back what it was given (``Decisions.revoke``) and
-    the refusal spends it: left standing, the grant would pass the
-    next line spelling that command on a nod given to one that never
-    ran.
+    a line that will not run. That admission hands off: every grant
+    behind the command, the one the host gives inline and one it gave
+    out of band before the pass alike, is claimed on the line's
+    ``HandOff`` for the per-command gate, which runs the line and
+    spends it, so a compound line costs the human one question per run
+    rather than one per pass. A claimed grant is not seen again by this
+    pass, so a command spelled twice on one line needs two nods, and
+    the hold reaches the whole line rather than breaking after the
+    first spelling ran. When this pass then refuses the line on a
+    later command, no gate runs behind it, so the pass hands back what
+    it claimed (``Decisions.revoke``) and the refusal spends it: left
+    standing, the grant would pass the next line spelling that command
+    on a nod given to one that never ran. A question left waiting is
+    not a refusal of that kind: the line is held for its retry, which
+    has to find the grants standing or the human is asked again for
+    what they already allowed. The executor sweeps whatever the run
+    itself never reached once the line ends.
 
     Every command is judged whether or not the session carries a
     document. A coded policy refuses on its own account, and one is
@@ -411,6 +438,8 @@ async def prejudge_line(
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
+        handed (HandOff): the line's hand-off, which the executor
+            sweeps once the line ends.
         agent_id (str): the agent the line is attributed to.
         cancel (asyncio.Event | None): the run's kill channel. This
             pass puts real questions to a host, so it carries it
@@ -430,14 +459,10 @@ async def prejudge_line(
                                      agent_id, redirects)))
     if sum(len(explained) for _, _, explained in judged) < 2:
         return None
-    # The grants on file as the pass begins are the gate's to spend; the
-    # ones added below it are the pass's own, and a refusal hands them
-    # back.
-    before = registry.decisions.list(session.session_id)
     for redirects, walked, explained in judged:
         targets = redirect_paths(redirects, registry, walked.cwd)
         for index, expl in enumerate(explained):
-            if not _is_verdict(expl):
+            if not _is_judged(expl):
                 continue
             args = list(expl.argv)
             classified = classified_words(expl.command, args, walked, registry)
@@ -458,16 +483,28 @@ async def prejudge_line(
                 # itself, so a grant the host gives here is handed to the
                 # per-command gate that runs the line, which spends it:
                 # one question per run, not per pass.
-                hand_off=True)
+                hand_off=handed)
             if isinstance(answered, Refused):
                 # No gate runs behind a refused line, so nothing would
-                # spend the grants handed to it: the refusal does.
-                await registry.decisions.revoke(session.session_id, before)
+                # spend the grants handed to it: the refusal does. A
+                # question left waiting holds the line for its retry
+                # instead, and the retry has to find them standing.
+                if not _pending(answered):
+                    await registry.decisions.revoke(session.session_id, handed)
                 return answered
             # The host answered this one inline. The rest of the line
             # has not been judged yet, so the scan goes on: stopping
             # here let a later command's deny run behind an approval.
     return None
+
+
+def _pending(refused: Refused) -> bool:
+    """Whether a refusal is a question the host has not answered yet.
+
+    Args:
+        refused (Refused): what the gate refused with.
+    """
+    return refused.refusal is not None and refused.refusal.kind == "pending"
 
 
 async def _verdict_refuses(
@@ -477,6 +514,7 @@ async def _verdict_refuses(
     registry: MountRegistry,
     namespace: Namespace | None,
     agent_id: str,
+    handed: HandOff,
     cancel: asyncio.Event | None,
 ) -> bool:
     """Whether a verdict's answer refuses the command, putting an
@@ -502,6 +540,8 @@ async def _verdict_refuses(
             decision ledger.
         namespace (Namespace | None): the link table.
         agent_id (str): the agent the line is attributed to.
+        handed (HandOff): the line's hand-off, on which an answer given
+            here is claimed for the gate.
         cancel (asyncio.Event | None): the run's kill channel.
     """
     args = list(expl.argv)
@@ -528,7 +568,7 @@ async def _verdict_refuses(
     # the gate behind it still has to admit the line. An answer given here is
     # left standing for that gate, which consumes it -- so the host is asked
     # once.
-    action = await registry.decisions.resolve(ctx, asked, cancel, True)
+    action = await registry.decisions.resolve(ctx, asked, cancel, handed)
     if isinstance(action, Abandoned):
         raise MirageAbortError()
     return action is not None
@@ -590,6 +630,7 @@ async def _command_refused(
     registry: MountRegistry,
     namespace: Namespace | None,
     agent_id: str,
+    handed: HandOff,
     cancel: asyncio.Event | None,
 ) -> bool:
     """Whether one walked command is refused on its text, resolving an
@@ -602,6 +643,7 @@ async def _command_refused(
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
         agent_id (str): the agent the line is attributed to.
+        handed (HandOff): the line's hand-off.
         cancel (asyncio.Event | None): the run's kill channel.
     """
     words, redirects, walked = item
@@ -615,7 +657,8 @@ async def _command_refused(
         # the lines it runs after it, so only the first explanation
         # is the command the redirects belong to.
         if await _verdict_refuses(expl, targets if index == 0 else (), walked,
-                                  registry, namespace, agent_id, cancel):
+                                  registry, namespace, agent_id, handed,
+                                  cancel):
             return True
     return False
 
@@ -625,6 +668,7 @@ async def unrefused_nodes(
     session: Session,
     registry: MountRegistry,
     namespace: Namespace | None,
+    handed: HandOff,
     agent_id: str = "",
     cancel: asyncio.Event | None = None,
 ) -> list[Any]:
@@ -660,6 +704,8 @@ async def unrefused_nodes(
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
+        handed (HandOff): the line's hand-off, on which an approval
+            given here is claimed for the gate.
         agent_id (str): the agent the line is attributed to.
         cancel (asyncio.Event | None): the run's kill channel, carried
             because an unanswered ask is put to the host here.
@@ -670,7 +716,8 @@ async def unrefused_nodes(
         if item is None:
             out.append(node)
             continue
-        if await _command_refused(item, registry, namespace, agent_id, cancel):
+        if await _command_refused(item, registry, namespace, agent_id, handed,
+                                  cancel):
             if position == 0:
                 return []
             continue

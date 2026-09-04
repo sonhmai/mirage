@@ -23,7 +23,14 @@ import {
   renderDeny,
   renderPending,
 } from '../../policy/index.ts'
-import type { Ask, CommandContext, CommandRule, AdmissionRules, Deny } from '../../policy/index.ts'
+import type {
+  Ask,
+  CommandContext,
+  CommandRule,
+  AdmissionRules,
+  Deny,
+  HandOff,
+} from '../../policy/index.ts'
 import { ioRefusal } from '../../policy/match/rule.ts'
 import { hasRules, readsArgs, scopesPaths } from '../../policy/match/reads.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
@@ -365,12 +372,13 @@ export async function admit(
   // cannot outlive the run that raised it. Nothing else here waits on
   // anything outside mirage.
   signal?: AbortSignal,
-  // True for a pass that judges the command on behalf of the gate that
-  // runs it (`prejudgeLine`): a grant the host gives inline is left
-  // standing for that gate to spend, so one question covers one run
-  // rather than one pass. A refusal needs no such care — the record
-  // refuses the agent's retry from the ledger either way.
-  handOff = false,
+  // The line's hand-off, for a pass that judges the command on behalf
+  // of the gate that runs it (`prejudgeLine`): the grants behind the
+  // command are claimed on it for that gate to spend, so one question
+  // covers one run rather than one pass. A refusal needs no such care —
+  // the record refuses the agent's retry from the ledger either way.
+  // Null for the gate.
+  handOff: HandOff | null = null,
 ): Promise<Refused | Admitted> {
   const gated = await gate(
     name,

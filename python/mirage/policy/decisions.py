@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable, Sequence
 
 from mirage.policy.match import Outcome
 from mirage.policy.types import (Abandoned, Ask, CommandContext, CommandRule,
-                                 Decision, Deny, Pending, Scope,
+                                 Decision, Deny, HandOff, Pending, Scope,
                                  SessionDecisionsQuery)
 
 # A host that answers an Ask inside the line.
@@ -247,7 +247,7 @@ class Decisions:
         ctx: CommandContext,
         ask: Ask,
         cancel: asyncio.Event | None = None,
-        hand_off: bool = False,
+        hand_off: HandOff | None = None,
     ) -> Deny | Pending | Abandoned | None:
         """The executor's branch for an Ask: settled records answer it,
         else the question is raised now.
@@ -275,13 +275,16 @@ class Decisions:
             cancel (asyncio.Event | None): the run's kill channel, so a
                 question outlives neither its run's deadline nor a
                 caller's kill.
-            hand_off (bool): True for a pass that judges the line on
-                behalf of the one that runs it -- the env pre-pass, and
-                the compound-line pass that judges every command before
-                any runs -- so nothing is spent here: every grant, the
-                one the host gives now and any already on file, is left
-                standing for the gate behind it, which runs the line
-                and spends them. False for that gate.
+            hand_off (HandOff | None): the line's hand-off for a pass
+                that judges it on behalf of the one that runs it -- the
+                env pre-pass, and the compound-line pass that judges
+                every command before any runs. Nothing is spent here:
+                every ONCE grant behind the command, the one the host
+                gives now and any already on file, is claimed on it for
+                the gate behind the pass, which runs the line and
+                spends them. A claimed grant is not seen again by the
+                same pass, so a command spelled twice on one line is
+                asked twice. None for that gate.
 
         Returns:
             None to run the line, a Deny to refuse it, a Pending when
@@ -290,7 +293,7 @@ class Decisions:
         """
         rules = ask.rules or (ask_rule(ctx, ask), )
         argv = (ctx.command, *ctx.argv)
-        held = self._records(ctx.session_id)
+        held = self._standing(ctx.session_id, hand_off)
         answers = [(rule, self._settled(held, rule, argv, ctx.cwd))
                    for rule in rules]
         refused = next((rule for rule, r in answers
@@ -316,35 +319,53 @@ class Decisions:
         # without the re-read, the grant it gave THIS line would still be
         # standing for the next identical one, and whoever allowed once
         # would have allowed twice.
-        if not hand_off:
-            await self._spend(
-                ctx.session_id,
-                self._once_answers(ctx.session_id, rules, argv, ctx.cwd))
+        once = self._once_answers(ctx.session_id, rules, argv, ctx.cwd,
+                                  hand_off)
+        if hand_off is None:
+            await self._spend(ctx.session_id, once)
+        else:
+            hand_off.claimed.extend(once)
         return None
 
-    async def revoke(self, session_id: str, since: tuple[Decision,
-                                                         ...]) -> None:
-        """Spend the grants handed to a line that was then refused
-        before it ran.
+    async def revoke(self, session_id: str, handed: HandOff) -> None:
+        """Spend every grant claimed on a hand-off that no gate spent.
 
-        The hand-off in :meth:`resolve` leaves a grant the host gives
-        inline standing for the gate that runs the line, and that gate
-        spends it. A pass that judges the whole line and refuses it on
-        a later command runs no gate at all, so a grant it was handed
-        would stand for the next line spelling the same command, which
-        would then run on a nod given to a line that never did. The
-        refusing pass hands back what it was given, and the refusal
-        spends it the way the run would have.
+        The hand-off in :meth:`resolve` leaves the grants behind a
+        command standing for the gate that runs the line, and that gate
+        spends each at the command it was claimed for. Two things leave
+        one unspent: the pass refuses the line on a later command, so
+        no gate runs at all, or the run never reaches the gate, because
+        a short-circuit or a conditional skipped the command. Either
+        way the grant would stand for the next line spelling that
+        command, which would then run on a nod given to a line that
+        never did, so the refusal, or the end of the run, spends what
+        the gates did not. A grant a gate already spent is gone from
+        the ledger and is passed over; the hand-off is emptied so a
+        second call is a no-op.
 
         Args:
             session_id (str): the session the line was judged in.
-            since (tuple[Decision, ...]): the records on file as the
-                pass began; every ONCE grant added after them is spent.
+            handed (HandOff): the line's hand-off.
         """
-        handed = tuple(r for r in self._records(session_id)
-                       if r.outcome is Outcome.ALLOW and r.scope is Scope.ONCE
-                       and not any(r is s for s in since))
-        await self._spend(session_id, handed)
+        await self._spend(session_id, tuple(handed.claimed))
+        handed.claimed.clear()
+
+    def _standing(self, session_id: str,
+                  hand_off: HandOff | None) -> tuple[Decision, ...]:
+        """The session's records as one pass may read them: every one,
+        less the grants the pass already claimed for an earlier
+        command of its line.
+
+        Args:
+            session_id (str): the asking session.
+            hand_off (HandOff | None): the line's hand-off, None for the
+                gate, which claims nothing and reads everything.
+        """
+        held = self._records(session_id)
+        if hand_off is None:
+            return held
+        return tuple(r for r in held
+                     if not any(r is c for c in hand_off.claimed))
 
     def _once_answers(
         self,
@@ -352,6 +373,7 @@ class Decisions:
         rules: Sequence[CommandRule],
         argv: tuple[str, ...],
         cwd: str,
+        hand_off: HandOff | None,
     ) -> tuple[Decision, ...]:
         """Every ONCE answer standing behind this line, as the ledger
         holds it now.
@@ -361,11 +383,13 @@ class Decisions:
             rules (Sequence[CommandRule]): the rules the ask named.
             argv (tuple[str, ...]): the line, command name first.
             cwd (str): the directory the line was typed in.
+            hand_off (HandOff | None): the line's hand-off, whose
+                claimed grants are not standing for this command.
 
         Returns:
             tuple[Decision, ...]: the settled ONCE records.
         """
-        held = self._records(session_id)
+        held = self._standing(session_id, hand_off)
         found = (self._settled(held, rule, argv, cwd) for rule in rules)
         return tuple(r for r in found
                      if r is not None and r.scope is Scope.ONCE)

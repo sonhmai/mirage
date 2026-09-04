@@ -239,6 +239,25 @@ export interface Decision {
 }
 
 /**
+ * The ONCE grants a line's judging passes matched to its commands, for
+ * the run behind them to spend.
+ *
+ * One per line, made by the executor and filled by `Decisions.resolve`
+ * as each pass admits a command: every grant it matches, whether the
+ * host gave it inline just now or out of band before the pass, is
+ * claimed here instead of spent. A claimed grant is invisible to the
+ * next command the same pass judges, so two spellings of one command
+ * on a line each need a nod of their own; the run spends each grant at
+ * the gate it was claimed for, and whatever the run never reaches is
+ * spent when the line ends (`Decisions.revoke`). Mirrors the Python
+ * HandOff.
+ */
+export interface HandOff {
+  /** The grants matched so far, in the order the commands were judged. */
+  readonly claimed: Decision[]
+}
+
+/**
  * The door's answer while the host has not decided: the line is refused
  * for now, and the id names what to grant. Mirrors the Python Pending.
  */

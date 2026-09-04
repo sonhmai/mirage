@@ -59,6 +59,7 @@ export {
   type Abandoned,
   type Pending,
   type Decision,
+  type HandOff,
   type Ruling,
   Scope,
   type SessionDecisionsQuery,

@@ -20,6 +20,7 @@ import {
   type CommandContext,
   type Deny,
   type Explanation,
+  type HandOff,
   type Pending,
 } from '../../policy/types.ts'
 import { getParts, getText, literalWord, splitEnvPrefix } from '../../shell/helpers.ts'
@@ -307,6 +308,26 @@ function* walkedLine(root: TSNodeLike, session: Session): Generator<WalkItem> {
  * runtime can expand, each of which is answered where it happens rather
  * than against the whole line.
  */
+/**
+ * Whether the compound-line pass puts a command through the gate.
+ *
+ * A verdict is, so the line is refused whole. So is a command that would
+ * run, because "would run" may mean a standing grant answers its ask,
+ * and only the gate can claim that grant for this line: read but not
+ * claimed, one nod answered every spelling of the command on the line,
+ * and a grant given to a line that was then refused stood for the next
+ * one. What stays out is the rule-less DENY, which `isVerdict` explains
+ * is answered where it happens.
+ */
+function isJudged(expl: Explanation): boolean {
+  return expl.exitCode === 0 || isVerdict(expl)
+}
+
+/** Whether a refusal is a question the host has not answered yet. */
+function pending(refused: Refused): boolean {
+  return refused.refusal?.kind === 'pending'
+}
+
 function isVerdict(expl: Explanation): boolean {
   if (expl.exitCode === 0) return false
   return expl.rule !== null || expl.outcome === Outcome.ALLOW
@@ -371,6 +392,8 @@ export async function prejudgeLine(
   registry: MountRegistry,
   namespace: Namespace | null,
   agentId: string,
+  // The line's hand-off, which the executor sweeps once the line ends.
+  handed: HandOff,
   reparse: (line: string) => TSNodeLike,
   // This pass puts real questions to a host, so it carries the run's
   // kill channel exactly as the per-command gate does. Without it a
@@ -388,13 +411,10 @@ export async function prejudgeLine(
     ])
   }
   if (judged.reduce((n, [, , explained]) => n + explained.length, 0) < 2) return null
-  // The grants on file as the pass begins are the gate's to spend; the
-  // ones added below it are the pass's own, and a refusal hands them back.
-  const before = registry.decisions.list(session.sessionId)
   for (const [redirects, walked, explained] of judged) {
     const targets = redirectPaths(redirects, registry, walked.cwd)
     for (const [index, expl] of explained.entries()) {
-      if (!isVerdict(expl)) continue
+      if (!isJudged(expl)) continue
       const args = [...expl.argv]
       const classified = classifiedWords(expl.command, args, walked, registry)
       const answered = await admit(
@@ -414,12 +434,14 @@ export async function prejudgeLine(
         // This pass judges on the gate's behalf and runs nothing itself, so
         // a grant the host gives here is handed to the per-command gate that
         // runs the line, which spends it: one question per run, not per pass.
-        true,
+        handed,
       )
       if (!(answered instanceof Admitted)) {
         // No gate runs behind a refused line, so nothing would spend the
-        // grants handed to it: the refusal does.
-        await registry.decisions.revoke(session.sessionId, before)
+        // grants handed to it: the refusal does. A question left waiting
+        // holds the line for its retry instead, and the retry has to find
+        // them standing.
+        if (!pending(answered)) await registry.decisions.revoke(session.sessionId, handed)
         return answered
       }
       // The host answered this one inline. The rest of the line has not
@@ -451,6 +473,9 @@ async function verdictRefuses(
   registry: MountRegistry,
   namespace: Namespace | null,
   agentId: string,
+  // The line's hand-off, on which an answer given here is claimed for
+  // the gate.
+  handed: HandOff,
   signal?: AbortSignal,
 ): Promise<boolean> {
   const args = [...expl.argv]
@@ -475,7 +500,7 @@ async function verdictRefuses(
   // handOff: this pass exists to decide whether a secret is fetched, and the
   // gate behind it still has to admit the line. An answer given here is left
   // standing for that gate, which consumes it — so the host is asked once.
-  const action = await registry.decisions.resolve(ctx, asked, signal, true)
+  const action = await registry.decisions.resolve(ctx, asked, signal, handed)
   if (action !== null && action.kind === 'abandoned') throw makeAbortError()
   return action !== null
 }
@@ -530,6 +555,7 @@ async function commandRefused(
   registry: MountRegistry,
   namespace: Namespace | null,
   agentId: string,
+  handed: HandOff,
   reparse: (line: string) => TSNodeLike,
   signal?: AbortSignal,
 ): Promise<boolean> {
@@ -557,6 +583,7 @@ async function commandRefused(
         registry,
         namespace,
         agentId,
+        handed,
         signal,
       )
     ) {
@@ -598,6 +625,9 @@ export async function unrefusedNodes(
   registry: MountRegistry,
   namespace: Namespace | null,
   agentId: string,
+  // The line's hand-off, on which an approval given here is claimed
+  // for the gate.
+  handed: HandOff,
   reparse: (line: string) => TSNodeLike,
   signal?: AbortSignal,
 ): Promise<TSNodeLike[]> {
@@ -608,7 +638,7 @@ export async function unrefusedNodes(
       out.push(node)
       continue
     }
-    if (await commandRefused(item, registry, namespace, agentId, reparse, signal)) {
+    if (await commandRefused(item, registry, namespace, agentId, handed, reparse, signal)) {
       if (position === 0) return []
       continue
     }

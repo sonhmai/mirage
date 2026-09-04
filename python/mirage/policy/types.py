@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, ClassVar, Protocol
 
@@ -293,6 +293,28 @@ class Decision:
     outcome: Outcome | None = None
     scope: Scope = Scope.ONCE
     note: str = ""
+
+
+@dataclass(slots=True)
+class HandOff:
+    """The ONCE grants a line's judging passes matched to its commands,
+    for the run behind them to spend.
+
+    One per line, made by the executor and filled by ``Decisions.resolve``
+    as each pass admits a command: every grant it matches, whether the
+    host gave it inline just now or out of band before the pass, is
+    claimed here instead of spent. A claimed grant is invisible to the
+    next command the same pass judges, so two spellings of one command
+    on a line each need a nod of their own; the run spends each grant at
+    the gate it was claimed for, and whatever the run never reaches is
+    spent when the line ends (``Decisions.revoke``).
+
+    Args:
+        claimed (list[Decision]): the grants matched so far, in the
+            order the commands were judged.
+    """
+
+    claimed: list[Decision] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)

@@ -292,10 +292,13 @@ settles the ask while the line waits, like a tool-approval prompt. A
 next identical line asks again; a refusal stands for the agent's
 immediate retry, which is refused from the record without the human
 being asked twice, and is spent by it. A compound line is judged whole
-before any of it runs, and a `once` grant given for one of its commands
-is handed to the run; when a later command is refused instead, nothing
-runs and the refusal spends the grant, so the next line spelling that
-command asks again.
+before any of it runs, and a `once` grant given for one of its commands,
+inline or out of band, is handed to the run; when a later command is
+refused instead, nothing runs and the refusal spends the grant, so the
+next line spelling that command asks again. A grant the run never
+reaches (a `&&` that short-circuited before the command) is spent when
+the line ends, for the same reason. A command spelled twice on one line
+is two questions: one `once` grant answers one spelling.
 
 ## Dry runs
 

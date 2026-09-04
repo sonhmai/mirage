@@ -33,7 +33,7 @@ import { makeAbortError, mergeSignals } from '../abort.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { RouteDeny, type RouteDecision } from '../../runtime/routing/index.ts'
-import { refusalOf, renderDeny, type Deny } from '../../policy/index.ts'
+import { refusalOf, renderDeny, type Deny, type HandOff } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { ExecuteFn } from '../expand/node.ts'
@@ -385,6 +385,9 @@ async function runParsedLine(
   // because expansion is what consumes the values. A SecretsError
   // folds like any failed line: the line exits 1 and never runs.
   const writesGated = await env.registry.policies.wantsFor('preSession', effectiveSession.sessionId)
+  // The grants the judging passes claim for the gates ride one hand-off,
+  // and whatever the run never spends is swept once the line ends.
+  const handed: HandOff = { claimed: [] }
   const fillManaged = async (
     nodes: TSNodeLike[],
     whole: boolean,
@@ -403,6 +406,7 @@ async function runParsedLine(
           env.registry,
           env.namespace,
           callAgentId,
+          handed,
           reparse,
           killed,
         )
@@ -523,6 +527,7 @@ async function runParsedLine(
     env.registry,
     env.namespace,
     callAgentId,
+    handed,
     reparse,
     killed,
   )
@@ -563,6 +568,10 @@ async function runParsedLine(
     const failed = failureResult(err)
     targetSession.lastExitCode = failed.exitCode
     return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
+  } finally {
+    // A gate a short-circuit or a conditional skipped spent nothing, and
+    // the grant it was handed must not outlive the line it was given for.
+    await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
   }
   const [[materialized, io], opRecords] = execResult
   // A record a nested line earned is the line's to report when its own

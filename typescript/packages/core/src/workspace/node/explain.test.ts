@@ -390,6 +390,68 @@ describe('prejudge', () => {
     expect(DEC.decode(again.stdout)).toBe('s\n')
     expect(asked).toHaveLength(2)
   })
+
+  it('sweeps a grant the run never reaches when the line ends', async () => {
+    // The host allows the cat inline and the line runs, but the failed cat
+    // before it short-circuits the && and the gate that would have spent
+    // the grant never runs. The line is over all the same, so the grant is
+    // swept with it and the next cat is a question again.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute('cat /data/missing && cat /data/secret.txt', { sessionId: 's' })
+    expect(ran.exitCode).toBe(1)
+    expect(DEC.decode(ran.stdout)).toBe('')
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+    const again = await w.execute('cat /data/secret.txt', { sessionId: 's' })
+    expect(again.exitCode).toBe(0)
+    expect(DEC.decode(again.stdout)).toBe('s\n')
+    expect(asked).toHaveLength(2)
+  })
+
+  it('needs two answers for a command spelled twice on a line', async () => {
+    // One out-of-band answer covers one spelling. Read for both, the first
+    // cat would run and spend it before the second was found wanting, which
+    // is the half-line the hold exists to prevent: the retry is held whole
+    // until the second spelling has its own answer.
+    const w = await ws()
+    const line = 'cat /data/secret.txt && cat /data/secret.txt'
+    const first = await w.execute(line, { sessionId: 's' })
+    expect(first.exitCode).toBe(126)
+    expect(first.refusal?.kind).toBe('pending')
+    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    const second = await w.execute(line, { sessionId: 's' })
+    expect(second.exitCode).toBe(126)
+    expect(DEC.decode(second.stdout)).toBe('')
+    expect(second.refusal?.kind).toBe('pending')
+    expect(w.decisions.list('s')).toHaveLength(2)
+    await w.decisions.answer(second.refusal?.askId ?? '', Outcome.ALLOW)
+    const ran = await w.execute(line, { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('s\ns\n')
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('spends a grant given before a line it then refuses', async () => {
+    // The cat was answered out of band while the line waited; its retry is
+    // then refused by the rm. That grant was given to this line as surely
+    // as an inline one, so the refusal spends it too, and the next cat is a
+    // question again rather than a run on a nod given to a line that never
+    // ran.
+    const w = await ws()
+    const line = 'cat /data/secret.txt && rm /data/prod/x.txt'
+    const first = await w.execute(line, { sessionId: 's' })
+    expect(first.exitCode).toBe(126)
+    expect(first.refusal?.kind).toBe('pending')
+    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    const retry = await w.execute(line, { sessionId: 's' })
+    expect(retry.exitCode).not.toBe(0)
+    expect(DEC.decode(retry.stderr)).toContain('production data is protected')
+    expect(w.decisions.list('s')).toEqual([])
+    const again = await w.execute('cat /data/secret.txt', { sessionId: 's' })
+    expect(again.exitCode).toBe(126)
+    expect(again.refusal?.kind).toBe('pending')
+  })
 })
 
 describe('prejudge scope', () => {

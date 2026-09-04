@@ -21,6 +21,7 @@ import type {
   CommandRule,
   Decision,
   Deny,
+  HandOff,
   Pending,
   SessionDecisionsQuery,
 } from './types.ts'
@@ -251,12 +252,15 @@ export class Decisions {
    * @param ask the chain's Ask.
    * @param signal the run's abort signal, so a question outlives
    *   neither its run's deadline nor a caller's kill.
-   * @param handOff true for a pass that judges the line on behalf of
-   *   the one that runs it — the env pre-pass, and the compound-line
-   *   pass that judges every command before any runs — so nothing is
-   *   spent here: every grant, the one the host gives now and any
-   *   already on file, is left standing for the gate behind it, which
-   *   runs the line and spends them. False for that gate.
+   * @param handOff the line's hand-off for a pass that judges it on
+   *   behalf of the one that runs it — the env pre-pass, and the
+   *   compound-line pass that judges every command before any runs.
+   *   Nothing is spent here: every ONCE grant behind the command, the
+   *   one the host gives now and any already on file, is claimed on it
+   *   for the gate behind the pass, which runs the line and spends
+   *   them. A claimed grant is not seen again by the same pass, so a
+   *   command spelled twice on one line is asked twice. Null for that
+   *   gate.
    * @returns the refusal, the question left waiting, an Abandoned for a
    *   run killed mid-question, or null to run.
    */
@@ -264,12 +268,12 @@ export class Decisions {
     ctx: CommandContext,
     ask: Ask,
     signal?: AbortSignal,
-    handOff = false,
+    handOff: HandOff | null = null,
   ): Promise<Deny | Pending | Abandoned | null> {
     const rules = ask.rules ?? [askRule(ctx, ask)]
     const argv = [ctx.command, ...ctx.argv]
     const sessionId = ctx.sessionId ?? ''
-    const held = this.records(sessionId)
+    const held = this.standing(sessionId, handOff)
     const answers = rules.map(
       (rule) => [rule, Decisions.settled(held, rule, argv, ctx.cwd)] as const,
     )
@@ -295,30 +299,44 @@ export class Decisions {
     // inline settled its record during the loop above: without the re-read,
     // the grant it gave THIS line would still be standing for the next
     // identical one, and whoever allowed once would have allowed twice.
-    if (!handOff) await this.spend(sessionId, this.onceAnswers(sessionId, rules, argv, ctx.cwd))
+    const once = this.onceAnswers(sessionId, rules, argv, ctx.cwd, handOff)
+    if (handOff === null) await this.spend(sessionId, once)
+    else handOff.claimed.push(...once)
     return null
   }
 
   /**
-   * Spend grants handed to a line that was then refused before it ran.
+   * Spend every grant claimed on a hand-off that no gate spent.
    *
-   * The hand-off in `resolve` leaves a grant the host gives inline
-   * standing for the gate that runs the line, and that gate spends it.
-   * A pass that judges the whole line and refuses it on a later command
-   * runs no gate at all, so a grant it was handed would stand for the
-   * next line spelling the same command, which would then run on a nod
-   * given to a line that never did. The refusing pass hands back what
-   * it was given, and the refusal spends it the way the run would have.
+   * The hand-off in `resolve` leaves the grants behind a command
+   * standing for the gate that runs the line, and that gate spends each
+   * at the command it was claimed for. Two things leave one unspent:
+   * the pass refuses the line on a later command, so no gate runs at
+   * all, or the run never reaches the gate, because a short-circuit or
+   * a conditional skipped the command. Either way the grant would stand
+   * for the next line spelling that command, which would then run on a
+   * nod given to a line that never did, so the refusal, or the end of
+   * the run, spends what the gates did not. A grant a gate already
+   * spent is gone from the ledger and is passed over; the hand-off is
+   * emptied so a second call is a no-op.
    *
    * @param sessionId the session the line was judged in.
-   * @param since the records on file as the pass began; every ONCE grant
-   *   added after them is spent.
+   * @param handed the line's hand-off.
    */
-  async revoke(sessionId: string, since: readonly Decision[]): Promise<void> {
-    const handed = this.records(sessionId).filter(
-      (r) => r.outcome === Outcome.ALLOW && r.scope === Scope.ONCE && !since.includes(r),
-    )
-    await this.spend(sessionId, handed)
+  async revoke(sessionId: string, handed: HandOff): Promise<void> {
+    await this.spend(sessionId, [...handed.claimed])
+    handed.claimed.length = 0
+  }
+
+  /**
+   * The session's records as one pass may read them: every one, less
+   * the grants the pass already claimed for an earlier command of its
+   * line. The gate claims nothing and reads everything.
+   */
+  private standing(sessionId: string, handOff: HandOff | null): readonly Decision[] {
+    const held = this.records(sessionId)
+    if (handOff === null) return held
+    return held.filter((r) => !handOff.claimed.some((c) => c === r))
   }
 
   /** Every ONCE answer standing behind this line, as the ledger holds it now. */
@@ -327,8 +345,9 @@ export class Decisions {
     rules: readonly CommandRule[],
     argv: readonly string[],
     cwd: string,
+    handOff: HandOff | null,
   ): Decision[] {
-    const held = this.records(sessionId)
+    const held = this.standing(sessionId, handOff)
     return rules
       .map((rule) => Decisions.settled(held, rule, argv, cwd))
       .filter((r): r is Decision => r !== null && r.scope === Scope.ONCE)

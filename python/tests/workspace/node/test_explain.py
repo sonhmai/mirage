@@ -439,6 +439,73 @@ async def test_a_grant_handed_to_a_refused_line_does_not_outlive_it():
 
 
 @pytest.mark.asyncio
+async def test_a_grant_the_run_never_reaches_does_not_outlive_the_line():
+    # The host allows the cat inline and the line runs, but the failed
+    # cat before it short-circuits the && and the gate that would have
+    # spent the grant never runs. The line is over all the same, so the
+    # grant is swept with it and the next cat is a question again.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute("cat /data/missing && cat /data/secret.txt",
+                               session_id="s")
+        assert ran.exit_code == 1
+        assert ran.stdout == b""
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+        again = await ws.execute("cat /data/secret.txt", session_id="s")
+        assert again.exit_code == 0
+        assert again.stdout == b"s\n"
+        assert len(asked) == 2
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_command_spelled_twice_on_a_line_needs_two_answers(ws):
+    # One out-of-band answer covers one spelling. Read for both, the
+    # first cat would run and spend it before the second was found
+    # wanting, which is the half-line the hold exists to prevent: the
+    # retry is held whole until the second spelling has its own answer.
+    line = "cat /data/secret.txt && cat /data/secret.txt"
+    first = await ws.execute(line, session_id="s")
+    assert first.exit_code == 126
+    assert first.refusal is not None and first.refusal.kind == "pending"
+    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    second = await ws.execute(line, session_id="s")
+    assert second.exit_code == 126
+    assert second.stdout == b""
+    assert second.refusal is not None and second.refusal.kind == "pending"
+    assert len(ws.decisions.list("s")) == 2
+    await ws.decisions.answer(second.refusal.ask_id, Outcome.ALLOW)
+    ran = await ws.execute(line, session_id="s")
+    assert ran.exit_code == 0
+    assert ran.stdout == b"s\ns\n"
+    assert ws.decisions.list("s") == ()
+
+
+@pytest.mark.asyncio
+async def test_a_grant_given_before_a_refused_line_does_not_outlive_it(ws):
+    # The cat was answered out of band while the line waited; its retry
+    # is then refused by the rm. That grant was given to this line as
+    # surely as an inline one, so the refusal spends it too, and the
+    # next cat is a question again rather than a run on a nod given to
+    # a line that never ran.
+    line = "cat /data/secret.txt && rm /data/prod/x.txt"
+    first = await ws.execute(line, session_id="s")
+    assert first.exit_code == 126
+    assert first.refusal is not None and first.refusal.kind == "pending"
+    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    retry = await ws.execute(line, session_id="s")
+    assert retry.exit_code != 0
+    assert b"production data is protected" in (retry.stderr or b"")
+    assert ws.decisions.list("s") == ()
+    again = await ws.execute("cat /data/secret.txt", session_id="s")
+    assert again.exit_code == 126
+    assert again.refusal is not None and again.refusal.kind == "pending"
+
+
+@pytest.mark.asyncio
 async def test_a_cd_in_a_subshell_moves_the_commands_inside_it(ws):
     # The sibling test pins that the cd does not escape the subshell.
     # This one pins the other half: inside it, the cd still applies, so

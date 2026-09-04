@@ -26,7 +26,7 @@ from mirage.commands.errors import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope
-from mirage.policy import resolve_limit
+from mirage.policy import HandOff, resolve_limit
 from mirage.provision import ProvisionResult
 from mirage.runtime.routing import RouteDecision, RouteDeny, RouteError
 from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
@@ -283,9 +283,13 @@ async def execute_line(
         # judged before any of it runs. Nothing here replaces the
         # per-command gate below, which still binds each command's own
         # entry gate; this only stops a line a rule refuses from
-        # running half-way.
+        # running half-way. The grants the passes below claim for the
+        # gates ride one hand-off, and whatever the run never spends is
+        # swept once the line ends.
+        handed = HandOff()
         refused = await prejudge_line(ast, effective_session, ws._registry,
-                                      ws._namespace, agent or "", cancel)
+                                      ws._namespace, handed, agent or "",
+                                      cancel)
         if refused is not None:
             io = IOResult(exit_code=refused.exit_code,
                           stderr=refused.stderr,
@@ -325,7 +329,7 @@ async def execute_line(
             if names:
                 served = await unrefused_nodes(nodes, effective_session,
                                                ws._registry, ws._namespace,
-                                               agent or "", cancel)
+                                               handed, agent or "", cancel)
                 if len(served) != len(nodes):
                     nodes = served
                     names = plan_names(served) if served else frozenset()
@@ -350,19 +354,26 @@ async def execute_line(
                     sources = await ws._secret_sources()
                     await fill_env(effective_session, names, sources)
                     names = plan_names(nodes)
-        io, _ = await run_command_tree(
-            ws.dispatch,
-            ws._registry,
-            ws._namespace,
-            ws.job_table,
-            exec_recursion,
-            agent or "",
-            ast,
-            effective_session,
-            stdin,
-            cancel,
-            routing_decision=decision,
-        )
+        try:
+            io, _ = await run_command_tree(
+                ws.dispatch,
+                ws._registry,
+                ws._namespace,
+                ws.job_table,
+                exec_recursion,
+                agent or "",
+                ast,
+                effective_session,
+                stdin,
+                cancel,
+                routing_decision=decision,
+            )
+        finally:
+            # A gate a short-circuit or a conditional skipped spent
+            # nothing, and the grant it was handed must not outlive the
+            # line it was given for.
+            await ws._registry.decisions.revoke(effective_session.session_id,
+                                                handed)
         # A record a nested line earned is the line's to report when
         # its own tree earned none (see NestedRefusal).
         if io.refusal is None:

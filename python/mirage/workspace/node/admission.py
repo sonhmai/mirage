@@ -22,8 +22,9 @@ from mirage.commands.spec.types import ValueType
 from mirage.context.session_context import session_path_allowed
 from mirage.io.types import ByteSource
 from mirage.policy import (Abandoned, AdmissionRules, Ask, CommandContext,
-                           CommandRule, Deny, Pending, PolicyDenied, Scope,
-                           ask_rule, refusal_of, render_deny, render_pending)
+                           CommandRule, Deny, HandOff, Pending, PolicyDenied,
+                           Scope, ask_rule, refusal_of, render_deny,
+                           render_pending)
 from mirage.policy.match import (Outcome, has_rules, io_refusal, reads_args,
                                  scopes_paths)
 from mirage.runtime.routing import command_nodes
@@ -320,7 +321,7 @@ async def admit(
     stdin: ByteSource | None = None,
     redirects: Sequence[PathSpec] = (),
     cancel: asyncio.Event | None = None,
-    hand_off: bool = False,
+    hand_off: HandOff | None = None,
 ) -> Refused | Admitted:
     """The command plane's admission of one command: visibility, then
     the policy chain, then the decision ledger.
@@ -355,12 +356,13 @@ async def admit(
             only so a question put to a host cannot outlive the run
             that raised it. Nothing else here waits on anything outside
             mirage.
-        hand_off (bool): True for a pass that judges the command on
-            behalf of the gate that runs it (``prejudge_line``): a grant
-            the host gives inline is left standing for that gate to
-            spend, so one question covers one run rather than one pass.
-            A refusal needs no such care -- the record refuses the
-            agent's retry from the ledger either way.
+        hand_off (HandOff | None): the line's hand-off, for a pass that
+            judges the command on behalf of the gate that runs it
+            (``prejudge_line``): the grants behind the command are
+            claimed on it for that gate to spend, so one question
+            covers one run rather than one pass. A refusal needs no
+            such care -- the record refuses the agent's retry from the
+            ledger either way. None for the gate.
     """
     gated = await gate(name, args, operands, session, registry, namespace,
                        agent_id, stdin, redirects)

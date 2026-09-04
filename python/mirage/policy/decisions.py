@@ -297,18 +297,8 @@ class Decisions:
             if record is not None:
                 continue
             action = await self._raise(ctx, rule, argv, cancel)
-            if action is None:
-                continue
-            # A refusal the host gave while this line waited refused THIS
-            # line, so it is spent by it -- unless a later pass on the
-            # same line still has to read it, which is the pass that
-            # refuses in place. A question left waiting, or a killed run,
-            # answered nothing and spends nothing.
-            if isinstance(action, Deny) and not hand_off:
-                await self._spend(
-                    ctx.session_id,
-                    self._once_answers(ctx.session_id, rules, argv, ctx.cwd))
-            return action
+            if action is not None:
+                return action
         # Every rule is answered and the line may run. Unless another pass
         # on this same line is still to come, the ledger is read again
         # rather than trusting the entry snapshot, because a host that
@@ -325,7 +315,7 @@ class Decisions:
         self,
         session_id: str,
         rules: Sequence[CommandRule],
-        argv: Sequence[str],
+        argv: tuple[str, ...],
         cwd: str,
     ) -> tuple[Decision, ...]:
         """Every ONCE answer standing behind this line, as the ledger
@@ -334,7 +324,7 @@ class Decisions:
         Args:
             session_id (str): the asking session.
             rules (Sequence[CommandRule]): the rules the ask named.
-            argv (Sequence[str]): the line, command name first.
+            argv (tuple[str, ...]): the line, command name first.
             cwd (str): the directory the line was typed in.
 
         Returns:

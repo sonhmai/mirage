@@ -184,10 +184,10 @@ async def test_a_host_that_answers_inside_the_line_leaves_nothing_waiting():
 
 
 @pytest.mark.asyncio
-async def test_an_inline_answer_is_spent_by_the_line_that_asked():
-    """The host answers while the line waits, so the answer belongs to
+async def test_an_inline_grant_is_spent_by_the_line_that_asked():
+    """The host answers while the line waits, so the grant belongs to
     that line: allowing once must not let the next identical line
-    through unasked, and refusing once must not refuse it either."""
+    through unasked."""
     asked = []
 
     async def allow(record: Decision) -> Decision:
@@ -201,6 +201,10 @@ async def test_an_inline_answer_is_spent_by_the_line_that_asked():
     assert await ledger.resolve(_ctx(), Ask("sign-off", rule=RULE)) is None
     assert len(asked) == 2
 
+    # A refusal is the other way round, by design: the human who said no
+    # is not asked about the agent's immediate retry. The record stands
+    # to refuse that retry, is spent by it, and the run after is a new
+    # question.
     refusals = []
 
     async def deny(record: Decision) -> Decision:
@@ -210,10 +214,10 @@ async def test_an_inline_answer_is_spent_by_the_line_that_asked():
                                    scope=Scope.ONCE)
 
     refused = Decisions(on_ask=deny)
-    for _ in range(2):
+    for expected in (1, 1, 2):
         action = await refused.resolve(_ctx(), Ask("sign-off", rule=RULE))
         assert isinstance(action, Deny)
-    assert len(refusals) == 2
+        assert len(refusals) == expected
 
     # The pass that asks on another pass's behalf leaves its answer
     # standing, so the gate behind it consumes the same one.

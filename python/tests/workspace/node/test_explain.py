@@ -16,13 +16,26 @@ import dataclasses
 
 import pytest
 import pytest_asyncio
+from pydantic import BaseModel, ConfigDict
 
 from mirage import Workspace
 from mirage.policy import Action, CommandContext, Deny, Policy
 from mirage.policy.match import Outcome
 from mirage.policy.types import Scope
 from mirage.resource.ram import RAMResource
+from mirage.secrets import registry as secrets_registry
+from mirage.secrets.registry import register_secrets
+from mirage.secrets.types import ResolvedSecret
 from mirage.types import MountMode
+
+
+class _FakeConfig(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+async def _dead_fetch(config: _FakeConfig, ref: str) -> ResolvedSecret:
+    raise RuntimeError("connection refused")
+
 
 PROFILE = {
     "commands": {
@@ -451,6 +464,41 @@ async def test_a_grant_the_run_never_reaches_does_not_outlive_the_line():
                                session_id="s")
         assert ran.exit_code == 1
         assert ran.stdout == b""
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+        again = await ws.execute("cat /data/secret.txt", session_id="s")
+        assert again.exit_code == 0
+        assert again.stdout == b"s\n"
+        assert len(asked) == 2
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_grant_does_not_outlive_a_line_that_fails_before_it_runs(
+        monkeypatch):
+    # The host allows the cat inline, and then the secret the echo reads
+    # cannot be fetched, so the line fails between the preflight and the
+    # run: no gate runs at all. The sweep covers that stretch too, or
+    # the next cat would run on a nod given to a line that never did.
+    monkeypatch.setattr(secrets_registry, "_CUSTOM", {})
+    register_secrets("fake", _FakeConfig, _dead_fetch)
+    asked: list[str] = []
+    ws = Workspace({"/data/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   profiles={"r": PROFILE},
+                   env={"TOKEN": {
+                       "from": "fake",
+                       "ref": "r"
+                   }},
+                   on_ask=_answering(asked, Outcome.ALLOW))
+    try:
+        await ws.fs.write("/data/secret.txt", b"s\n")
+        ws.create_session("s", profile="r")
+        ran = await ws.execute("cat /data/secret.txt && echo $TOKEN",
+                               session_id="s")
+        assert ran.exit_code == 1
+        assert ran.stderr == b"TOKEN: cannot fetch from fake\n"
         assert len(asked) == 1
         assert ws.decisions.list("s") == ()
         again = await ws.execute("cat /data/secret.txt", session_id="s")

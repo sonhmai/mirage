@@ -310,15 +310,16 @@ export class Decisions {
    *
    * The hand-off in `resolve` leaves the grants behind a command
    * standing for the gate that runs the line, and that gate spends each
-   * at the command it was claimed for. Two things leave one unspent:
-   * the pass refuses the line on a later command, so no gate runs at
-   * all, or the run never reaches the gate, because a short-circuit or
-   * a conditional skipped the command. Either way the grant would stand
+   * at the command it was claimed for. Anything that ends the line short
+   * of that gate leaves one unspent: the pass refuses the line on a
+   * later command, a fetch fails before the run, the run is killed, or
+   * a short-circuit skips the command. Either way the grant would stand
    * for the next line spelling that command, which would then run on a
-   * nod given to a line that never did, so the refusal, or the end of
-   * the run, spends what the gates did not. A grant a gate already
-   * spent is gone from the ledger and is passed over; the hand-off is
-   * emptied so a second call is a no-op.
+   * nod given to a line that never did, so the executor spends what the
+   * gates did not, however the line ended, except when it is held on a
+   * question still waiting. A grant a gate already spent is gone from
+   * the ledger and is passed over; the hand-off is emptied so a second
+   * call is a no-op.
    *
    * @param sessionId the session the line was judged in.
    * @param handed the line's hand-off.

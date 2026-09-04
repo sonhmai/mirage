@@ -93,6 +93,14 @@ export interface Refused {
   readonly refusal: Refusal | null
 }
 
+/**
+ * Whether a refusal is a question the host has not answered yet, which
+ * holds the line for its retry rather than ending it.
+ */
+export function isPending(refused: Refused): boolean {
+  return refused.refusal?.kind === 'pending'
+}
+
 function norm(virtual: string): string {
   return virtual.replace(/\/+$/, '') || '/'
 }

@@ -49,7 +49,7 @@ import type { ExecutionNode } from '../types.ts'
 import { failureResult, isControlFlowError } from './failure.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { cliEnvNames, fillEnv, fillNames, guestBound, lineNodes } from './fill.ts'
-import { admitLine } from '../node/admission.ts'
+import { admitLine, isPending } from '../node/admission.ts'
 import { runWholeLine } from './line.ts'
 import type { WorkspaceMeta } from './meta.ts'
 import type { Router } from './routing.ts'
@@ -520,58 +520,67 @@ async function runParsedLine(
   // The line is the unit a rule judges, so every command in it is
   // judged before any of it runs. Nothing here replaces the per-command
   // gate below, which still binds each command's own entry gate; this
-  // only stops a line a rule refuses from running half-way.
-  const prejudged = await prejudgeLine(
-    rootNode,
-    effectiveSession,
-    env.registry,
-    env.namespace,
-    callAgentId,
-    handed,
-    reparse,
-    killed,
-  )
-  if (prejudged !== null) {
-    targetSession.lastExitCode = prejudged.exitCode
-    return new ExecuteResult(
-      new Uint8Array(),
-      prejudged.stderr,
-      prejudged.exitCode,
-      prejudged.refusal,
-    )
-  }
-  if (env.sessions.hasManagedEnv) {
-    // The walked set carries stored function bodies and alias
-    // expansions too, so a body invoked by bare name still fills what
-    // it reads.
-    const nodes = lineNodes(rootNode, effectiveSession, reparse)
-    const filled = await fillManaged(
-      nodes,
-      guestBound(nodes, deps.routingDecision ?? null, env.runtimes.bindings),
-      cliEnvNames(nodes, effectiveSession, env.registry),
-      true,
-    )
-    if (filled !== null) return filled
-  }
-  const runBody = (): Promise<[ByteSource | null, IOResult, ExecutionNode]> =>
-    runCommandTree(deps, rootNode, effectiveSession, stdin)
+  // only stops a line a rule refuses from running half-way. The grants
+  // the passes claim for the gates ride one hand-off, swept in the
+  // finally however the line ends: the sweep has to cover everything
+  // from the preflight on, since a fetch that fails or a kill between it
+  // and the run leaves a claimed grant just as unspent as a skipped gate
+  // does.
+  let held = false
   let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
   try {
-    execResult = isLine ? await runWithRecording(runBody) : [await runBody(), []]
-  } catch (err) {
-    // Abort (cancellation) and content drift are control-flow signals
-    // that must propagate, mirroring the Python workspace. Any other
-    // execution failure (timeout, usage error, an unsupported shell
-    // construct) is surfaced as a failed command rather than crashing
-    // the caller.
-    if (isControlFlowError(err)) throw err
-    const failed = failureResult(err)
-    targetSession.lastExitCode = failed.exitCode
-    return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
+    const prejudged = await prejudgeLine(
+      rootNode,
+      effectiveSession,
+      env.registry,
+      env.namespace,
+      callAgentId,
+      handed,
+      reparse,
+      killed,
+    )
+    if (prejudged !== null) {
+      // A question left waiting holds the line for its retry, which has
+      // to find the grants standing; any other refusal ends the line.
+      held = isPending(prejudged)
+      targetSession.lastExitCode = prejudged.exitCode
+      return new ExecuteResult(
+        new Uint8Array(),
+        prejudged.stderr,
+        prejudged.exitCode,
+        prejudged.refusal,
+      )
+    }
+    if (env.sessions.hasManagedEnv) {
+      // The walked set carries stored function bodies and alias
+      // expansions too, so a body invoked by bare name still fills what
+      // it reads.
+      const nodes = lineNodes(rootNode, effectiveSession, reparse)
+      const filled = await fillManaged(
+        nodes,
+        guestBound(nodes, deps.routingDecision ?? null, env.runtimes.bindings),
+        cliEnvNames(nodes, effectiveSession, env.registry),
+        true,
+      )
+      if (filled !== null) return filled
+    }
+    const runBody = (): Promise<[ByteSource | null, IOResult, ExecutionNode]> =>
+      runCommandTree(deps, rootNode, effectiveSession, stdin)
+    try {
+      execResult = isLine ? await runWithRecording(runBody) : [await runBody(), []]
+    } catch (err) {
+      // Abort (cancellation) and content drift are control-flow signals
+      // that must propagate, mirroring the Python workspace. Any other
+      // execution failure (timeout, usage error, an unsupported shell
+      // construct) is surfaced as a failed command rather than crashing
+      // the caller.
+      if (isControlFlowError(err)) throw err
+      const failed = failureResult(err)
+      targetSession.lastExitCode = failed.exitCode
+      return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
+    }
   } finally {
-    // A gate a short-circuit or a conditional skipped spent nothing, and
-    // the grant it was handed must not outlive the line it was given for.
-    await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
+    if (!held) await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
   }
   const [[materialized, io], opRecords] = execResult
   // A record a nested line earned is the line's to report when its own

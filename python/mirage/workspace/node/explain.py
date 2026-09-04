@@ -412,11 +412,13 @@ async def prejudge_line(
     later command, no gate runs behind it, so the pass hands back what
     it claimed (``Decisions.revoke``) and the refusal spends it: left
     standing, the grant would pass the next line spelling that command
-    on a nod given to one that never ran. A question left waiting is
-    not a refusal of that kind: the line is held for its retry, which
-    has to find the grants standing or the human is asked again for
-    what they already allowed. The executor sweeps whatever the run
-    itself never reached once the line ends.
+    on a nod given to one that never ran. The sweep is the executor's
+    (``Decisions.revoke``), and it covers the line from this pass on,
+    whichever way the line ends: a refusal here, a fetch that fails
+    before the run, a kill, or a run that skipped the gate. The one
+    exception is a question left waiting, which holds the line for its
+    retry, and the retry has to find the grants standing or the human
+    is asked again for what they already allowed.
 
     Every command is judged whether or not the session carries a
     document. A coded policy refuses on its own account, and one is
@@ -438,8 +440,8 @@ async def prejudge_line(
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
-        handed (HandOff): the line's hand-off, which the executor
-            sweeps once the line ends.
+        handed (HandOff): the line's hand-off, on which every grant
+            claimed here rides to the executor's sweep.
         agent_id (str): the agent the line is attributed to.
         cancel (asyncio.Event | None): the run's kill channel. This
             pass puts real questions to a host, so it carries it
@@ -485,26 +487,11 @@ async def prejudge_line(
                 # one question per run, not per pass.
                 hand_off=handed)
             if isinstance(answered, Refused):
-                # No gate runs behind a refused line, so nothing would
-                # spend the grants handed to it: the refusal does. A
-                # question left waiting holds the line for its retry
-                # instead, and the retry has to find them standing.
-                if not _pending(answered):
-                    await registry.decisions.revoke(session.session_id, handed)
                 return answered
             # The host answered this one inline. The rest of the line
             # has not been judged yet, so the scan goes on: stopping
             # here let a later command's deny run behind an approval.
     return None
-
-
-def _pending(refused: Refused) -> bool:
-    """Whether a refusal is a question the host has not answered yet.
-
-    Args:
-        refused (Refused): what the gate refused with.
-    """
-    return refused.refusal is not None and refused.refusal.kind == "pending"
 
 
 async def _verdict_refuses(

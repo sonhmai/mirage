@@ -399,6 +399,16 @@ async def admit(
     return Refused(err, code, refusal_of(action))
 
 
+def is_pending(refused: Refused) -> bool:
+    """Whether a refusal is a question the host has not answered yet,
+    which holds the line for its retry rather than ending it.
+
+    Args:
+        refused (Refused): what the gate refused with.
+    """
+    return refused.refusal is not None and refused.refusal.kind == "pending"
+
+
 def _refuse(name: str, reason: str) -> Refused:
     deny = Deny(reason)
     err, code = render_deny(name, deny)

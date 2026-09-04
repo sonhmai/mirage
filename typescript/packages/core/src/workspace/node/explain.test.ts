@@ -13,10 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { z } from 'zod'
 
 import { Outcome, Scope } from '../../policy/index.ts'
 import type { Action, AskHandler, CommandContext, Policy } from '../../policy/index.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
+import { registerSecrets } from '../../secrets/registry.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
@@ -401,6 +403,40 @@ describe('prejudge', () => {
     const ran = await w.execute('cat /data/missing && cat /data/secret.txt', { sessionId: 's' })
     expect(ran.exitCode).toBe(1)
     expect(DEC.decode(ran.stdout)).toBe('')
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+    const again = await w.execute('cat /data/secret.txt', { sessionId: 's' })
+    expect(again.exitCode).toBe(0)
+    expect(DEC.decode(again.stdout)).toBe('s\n')
+    expect(asked).toHaveLength(2)
+  })
+
+  it('sweeps a grant when the line fails before it runs', async () => {
+    // The host allows the cat inline, and then the secret the echo reads
+    // cannot be fetched, so the line fails between the preflight and the
+    // run: no gate runs at all. The sweep covers that stretch too, or the
+    // next cat would run on a nod given to a line that never did.
+    registerSecrets('fake-dead-handoff', z.strictObject({}), () =>
+      Promise.reject(new Error('connection refused')),
+    )
+    const asked: string[] = []
+    const parser = await getTestParser()
+    const w = new Workspace(
+      { '/data': new RAMResource() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        profiles: { r: PROFILE },
+        onAsk: answering(asked, Outcome.ALLOW),
+        env: { TOKEN: { from: 'fake-dead-handoff', ref: 'r' } },
+      },
+    )
+    open.push(w)
+    await w.execute('echo s > /data/secret.txt')
+    w.createSession('s', { profile: 'r' })
+    const ran = await w.execute('cat /data/secret.txt && echo $TOKEN', { sessionId: 's' })
+    expect(ran.exitCode).toBe(1)
+    expect(DEC.decode(ran.stderr)).toBe('TOKEN: cannot fetch from fake-dead-handoff\n')
     expect(asked).toHaveLength(1)
     expect(w.decisions.list('s')).toEqual([])
     const again = await w.execute('cat /data/secret.txt', { sessionId: 's' })

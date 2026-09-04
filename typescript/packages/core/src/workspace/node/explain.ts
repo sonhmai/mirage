@@ -323,11 +323,6 @@ function isJudged(expl: Explanation): boolean {
   return expl.exitCode === 0 || isVerdict(expl)
 }
 
-/** Whether a refusal is a question the host has not answered yet. */
-function pending(refused: Refused): boolean {
-  return refused.refusal?.kind === 'pending'
-}
-
 function isVerdict(expl: Explanation): boolean {
   if (expl.exitCode === 0) return false
   return expl.rule !== null || expl.outcome === Outcome.ALLOW
@@ -392,7 +387,8 @@ export async function prejudgeLine(
   registry: MountRegistry,
   namespace: Namespace | null,
   agentId: string,
-  // The line's hand-off, which the executor sweeps once the line ends.
+  // The line's hand-off, on which every grant claimed here rides to the
+  // executor's sweep.
   handed: HandOff,
   reparse: (line: string) => TSNodeLike,
   // This pass puts real questions to a host, so it carries the run's
@@ -436,14 +432,7 @@ export async function prejudgeLine(
         // runs the line, which spends it: one question per run, not per pass.
         handed,
       )
-      if (!(answered instanceof Admitted)) {
-        // No gate runs behind a refused line, so nothing would spend the
-        // grants handed to it: the refusal does. A question left waiting
-        // holds the line for its retry instead, and the retry has to find
-        // them standing.
-        if (!pending(answered)) await registry.decisions.revoke(session.sessionId, handed)
-        return answered
-      }
+      if (!(answered instanceof Admitted)) return answered
       // The host answered this one inline. The rest of the line has not
       // been judged yet, so the scan goes on: stopping here let a later
       // command's deny run behind an approval.

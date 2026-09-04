@@ -416,6 +416,29 @@ async def test_a_refused_compound_line_is_refused_again_without_asking():
 
 
 @pytest.mark.asyncio
+async def test_a_grant_handed_to_a_refused_line_does_not_outlive_it():
+    # The host allows the cat inline and the pass hands that grant to
+    # the gate, which never runs: the rm behind it is refused first.
+    # Left standing, the grant would pass the next cat of the secret on
+    # a nod given to a line that never ran, so the refusal spends it
+    # and the next cat is a question again.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute("cat /data/secret.txt && rm /data/prod/x.txt",
+                               session_id="s")
+        assert ran.exit_code != 0
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+        again = await ws.execute("cat /data/secret.txt", session_id="s")
+        assert again.exit_code == 0
+        assert again.stdout == b"s\n"
+        assert len(asked) == 2
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_cd_in_a_subshell_moves_the_commands_inside_it(ws):
     # The sibling test pins that the cd does not escape the subshell.
     # This one pins the other half: inside it, the cd still applies, so

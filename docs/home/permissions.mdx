@@ -291,7 +291,11 @@ settles the ask while the line waits, like a tool-approval prompt. A
 `once` grant given that way is consumed by the line that asked, so the
 next identical line asks again; a refusal stands for the agent's
 immediate retry, which is refused from the record without the human
-being asked twice, and is spent by it.
+being asked twice, and is spent by it. A compound line is judged whole
+before any of it runs, and a `once` grant given for one of its commands
+is handed to the run; when a later command is refused instead, nothing
+runs and the refusal spends the grant, so the next line spelling that
+command asks again.
 
 ## Dry runs
 
@@ -325,9 +329,9 @@ and
 [policy_yaml.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/policy_yaml.ts).
 Both tables are pinned the same way.
 
-The ask example runs one guarded line under both kinds of host, a
-scripted `on_ask` answering inline and a ledger answered out of band by
-id, and pins what allow-once, deny and allow-for-the-session each do to
-the line that asked and to the next one:
+The ask example runs one guarded `rm` under both kinds of host: an
+`on_ask` reviewer that allows it once inline, so the same line asks
+again, and a ledger answered out of band by id with a session grant, so
+nothing asks again:
 [ask.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/ask.py),
 [ask.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/ask.ts).

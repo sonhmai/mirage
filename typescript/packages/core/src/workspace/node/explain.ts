@@ -388,6 +388,9 @@ export async function prejudgeLine(
     ])
   }
   if (judged.reduce((n, [, , explained]) => n + explained.length, 0) < 2) return null
+  // The grants on file as the pass begins are the gate's to spend; the
+  // ones added below it are the pass's own, and a refusal hands them back.
+  const before = registry.decisions.list(session.sessionId)
   for (const [redirects, walked, explained] of judged) {
     const targets = redirectPaths(redirects, registry, walked.cwd)
     for (const [index, expl] of explained.entries()) {
@@ -413,7 +416,12 @@ export async function prejudgeLine(
         // runs the line, which spends it: one question per run, not per pass.
         true,
       )
-      if (!(answered instanceof Admitted)) return answered
+      if (!(answered instanceof Admitted)) {
+        // No gate runs behind a refused line, so nothing would spend the
+        // grants handed to it: the refusal does.
+        await registry.decisions.revoke(session.sessionId, before)
+        return answered
+      }
       // The host answered this one inline. The rest of the line has not
       // been judged yet, so the scan goes on: stopping here let a later
       // command's deny run behind an approval.

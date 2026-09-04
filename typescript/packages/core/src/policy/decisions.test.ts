@@ -225,6 +225,24 @@ describe('decisions', () => {
     expect(ledger.list('s')).toEqual([])
   })
 
+  it('asks again once a hand-off is revoked', async () => {
+    // A grant handed off to a line that was then refused is handed back,
+    // and the next identical line is a question again.
+    let asked = 0
+    const allow = (r: Decision): Promise<Decision> => {
+      asked += 1
+      return Promise.resolve({ ...r, outcome: Outcome.ALLOW, scope: Scope.ONCE })
+    }
+    const ledger = new Decisions(null, allow)
+    const before = ledger.list('s')
+    expect(await ledger.resolve(ctx(), ASK, undefined, true)).toBeNull()
+    expect(ledger.list('s')).toHaveLength(1)
+    await ledger.revoke('s', before)
+    expect(ledger.list('s')).toEqual([])
+    expect(await ledger.resolve(ctx(), ASK)).toBeNull()
+    expect(asked).toBe(2)
+  })
+
   it('hands the run signal to the host, so a prompt can be taken down', async () => {
     const seen: (AbortSignal | undefined)[] = []
     const controller = new AbortController()

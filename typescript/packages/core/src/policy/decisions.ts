@@ -299,6 +299,28 @@ export class Decisions {
     return null
   }
 
+  /**
+   * Spend grants handed to a line that was then refused before it ran.
+   *
+   * The hand-off in `resolve` leaves a grant the host gives inline
+   * standing for the gate that runs the line, and that gate spends it.
+   * A pass that judges the whole line and refuses it on a later command
+   * runs no gate at all, so a grant it was handed would stand for the
+   * next line spelling the same command, which would then run on a nod
+   * given to a line that never did. The refusing pass hands back what
+   * it was given, and the refusal spends it the way the run would have.
+   *
+   * @param sessionId the session the line was judged in.
+   * @param since the records on file as the pass began; every ONCE grant
+   *   added after them is spent.
+   */
+  async revoke(sessionId: string, since: readonly Decision[]): Promise<void> {
+    const handed = this.records(sessionId).filter(
+      (r) => r.outcome === Outcome.ALLOW && r.scope === Scope.ONCE && !since.includes(r),
+    )
+    await this.spend(sessionId, handed)
+  }
+
   /** Every ONCE answer standing behind this line, as the ledger holds it now. */
   private onceAnswers(
     sessionId: string,

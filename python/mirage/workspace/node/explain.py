@@ -384,7 +384,12 @@ async def prejudge_line(
     a line that will not run. That admission hands off: a grant the
     host gives inline is left standing for the per-command gate, which
     runs the line and spends it, so a compound line costs the human one
-    question per run rather than one per pass.
+    question per run rather than one per pass. When this pass then
+    refuses the line on a later command, no gate runs behind it, so
+    the pass hands back what it was given (``Decisions.revoke``) and
+    the refusal spends it: left standing, the grant would pass the
+    next line spelling that command on a nod given to one that never
+    ran.
 
     Every command is judged whether or not the session carries a
     document. A coded policy refuses on its own account, and one is
@@ -425,6 +430,10 @@ async def prejudge_line(
                                      agent_id, redirects)))
     if sum(len(explained) for _, _, explained in judged) < 2:
         return None
+    # The grants on file as the pass begins are the gate's to spend; the
+    # ones added below it are the pass's own, and a refusal hands them
+    # back.
+    before = registry.decisions.list(session.session_id)
     for redirects, walked, explained in judged:
         targets = redirect_paths(redirects, registry, walked.cwd)
         for index, expl in enumerate(explained):
@@ -451,6 +460,9 @@ async def prejudge_line(
                 # one question per run, not per pass.
                 hand_off=True)
             if isinstance(answered, Refused):
+                # No gate runs behind a refused line, so nothing would
+                # spend the grants handed to it: the refusal does.
+                await registry.decisions.revoke(session.session_id, before)
                 return answered
             # The host answered this one inline. The rest of the line
             # has not been judged yet, so the scan goes on: stopping

@@ -322,6 +322,30 @@ class Decisions:
                 self._once_answers(ctx.session_id, rules, argv, ctx.cwd))
         return None
 
+    async def revoke(self, session_id: str, since: tuple[Decision,
+                                                         ...]) -> None:
+        """Spend the grants handed to a line that was then refused
+        before it ran.
+
+        The hand-off in :meth:`resolve` leaves a grant the host gives
+        inline standing for the gate that runs the line, and that gate
+        spends it. A pass that judges the whole line and refuses it on
+        a later command runs no gate at all, so a grant it was handed
+        would stand for the next line spelling the same command, which
+        would then run on a nod given to a line that never did. The
+        refusing pass hands back what it was given, and the refusal
+        spends it the way the run would have.
+
+        Args:
+            session_id (str): the session the line was judged in.
+            since (tuple[Decision, ...]): the records on file as the
+                pass began; every ONCE grant added after them is spent.
+        """
+        handed = tuple(r for r in self._records(session_id)
+                       if r.outcome is Outcome.ALLOW and r.scope is Scope.ONCE
+                       and not any(r is s for s in since))
+        await self._spend(session_id, handed)
+
     def _once_answers(
         self,
         session_id: str,

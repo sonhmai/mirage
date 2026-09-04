@@ -257,6 +257,29 @@ async def test_a_hand_off_spends_nothing_for_the_pass_that_follows():
 
 
 @pytest.mark.asyncio
+async def test_a_revoked_hand_off_is_asked_again():
+    """A grant handed off to a line that was then refused is handed
+    back, and the next identical line is a question again."""
+    asked = []
+
+    async def allow(record: Decision) -> Decision:
+        asked.append(record.id)
+        return dataclasses.replace(record,
+                                   outcome=Outcome.ALLOW,
+                                   scope=Scope.ONCE)
+
+    ledger = Decisions(on_ask=allow)
+    ask = Ask("sign-off", rule=RULE)
+    before = ledger.list("s")
+    assert await ledger.resolve(_ctx(), ask, None, True) is None
+    assert len(ledger.list("s")) == 1
+    await ledger.revoke("s", before)
+    assert ledger.list("s") == ()
+    assert await ledger.resolve(_ctx(), ask) is None
+    assert len(asked) == 2
+
+
+@pytest.mark.asyncio
 async def test_a_host_takes_one_argument():
     # The handler is a plain `async def h(record)`, as it was before the
     # wait was bounded. The typescript twin grows an optional signal

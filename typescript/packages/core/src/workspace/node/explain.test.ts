@@ -372,6 +372,24 @@ describe('prejudge', () => {
     }
     expect(await w.fs.readdir('/data')).toContain('/data/a.txt')
   })
+
+  it('spends a grant handed to a line it then refuses', async () => {
+    // The host allows the cat inline and the pass hands that grant to the
+    // gate, which never runs: the rm behind it is refused first. Left
+    // standing, the grant would pass the next cat of the secret on a nod
+    // given to a line that never ran, so the refusal spends it and the
+    // next cat is a question again.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute('cat /data/secret.txt && rm /data/prod/x.txt', { sessionId: 's' })
+    expect(ran.exitCode).not.toBe(0)
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+    const again = await w.execute('cat /data/secret.txt', { sessionId: 's' })
+    expect(again.exitCode).toBe(0)
+    expect(DEC.decode(again.stdout)).toBe('s\n')
+    expect(asked).toHaveLength(2)
+  })
 })
 
 describe('prejudge scope', () => {

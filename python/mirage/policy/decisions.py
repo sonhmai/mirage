@@ -140,6 +140,20 @@ def covers(record: Decision, rule: CommandRule, argv: tuple[str, ...],
     return (record.command, *record.argv) == argv and record.cwd == cwd
 
 
+def lineage(handed: HandOff | None) -> tuple[HandOff, ...]:
+    """A hand-off and every line it was evaluated from, innermost
+    first; empty outside a line.
+
+    Args:
+        handed (HandOff | None): the reading line's hand-off.
+    """
+    out: list[HandOff] = []
+    while handed is not None:
+        out.append(handed)
+        handed = handed.parent
+    return tuple(out)
+
+
 class Decisions:
     """The workspace's decision ledger: turns an Ask into run, refuse or
     pending, and is the host's handle on every question raised and every
@@ -281,9 +295,11 @@ class Decisions:
                 question outlives neither its run's deadline nor a
                 caller's kill.
             handed (HandOff | None): the line's hand-off, None outside a
-                line (a bare chain, a whole line a runtime takes). A
-                grant another live hand-off has claimed is not on offer
-                to this line at all, whichever pass reads it.
+                line (a bare chain). A grant another live hand-off has
+                claimed is not on offer to this line at all, whichever
+                pass reads it, unless that hand-off is one this line
+                was evaluated from: the outer pass claimed it for the
+                words it runs, so it is this line's to spend.
             judging (bool): True for a pass that judges the line on
                 behalf of the one that runs it -- the env pre-pass, and
                 the compound-line pass that judges every command before
@@ -408,7 +424,11 @@ class Decisions:
         its earlier commands before its gate found the grant gone. A
         grant this line claimed is on offer to its gate, which spends
         it, and not to its own judging pass, so a command spelled twice
-        on the line is asked twice.
+        on the line is asked twice. A grant claimed by a line this one
+        was evaluated from is on offer to both, gate and pass alike: the
+        outer pass read into the words it runs and claimed for them,
+        so the inner pass finds the same occurrence answered rather
+        than asking for it again, and the inner gate spends it.
 
         Args:
             session_id (str): the asking session.
@@ -417,9 +437,10 @@ class Decisions:
             judging (bool): whether the reader is a judging pass.
         """
         held = self._records(session_id)
+        own = lineage(handed)
         taken: list[Decision] = []
         for other in self._live.get(session_id, ()):
-            if other is not handed:
+            if not any(other is h for h in own):
                 taken.extend(other.claimed)
         if judging and handed is not None:
             taken.extend(handed.claimed)

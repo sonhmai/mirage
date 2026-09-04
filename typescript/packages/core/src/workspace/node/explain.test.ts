@@ -18,6 +18,10 @@ import { z } from 'zod'
 import { Outcome, Scope } from '../../policy/index.ts'
 import type { Action, AskHandler, CommandContext, Policy } from '../../policy/index.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
+import { Runtime } from '../../runtime/base.ts'
+import { LINE_EXECUTOR, type LineExecutor } from '../../runtime/mixin.ts'
+import type { RunResult } from '../../runtime/types.ts'
+import type { JobConsole } from '../../shell/console/index.ts'
 import { registerSecrets } from '../../secrets/registry.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
@@ -25,10 +29,11 @@ import { parseSessionProfile } from '../../policy/profile.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 const DEC = new TextDecoder()
+const ENC = new TextEncoder()
 
 const PROFILE = parseSessionProfile({
   commands: {
-    allow: ['ls', 'cat', 'git', 'rm', 'mkdir', 'cd', 'echo', 'sleep', 'wait'],
+    allow: ['ls', 'cat', 'git', 'rm', 'mkdir', 'cd', 'echo', 'sleep', 'wait', 'eval'],
     deny: [{ reason: 'production data is protected', commands: { rm: ['/data/prod/*'] } }],
     ask: [
       { reason: 'pushes need sign-off', commands: ['git push'] },
@@ -71,6 +76,22 @@ async function inlineWs(onAsk: AskHandler): Promise<Workspace> {
   await w.execute('echo s > /data/secret.txt')
   w.createSession('s', { profile: 'r' })
   return w
+}
+
+class LineBox extends Runtime implements LineExecutor {
+  readonly [LINE_EXECUTOR] = true as const
+  readonly name = 'sandbox'
+  declare captures: readonly string[]
+  lines: string[] = []
+
+  constructor() {
+    super({ captures: ['*'] })
+  }
+
+  runLine(line: string): Promise<RunResult> {
+    this.lines.push(line)
+    return Promise.resolve({ stdout: ENC.encode(`box:${line}`), stderr: null, exitCode: 0 })
+  }
 }
 
 /** A host answering every question the same way, counting what it was asked. */
@@ -461,6 +482,124 @@ describe('prejudge', () => {
     expect(waited.exitCode).toBe(0)
     expect(asked).toHaveLength(1)
     expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('hands a grant claimed for a nested line to the inner gate', async () => {
+    // The pass reads into a substitution, so the cat inside $( ) is
+    // judged and its grant claimed before the line runs. The inner line
+    // re-enters the executor as a line of its own; with a hand-off
+    // unlinked to the outer one, its gate read that claim as another
+    // line's reservation and asked the human a second time for one run.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute('echo $(cat /data/secret.txt) && ls /data', { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout).startsWith('s\n')).toBe(true)
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('runs a nested line on the answer its outer line was given', async () => {
+    // Out of band: the question is the outer pass's, and the answer has
+    // to reach the gate inside the substitution on the retry.
+    const w = await ws()
+    const line = 'echo $(cat /data/secret.txt) && ls /data'
+    const first = await w.execute(line, { sessionId: 's' })
+    expect(first.exitCode).toBe(126)
+    expect(first.refusal?.kind).toBe('pending')
+    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    const ran = await w.execute(line, { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout).startsWith('s\n')).toBe(true)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('costs a nested line spelled twice two nods and no more', async () => {
+    // The outer pass reads the line eval runs and claims one grant per
+    // spelling. The inner line's own pass then finds both standing for
+    // its two occurrences rather than asking for either again, and its
+    // gates spend them.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute("eval 'cat /data/secret.txt && cat /data/secret.txt' && ls /data", {
+      sessionId: 's',
+    })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout).startsWith('s\ns\n')).toBe(true)
+    expect(asked).toHaveLength(2)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it("keeps a whole line's first answer while its second waits", async () => {
+    // A runtime that takes the line whole has no per-command gate, so
+    // its admission pass is the only reader. Spending there, the cat's
+    // answer was gone by the time the push's question came back, and
+    // every retry asked for the cat again; the answers could never
+    // accumulate to a line that runs.
+    const box = new LineBox()
+    const parser = await getTestParser()
+    const w = new Workspace(
+      { '/data': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        profiles: { r: PROFILE },
+        runtimes: [box, 'vfs'],
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: 'r' })
+    const line = 'cat /data/secret.txt && git push origin main'
+    const first = await w.execute(line, { sessionId: 's' })
+    expect(first.exitCode).toBe(126)
+    expect(first.refusal?.kind).toBe('pending')
+    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    const second = await w.execute(line, { sessionId: 's' })
+    expect(second.exitCode).toBe(126)
+    expect(second.refusal?.kind).toBe('pending')
+    expect(w.decisions.list('s')).toHaveLength(2)
+    expect(box.lines).toEqual([])
+    await w.decisions.answer(second.refusal?.askId ?? '', Outcome.ALLOW)
+    const ran = await w.execute(line, { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(box.lines).toEqual([line])
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('hands a borrow back when the job cannot be submitted', async () => {
+    // The job borrows the line's hand-off before it is submitted, and
+    // its runner hands it back. A submission that fails starts no
+    // runner, so the borrow has to be handed back at the failure, or
+    // the hand-off stays a holder short of release for good and its
+    // grant is neither spent nor on offer to any later line.
+    const asked: string[] = []
+    const parser = await getTestParser()
+    let consoles = 0
+    const w = new Workspace(
+      { '/data': new RAMResource() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        profiles: { r: PROFILE },
+        onAsk: answering(asked, Outcome.ALLOW),
+        consoleFactory: (): JobConsole => {
+          consoles += 1
+          throw new Error('no console')
+        },
+      },
+    )
+    open.push(w)
+    await w.execute('echo s > /data/secret.txt')
+    w.createSession('s', { profile: 'r' })
+    const ran = await w.execute('cat /data/secret.txt & ls /data', { sessionId: 's' })
+    expect(ran.exitCode).not.toBe(0)
+    expect(consoles).toBe(1)
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+    const again = await w.execute('cat /data/secret.txt', { sessionId: 's' })
+    expect(again.exitCode).toBe(0)
+    expect(DEC.decode(again.stdout)).toBe('s\n')
+    expect(asked).toHaveLength(2)
   })
 
   it('needs two answers for a command spelled twice on a line', async () => {

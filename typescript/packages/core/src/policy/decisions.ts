@@ -175,6 +175,16 @@ export function covers(
  *
  * Mirrors the Python Decisions.
  */
+/**
+ * A hand-off and every line it was evaluated from, innermost first;
+ * empty outside a line.
+ */
+export function lineage(handed: HandOff | null): HandOff[] {
+  const out: HandOff[] = []
+  for (let h = handed; h !== null; h = h.parent) out.push(h)
+  return out
+}
+
 export class Decisions {
   private readonly sessions: SessionDecisionsQuery | null
   private readonly onAsk: AskHandler | null
@@ -382,7 +392,11 @@ export class Decisions {
    * commands before its gate found the grant gone. A grant this line
    * claimed is on offer to its gate, which spends it, and not to its
    * own judging pass, so a command spelled twice on the line is asked
-   * twice.
+   * twice. A grant claimed by a line this one was evaluated from is on
+   * offer to both, gate and pass alike: the outer pass read into the
+   * words it runs and claimed for them, so the inner pass finds the
+   * same occurrence answered rather than asking for it again, and the
+   * inner gate spends it.
    */
   private standing(
     sessionId: string,
@@ -390,9 +404,10 @@ export class Decisions {
     judging: boolean,
   ): readonly Decision[] {
     const held = this.records(sessionId)
+    const own = lineage(handed)
     const taken: Decision[] = []
     for (const other of this.live.get(sessionId) ?? []) {
-      if (other !== handed) taken.push(...other.claimed)
+      if (!own.includes(other)) taken.push(...other.claimed)
     }
     if (judging && handed !== null) taken.push(...handed.claimed)
     if (taken.length === 0) return held

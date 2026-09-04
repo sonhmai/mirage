@@ -24,9 +24,13 @@ from mirage.policy import Action, CommandContext, Deny, Policy
 from mirage.policy.match import Outcome
 from mirage.policy.types import Scope
 from mirage.resource.ram import RAMResource
+from mirage.runtime.base import Runtime
+from mirage.runtime.mixin import LineExecutorMixin
+from mirage.runtime.types import RunResult
 from mirage.secrets import registry as secrets_registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
+from mirage.shell.console import JobConsole
 from mirage.types import MountMode
 
 
@@ -40,8 +44,10 @@ async def _dead_fetch(config: _FakeConfig, ref: str) -> ResolvedSecret:
 
 PROFILE = {
     "commands": {
-        "allow":
-        ["ls", "cat", "git", "rm", "mkdir", "cd", "echo", "sleep", "wait"],
+        "allow": [
+            "ls", "cat", "git", "rm", "mkdir", "cd", "echo", "sleep", "wait",
+            "eval"
+        ],
         "deny": [{
             "reason": "production data is protected",
             "commands": {
@@ -623,3 +629,136 @@ async def test_a_one_command_line_is_refused_inside_the_shell(ws):
     assert ran.stdout == (
         b"rm: /data/prod/x.txt: production data is protected\n")
     assert ran.stderr in (b"", None)
+
+
+@pytest.mark.asyncio
+async def test_a_grant_claimed_for_a_nested_line_is_the_inner_gates():
+    # The pass reads into a substitution, so the cat inside $( ) is
+    # judged and its grant claimed before the line runs. The inner line
+    # re-enters the executor as a line of its own; with a hand-off
+    # unlinked to the outer one, its gate read that claim as another
+    # line's reservation and asked the human a second time for one run.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute("echo $(cat /data/secret.txt) && ls /data",
+                               session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout.startswith(b"s\n")
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_nested_line_runs_on_the_answer_its_outer_line_was_given(ws):
+    # Out of band: the question is the outer pass's, and the answer has
+    # to reach the gate inside the substitution on the retry.
+    line = "echo $(cat /data/secret.txt) && ls /data"
+    first = await ws.execute(line, session_id="s")
+    assert first.exit_code == 126
+    assert first.refusal is not None and first.refusal.kind == "pending"
+    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    ran = await ws.execute(line, session_id="s")
+    assert ran.exit_code == 0
+    assert ran.stdout.startswith(b"s\n")
+    assert ws.decisions.list("s") == ()
+
+
+@pytest.mark.asyncio
+async def test_a_nested_line_spelled_twice_costs_two_nods_and_no_more():
+    # The outer pass reads the line eval runs and claims one grant per
+    # spelling. The inner line's own pass then finds both standing for
+    # its two occurrences rather than asking for either again, and its
+    # gates spend them.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute(
+            "eval 'cat /data/secret.txt && cat /data/secret.txt' && ls /data",
+            session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout.startswith(b"s\ns\n")
+        assert len(asked) == 2
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+class _LineBox(Runtime, LineExecutorMixin):
+    name = "sandbox"
+    captures = ("*", )
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    async def run_line(self, line: str, stdin: bytes | None,
+                       env: dict[str, str], cwd: str) -> RunResult:
+        self.lines.append(line)
+        return RunResult(stdout=b"box:" + line.encode(),
+                         stderr=None,
+                         exit_code=0)
+
+
+@pytest.mark.asyncio
+async def test_a_whole_line_keeps_its_first_answer_while_its_second_waits():
+    # A runtime that takes the line whole has no per-command gate, so
+    # its admission pass is the only reader. Spending there, the cat's
+    # answer was gone by the time the push's question came back, and
+    # every retry asked for the cat again; the answers could never
+    # accumulate to a line that runs.
+    box = _LineBox()
+    ws = Workspace({"/data/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   profiles={"r": PROFILE},
+                   runtimes=[box, "vfs"])
+    try:
+        await ws.fs.write("/data/secret.txt", b"s\n")
+        ws.create_session("s", profile="r")
+        line = "cat /data/secret.txt && git push origin main"
+        first = await ws.execute(line, session_id="s")
+        assert first.exit_code == 126
+        assert first.refusal is not None and first.refusal.kind == "pending"
+        await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+        second = await ws.execute(line, session_id="s")
+        assert second.exit_code == 126
+        assert second.refusal is not None and second.refusal.kind == "pending"
+        assert len(ws.decisions.list("s")) == 2
+        assert box.lines == []
+        await ws.decisions.answer(second.refusal.ask_id, Outcome.ALLOW)
+        ran = await ws.execute(line, session_id="s")
+        assert ran.exit_code == 0
+        assert box.lines == [line]
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+def _no_console(job_id: int) -> JobConsole:
+    raise RuntimeError("no console")
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_cannot_be_submitted_hands_its_borrow_back():
+    # The job borrows the line's hand-off before it is submitted, and
+    # its runner hands it back. A submission that fails starts no
+    # runner, so the borrow has to be handed back at the failure, or
+    # the hand-off stays a holder short of release for good and its
+    # grant is neither spent nor on offer to any later line.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ws.job_table._console_factory = _no_console
+        ran = await ws.execute("cat /data/secret.txt & ls /data",
+                               session_id="s")
+        assert ran.exit_code != 0
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+        ws.job_table._console_factory = None
+        again = await ws.execute("cat /data/secret.txt", session_id="s")
+        assert again.exit_code == 0
+        assert again.stdout == b"s\n"
+        assert len(asked) == 2
+    finally:
+        await ws.close()

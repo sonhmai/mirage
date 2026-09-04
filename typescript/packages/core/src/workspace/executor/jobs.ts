@@ -164,14 +164,24 @@ export async function handleBackground(
   if (handed !== null && decisions !== null) decisions.borrow(handed)
   // Non-interactive bash announces nothing on launch ("[1] <pid>" is
   // interactive-only); the job stays discoverable via $! and `jobs`.
-  const job = jobTable.submit({
-    command: cmdStr,
-    run: runBg,
-    abort,
-    cwd: bgSession.cwd,
-    agent: agentId ?? '',
-    sessionId: session.sessionId,
-  })
+  let job: Job
+  try {
+    job = jobTable.submit({
+      command: cmdStr,
+      run: runBg,
+      abort,
+      cwd: bgSession.cwd,
+      agent: agentId ?? '',
+      sessionId: session.sessionId,
+    })
+  } catch (err) {
+    // A submission that fails (a console the table cannot build) starts
+    // no runner, so nothing would ever hand the borrow back: the
+    // hand-off would stay a holder short of release and hide its grants
+    // from every later line.
+    if (handed !== null && decisions !== null) await decisions.revoke(session.sessionId, handed)
+    throw err
+  }
   session.lastBgJobId = job.id
 
   if (right === null) {

@@ -30,7 +30,7 @@ from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.observe.store import ObserverStore
 from mirage.ops import Ops
-from mirage.policy import (AskHandler, Decisions, Explanation,
+from mirage.policy import (AskHandler, Decisions, Explanation, HandOff,
                            PermissionsPolicy, Policies, Policy, PolicyError,
                            ScriptPolicy, SessionProfile)
 from mirage.provision import ProvisionResult
@@ -1039,36 +1039,36 @@ class Workspace:
         await self._dispatcher.apply_io(io, records=records)
 
     @overload
-    async def execute(
-            self,
-            command: str,
-            session_id: str | None = ...,
-            stdin: ByteSource | None = ...,
-            provision: Literal[False] = ...,
-            agent_id: str | None = ...,
-            cwd: str | None = ...,
-            env: dict[str, str] | None = ...,
-            cancel: asyncio.Event | None = ...,
-            record: bool = ...,
-            runtime: str | None = ...,
-            routing_decision: "RouteDecision | None" = ...) -> IOResult:
+    async def execute(self,
+                      command: str,
+                      session_id: str | None = ...,
+                      stdin: ByteSource | None = ...,
+                      provision: Literal[False] = ...,
+                      agent_id: str | None = ...,
+                      cwd: str | None = ...,
+                      env: dict[str, str] | None = ...,
+                      cancel: asyncio.Event | None = ...,
+                      record: bool = ...,
+                      runtime: str | None = ...,
+                      routing_decision: "RouteDecision | None" = ...,
+                      handed: "HandOff | None" = ...) -> IOResult:
         ...
 
     @overload
-    async def execute(
-            self,
-            command: str,
-            session_id: str | None = ...,
-            stdin: ByteSource | None = ...,
-            *,
-            provision: Literal[True],
-            agent_id: str | None = ...,
-            cwd: str | None = ...,
-            env: dict[str, str] | None = ...,
-            cancel: asyncio.Event | None = ...,
-            record: bool = ...,
-            runtime: str | None = ...,
-            routing_decision: "RouteDecision | None" = ...) -> ProvisionResult:
+    async def execute(self,
+                      command: str,
+                      session_id: str | None = ...,
+                      stdin: ByteSource | None = ...,
+                      *,
+                      provision: Literal[True],
+                      agent_id: str | None = ...,
+                      cwd: str | None = ...,
+                      env: dict[str, str] | None = ...,
+                      cancel: asyncio.Event | None = ...,
+                      record: bool = ...,
+                      runtime: str | None = ...,
+                      routing_decision: "RouteDecision | None" = ...,
+                      handed: "HandOff | None" = ...) -> ProvisionResult:
         ...
 
     async def execute(
@@ -1084,6 +1084,7 @@ class Workspace:
         record: bool = True,
         runtime: str | None = None,
         routing_decision: RouteDecision | None = None,
+        handed: HandOff | None = None,
     ) -> IOResult | ProvisionResult:
         """Execute a shell command in the workspace.
 
@@ -1120,7 +1121,10 @@ class Workspace:
             routing_decision: Internal. The typed line's routing decision,
                 forwarded by the executor's nested evals so inner
                 lines never re-route.
+            handed: Internal. The enclosing line's hand-off, forwarded
+                by the executor's nested evals so an inner line spends
+                the grants the outer line's pass claimed for it.
         """
         return await execute_line(self, command, session_id, stdin, provision,
                                   agent_id, cwd, env, cancel, record, runtime,
-                                  routing_decision)
+                                  routing_decision, handed)

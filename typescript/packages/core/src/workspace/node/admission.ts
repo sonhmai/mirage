@@ -495,6 +495,10 @@ async function admitWords(
   reparse: (line: string) => TSNodeLike,
   redirectWords: readonly Word[] = [],
   signal?: AbortSignal,
+  // The line's hand-off and whether this is a judging pass, as `admit`
+  // takes them.
+  handed: HandOff | null = null,
+  judging = false,
 ): Promise<Refused | null> {
   const head = words[0]
   if (head === undefined) return null
@@ -515,6 +519,8 @@ async function admitWords(
     null,
     redirects,
     signal,
+    handed,
+    judging,
   )
   if (!(verdict instanceof Admitted)) return verdict
   if (verdict.scoped) {
@@ -551,6 +557,8 @@ async function admitWords(
             agentId,
             reparse,
             signal,
+            handed,
+            judging,
           )
         : await admitWords(
             inner.argv,
@@ -563,6 +571,8 @@ async function admitWords(
             reparse,
             [],
             signal,
+            handed,
+            judging,
           )
     if (innerRefusal !== null) return innerRefusal
   }
@@ -595,6 +605,15 @@ async function admitWords(
  * account: the words are admitted as typed, which is all a coded
  * policy ever saw. `reparse` parses the text a word runs (`eval`,
  * `sh -c`) the way the line reader parsed the line.
+ *
+ * No gate follows this pass: the runtime runs the line whole, so the
+ * executor calls it as a judging pass over the line's hand-off, on
+ * which every grant it matches is claimed rather than spent, and sweeps
+ * the hand-off when the line ends. A line held on a question still
+ * waiting keeps its earlier answers standing for the retry, exactly as
+ * the compound-line pass does, where spending them here asked the human
+ * again for each on every retry. `handed` is null outside a line (a
+ * bare admission with no run behind it).
  */
 export async function admitLine(
   root: TSNodeLike,
@@ -604,6 +623,8 @@ export async function admitLine(
   agentId: string,
   reparse: (line: string) => TSNodeLike,
   signal?: AbortSignal,
+  handed: HandOff | null = null,
+  judging = false,
 ): Promise<Refused | null> {
   const rules = session.commands
   const home = homeDir(session)
@@ -625,6 +646,8 @@ export async function admitLine(
       reparse,
       statementRedirects(node, home),
       signal,
+      handed,
+      judging,
     )
     if (refusal !== null) return refusal
   }

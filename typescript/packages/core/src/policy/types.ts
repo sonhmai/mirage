@@ -252,11 +252,24 @@ export interface Decision {
  * cannot both run on one nod; the run spends each grant at the gate it
  * was claimed for, and whatever the run never reaches is spent when the
  * line ends (`Decisions.revoke`). Compared by identity, because the
- * hand-off is the line. Mirrors the Python HandOff.
+ * hand-off is the line.
+ *
+ * A line the executor evaluates from inside another (`$( )`, `eval`,
+ * `source`, `xargs`) is a line of its own with a hand-off of its own,
+ * linked to the outer line's through `parent`: the outer pass reads
+ * into the words it runs, so the grants it claimed for them are the
+ * inner line's to spend, and its gates and passes read them as their
+ * own line's. Only what the inner line claims itself is hidden from its
+ * own pass. Mirrors the Python HandOff.
  */
 export interface HandOff {
   /** The grants matched so far, in the order the commands were judged. */
   readonly claimed: Decision[]
+  /**
+   * The hand-off of the line this one was evaluated from, null for a
+   * typed line.
+   */
+  readonly parent: HandOff | null
   /**
    * How many runs still own the claims: the line itself, plus every
    * background job it launched, each of which reaches its gates after

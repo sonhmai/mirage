@@ -514,3 +514,44 @@ async def test_records_are_listed_per_session_and_across_them():
     assert len(ledger.list("a")) == 1
     assert ledger.list("a")[0].session_id == "a"
     assert ledger.list("nobody") == ()
+
+
+@pytest.mark.asyncio
+async def test_a_nested_line_spends_what_its_parents_pass_claimed():
+    """A line evaluated from inside another reads the outer line's
+    claims as its own: its pass finds the occurrence answered instead
+    of asking again, its gate spends it, and only what it claims itself
+    is hidden from its own pass. Every other line still sees none of
+    it."""
+    asked = []
+
+    async def allow(record: Decision) -> Decision:
+        asked.append(record.id)
+        return dataclasses.replace(record,
+                                   outcome=Outcome.ALLOW,
+                                   scope=Scope.ONCE)
+
+    ledger = Decisions(on_ask=allow)
+    ask = Ask("sign-off", rule=RULE)
+    outer = HandOff()
+    assert await ledger.resolve(_ctx(), ask, None, outer, True) is None
+    assert len(asked) == 1
+    inner = HandOff(parent=outer)
+    # The inner pass finds the outer claim standing for this occurrence.
+    assert await ledger.resolve(_ctx(), ask, None, inner, True) is None
+    assert len(asked) == 1
+    # A second spelling on the inner line is a question of its own.
+    assert await ledger.resolve(_ctx(), ask, None, inner, True) is None
+    assert len(asked) == 2
+    # A line outside the lineage sees neither claim.
+    stranger = HandOff()
+    assert await ledger.resolve(_ctx(), ask, None, stranger, True) is None
+    assert len(asked) == 3
+    # The inner gates spend both without asking.
+    assert await ledger.resolve(_ctx(), ask, None, inner) is None
+    assert await ledger.resolve(_ctx(), ask, None, inner) is None
+    assert len(asked) == 3
+    await ledger.revoke("s", inner)
+    await ledger.revoke("s", outer)
+    await ledger.revoke("s", stranger)
+    assert ledger.list("s") == ()

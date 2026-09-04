@@ -312,6 +312,14 @@ class HandOff:
     when the line ends (``Decisions.revoke``). Compared by identity,
     because the hand-off is the line.
 
+    A line the executor evaluates from inside another (``$( )``,
+    ``eval``, ``source``, ``xargs``) is a line of its own with a
+    hand-off of its own, linked to the outer line's through ``parent``:
+    the outer pass reads into the words it runs, so the grants it
+    claimed for them are the inner line's to spend, and its gates and
+    passes read them as their own line's. Only what the inner line
+    claims itself is hidden from its own pass.
+
     Args:
         claimed (list[Decision]): the grants matched so far, in the
             order the commands were judged.
@@ -319,10 +327,13 @@ class HandOff:
             itself, plus every background job it launched, each of
             which reaches its gates after the line has returned. The
             last holder to finish spends what the gates did not.
+        parent (HandOff | None): the hand-off of the line this one was
+            evaluated from, None for a typed line.
     """
 
     claimed: list[Decision] = field(default_factory=list)
     holders: int = 1
+    parent: "HandOff | None" = None
 
 
 @dataclass(frozen=True, slots=True)

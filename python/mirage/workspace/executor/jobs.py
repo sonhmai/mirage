@@ -138,11 +138,20 @@ async def handle_background(
         decisions.borrow(handed)
     # Non-interactive bash announces nothing on launch ("[1] <pid>" is
     # interactive-only); the job stays discoverable via $! and `jobs`.
-    job = job_table.submit(command=cmd_str,
-                           run=_run_bg,
-                           cwd=bg_session.cwd,
-                           agent=agent_id or "",
-                           session_id=session.session_id)
+    try:
+        job = job_table.submit(command=cmd_str,
+                               run=_run_bg,
+                               cwd=bg_session.cwd,
+                               agent=agent_id or "",
+                               session_id=session.session_id)
+    except Exception:
+        # A submission that fails (a console the table cannot build)
+        # starts no runner, so nothing would ever hand the borrow back:
+        # the hand-off would stay a holder short of release and hide
+        # its grants from every later line.
+        if handed is not None and decisions is not None:
+            await decisions.revoke(session.session_id, handed)
+        raise
     session.last_bg_job_id = job.id
 
     if right is None:

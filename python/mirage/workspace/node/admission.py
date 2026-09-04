@@ -507,6 +507,8 @@ async def _admit_words(
     rules: AdmissionRules | None,
     redirect_words: tuple[Word, ...] = (),
     cancel: asyncio.Event | None = None,
+    handed: HandOff | None = None,
+    judging: bool = False,
 ) -> Refused | None:
     """Admit one command of a whole line on the words the gate read,
     then whatever lines the command runs in turn.
@@ -524,6 +526,10 @@ async def _admit_words(
         redirect_words (tuple[Word, ...]): the statement's redirect
             targets, as the gate reads them.
         cancel (asyncio.Event | None): the run's kill channel.
+        handed (HandOff | None): the line's hand-off, as ``admit`` takes
+            it.
+        judging (bool): whether this is a judging pass, as ``admit``
+            takes it.
     """
     head = words[0]
     if head.text is None and has_rules(rules):
@@ -541,7 +547,9 @@ async def _admit_words(
                          namespace,
                          agent_id,
                          redirects=redirects,
-                         cancel=cancel)
+                         cancel=cancel,
+                         handed=handed,
+                         judging=judging)
     if isinstance(action, Refused):
         return action
     if action.scoped:
@@ -569,7 +577,8 @@ async def _admit_words(
             continue
         if inner.line is not None:
             refusal = await admit_line(parse(inner.line), session, registry,
-                                       namespace, agent_id, cancel)
+                                       namespace, agent_id, cancel, handed,
+                                       judging)
         else:
             refusal = await _admit_words(list(inner.argv),
                                          inner.open,
@@ -578,7 +587,9 @@ async def _admit_words(
                                          namespace,
                                          agent_id,
                                          rules,
-                                         cancel=cancel)
+                                         cancel=cancel,
+                                         handed=handed,
+                                         judging=judging)
         if refusal is not None:
             return refusal
     return None
@@ -591,6 +602,8 @@ async def admit_line(
     namespace: Namespace | None,
     agent_id: str = "",
     cancel: asyncio.Event | None = None,
+    handed: HandOff | None = None,
+    judging: bool = False,
 ) -> Refused | None:
     """Admit every command of a line a runtime takes whole.
 
@@ -619,6 +632,14 @@ async def admit_line(
     refused on this account: the words are admitted as typed, which is
     all a coded policy ever saw.
 
+    No gate follows this pass: the runtime runs the line whole, so the
+    executor calls it as a judging pass over the line's hand-off, on
+    which every grant it matches is claimed rather than spent, and
+    sweeps the hand-off when the line ends. A line held on a question
+    still waiting keeps its earlier answers standing for the retry,
+    exactly as the compound-line pass does, where spending them here
+    asked the human again for each on every retry.
+
     Args:
         ast (Any): the parsed tree-sitter root node.
         session (Session): the session running the line.
@@ -627,6 +648,10 @@ async def admit_line(
         namespace (Namespace | None): the link table.
         agent_id (str): the agent the line is attributed to.
         cancel (asyncio.Event | None): the run's kill channel.
+        handed (HandOff | None): the line's hand-off, None outside a
+            line (a bare admission with no run behind it).
+        judging (bool): True for the executor's pass over a line a
+            runtime takes whole, which claims on ``handed``.
     """
     rules = session.commands
     home = home_dir(session)
@@ -646,7 +671,9 @@ async def admit_line(
                                      rules,
                                      redirect_words=statement_redirects(
                                          node, home),
-                                     cancel=cancel)
+                                     cancel=cancel,
+                                     handed=handed,
+                                     judging=judging)
         if refusal is not None:
             return refusal
     return None

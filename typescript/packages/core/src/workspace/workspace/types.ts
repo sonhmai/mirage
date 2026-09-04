@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { HandOff } from '../../policy/types.ts'
 import type { CacheConfig } from '../../cache/file/config.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
 import type { CLISpec } from '../../commands/cli/types.ts'
@@ -268,4 +269,10 @@ export interface ExecuteOptions {
    * evals so inner lines never re-route.
    */
   routingDecision?: RouteDecision
+  /**
+   * @internal The enclosing line's hand-off, forwarded to nested evals
+   * so an inner line spends the grants the outer line's pass claimed
+   * for it.
+   */
+  handed?: HandOff
 }

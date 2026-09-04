@@ -260,6 +260,13 @@ async function runLine(
 
   const nested: NestedRefusal = { latest: null }
 
+  // The line's hand-off: the grants its judging passes claim for its
+  // gates, which the gates spend from and the line's end sweeps. A
+  // nested evaluation is handed it as the parent of its own, so what
+  // this line's pass claimed for the words a command runs is spent by
+  // the line that runs them.
+  const handed: HandOff = { claimed: [], holders: 1, parent: options.handed ?? null }
+
   const executeFn: ExecuteFn = async (cmd, opts) => {
     // The executor's internal evals ($(), eval, source, xargs) are
     // never a typed line: they must not record a history entry or open
@@ -276,6 +283,7 @@ async function runLine(
     // Nested lines never re-route: the evaluator's inner lines keep
     // the typed line's decision (runtime argument, policy, or scripts).
     if (routingDecision !== null) innerOpts.routingDecision = routingDecision
+    innerOpts.handed = handed
     // `command NAME` re-runs the inner line and must forward the pipe
     // stdin so `... | command cat` filters the upstream output; the same
     // path carries `echo hi | bash -c 'cat'` into the inner line.
@@ -292,9 +300,6 @@ async function runLine(
     })
   }
 
-  // The line's hand-off: the grants its judging passes claim for its
-  // gates, which the gates spend from and the line's end sweeps.
-  const handed: HandOff = { claimed: [], holders: 1 }
   const deps = {
     dispatch,
     handed,
@@ -450,88 +455,98 @@ async function runParsedLine(
       return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
     }
   }
-  if (lineRuntime?.runLine !== undefined) {
-    // A whole line is a command like any other: the same visibility and
-    // admission gate as the tree, per parsed command, before the
-    // runtime sees a byte of it.
-    const refused = await admitLine(
-      rootNode,
-      effectiveSession,
-      env.registry,
-      env.namespace,
-      callAgentId,
-      reparse,
-      killed,
-    )
-    if (refused !== null) {
-      targetSession.lastExitCode = refused.exitCode
+  let held = false
+  let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
+  try {
+    if (lineRuntime?.runLine !== undefined) {
+      // A whole line is a command like any other: the same visibility and
+      // admission gate as the tree, per parsed command, before the
+      // runtime sees a byte of it. No gate follows, so the pass claims on
+      // the hand-off and the sweep below spends what it claimed, or keeps
+      // it for the retry of a line held on a question.
+      const refused = await admitLine(
+        rootNode,
+        effectiveSession,
+        env.registry,
+        env.namespace,
+        callAgentId,
+        reparse,
+        killed,
+        handed,
+        true,
+      )
+      if (refused !== null) {
+        held = isPending(refused)
+        targetSession.lastExitCode = refused.exitCode
+        if (isLine) {
+          await env.observer.logExecution(
+            command,
+            new IOResult({
+              exitCode: refused.exitCode,
+              stderr: refused.stderr,
+              refusal: refused.refusal,
+            }),
+            [],
+            callAgentId,
+            targetSession.sessionId,
+            effectiveSession.cwd,
+          )
+        }
+        return new ExecuteResult(
+          new Uint8Array(),
+          refused.stderr,
+          refused.exitCode,
+          refused.refusal,
+        )
+      }
+      if (env.sessions.hasManagedEnv) {
+        // A whole-line program may read any name, so the walk is not
+        // consulted, and admitLine above already ran the real gate.
+        const filled = await fillManaged([rootNode], true, new Set(), false)
+        if (filled !== null) return filled
+      }
+      const result = await runWholeLine(
+        lineRuntime,
+        command,
+        stdin,
+        effectiveSession,
+        env.registry.allMounts(),
+        env.registry.policies,
+        () => env.invalidateAllAfterRemote(),
+      )
+      targetSession.lastExitCode = result.exitCode
       if (isLine) {
+        const lineIo = new IOResult({
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          refusal: result.refusal,
+          ...(result.stderr !== null ? { stderr: result.stderr } : {}),
+        })
         await env.observer.logExecution(
           command,
-          new IOResult({
-            exitCode: refused.exitCode,
-            stderr: refused.stderr,
-            refusal: refused.refusal,
-          }),
+          lineIo,
           [],
           callAgentId,
           targetSession.sessionId,
           effectiveSession.cwd,
         )
       }
-      return new ExecuteResult(new Uint8Array(), refused.stderr, refused.exitCode, refused.refusal)
-    }
-    if (env.sessions.hasManagedEnv) {
-      // A whole-line program may read any name, so the walk is not
-      // consulted, and admitLine above already ran the real gate.
-      const filled = await fillManaged([rootNode], true, new Set(), false)
-      if (filled !== null) return filled
-    }
-    const result = await runWholeLine(
-      lineRuntime,
-      command,
-      stdin,
-      effectiveSession,
-      env.registry.allMounts(),
-      env.registry.policies,
-      () => env.invalidateAllAfterRemote(),
-    )
-    targetSession.lastExitCode = result.exitCode
-    if (isLine) {
-      const lineIo = new IOResult({
-        exitCode: result.exitCode,
-        stdout: result.stdout,
-        refusal: result.refusal,
-        ...(result.stderr !== null ? { stderr: result.stderr } : {}),
-      })
-      await env.observer.logExecution(
-        command,
-        lineIo,
-        [],
-        callAgentId,
-        targetSession.sessionId,
-        effectiveSession.cwd,
+      return new ExecuteResult(
+        result.stdout,
+        result.stderr ?? new Uint8Array(),
+        result.exitCode,
+        result.refusal,
       )
     }
-    return new ExecuteResult(
-      result.stdout,
-      result.stderr ?? new Uint8Array(),
-      result.exitCode,
-      result.refusal,
-    )
-  }
-  // The line is the unit a rule judges, so every command in it is
-  // judged before any of it runs. Nothing here replaces the per-command
-  // gate below, which still binds each command's own entry gate; this
-  // only stops a line a rule refuses from running half-way. The grants
-  // the passes claim for the gates ride one hand-off, swept in the
-  // finally however the line ends: the sweep has to cover everything
-  // from the preflight on, since a fetch that fails or a kill between it
-  // and the run leaves a claimed grant just as unspent as a skipped gate
-  // does.
-  let held = false
-  let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
-  try {
+    // The line is the unit a rule judges, so every command in it is
+    // judged before any of it runs. Nothing here replaces the per-command
+    // gate below, which still binds each command's own entry gate; this
+    // only stops a line a rule refuses from running half-way. The grants
+    // the passes claim for the gates ride the hand-off, swept in the
+    // finally however the line ends: the sweep has to cover everything
+    // from the preflight on, since a fetch that fails or a kill between it
+    // and the run leaves a claimed grant just as unspent as a skipped gate
+    // does.
     const prejudged = await prejudgeLine(
       rootNode,
       effectiveSession,

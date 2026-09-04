@@ -91,6 +91,7 @@ async def recurse(
     routing_decision: RouteDecision | None,
     agent_id: str | None,
     nested: NestedRefusal,
+    handed: HandOff,
     cmd: str,
     **opts: Any,
 ) -> Any:
@@ -100,7 +101,10 @@ async def recurse(
     its own recording context (GNU: history is appended by the line
     reader, the evaluator can't touch it). It inherits the typed
     line's routing decision and agent: nested lines never re-route,
-    and an approval they raise is the outer line's agent's.
+    and an approval they raise is the outer line's agent's. It inherits
+    the line's hand-off too, as the parent of its own: the outer pass
+    reads into the words a command runs, so the grants it claimed for
+    them are the inner line's to spend.
 
     Args:
         ws: the workspace hosting the outer line.
@@ -110,6 +114,7 @@ async def recurse(
         agent_id (str | None): the typed line's agent, inherited.
         nested (NestedRefusal): where the record a nested line earned
             is kept for the typed line.
+        handed (HandOff): the outer line's hand-off.
         cmd (str): the nested command line.
     """
     io = await ws.execute(cmd,
@@ -117,6 +122,7 @@ async def recurse(
                           record=False,
                           routing_decision=routing_decision,
                           agent_id=agent_id,
+                          handed=handed,
                           **opts)
     if isinstance(io, IOResult) and io.refusal is not None:
         nested.latest = io.refusal
@@ -152,6 +158,7 @@ async def execute_line(
     record: bool,
     runtime: str | None,
     routing_decision: RouteDecision | None,
+    parent: HandOff | None = None,
 ) -> IOResult | ProvisionResult:
     """The body of ``Workspace.execute``; see its docstring for the
     argument contract.
@@ -165,6 +172,9 @@ async def execute_line(
 
     Args:
         ws: the workspace the line runs in.
+        parent (HandOff | None): the enclosing line's hand-off when
+            this line is one of its nested evaluations, None for a
+            typed line.
     """
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
@@ -227,7 +237,14 @@ async def execute_line(
                                            or "", ws._route_policy,
                                            routing_decision)
         nested = NestedRefusal()
-        exec_recursion = partial(recurse, ws, cancel, decision, agent, nested)
+        # The line's hand-off: the grants its judging passes claim for
+        # its gates, which the gates spend from and the line's end
+        # sweeps. A nested evaluation is handed it as the parent of its
+        # own, so what this line's pass claimed for the words a command
+        # runs is spent by the line that runs them.
+        handed = HandOff(parent=parent)
+        exec_recursion = partial(recurse, ws, cancel, decision, agent, nested,
+                                 handed)
         if provision:
             name = command_name(command)
             guard = resolve_limit(name) if name else None
@@ -240,57 +257,62 @@ async def execute_line(
                                ast,
                                effective_session,
                                agent_id=agent or ""), timeout, name)
-        line_runtime = ws._runtimes.whole_line(ast, decision)
-        if line_runtime is not None:
-            # A whole line is a command like any other: the same
-            # visibility and admission gate as the tree, per parsed
-            # command, before the runtime sees a byte of it.
-            refused = await admit_line(ast, effective_session, ws._registry,
-                                       ws._namespace, agent or "", cancel)
-            if refused is not None:
-                io = IOResult(exit_code=refused.exit_code,
-                              stderr=refused.stderr,
-                              refusal=refused.refusal)
-                session.last_exit_code = io.exit_code
-                return io
-            if ws._has_managed_env:
-                # Filled only after the line is admitted (a refused
-                # line must never reach a secret store) and before the
-                # runtime snapshots the env; a whole-line program may
-                # read any name, so the walk is not consulted. A dry
-                # run (provision) returned above and never fetches. A
-                # SecretsError raises through to the generic fold
-                # below: the line exits 1 and never runs.
-                whole_names = fill_names(effective_session, [ast],
-                                         whole=True,
-                                         cli_env_names=frozenset())
-                # Names first, and the declarations only if there are
-                # any: both arguments would otherwise be evaluated, so
-                # a session with nothing pending (a profile hiding
-                # every managed name) still read a bootstrap source.
-                # The TypeScript twin shares one helper with the
-                # per-command path and skipped this by construction.
-                if whole_names:
-                    await fill_env(effective_session, whole_names, await
-                                   ws._secret_sources())
-            io = await run_whole_line(
-                line_runtime, command, stdin, effective_session,
-                ws._registry.mounts(), ws._registry.policies,
-                ws._dispatcher.invalidate_all_after_remote)
-            session.last_exit_code = io.exit_code
-            return io
-        # The line is the unit a rule judges, so every command in it is
-        # judged before any of it runs. Nothing here replaces the
-        # per-command gate below, which still binds each command's own
-        # entry gate; this only stops a line a rule refuses from
-        # running half-way. The grants the passes below claim for the
-        # gates ride one hand-off, swept in the finally however the line
-        # ends: the sweep has to cover everything from the preflight on,
-        # since a fetch that fails or a kill between it and the run
-        # leaves a claimed grant just as unspent as a skipped gate does.
-        handed = HandOff()
         held = False
         try:
+            line_runtime = ws._runtimes.whole_line(ast, decision)
+            if line_runtime is not None:
+                # A whole line is a command like any other: the same
+                # visibility and admission gate as the tree, per parsed
+                # command, before the runtime sees a byte of it. No gate
+                # follows, so the pass claims on the hand-off and the
+                # sweep below spends what it claimed, or keeps it for
+                # the retry of a line held on a question.
+                refused = await admit_line(ast, effective_session,
+                                           ws._registry, ws._namespace, agent
+                                           or "", cancel, handed, True)
+                if refused is not None:
+                    held = is_pending(refused)
+                    io = IOResult(exit_code=refused.exit_code,
+                                  stderr=refused.stderr,
+                                  refusal=refused.refusal)
+                    session.last_exit_code = io.exit_code
+                    return io
+                if ws._has_managed_env:
+                    # Filled only after the line is admitted (a refused
+                    # line must never reach a secret store) and before the
+                    # runtime snapshots the env; a whole-line program may
+                    # read any name, so the walk is not consulted. A dry
+                    # run (provision) returned above and never fetches. A
+                    # SecretsError raises through to the generic fold
+                    # below: the line exits 1 and never runs.
+                    whole_names = fill_names(effective_session, [ast],
+                                             whole=True,
+                                             cli_env_names=frozenset())
+                    # Names first, and the declarations only if there are
+                    # any: both arguments would otherwise be evaluated, so
+                    # a session with nothing pending (a profile hiding
+                    # every managed name) still read a bootstrap source.
+                    # The TypeScript twin shares one helper with the
+                    # per-command path and skipped this by construction.
+                    if whole_names:
+                        await fill_env(effective_session, whole_names, await
+                                       ws._secret_sources())
+                io = await run_whole_line(
+                    line_runtime, command, stdin, effective_session,
+                    ws._registry.mounts(), ws._registry.policies,
+                    ws._dispatcher.invalidate_all_after_remote)
+                session.last_exit_code = io.exit_code
+                return io
+            # The line is the unit a rule judges, so every command in it is
+            # judged before any of it runs. Nothing here replaces the
+            # per-command gate below, which still binds each command's own
+            # entry gate; this only stops a line a rule refuses from
+            # running half-way. The grants the passes claim for the gates
+            # ride the hand-off, swept in the finally however the line
+            # ends: the sweep has to cover everything from the preflight
+            # on, since a fetch that fails or a kill between it and the
+            # run leaves a claimed grant just as unspent as a skipped gate
+            # does.
             refused = await prejudge_line(ast, effective_session, ws._registry,
                                           ws._namespace, handed, agent or "",
                                           cancel)

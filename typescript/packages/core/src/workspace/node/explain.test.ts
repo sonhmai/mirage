@@ -28,7 +28,7 @@ const DEC = new TextDecoder()
 
 const PROFILE = parseSessionProfile({
   commands: {
-    allow: ['ls', 'cat', 'git', 'rm', 'mkdir', 'cd', 'echo'],
+    allow: ['ls', 'cat', 'git', 'rm', 'mkdir', 'cd', 'echo', 'sleep', 'wait'],
     deny: [{ reason: 'production data is protected', commands: { rm: ['/data/prod/*'] } }],
     ask: [
       { reason: 'pushes need sign-off', commands: ['git push'] },
@@ -443,6 +443,24 @@ describe('prejudge', () => {
     expect(again.exitCode).toBe(0)
     expect(DEC.decode(again.stdout)).toBe('s\n')
     expect(asked).toHaveLength(2)
+  })
+
+  it('leaves a grant with a background job until the job ends', async () => {
+    // The line returns as soon as the job is launched, long before the
+    // job's cat reaches its gate. The grant the host gave the line is the
+    // job's to spend, so the line's end leaves it standing and the job's
+    // end sweeps it; revoked with the line, the cat would have asked
+    // again from inside the job.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute('sleep 0.2 && cat /data/secret.txt &', { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toHaveLength(1)
+    const waited = await w.execute('wait', { sessionId: 's' })
+    expect(waited.exitCode).toBe(0)
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
   })
 
   it('needs two answers for a command spelled twice on a line', async () => {

@@ -346,7 +346,8 @@ async def execute_node(
     # ── program (root / semicolons) ─────────────
     if kind == NodeKind.PROGRAM:
         return await execute_program(stream, node, session, stdin, cs,
-                                     job_table, agent_id, dispatch)
+                                     job_table, agent_id, dispatch, handed,
+                                     registry.decisions)
 
     # ── command ─────────────────────────────────
     if kind == NodeKind.COMMAND:
@@ -469,7 +470,8 @@ async def execute_node(
                               sink=sink,
                               handed=handed)
         return await handle_subshell(sub_recurse, list(node.children), session,
-                                     stdin, cs, sub_table, agent_id, dispatch)
+                                     stdin, cs, sub_table, agent_id, dispatch,
+                                     handed, registry.decisions)
 
     # ── arithmetic command ((( ... ))) ──────────
     if (kind == NodeKind.COMPOUND and node.children

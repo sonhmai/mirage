@@ -21,6 +21,8 @@ from mirage.commands.errors import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
+from mirage.policy.decisions import Decisions
+from mirage.policy.types import HandOff
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
@@ -65,8 +67,16 @@ async def handle_background(
     agent_id: str | None,
     stdin: ByteSource | None = None,
     call_stack=None,
+    handed: HandOff | None = None,
+    decisions: Decisions | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Run left side in background."""
+    """Run left side in background.
+
+    ``handed`` and ``decisions`` are the line's hand-off and the ledger
+    it lives in: the job borrows the hand-off before the line returns,
+    since its gates run after that, and hands it back when it ends, so
+    the grants the line was given are spent by whichever finishes last.
+    """
     bg_session = session.fork()
 
     async def _run_bg(job: Job) -> tuple[IOResult, ExecutionNode]:
@@ -119,9 +129,13 @@ async def handle_background(
             return io, exec_node
         finally:
             reset_current_session(token)
+            if handed is not None and decisions is not None:
+                await decisions.revoke(session.session_id, handed)
 
     cmd_str = get_text(left) if hasattr(left, 'text') else str(left)
 
+    if handed is not None and decisions is not None:
+        decisions.borrow(handed)
     # Non-interactive bash announces nothing on launch ("[1] <pid>" is
     # interactive-only); the job stays discoverable via $! and `jobs`.
     job = job_table.submit(command=cmd_str,

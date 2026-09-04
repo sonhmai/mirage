@@ -299,7 +299,10 @@ next line spelling that command asks again. A grant the run never
 reaches (a `&&` that short-circuited before the command) is spent when
 the line ends, for the same reason. A command spelled twice on one line
 is two questions: one `once` grant answers one spelling, and a grant one
-line has claimed is not on offer to a line judged at the same time.
+line has claimed is not on offer to a line judged at the same time. A
+grant given to a line that launches a background job stays with the job
+until the job ends, since its commands reach their gates after the line
+has returned.
 
 ## Dry runs
 

@@ -24,6 +24,8 @@ import { runWithSession } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { mergeSignals } from '../abort.ts'
 import type { SessionView } from '../../ops/types.ts'
+import type { Decisions } from '../../policy/decisions.ts'
+import type { HandOff } from '../../policy/types.ts'
 import type { Session } from '../session/session.ts'
 import { scanOptions } from './builtins/getopt.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -77,6 +79,12 @@ export async function handleBackground(
   agentId: string | null,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
+  // The line's hand-off and the ledger it lives in: the job borrows the
+  // hand-off before the line returns, since its gates run after that,
+  // and hands it back when it ends, so the grants the line was given
+  // are spent by whichever finishes last.
+  handed: HandOff | null = null,
+  decisions: Decisions | null = null,
 ): Promise<JobHandlerResult> {
   const bgSession = session.fork()
 
@@ -145,10 +153,15 @@ export async function handleBackground(
     // did before ambient sessions existed: a job that leaks into its
     // own nested eval is narrower than a job that leaks into the whole
     // line.
-    return asyncContextIsolatesTasks ? runWithSession(bgSession, body) : body()
+    try {
+      return await (asyncContextIsolatesTasks ? runWithSession(bgSession, body) : body())
+    } finally {
+      if (handed !== null && decisions !== null) await decisions.revoke(session.sessionId, handed)
+    }
   }
 
   const cmdStr = left.text
+  if (handed !== null && decisions !== null) decisions.borrow(handed)
   // Non-interactive bash announces nothing on launch ("[1] <pid>" is
   // interactive-only); the job stays discoverable via $! and `jobs`.
   const job = jobTable.submit({

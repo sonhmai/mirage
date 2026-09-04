@@ -40,7 +40,8 @@ async def _dead_fetch(config: _FakeConfig, ref: str) -> ResolvedSecret:
 
 PROFILE = {
     "commands": {
-        "allow": ["ls", "cat", "git", "rm", "mkdir", "cd", "echo"],
+        "allow":
+        ["ls", "cat", "git", "rm", "mkdir", "cd", "echo", "sleep", "wait"],
         "deny": [{
             "reason": "production data is protected",
             "commands": {
@@ -506,6 +507,29 @@ async def test_a_grant_does_not_outlive_a_line_that_fails_before_it_runs(
         assert again.exit_code == 0
         assert again.stdout == b"s\n"
         assert len(asked) == 2
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_grant_stays_with_a_background_job_until_it_ends():
+    # The line returns as soon as the job is launched, long before the
+    # job's cat reaches its gate. The grant the host gave the line is
+    # the job's to spend, so the line's end leaves it standing and the
+    # job's end sweeps it; revoked with the line, the cat would have
+    # asked again from inside the job.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute("sleep 0.2 && cat /data/secret.txt &",
+                               session_id="s")
+        assert ran.exit_code == 0
+        assert len(asked) == 1
+        assert len(ws.decisions.list("s")) == 1
+        waited = await ws.execute("wait", session_id="s")
+        assert waited.exit_code == 0
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
     finally:
         await ws.close()
 

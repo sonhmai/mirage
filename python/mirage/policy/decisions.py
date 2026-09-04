@@ -340,8 +340,22 @@ class Decisions:
             live.append(handed)
         return None
 
+    def borrow(self, handed: HandOff) -> None:
+        """Add a holder to a hand-off: a background job the line
+        launched, whose gates run after the line has returned.
+
+        The job's ``revoke`` hands the hand-off back; the claims are
+        spent by whichever holder finishes last, so a job that reaches
+        its gate after the line ended still finds its grant.
+
+        Args:
+            handed (HandOff): the line's hand-off.
+        """
+        handed.holders += 1
+
     async def revoke(self, session_id: str, handed: HandOff) -> None:
-        """Spend every grant claimed on a hand-off that no gate spent.
+        """Spend every grant claimed on a hand-off that no gate spent,
+        once its last holder is done with it.
 
         The hand-off in :meth:`resolve` leaves the grants behind a
         command standing for the gate that runs the line, and that gate
@@ -361,6 +375,9 @@ class Decisions:
             session_id (str): the session the line was judged in.
             handed (HandOff): the line's hand-off.
         """
+        handed.holders -= 1
+        if handed.holders > 0:
+            return
         await self._spend(session_id, tuple(handed.claimed))
         self.release(session_id, handed)
 
@@ -438,7 +455,10 @@ class Decisions:
         return tuple(r for r in found
                      if r is not None and r.scope is Scope.ONCE)
 
-    def held(self, ctx: CommandContext, ask: Ask) -> Deny | Pending | None:
+    def held(self,
+             ctx: CommandContext,
+             ask: Ask,
+             handed: HandOff | None = None) -> Deny | Pending | None:
         """What the settled records alone say about an asked line.
 
         The read-only half of :meth:`resolve`, and the only half a dry
@@ -446,11 +466,15 @@ class Decisions:
         stops there, spending nothing, recording no question and never
         reaching the host. So ``explain`` can report that a line would
         be refused, or would still be waiting, without a question
-        arriving for a line nobody typed.
+        arriving for a line nobody typed. It reads through the same
+        reservations a judging pass does, so a grant a live line has
+        claimed reads as waiting here exactly as a run would find it.
 
         Args:
             ctx (CommandContext): the asked line.
             ask (Ask): the chain's answer.
+            handed (HandOff | None): the reading line's hand-off, None
+                for a dry run outside any line.
 
         Returns:
             None when every rule the ask names is already answered, a
@@ -458,7 +482,7 @@ class Decisions:
             rule nothing answers.
         """
         argv = (ctx.command, *ctx.argv)
-        held = self._records(ctx.session_id)
+        held = self._standing(ctx.session_id, handed, True)
         answers = [(rule, self._settled(held, rule, argv, ctx.cwd))
                    for rule in (ask.rules or (ask_rule(ctx, ask), ))]
         refused = next((rule for rule, r in answers

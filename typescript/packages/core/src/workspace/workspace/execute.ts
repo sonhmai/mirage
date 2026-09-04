@@ -294,7 +294,7 @@ async function runLine(
 
   // The line's hand-off: the grants its judging passes claim for its
   // gates, which the gates spend from and the line's end sweeps.
-  const handed: HandOff = { claimed: [] }
+  const handed: HandOff = { claimed: [], holders: 1 }
   const deps = {
     dispatch,
     handed,

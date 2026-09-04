@@ -357,7 +357,18 @@ export async function executeNode(
   }
 
   if (kind === NodeKind.PROGRAM) {
-    return executeProgram(stream, node, session, stdin, callStack, jobTable, agentId, dispatch)
+    return executeProgram(
+      stream,
+      node,
+      session,
+      stdin,
+      callStack,
+      jobTable,
+      agentId,
+      dispatch,
+      deps.handed ?? null,
+      registry.decisions,
+    )
   }
 
   if (kind === NodeKind.COMMAND) {
@@ -521,6 +532,8 @@ export async function executeNode(
       subTable,
       agentId,
       dispatch,
+      deps.handed ?? null,
+      registry.decisions,
     )
   }
 

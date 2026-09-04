@@ -484,7 +484,7 @@ async function verdictRefuses(
   if (!Array.isArray(gated)) return true
   const [ctx, asked] = gated
   if (asked?.kind !== 'ask') return asked !== null
-  const standing = await registry.decisions.held(ctx, asked)
+  const standing = await registry.decisions.held(ctx, asked, handed)
   if (standing === null) return false
   if (standing.kind === 'deny') return true
   // handOff: this pass exists to decide whether a secret is fetched, and the

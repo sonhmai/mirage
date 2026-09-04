@@ -315,9 +315,14 @@ class HandOff:
     Args:
         claimed (list[Decision]): the grants matched so far, in the
             order the commands were judged.
+        holders (int): how many runs still own the claims: the line
+            itself, plus every background job it launched, each of
+            which reaches its gates after the line has returned. The
+            last holder to finish spends what the gates did not.
     """
 
     claimed: list[Decision] = field(default_factory=list)
+    holders: int = 1
 
 
 @dataclass(frozen=True, slots=True)

@@ -547,7 +547,7 @@ async def _verdict_refuses(
     ctx, asked = gated
     if not isinstance(asked, Ask):
         return isinstance(asked, Deny)
-    standing = registry.decisions.held(ctx, asked)
+    standing = registry.decisions.held(ctx, asked, handed)
     if standing is None:
         return False
     if isinstance(standing, Deny):

@@ -202,7 +202,7 @@ describe('decisions', () => {
       return Promise.resolve({ ...r, outcome: Outcome.ALLOW, scope: Scope.ONCE })
     }
     const ledger = new Decisions(null, allow)
-    const first: HandOff = { claimed: [] }
+    const first: HandOff = { claimed: [], holders: 1 }
     expect(await ledger.resolve(ctx(), ASK, undefined, first, true)).toBeNull()
     expect(await ledger.resolve(ctx(), ASK, undefined, first)).toBeNull()
     expect(asked).toBe(1)
@@ -218,10 +218,10 @@ describe('decisions', () => {
     const both: Ask = { kind: 'ask', reason: 'sign-off', rules: [RULE, other] }
     // The first rule is granted to a line that was then held, which
     // releases its claim; the second during this line's own pass.
-    const earlier: HandOff = { claimed: [] }
+    const earlier: HandOff = { claimed: [], holders: 1 }
     expect(await ledger.resolve(ctx(), ASK, undefined, earlier, true)).toBeNull()
     ledger.release('s', earlier)
-    const line: HandOff = { claimed: [] }
+    const line: HandOff = { claimed: [], holders: 1 }
     expect(await ledger.resolve(ctx(), both, undefined, line, true)).toBeNull()
     expect(asked).toBe(4)
     // The gate finds both standing and asks nothing.
@@ -239,7 +239,7 @@ describe('decisions', () => {
       return Promise.resolve({ ...r, outcome: Outcome.ALLOW, scope: Scope.ONCE })
     }
     const ledger = new Decisions(null, allow)
-    const handed: HandOff = { claimed: [] }
+    const handed: HandOff = { claimed: [], holders: 1 }
     expect(await ledger.resolve(ctx(), ASK, undefined, handed, true)).toBeNull()
     expect(ledger.list('s')).toHaveLength(1)
     expect(handed.claimed).toEqual(ledger.list('s'))
@@ -260,7 +260,7 @@ describe('decisions', () => {
       return Promise.resolve({ ...r, outcome: Outcome.ALLOW, scope: Scope.ONCE })
     }
     const ledger = new Decisions(null, allow)
-    const handed: HandOff = { claimed: [] }
+    const handed: HandOff = { claimed: [], holders: 1 }
     expect(await ledger.resolve(ctx(), ASK, undefined, handed, true)).toBeNull()
     expect(await ledger.resolve(ctx(), ASK, undefined, handed, true)).toBeNull()
     expect(asked).toBe(2)
@@ -280,8 +280,8 @@ describe('decisions', () => {
     const waiting = await ledger.resolve(ctx(), ASK)
     if (waiting?.kind !== 'pending') throw new Error('unreachable')
     await ledger.answer(waiting.id, Outcome.ALLOW)
-    const first: HandOff = { claimed: [] }
-    const second: HandOff = { claimed: [] }
+    const first: HandOff = { claimed: [], holders: 1 }
+    const second: HandOff = { claimed: [], holders: 1 }
     expect(await ledger.resolve(ctx(), ASK, undefined, first, true)).toBeNull()
     expect((await ledger.resolve(ctx(), ASK, undefined, second, true))?.kind).toBe('pending')
     expect((await ledger.resolve(ctx(), ASK))?.kind).toBe('pending')
@@ -294,6 +294,41 @@ describe('decisions', () => {
     expect(await ledger.resolve(ctx(), ASK, undefined, second, true)).toBeNull()
   })
 
+  it('spends a borrowed hand-off at its last holder', async () => {
+    // A background job borrows the line's hand-off before the line
+    // returns, so the line's own revoke leaves the claims standing for the
+    // job's gates, and the job's revoke spends them.
+    const ledger = new Decisions()
+    const waiting = await ledger.resolve(ctx(), ASK)
+    if (waiting?.kind !== 'pending') throw new Error('unreachable')
+    await ledger.answer(waiting.id, Outcome.ALLOW)
+    const handed: HandOff = { claimed: [], holders: 1 }
+    expect(await ledger.resolve(ctx(), ASK, undefined, handed, true)).toBeNull()
+    ledger.borrow(handed)
+    await ledger.revoke('s', handed)
+    expect(ledger.list('s')).toHaveLength(1)
+    expect(await ledger.resolve(ctx(), ASK, undefined, handed)).toBeNull()
+    await ledger.revoke('s', handed)
+    expect(ledger.list('s')).toEqual([])
+  })
+
+  it('reads held through a live line’s claim', async () => {
+    // A dry run reports what a run would find: a grant one line has
+    // claimed reads as waiting to everyone else, and as answered to that
+    // line.
+    const ledger = new Decisions()
+    const waiting = await ledger.resolve(ctx(), ASK)
+    if (waiting?.kind !== 'pending') throw new Error('unreachable')
+    await ledger.answer(waiting.id, Outcome.ALLOW)
+    expect(await ledger.held(ctx(), ASK)).toBeNull()
+    const handed: HandOff = { claimed: [], holders: 1 }
+    expect(await ledger.resolve(ctx(), ASK, undefined, handed, true)).toBeNull()
+    expect((await ledger.held(ctx(), ASK))?.kind).toBe('pending')
+    expect((await ledger.held(ctx(), ASK, { claimed: [], holders: 1 }))?.kind).toBe('pending')
+    ledger.release('s', handed)
+    expect(await ledger.held(ctx(), ASK)).toBeNull()
+  })
+
   it('hands back a grant given before the pass when the line is revoked', async () => {
     // A grant answered out of band is claimed by the pass that reads it
     // exactly as an inline one is, so a refusal hands it back too and the
@@ -303,7 +338,7 @@ describe('decisions', () => {
     expect(waiting?.kind).toBe('pending')
     if (waiting?.kind !== 'pending') throw new Error('unreachable')
     await ledger.answer(waiting.id, Outcome.ALLOW)
-    const handed: HandOff = { claimed: [] }
+    const handed: HandOff = { claimed: [], holders: 1 }
     expect(await ledger.resolve(ctx(), ASK, undefined, handed, true)).toBeNull()
     expect(handed.claimed).toHaveLength(1)
     await ledger.revoke('s', handed)

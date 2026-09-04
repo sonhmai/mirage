@@ -257,6 +257,13 @@ export interface Decision {
 export interface HandOff {
   /** The grants matched so far, in the order the commands were judged. */
   readonly claimed: Decision[]
+  /**
+   * How many runs still own the claims: the line itself, plus every
+   * background job it launched, each of which reaches its gates after
+   * the line has returned. The last holder to finish spends what the
+   * gates did not.
+   */
+  holders: number
 }
 
 /**

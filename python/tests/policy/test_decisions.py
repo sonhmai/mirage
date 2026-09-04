@@ -338,6 +338,45 @@ async def test_a_grant_one_line_claimed_is_not_on_offer_to_another():
 
 
 @pytest.mark.asyncio
+async def test_a_borrowed_hand_off_is_spent_by_its_last_holder():
+    """A background job borrows the line's hand-off before the line
+    returns, so the line's own revoke leaves the claims standing for
+    the job's gates, and the job's revoke spends them."""
+    ledger = Decisions()
+    ask = Ask("sign-off", rule=RULE)
+    waiting = await ledger.resolve(_ctx(), ask)
+    assert isinstance(waiting, Pending)
+    await ledger.answer(waiting.id, Outcome.ALLOW)
+    handed = HandOff()
+    assert await ledger.resolve(_ctx(), ask, None, handed, True) is None
+    ledger.borrow(handed)
+    await ledger.revoke("s", handed)
+    assert len(ledger.list("s")) == 1
+    assert await ledger.resolve(_ctx(), ask, None, handed) is None
+    await ledger.revoke("s", handed)
+    assert ledger.list("s") == ()
+
+
+@pytest.mark.asyncio
+async def test_held_reads_through_a_live_lines_claim():
+    """A dry run reports what a run would find: a grant one line has
+    claimed reads as waiting to everyone else, and as answered to that
+    line."""
+    ledger = Decisions()
+    ask = Ask("sign-off", rule=RULE)
+    waiting = await ledger.resolve(_ctx(), ask)
+    assert isinstance(waiting, Pending)
+    await ledger.answer(waiting.id, Outcome.ALLOW)
+    assert ledger.held(_ctx(), ask) is None
+    handed = HandOff()
+    assert await ledger.resolve(_ctx(), ask, None, handed, True) is None
+    assert isinstance(ledger.held(_ctx(), ask), Pending)
+    assert isinstance(ledger.held(_ctx(), ask, HandOff()), Pending)
+    ledger.release("s", handed)
+    assert ledger.held(_ctx(), ask) is None
+
+
+@pytest.mark.asyncio
 async def test_revoke_hands_back_a_grant_given_before_the_pass():
     """A grant answered out of band is claimed by the pass that reads
     it exactly as an inline one is, so a refusal hands it back too and

@@ -342,8 +342,21 @@ export class Decisions {
    * @param handed the line's hand-off.
    */
   async revoke(sessionId: string, handed: HandOff): Promise<void> {
+    handed.holders -= 1
+    if (handed.holders > 0) return
     await this.spend(sessionId, [...handed.claimed])
     this.release(sessionId, handed)
+  }
+
+  /**
+   * Add a holder to a hand-off: a background job the line launched,
+   * whose gates run after the line has returned. The job's `revoke`
+   * hands the hand-off back; the claims are spent by whichever holder
+   * finishes last, so a job that reaches its gate after the line ended
+   * still finds its grant.
+   */
+  borrow(handed: HandOff): void {
+    handed.holders += 1
   }
 
   /**
@@ -409,12 +422,21 @@ export class Decisions {
    * spending nothing, recording no question and never reaching the
    * host. So `explain` can report that a line would be refused, or
    * would still be waiting, without a question arriving for a line
-   * nobody typed.
+   * nobody typed. It reads through the same reservations a judging
+   * pass does, so a grant a live line has claimed reads as waiting here
+   * exactly as a run would find it.
+   *
+   * @param handed the reading line's hand-off, null for a dry run
+   *   outside any line.
    */
-  async held(ctx: CommandContext, ask: Ask): Promise<Deny | Pending | null> {
+  async held(
+    ctx: CommandContext,
+    ask: Ask,
+    handed: HandOff | null = null,
+  ): Promise<Deny | Pending | null> {
     const argv = [ctx.command, ...ctx.argv]
     const sessionId = ctx.sessionId ?? ''
-    const records = this.records(sessionId)
+    const records = this.standing(sessionId, handed, true)
     const answers = (ask.rules ?? [askRule(ctx, ask)]).map(
       (rule) => [rule, Decisions.settled(records, rule, argv, ctx.cwd)] as const,
     )

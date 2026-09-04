@@ -287,7 +287,11 @@ answered", not "not found". `deny` with scope `session` is refused
 `answer(ask_id, outcome, scope, note)`. A host that wants to answer
 inline instead of leaving the ask pending passes `on_ask` (`onAsk`) to
 the workspace: an async handler given the pending record, whose answer
-settles the ask while the line waits, like a tool-approval prompt.
+settles the ask while the line waits, like a tool-approval prompt. A
+`once` grant given that way is consumed by the line that asked, so the
+next identical line asks again; a refusal stands for the agent's
+immediate retry, which is refused from the record without the human
+being asked twice, and is spent by it.
 
 ## Dry runs
 
@@ -320,3 +324,10 @@ loaded by
 and
 [policy_yaml.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/policy_yaml.ts).
 Both tables are pinned the same way.
+
+The ask example runs one guarded line under both kinds of host, a
+scripted `on_ask` answering inline and a ledger answered out of band by
+id, and pins what allow-once, deny and allow-for-the-session each do to
+the line that asked and to the next one:
+[ask.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/ask.py),
+[ask.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/ask.ts).

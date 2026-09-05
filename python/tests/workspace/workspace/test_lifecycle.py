@@ -34,13 +34,89 @@ _RELEASE: list[asyncio.Event] = []
 
 
 @pytest.mark.asyncio
-async def test_retired_command_cannot_cache_bytes_for_replacement_mount():
+async def test_unmount_waits_for_an_inflight_cache_write(monkeypatch):
 
     class CachedRAM(RAMResource):
         caches_reads = True
 
     old = CachedRAM()
     old.load_state({"files": {"/file": b"old"}})
+    ws = Workspace({"/data": old})
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    write_cache = ws.cache.set
+
+    async def blocked_set(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        await write_cache(*args, **kwargs)
+
+    monkeypatch.setattr(ws.cache, "set", blocked_set)
+    reading = asyncio.create_task(ws.execute("cat /data/file"))
+    removing = None
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        removing = asyncio.create_task(ws.unmount("/data"))
+        await asyncio.sleep(0)
+        assert not removing.done()
+        with pytest.raises(ValueError, match="duplicate mount prefix"):
+            ws.add_mount("/data", CachedRAM())
+        release.set()
+        await asyncio.wait_for(asyncio.gather(reading, removing), timeout=5)
+        assert await ws.cache.get("/data/file") is None
+        replacement = CachedRAM()
+        replacement.load_state({"files": {"/file": b"new"}})
+        ws.add_mount("/data", replacement)
+        assert (await ws.execute("cat /data/file")).stdout == b"new"
+    finally:
+        release.set()
+        await asyncio.gather(reading,
+                             *([removing] if removing else []),
+                             return_exceptions=True)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_resource_cannot_be_remounted_while_close_is_pending(
+        monkeypatch):
+    resource = RAMResource()
+    ws = Workspace({"/data": resource})
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    close = resource.close
+
+    async def blocked_close():
+        entered.set()
+        await release.wait()
+        await close()
+
+    monkeypatch.setattr(resource, "close", blocked_close)
+    removing = asyncio.create_task(ws.unmount("/data"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        for prefix in ("/data", "/alias"):
+            with pytest.raises(ValueError,
+                               match="resource is being unmounted"):
+                ws.add_mount(prefix, resource)
+        release.set()
+        await removing
+        ws.add_mount("/data", resource)
+    finally:
+        release.set()
+        await asyncio.gather(removing, return_exceptions=True)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shadow", [False, True])
+async def test_retired_command_cannot_cache_bytes_for_replacement_mount(
+        shadow):
+
+    class CachedRAM(RAMResource):
+        caches_reads = True
+
+    old = CachedRAM()
+    old.load_state({"files": {"/data/file" if shadow else "/file": b"old"}})
     replacement = CachedRAM()
     replacement.load_state({"files": {"/file": b"new"}})
     entered = asyncio.Event()
@@ -51,13 +127,15 @@ async def test_retired_command_cannot_cache_bytes_for_replacement_mount():
         await release.wait()
         return None, IOResult()
 
-    ws = Workspace({"/data": old})
+    prefix = "/" if shadow else "/data"
+    ws = Workspace({prefix: old})
     ws.register_cli("gate", CLISpec(name="gate", fn=gate))
-    retired = ws.mount("/data").cache_manager
+    retired = ws.mount(prefix).cache_manager
     running = asyncio.create_task(ws.execute("cat /data/file; gate"))
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
-        await ws.unmount("/data")
+        if not shadow:
+            await ws.unmount("/data")
         ws.add_mount("/data", replacement)
         release.set()
         result = await asyncio.wait_for(running, timeout=5)
@@ -127,7 +205,9 @@ async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("store_kind", ["ram", "redis"])
-async def test_unmount_invalidates_index_before_replacement(store_kind):
+@pytest.mark.parametrize("shadow", [False, True])
+async def test_mount_change_invalidates_index_before_replacement(
+        store_kind, shadow):
     config = IndexConfig()
     if store_kind == "redis":
         url = os.environ.get("REDIS_URL")
@@ -135,7 +215,7 @@ async def test_unmount_invalidates_index_before_replacement(store_kind):
             pytest.skip("REDIS_URL not set")
         config = RedisIndexConfig(url=url, key_prefix=f"lifecycle:{uuid4()}:")
     resource = RAMResource()
-    ws = Workspace({"/data": resource}, index=config)
+    ws = Workspace({"/" if shadow else "/data": resource}, index=config)
     ws.add_mount("/alias", resource)
     index = resource.index
     entry = IndexEntry(id="old", name="private.txt", resource_type="file")
@@ -143,18 +223,19 @@ async def test_unmount_invalidates_index_before_replacement(store_kind):
         await index.put("/data", entry)
         for path in ("/data", "/data/nested", "/database", "/alias"):
             await index.set_dir(path, [("private.txt", entry)])
-        await ws.unmount("/data")
+        if not shadow:
+            await ws.unmount("/data")
         replacement = RAMResource()
         ws.add_mount("/data", replacement)
+        if shadow:
+            assert await ws.fs.readdir("/data") == []
         for candidate in (index, replacement.index):
             for path in ("/data", "/data/private.txt",
                          "/data/nested/private.txt"):
                 assert (await
                         candidate.get(path)).status == LookupStatus.NOT_FOUND
             for path in ("/data", "/data/nested"):
-                assert (
-                    await
-                    candidate.list_dir(path)).status == LookupStatus.NOT_FOUND
+                assert (await candidate.list_dir(path)).entries in (None, [])
         for path in ("/database", "/alias"):
             assert (await
                     index.list_dir(path)).entries == [f"{path}/private.txt"]

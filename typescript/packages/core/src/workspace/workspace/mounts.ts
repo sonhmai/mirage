@@ -19,6 +19,10 @@ import type { Limit, MountMode } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { MountSpec } from './types.ts'
+import type { MountEntry } from '../mount/mount.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { FileCache } from '../../cache/file/mixin.ts'
+import { withCacheMutation } from '../../cache/file/io.ts'
 
 /**
  * The `resources` mapping in resolved form: every accepted spelling
@@ -53,6 +57,36 @@ export function normalizeResources(resources: Record<string, MountSpec>): Normal
   return { bare, modes, commandLimits }
 }
 
+/** Drop mount cache state atomically with deferred file-cache fills. */
+async function clearMountCache(
+  cache: FileCache | null,
+  prefix: string,
+  indices: readonly IndexCacheStore[],
+): Promise<void> {
+  const clearIndices = async (): Promise<void> => {
+    for (const index of new Set(indices)) await index.invalidatePrefix(prefix.slice(0, -1))
+  }
+  if (cache === null) return clearIndices()
+  await withCacheMutation(cache, async () => {
+    await cache.remove(prefix.slice(0, -1))
+    await cache.evictPrefix(prefix)
+    await clearIndices()
+  })
+}
+
+/** Keep synchronous registration; I/O awaits removal of shadowed state. */
+export function prepareAddedMount(
+  registry: MountRegistry,
+  entry: MountEntry,
+  previous: readonly MountEntry[],
+): void {
+  const indices = [
+    entry.resource.index,
+    ...previous.filter((m) => entry.prefix.startsWith(m.prefix)).map((m) => m.resource.index),
+  ].filter((index): index is IndexCacheStore => index !== undefined)
+  entry.beforeUse = () => clearMountCache(registry.fileCache, entry.prefix, indices)
+}
+
 export interface UnmountDeps {
   registry: MountRegistry
   opsRegistry: OpsRegistry
@@ -85,14 +119,11 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
   if (entry.retiring) throw new Error(`mount is being unmounted: ${norm}`)
   entry.retiring = true
   try {
-    const cache = deps.registry.fileCache
-    if (cache !== null) {
-      // Retain the mount until cleanup succeeds; retiring prevents new
-      // cache fills while a replacement is waiting for this prefix.
-      await cache.remove(norm.slice(0, -1))
-      await cache.evictPrefix(norm)
-    }
-    await entry.resource.index?.invalidatePrefix(norm.slice(0, -1))
+    await clearMountCache(
+      deps.registry.fileCache,
+      norm,
+      entry.resource.index === undefined ? [] : [entry.resource.index],
+    )
     if (deps.isShuttingDown()) throw new Error('Workspace is closed')
     if (deps.registry.tryMountForPrefix(prefix) !== entry) {
       throw new Error(`mount changed while unmounting: ${prefix}`)
@@ -112,7 +143,12 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
     if (idx !== -1) deps.openOrder.splice(idx, 1)
     if (deps.opened.has(resource)) {
       deps.opened.delete(resource)
-      await resource.close()
+      deps.registry.retiringResources.add(resource)
+      try {
+        await resource.close()
+      } finally {
+        deps.registry.retiringResources.delete(resource)
+      }
     }
   }
 }

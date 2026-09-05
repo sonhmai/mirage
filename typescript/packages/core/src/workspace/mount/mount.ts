@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../utils/key_prefix.ts'
+import { KeyLock } from '../../cache/lock.ts'
 import { type Accessor, NOOPAccessor } from '../../accessor/base.ts'
 import type {
   CommandFn,
@@ -90,6 +91,8 @@ export class MountEntry {
   mode: MountMode
   readonly consistency: ConsistencyPolicy
   retiring = false
+  beforeUse: (() => Promise<void>) | null = null
+  private readonly readyLock = new KeyLock()
 
   /**
    * Per-path revision pins installed at Workspace.load time. Read
@@ -135,6 +138,17 @@ export class MountEntry {
    * This mount's mode narrowed by the current session's cap. The
    * configured mode is the ceiling; a session's mode can only weaken it.
    */
+  /** Finish deferred mount preparation before any backend or cache read. */
+  async ensureReady(): Promise<void> {
+    if (this.beforeUse === null) return
+    await this.readyLock.withLock('', async () => {
+      if (this.beforeUse !== null) {
+        await this.beforeUse()
+        this.beforeUse = null
+      }
+    })
+  }
+
   effectiveMode(): MountMode {
     return effectiveMountMode(this.prefix, this.mode)
   }
@@ -398,6 +412,7 @@ export class MountEntry {
     flags: Record<string, FlagValue>,
     context: ExecContext = {},
   ): Promise<[ByteSource | null, IOResult]> {
+    await this.ensureReady()
     let extension =
       paths.length > 0 && paths[0] !== undefined ? getExtension(paths[0].virtual) : null
     // A filetype handler is selected from the operand's NAME, and a
@@ -587,6 +602,7 @@ export class MountEntry {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
+    await this.ensureReady()
     const filetype = getExtension(path)
     const levels = this.resolveCascade(opName, filetype, this.ops, this.generalOps)
     if (levels.length === 0) {

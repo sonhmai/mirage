@@ -93,7 +93,7 @@ import { resolveControlStores } from './build.ts'
 import { executeLine, type ExecuteEnv } from './execute.ts'
 import { closeWorkspace } from './lifecycle.ts'
 import { WorkspaceMeta } from './meta.ts'
-import { normalizeResources, unmountPrefix } from './mounts.ts'
+import { normalizeResources, prepareAddedMount, unmountPrefix } from './mounts.ts'
 import { Router } from './routing.ts'
 import { Runtimes } from './runtimes.ts'
 import type { ExecuteResult } from './types.ts'
@@ -841,6 +841,8 @@ export class Workspace {
    */
   addMount(prefix: string, resource: Resource, mode: MountMode = MountMode.READ): MountEntry {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    this.registry.checkResourceAvailable(resource)
+    const previous = this.registry.allMounts()
     // Configure before mount() captures the index in its CacheManager.
     // An alias must retain the index used by the resource's other mounts.
     if (
@@ -851,6 +853,7 @@ export class Workspace {
       resource.setIndex?.(this.indexConfig)
     }
     const m = this.registry.mount(prefix, resource, mode)
+    prepareAddedMount(this.registry, m, previous)
     this.opsRegistry.registerResource(resource)
     const resourceOps = resource.ops?.()
     if (resourceOps !== undefined) {
@@ -1017,6 +1020,9 @@ export class Workspace {
   }
 
   private async ensureOpen(resource: Resource): Promise<void> {
+    for (const mount of this.registry.allMounts()) {
+      if (mount.resource === resource) await mount.ensureReady()
+    }
     if (this.opened.has(resource)) return
     await resource.open()
     this.opened.add(resource)

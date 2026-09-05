@@ -70,6 +70,7 @@ class MountRegistry:
 
     def __init__(self) -> None:
         self._mounts: list[MountEntry] = []
+        self.retiring_resources: set[int] = set()
         self._root: MountEntry | None = None
         # Workspace-level command -> runtime bindings (first listed
         # capturer wins), set by Workspace after construction (same
@@ -140,9 +141,16 @@ class MountRegistry:
             self._attach_manager(m)
 
     def _attach_manager(self, m: MountEntry) -> None:
-        m.cache_manager = CacheManager(self._file_cache, m.resource.index,
-                                       m.prefix, m.resource.caches_reads,
-                                       lambda: not m.retiring)
+        m.cache_manager = CacheManager(
+            self._file_cache, m.resource.index, m.prefix,
+            m.resource.caches_reads,
+            lambda path: not m.retiring and self.try_mount_for(path) is m)
+
+    def check_resource_available(self, resource: BaseResource) -> None:
+        """Refuse reuse until the previous lifecycle has finished closing."""
+        if id(resource) in self.retiring_resources or any(
+                m.resource is resource and m.retiring for m in self._mounts):
+            raise ValueError("resource is being unmounted")
 
     def mount(
         self,
@@ -152,6 +160,7 @@ class MountRegistry:
         consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
     ) -> MountEntry:
         """Mount a resource and return the Mount object."""
+        self.check_resource_available(resource)
         stripped = prefix.strip("/")
         norm_prefix = ("/" + stripped + "/" if stripped else "/")
         for existing in self._mounts:

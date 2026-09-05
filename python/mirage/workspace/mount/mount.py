@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import dataclasses
 import errno
 import inspect
-from collections.abc import Iterable
+from collections.abc import Awaitable, Iterable
 from typing import Any, Callable
 
 from mirage.cache.context import push_cache_manager
@@ -149,6 +150,8 @@ class MountEntry:
         self.mode = mode
         self.consistency = consistency
         self.retiring = False
+        self.before_use: Callable[[], Awaitable[None]] | None = None
+        self._ready_lock = asyncio.Lock()
         self.cache_manager: CacheManager | None = None
         # Per-path revision pins installed at Workspace.load time. Read
         # functions consult these via the ``revision_for`` contextvar
@@ -170,6 +173,15 @@ class MountEntry:
         self._general_ops: dict[str, RegisteredOp] = {}
         # key: (cmd_name, target_resource_type)
         self._cross_cmds: dict[tuple[Any, ...], RegisteredCommand] = {}
+
+    async def ensure_ready(self) -> None:
+        """Finish mount preparation before any backend or cache read."""
+        if self.before_use is None:
+            return
+        async with self._ready_lock:
+            if self.before_use is not None:
+                await self.before_use()
+                self.before_use = None
 
     def effective_mode(self) -> MountMode:
         """This mount's mode narrowed by the current session's cap.
@@ -492,6 +504,7 @@ class MountEntry:
                 reads the fields it wants, so no list of command names
                 is kept here.
         """
+        await self.ensure_ready()
         stdin = context.stdin
         cwd = context.cwd
         stat_path = context.stat_path
@@ -675,6 +688,7 @@ class MountEntry:
             op_name (str): operation name (e.g. "read", "stat").
             path (str): virtual path.
         """
+        await self.ensure_ready()
         filetype = (kwargs.pop("filetype")
                     if "filetype" in kwargs else get_extension(path))
         levels = self._resolve_cascade(op_name, filetype, self._ops,

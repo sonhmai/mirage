@@ -50,14 +50,13 @@ class MockResource extends BaseResource implements Resource {
 }
 
 describe('Workspace lifecycle', () => {
-  it('does not cache a retired command result for a replacement mount', async () => {
+  it('waits for an inflight cache write before releasing a mount', async () => {
     class CachedRAM extends RAMResource {
       override readonly cachesReads = true
     }
     const old = new CachedRAM()
     old.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('old') } })
-    const replacement = new CachedRAM()
-    replacement.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('new') } })
+    const ws = new Workspace({ '/data': old }, { shellParser: await getTestParser() })
     let enter = (): void => undefined
     let resume = (): void => undefined
     const entered = new Promise<void>((resolve) => {
@@ -66,45 +65,133 @@ describe('Workspace lifecycle', () => {
     const release = new Promise<void>((resolve) => {
       resume = resolve
     })
-    const ws = new Workspace({ '/data': old }, { shellParser: await getTestParser() })
-    ws.registerCli(
-      'gate',
-      new CLISpec({
-        name: 'gate',
-        fn: async () => {
-          enter()
-          await release
-          return [null, new IOResult()]
-        },
-      }),
-    )
-    const retired = ws.mount('/data').cacheManager
-    const running = ws.execute('cat /data/file; gate')
+    const writeCache = ws.cache.set.bind(ws.cache)
+    vi.spyOn(ws.cache, 'set').mockImplementationOnce(async (...args) => {
+      enter()
+      await release
+      await writeCache(...args)
+    })
+    const reading = ws.execute('cat /data/file')
+    let removing: Promise<void> | undefined
     try {
       await entered
-      await ws.unmount('/data')
-      ws.addMount('/data', replacement)
+      let removed = false
+      removing = ws.unmount('/data').then(() => {
+        removed = true
+      })
+      await Promise.resolve()
+      expect(removed).toBe(false)
+      expect(() => ws.addMount('/data', new CachedRAM())).toThrow('duplicate mount prefix')
       resume()
-      expect(new TextDecoder().decode((await running).stdout)).toBe('old')
+      await Promise.all([reading, removing])
       expect(await ws.cache.get('/data/file')).toBeNull()
+      const replacement = new CachedRAM()
+      replacement.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('new') } })
+      ws.addMount('/data', replacement)
       expect(new TextDecoder().decode((await ws.execute('cat /data/file')).stdout)).toBe('new')
-      expect(await ws.cache.get('/data/file')).toEqual(new TextEncoder().encode('new'))
-      expect(retired).not.toBeNull()
-      expect(
-        await retired?.cachedBytes(
-          new PathSpec({
-            virtual: '/data/file',
-            directory: '/data/',
-            resourcePath: 'file',
-          }),
-        ),
-      ).toBeNull()
     } finally {
       resume()
-      await running
+      await Promise.allSettled([reading, removing])
       await ws.close()
     }
   })
+
+  it('refuses resource reuse until asynchronous close finishes', async () => {
+    const resource = new RAMResource()
+    const ws = new Workspace({ '/data': resource })
+    await ws.resolve('/data')
+    let enter = (): void => undefined
+    let resume = (): void => undefined
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    const release = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    const close = resource.close.bind(resource)
+    vi.spyOn(resource, 'close').mockImplementationOnce(async () => {
+      enter()
+      await release
+      await close()
+    })
+    const removing = ws.unmount('/data')
+    try {
+      await entered
+      for (const prefix of ['/data', '/alias']) {
+        expect(() => ws.addMount(prefix, resource)).toThrow('resource is being unmounted')
+      }
+      resume()
+      await removing
+      ws.addMount('/data', resource)
+    } finally {
+      resume()
+      await removing
+      await ws.close()
+    }
+  })
+
+  it.each([false, true])(
+    'does not cache a retired command result for a replacement mount (shadow=%s)',
+    async (shadow) => {
+      class CachedRAM extends RAMResource {
+        override readonly cachesReads = true
+      }
+      const old = new CachedRAM()
+      old.loadState({
+        type: 'ram',
+        files: { [shadow ? '/data/file' : '/file']: new TextEncoder().encode('old') },
+      })
+      const replacement = new CachedRAM()
+      replacement.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('new') } })
+      let enter = (): void => undefined
+      let resume = (): void => undefined
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve
+      })
+      const release = new Promise<void>((resolve) => {
+        resume = resolve
+      })
+      const prefix = shadow ? '/' : '/data'
+      const ws = new Workspace({ [prefix]: old }, { shellParser: await getTestParser() })
+      ws.registerCli(
+        'gate',
+        new CLISpec({
+          name: 'gate',
+          fn: async () => {
+            enter()
+            await release
+            return [null, new IOResult()]
+          },
+        }),
+      )
+      const retired = ws.mount(prefix).cacheManager
+      const running = ws.execute('cat /data/file; gate')
+      try {
+        await entered
+        if (!shadow) await ws.unmount('/data')
+        ws.addMount('/data', replacement)
+        resume()
+        expect(new TextDecoder().decode((await running).stdout)).toBe('old')
+        expect(await ws.cache.get('/data/file')).toBeNull()
+        expect(new TextDecoder().decode((await ws.execute('cat /data/file')).stdout)).toBe('new')
+        expect(await ws.cache.get('/data/file')).toEqual(new TextEncoder().encode('new'))
+        expect(retired).not.toBeNull()
+        expect(
+          await retired?.cachedBytes(
+            new PathSpec({
+              virtual: '/data/file',
+              directory: '/data/',
+              resourcePath: 'file',
+            }),
+          ),
+        ).toBeNull()
+      } finally {
+        resume()
+        await running
+        await ws.close()
+      }
+    },
+  )
 
   it('does not open resources at construction time', () => {
     const ram = new MockResource()
@@ -170,48 +257,51 @@ describe('Workspace lifecycle', () => {
 
 describe('Workspace dynamic mount index', () => {
   for (const type of [IndexType.RAM, IndexType.REDIS]) {
-    it.skipIf(type === IndexType.REDIS && process.env.REDIS_URL === undefined)(
-      `invalidates the ${type} index before remounting`,
-      async () => {
-        const url = process.env.REDIS_URL
-        const config: IndexConfig | RedisIndexConfig =
-          type === IndexType.REDIS
-            ? {
-                type,
-                ...(url === undefined ? {} : { url }),
-                keyPrefix: `lifecycle:${crypto.randomUUID()}:`,
+    for (const shadow of [false, true]) {
+      it.skipIf(type === IndexType.REDIS && process.env.REDIS_URL === undefined)(
+        `invalidates the ${type} index before mount replacement (shadow=${String(shadow)})`,
+        async () => {
+          const url = process.env.REDIS_URL
+          const config: IndexConfig | RedisIndexConfig =
+            type === IndexType.REDIS
+              ? {
+                  type,
+                  ...(url === undefined ? {} : { url }),
+                  keyPrefix: `lifecycle:${crypto.randomUUID()}:`,
+                }
+              : { type }
+          const resource = new RAMResource()
+          const ws = new Workspace({ [shadow ? '/' : '/data']: resource }, { index: config })
+          ws.addMount('/alias', resource)
+          const index = resource.index
+          const entry = new IndexEntry({ id: 'old', name: 'private.txt', resourceType: 'file' })
+          try {
+            await index.put('/data', entry)
+            for (const path of ['/data', '/data/nested', '/database', '/alias']) {
+              await index.setDir(path, [['private.txt', entry]])
+            }
+            if (!shadow) await ws.unmount('/data')
+            const replacement = new RAMResource()
+            ws.addMount('/data', replacement)
+            if (shadow) expect(await ws.fs.readdir('/data')).toEqual([])
+            for (const candidate of [index, replacement.index]) {
+              for (const path of ['/data', '/data/private.txt', '/data/nested/private.txt']) {
+                expect((await candidate.get(path)).status).toBe(LookupStatus.NOT_FOUND)
               }
-            : { type }
-        const resource = new RAMResource()
-        const ws = new Workspace({ '/data': resource }, { index: config })
-        ws.addMount('/alias', resource)
-        const index = resource.index
-        const entry = new IndexEntry({ id: 'old', name: 'private.txt', resourceType: 'file' })
-        try {
-          await index.put('/data', entry)
-          for (const path of ['/data', '/data/nested', '/database', '/alias']) {
-            await index.setDir(path, [['private.txt', entry]])
-          }
-          await ws.unmount('/data')
-          const replacement = new RAMResource()
-          ws.addMount('/data', replacement)
-          for (const candidate of [index, replacement.index]) {
-            for (const path of ['/data', '/data/private.txt', '/data/nested/private.txt']) {
-              expect((await candidate.get(path)).status).toBe(LookupStatus.NOT_FOUND)
+              for (const path of ['/data', '/data/nested']) {
+                expect((await candidate.listDir(path)).entries ?? []).toEqual([])
+              }
             }
-            for (const path of ['/data', '/data/nested']) {
-              expect((await candidate.listDir(path)).status).toBe(LookupStatus.NOT_FOUND)
+            for (const path of ['/database', '/alias']) {
+              expect((await index.listDir(path)).entries).toEqual([`${path}/private.txt`])
             }
+          } finally {
+            await index.clear()
+            await ws.close()
           }
-          for (const path of ['/database', '/alias']) {
-            expect((await index.listDir(path)).entries).toEqual([`${path}/private.txt`])
-          }
-        } finally {
-          await index.clear()
-          await ws.close()
-        }
-      },
-    )
+        },
+      )
+    }
   }
 
   it('applies the workspace Redis index to added mounts', async () => {

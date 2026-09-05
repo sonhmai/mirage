@@ -14,14 +14,19 @@
 
 import inspect
 from collections.abc import Callable
+from functools import partial
 
+from mirage.cache.file.io import mutation_lock
+from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import IndexConfig
+from mirage.cache.index.store import IndexCacheStore
 from mirage.ops import Ops
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX
 from mirage.resource.ram import RAMResource
 from mirage.types import KERNEL_BACKENDS, MountBackend, MountMode
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.workspace.types import MountSpec, ResourceMount
 
@@ -137,6 +142,33 @@ def install_mounts(registry: MountRegistry, specs: list[MountSpec],
     return implicit_root
 
 
+async def clear_mount_cache(cache: FileCacheMixin | None, prefix: str,
+                            indices: list[IndexCacheStore]) -> None:
+    """Drop a mount's cache state atomically with deferred file-cache fills."""
+
+    async def clear_indices() -> None:
+        for index in dict.fromkeys(indices):
+            await index.invalidate_prefix(prefix.rstrip("/"))
+
+    if cache is None:
+        await clear_indices()
+        return
+    async with mutation_lock(cache):
+        await cache.remove(prefix.rstrip("/"))
+        await cache.evict_prefix(prefix)
+        await clear_indices()
+
+
+def prepare_added_mount(registry: MountRegistry, entry: MountEntry,
+                        previous: list[MountEntry]) -> None:
+    """Keep synchronous registration; I/O awaits removal of shadowed state."""
+    indices = [entry.resource.index]
+    indices.extend(m.resource.index for m in previous
+                   if entry.prefix.startswith(m.prefix))
+    entry.before_use = partial(clear_mount_cache, registry.file_cache,
+                               entry.prefix, indices)
+
+
 async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
                   is_shutting_down: Callable[[], bool]) -> None:
     """Remove one mount, closing its resource if nothing else uses it.
@@ -170,13 +202,8 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
         raise ValueError(f"mount is being unmounted: {norm!r}")
     entry.retiring = True
     try:
-        cache = registry.file_cache
-        if cache is not None:
-            # Retain the mount until cleanup succeeds; retiring prevents new
-            # cache fills while a replacement is waiting for this prefix.
-            await cache.remove(norm.rstrip("/"))
-            await cache.evict_prefix(norm)
-        await entry.resource.index.invalidate_prefix(norm.rstrip("/"))
+        await clear_mount_cache(registry.file_cache, norm,
+                                [entry.resource.index])
         if is_shutting_down():
             raise RuntimeError("Workspace is closed")
         if registry.try_mount_for_prefix(prefix) is not entry:
@@ -191,8 +218,12 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
     # The mount owns its op table, so dropping the mount drops the ops
     # with it; the facade keeps no second registry to clean up.
     if not still_instance:
-        close = getattr(removed.resource, "close", None)
-        if callable(close):
-            result = close()
-            if hasattr(result, "__await__"):
-                await result
+        registry.retiring_resources.add(id(removed.resource))
+        try:
+            close = getattr(removed.resource, "close", None)
+            if callable(close):
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+        finally:
+            registry.retiring_resources.discard(id(removed.resource))

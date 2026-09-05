@@ -16,12 +16,24 @@ import asyncio
 import logging
 from functools import partial
 from typing import Any, Callable
+from weakref import WeakKeyDictionary
 
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.io import CachableAsyncIterator, IOResult
 from mirage.observe.record import OpRecord
 
 logger = logging.getLogger(__name__)
+_mutation_locks: WeakKeyDictionary[FileCacheMixin,
+                                   asyncio.Lock] = WeakKeyDictionary()
+
+
+def mutation_lock(cache: FileCacheMixin) -> asyncio.Lock:
+    """Serialize cache fills with mount ownership changes."""
+    lock = _mutation_locks.get(cache)
+    if lock is None:
+        lock = asyncio.Lock()
+        _mutation_locks[cache] = lock
+    return lock
 
 
 def read_fingerprint(records: list[OpRecord] | None, path: str) -> str | None:
@@ -53,6 +65,17 @@ async def _set_cached(
     records: list[OpRecord] | None,
     is_cacheable: Callable[[str], bool] | None,
 ) -> None:
+    async with mutation_lock(cache):
+        if is_cacheable is None or is_cacheable(path):
+            await _set_cached_locked(cache, path, data, records)
+
+
+async def _set_cached_locked(
+    cache: FileCacheMixin,
+    path: str,
+    data: bytes,
+    records: list[OpRecord] | None,
+) -> None:
     fingerprint = read_fingerprint(records, path)
     if fingerprint is None and await cache.get(path) == data:
         # Warm read: the bytes were served from this cache, so there is
@@ -60,8 +83,7 @@ async def _set_cached(
         # fingerprint stamped on the cold read with the MD5 default and
         # force ALWAYS mode to evict and refetch on every read.
         return
-    if is_cacheable is None or is_cacheable(path):
-        await cache.set(path, data, fingerprint=fingerprint)
+    await cache.set(path, data, fingerprint=fingerprint)
 
 
 def _drop_drain_task(cache: FileCacheMixin, path: str,
@@ -131,11 +153,13 @@ async def _background_drain(
     try:
         materialized = await it.drain_bounded(max_bytes)
         if materialized is not None:
-            if (cache._drain_tasks.get(path) is asyncio.current_task()
-                    and (is_cacheable is None or is_cacheable(path))):
-                await cache.add(path,
-                                materialized,
-                                fingerprint=read_fingerprint(records, path))
+            async with mutation_lock(cache):
+                if (cache._drain_tasks.get(path) is asyncio.current_task()
+                        and (is_cacheable is None or is_cacheable(path))):
+                    await cache.add(path,
+                                    materialized,
+                                    fingerprint=read_fingerprint(
+                                        records, path))
         else:
             logger.info(
                 "cache drain budget exceeded for %s "

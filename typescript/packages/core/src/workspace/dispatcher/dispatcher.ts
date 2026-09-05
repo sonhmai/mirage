@@ -329,13 +329,15 @@ export class Dispatcher {
     // under the same key, so it must not be served from that cache;
     // nothing populates it from here, so skipping the probe is the
     // whole fix. Mirrors Python's Dispatcher.dispatch.
+    await mount.ensureReady()
     const raw = kwargs?.filetype === null
     if (caches && !raw && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
       if (
         cached !== null &&
         (await this.reconciler.mayServeCached(mount, p.virtual)) &&
-        !mount.retiring
+        !mount.retiring &&
+        this.namespace.tryMountFor(p.virtual) === mount
       ) {
         // The cache holds the whole object, so a ranged read is answered
         // by slicing it, never by handing back the whole file: the

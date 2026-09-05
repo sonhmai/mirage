@@ -347,6 +347,7 @@ class Dispatcher:
         if op == "rename" and isinstance(dst, PathSpec):
             await pre_ops_gate(policies, op, dst, True, mount.prefix,
                                _session_id())
+        await mount.ensure_ready()
         caches_reads = mount.resource.caches_reads
         # The file cache is keyed on the path alone, and what a command
         # put there is the rendered read. A raw read asks for a
@@ -357,8 +358,9 @@ class Dispatcher:
 
         if caches_reads and not raw and op in DISPATCH_READ_OPS:
             cached = await self._cache.get(path.virtual)
-            if cached is not None and await self._reconciler.may_serve_cached(
-                    mount, path.virtual) and not mount.retiring:
+            if (cached is not None and await self._reconciler.may_serve_cached(
+                    mount, path.virtual) and not mount.retiring
+                    and self._namespace.try_mount_for(path.virtual) is mount):
                 # The cache holds the whole object, so a ranged read is
                 # answered by slicing it, never by handing back the
                 # whole file: the window is what the caller asked for

@@ -65,6 +65,7 @@ export interface OpsMountInfo {
 
 export class MountRegistry {
   private readonly mountList: MountEntry[]
+  readonly retiringResources = new Set<Resource>()
   private rootRef: MountEntry | null = null
   private consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
   private readonly defaultMode: MountMode
@@ -121,7 +122,7 @@ export class MountRegistry {
       m.resource.index ?? null,
       m.prefix,
       cachesReads(m.resource),
-      () => !m.retiring,
+      (path) => !m.retiring && this.tryMountFor(path) === m,
     )
   }
 
@@ -163,6 +164,16 @@ export class MountRegistry {
     return this.consistency
   }
 
+  /** Refuse reuse until the previous lifecycle has finished closing. */
+  checkResourceAvailable(resource: Resource): void {
+    if (
+      this.retiringResources.has(resource) ||
+      this.mountList.some((m) => m.resource === resource && m.retiring)
+    ) {
+      throw new Error('resource is being unmounted')
+    }
+  }
+
   /**
    * Add a mount dynamically. Mirrors Python's `registry.mount(...)`.
    * Registers the resource's commands and ops on the new mount and
@@ -174,6 +185,7 @@ export class MountRegistry {
     mode: MountMode = MountMode.READ,
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
   ): MountEntry {
+    this.checkResourceAvailable(resource)
     const norm = normalizePrefix(prefix)
     for (const existing of this.mountList) {
       if (existing.prefix === norm) {

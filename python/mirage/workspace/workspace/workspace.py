@@ -84,7 +84,8 @@ from mirage.workspace.workspace.lifecycle import (close_async, patch_process,
 from mirage.workspace.workspace.meta import WorkspaceMeta
 from mirage.workspace.workspace.mounts import (check_resource, install_mounts,
                                                kernel_targets,
-                                               normalize_resources)
+                                               normalize_resources,
+                                               prepare_added_mount)
 from mirage.workspace.workspace.mounts import unmount as unmount_prefix
 from mirage.workspace.workspace.types import ResourceMount
 from mirage.workspace.workspace.watch import WatchDelegate, WatchManager
@@ -500,6 +501,8 @@ class Workspace:
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         check_resource(prefix, resource)
+        self._registry.check_resource_available(resource)
+        previous = self._registry.mounts()
         # Configure before mount() captures the index in its CacheManager.
         # An alias must retain the index used by the resource's other mounts.
         if (self._registry.try_mount_for_prefix(prefix) is None
@@ -507,6 +510,7 @@ class Workspace:
                             for m in self._registry.mounts())):
             resource.set_index(self._index_config)
         entry = self._registry.mount(prefix, resource, mode)
+        prepare_added_mount(self._registry, entry, previous)
         self._ops.set_mounts(self._registry.ops_mounts())
         return entry
 

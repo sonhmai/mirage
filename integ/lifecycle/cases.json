@@ -2087,6 +2087,103 @@
           }
         }
       ]
+    },
+    {
+      "id": "new_mount_discards_shadowed_ancestor_cache",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/parent": {
+            "resource": "cached-ram",
+            "config": {
+              "files": {
+                "/child/file": "ancestor",
+                "/peer": "peer"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cat /parent/child/file",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "ancestor",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/parent/child/file",
+          "expect": {
+            "value": "ancestor"
+          }
+        },
+        {
+          "op": "mount",
+          "path": "/parent/child",
+          "resource": "cached-ram",
+          "config": {
+            "files": {
+              "/file": "child"
+            }
+          },
+          "expect": {
+            "value": "/parent/child/"
+          }
+        },
+        {
+          "op": "read",
+          "path": "/parent/child/file",
+          "expect": {
+            "value": "child"
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /parent/child/file",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "child",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/parent/child/file",
+          "expect": {
+            "value": "child"
+          }
+        },
+        {
+          "op": "unmount",
+          "path": "/parent/child"
+        },
+        {
+          "op": "exec",
+          "command": "cat /parent/child/file",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "ancestor",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "read",
+          "path": "/parent/peer",
+          "expect": {
+            "value": "peer"
+          }
+        }
+      ]
     }
   ]
 }

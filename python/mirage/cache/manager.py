@@ -38,7 +38,7 @@ class CacheManager:
                  index: IndexCacheStore,
                  prefix: str,
                  caches_reads: bool,
-                 is_active: Callable[[], bool] = lambda: True) -> None:
+                 owns_path: Callable[[str], bool] = lambda _: True) -> None:
         """Args:
             file_cache (FileCacheMixin | None): Workspace file cache
                 store; entries are keyed by mount-absolute path.
@@ -48,13 +48,13 @@ class CacheManager:
             prefix (str): Mount prefix (e.g. "/data/").
             caches_reads (bool): Whether the resource caches reads; the
                 file cache only holds paths for read-caching backends.
-            is_active: whether this mount still owns its cache entries.
+            owns_path: whether this mount still owns a virtual cache key.
         """
         self._file_cache = file_cache
         self._index = index
         self._prefix = prefix.rstrip("/")
         self._caches_reads = caches_reads
-        self._is_active = is_active
+        self._owns_path = owns_path
 
     async def _evict_dir(self, key: str) -> None:
         """Drop one directory's cached listing.
@@ -111,13 +111,13 @@ class CacheManager:
         Args:
             path (PathSpec): the path to look up.
         """
-        if (not self._caches_reads or self._file_cache is None
-                or not self._is_active()):
-            return None
         key = self._cache_key(path)
+        if (not self._caches_reads or self._file_cache is None
+                or not self._owns_path(key)):
+            return None
         if await self._file_cache.exists(key):
             cached = await self._file_cache.get(key)
-            return cached if self._is_active() else None
+            return cached if self._owns_path(key) else None
         return None
 
     async def invalidate_after_write(self, path: PathSpec) -> None:

@@ -32,14 +32,15 @@ import {
 import { Policies, PolicyDenied, postOpsGate, preOpsGate } from '../../policy/index.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { normDir, rstripSlash } from '../../utils/slash.ts'
+import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { record, runWithMountPrefix, runWithRevisions, startOp } from '../../observe/context.ts'
+import { wrapOpStream } from '../mount/mount.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
 import { type OpKwargs } from '../../ops/registry.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
-import { isMissingPath } from '../../utils/errors.ts'
+import { ebusy, isMissingPath } from '../../utils/errors.ts'
 import { cachesReads, type Resource } from '../../resource/base.ts'
 import {
   ConsistencyPolicy,
@@ -52,6 +53,7 @@ import {
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
+import type { MountEntry } from '../mount/mount.ts'
 import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { Reconciler } from '../reconcile.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
@@ -260,6 +262,7 @@ export class Dispatcher {
         if (!pathAllowed(p.virtual)) throw hiddenRefusal(opName, p.virtual)
       }
     }
+    const resolvedOwner = this.namespace.tryMountFor(p.virtual)
     let resolved: [Resource, PathSpec, MountMode]
     try {
       resolved = await this.namespace.resolve(p.virtual, false)
@@ -308,6 +311,7 @@ export class Dispatcher {
     // resolve() above already threw for a path outside every mount, so
     // this lookup cannot miss.
     const mount = this.namespace.mountFor(p.virtual)
+    if (mount !== resolvedOwner) throw ebusy(p.virtual)
     const mountPrefix = mount.prefix
     // Admission policies fire at the door, before the warm-cache early
     // return below: a cached read must be refused exactly like a cold
@@ -329,10 +333,16 @@ export class Dispatcher {
     // under the same key, so it must not be served from that cache;
     // nothing populates it from here, so skipping the probe is the
     // whole fix. Mirrors Python's Dispatcher.dispatch.
+    await mount.ensureReady()
     const raw = kwargs?.filetype === null
     if (caches && !raw && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
-      if (cached !== null && (await this.reconciler.mayServeCached(mount, p.virtual))) {
+      if (
+        cached !== null &&
+        (await this.reconciler.mayServeCached(mount, p.virtual)) &&
+        !mount.retiring &&
+        this.namespace.tryMountFor(p.virtual) === mount
+      ) {
         // The cache holds the whole object, so a ranged read is answered
         // by slicing it, never by handing back the whole file: the
         // window is what the caller asked for instead of the file, and
@@ -353,7 +363,7 @@ export class Dispatcher {
         return [served, new IOResult({ reads: { [p.virtual]: served } })]
       }
     }
-    if (this.opsRegistry.find(opName, resource.kind)?.write === true) {
+    if (this.opsRegistry.find(opName, resource)?.write === true) {
       if (effectivePathMode(p.virtual, mountPrefix, mode) === MountMode.READ) {
         throw erofsReadOnly(`mount at '${p.virtual}' is read-only`, p)
       }
@@ -370,9 +380,7 @@ export class Dispatcher {
     const filetype = getExtension(p.virtual)
     const fullKwargs: OpKwargs = {
       ...(kwargs ?? {}),
-      ...(kwargs?.index === undefined && resource.index !== undefined
-        ? { index: resource.index }
-        : {}),
+      ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
       ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
     }
     let fullArgs = args ?? []
@@ -402,26 +410,32 @@ export class Dispatcher {
     // prefix has to be active while the op runs or the record loses the
     // mount it belongs to. Mirrors Python's Ops._call.
     try {
-      result = await runWithMountPrefix(rstripSlash(mountPrefix), () =>
-        runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () =>
-          runWithTimeout(
-            Promise.resolve(
-              opName === 'setattr'
-                ? this.applySetattr(resource, scope, p, fullKwargs)
-                : this.opsRegistry.call(
-                    opName,
-                    resource.kind,
-                    resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-                    scope,
-                    fullArgs,
-                    fullKwargs,
-                  ),
+      result = await mount.use(async () => {
+        const answer = await runWithMountPrefix(
+          rstripSlash(mountPrefix),
+          () =>
+            runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () =>
+              runWithTimeout(
+                Promise.resolve(
+                  opName === 'setattr'
+                    ? this.applySetattr(resource, scope, p, fullKwargs)
+                    : this.opsRegistry.call(
+                        opName,
+                        resource,
+                        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+                        scope,
+                        fullArgs,
+                        fullKwargs,
+                      ),
+                ),
+                opTimeout,
+                opName,
+              ),
             ),
-            opTimeout,
-            opName,
-          ),
-        ),
-      )
+          mount.mountId,
+        )
+        return wrapOpStream(answer, rstripSlash(mountPrefix), mount.mountId, mount.activity)
+      })
     } catch (err) {
       const code = (err as { code?: string }).code
       if (opName === 'rmdir' && (code === 'ENOTEMPTY' || code === 'EEXIST')) {
@@ -492,8 +506,9 @@ export class Dispatcher {
    * the door's own raw registry calls: an indexed backend cannot
    * resolve a nested path without it.
    */
-  private indexKwargs(resource: Resource): OpKwargs {
-    return resource.index !== undefined ? { index: resource.index } : {}
+  private indexKwargs(mount: MountEntry | null): OpKwargs {
+    const index = mount?.index
+    return index !== undefined ? { index } : {}
   }
 
   /**
@@ -520,7 +535,8 @@ export class Dispatcher {
     spec: PathSpec,
     issuer?: symbol,
   ): Promise<unknown> {
-    const write = this.opsRegistry.find(opName, resource.kind)?.write === true
+    const mount = this.namespace.mountFor(spec.virtual)
+    const write = this.opsRegistry.find(opName, resource)?.write === true
     if (write) {
       // The same pre-ops admission a dispatched op answers, with the
       // walk's own child path: the gate that admitted the rmdir judged
@@ -539,20 +555,26 @@ export class Dispatcher {
     // pins have to ride here as on the main path above, or a cascade
     // read answers from the wrong version of a revision-pinned mount.
     // Python's twin gets both bindings from `Mount.execute_op`.
-    const mount = this.namespace.mountFor(spec.virtual)
+    await mount.ensureReady()
     try {
-      return await runWithMountPrefix(rstripSlash(mountPrefix), () =>
-        runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
-          this.opsRegistry.call(
-            opName,
-            resource.kind,
-            resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-            spec,
-            [],
-            this.indexKwargs(resource),
-          ),
-        ),
-      )
+      return await mount.use(async () => {
+        const answer = await runWithMountPrefix(
+          rstripSlash(mountPrefix),
+          () =>
+            runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
+              this.opsRegistry.call(
+                opName,
+                resource,
+                resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+                spec,
+                [],
+                this.indexKwargs(mount),
+              ),
+            ),
+          mount.mountId,
+        )
+        return wrapOpStream(answer, rstripSlash(mountPrefix), mount.mountId, mount.activity)
+      })
     } finally {
       if (write) await this.invalidateAfterWriteByPath(spec.virtual)
     }
@@ -894,19 +916,22 @@ export class Dispatcher {
     const [resource, scope] = resolved
     const mount = this.namespace.tryMountFor(scope.virtual)
     await preOpsGate(this.policies, opName, scope, false, mount?.prefix ?? '', sessionId(), issuer)
+    await mount?.ensureReady()
     const filetype = getExtension(scope.virtual)
     try {
-      return await this.opsRegistry.call(
-        opName,
-        resource.kind,
-        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-        scope,
-        [],
-        {
-          ...(resource.index !== undefined ? { index: resource.index } : {}),
-          ...(filetype !== null ? { filetype } : {}),
-        },
-      )
+      const call = () =>
+        this.opsRegistry.call(
+          opName,
+          resource,
+          resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+          scope,
+          [],
+          {
+            ...this.indexKwargs(mount),
+            ...(filetype !== null ? { filetype } : {}),
+          },
+        )
+      return await (mount === null ? call() : mount.use(call))
     } catch (err) {
       // The "nothing here" set exactly, plus a backend with no such op:
       // a miss on one channel is not absence on its own, so the caller
@@ -933,15 +958,12 @@ export class Dispatcher {
     p: PathSpec,
     kwargs: OpKwargs,
   ): Promise<Record<string, number | string>> {
-    if (
-      this.namespace.isLink(p.virtual) ||
-      this.opsRegistry.find('setattr', resource.kind) === null
-    ) {
+    if (this.namespace.isLink(p.virtual) || this.opsRegistry.find('setattr', resource) === null) {
       return this.overlaySetattr(p, kwargs)
     }
     const raw = await this.opsRegistry.call(
       'setattr',
-      resource.kind,
+      resource,
       resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
       scope,
       [],
@@ -1022,10 +1044,27 @@ export class Dispatcher {
   isCacheablePath = (path: string): boolean => {
     const mount = this.namespace.tryMountFor(path)
     if (mount === null) return false
-    return cachesReads(mount.resource)
+    return !mount.retiring && cachesReads(mount.resource)
   }
 
-  async applyIo(io: IOResult, records?: readonly OpRecord[]): Promise<void> {
-    await applyIo(this.cache, io, this.isCacheablePath, records)
+  /** Bind deferred command results to the mounts that produced them. */
+  captureCacheablePaths(): (path: string) => boolean {
+    const mounts = new Map(
+      this.namespace.mountPrefixes().map((p) => [p, this.namespace.mountFor(p)]),
+    )
+    return (path) => {
+      const prefix = ownerPrefix(mounts.keys(), path)
+      const original = prefix === null ? null : mounts.get(prefix)
+      const mount = this.namespace.tryMountFor(path)
+      return mount !== null && original === mount && !mount.retiring && cachesReads(mount.resource)
+    }
+  }
+
+  async applyIo(
+    io: IOResult,
+    records?: readonly OpRecord[],
+    isCacheable: (path: string) => boolean = this.isCacheablePath,
+  ): Promise<void> {
+    await applyIo(this.cache, io, isCacheable, records)
   }
 }

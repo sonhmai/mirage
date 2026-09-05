@@ -1336,6 +1336,7 @@ export class Workspace {
   }
 
   private async runClose(): Promise<void> {
+    await this.sessionManager.settle()
     await this.scriptPolicy.close()
     await closeWorkspace({
       watch: this.watchManager,

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { IOResult } from '../../io/types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
@@ -98,3 +98,82 @@ describe('closeWorkspace', () => {
     release.fire?.()
   })
 })
+
+it.each([
+  { secondary: false, failure: false },
+  { secondary: false, failure: true },
+  { secondary: true, failure: false },
+  { secondary: true, failure: true },
+])(
+  'close settles profile persistence (secondary=$secondary, failure=$failure)',
+  async ({ secondary, failure }) => {
+    const ws = buildWs()
+    await ws.ensureSessionsLoaded()
+    ws.createSession('peer')
+    await ws.flushSessions()
+    const sessionId = secondary ? 'peer' : ws.defaultSessionId
+    const store = ws.stateStore.sessions(ws.workspaceId)
+    const events: string[] = []
+    let enter = (): void => undefined
+    let resume = (): void => undefined
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    const release = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    const casSet = store.casSet.bind(store)
+    const closeStore = ws.stateStore.close.bind(ws.stateStore)
+    vi.spyOn(store, 'casSet').mockImplementation(async (...args) => {
+      enter()
+      await release
+      try {
+        expect(events).not.toContain('store-closed')
+        if (failure) throw new Error('store unavailable')
+        return await casSet(...args)
+      } finally {
+        events.push('write-finished')
+      }
+    })
+    vi.spyOn(ws.stateStore, 'close').mockImplementation(async () => {
+      events.push('store-closed')
+      await closeStore()
+    })
+    const updating = ws.setSessionProfile(sessionId, { paths: { hide: ['/data/secret'] } }).then(
+      (value) => value,
+      (error: unknown) => error,
+    )
+    let closing: Promise<void> | undefined
+    let closed = false
+    try {
+      await entered
+      closing = ws.close().then(() => {
+        closed = true
+      })
+      await Promise.resolve()
+      expect(closed).toBe(false)
+      expect(events).toEqual([])
+      await expect(ws.setSessionProfile(sessionId, {})).rejects.toThrow('Workspace is closed')
+      const finished = await Promise.race([
+        closing.then(() => true),
+        new Promise<boolean>((resolve) => {
+          setTimeout(() => {
+            resolve(false)
+          }, 30)
+        }),
+      ])
+      expect(finished).toBe(false)
+      resume()
+      expect(await updating).toEqual(
+        failure ? new Error('store unavailable') : ws.getSession(sessionId),
+      )
+      await closing
+      expect(events).toEqual(['write-finished', 'store-closed'])
+    } finally {
+      resume()
+      await updating
+      await closing
+      await ws.close()
+    }
+  },
+)

@@ -332,6 +332,13 @@ export class SessionManager {
     }
   }
 
+  /** Wait for admitted session writes before their store closes. */
+  async settle(): Promise<void> {
+    for (const sessionId of this.sessions.keys()) {
+      await this.persistLock.withLock(sessionId, () => Promise.resolve())
+    }
+  }
+
   /** Persist one session, retrying when another writer races us. */
   private async flushOne(session: Session): Promise<void> {
     const sid = session.sessionId

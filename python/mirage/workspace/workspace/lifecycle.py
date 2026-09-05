@@ -140,6 +140,7 @@ async def close_async(ws: "Workspace", ) -> None:
     async with ws._close_lock:
         if ws._async_closed:
             return
+        await ws._session_mgr.settle()
         await ws._watch.detach()
         await ws.job_table.kill_all()
         await ws.job_table.close_consoles()

@@ -523,3 +523,68 @@ async def test_unmount_preserves_operations_of_each_surviving_resource():
         assert await ws.fs.readdir("/")
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("secondary", [False, True])
+@pytest.mark.parametrize("failure", [False, True])
+async def test_close_settles_pending_profile_persistence(
+        monkeypatch, secondary, failure):
+    ws = Workspace({})
+    await ws.ensure_sessions_loaded()
+    ws.create_session("peer")
+    await ws.flush_sessions()
+    session_id = "peer" if secondary else ws.default_session_id
+    store = ws.state_store.sessions(ws.workspace_id)
+    entered, release = asyncio.Event(), asyncio.Event()
+    events = []
+    cas_set = store.cas_set
+    close_store = ws.state_store.close
+
+    async def delayed_write(*args):
+        entered.set()
+        await release.wait()
+        try:
+            assert "store-closed" not in events
+            if failure:
+                raise RuntimeError("store unavailable")
+            return await cas_set(*args)
+        finally:
+            events.append("write-finished")
+
+    async def tracked_close():
+        events.append("store-closed")
+        await close_store()
+
+    monkeypatch.setattr(store, "cas_set", delayed_write)
+    monkeypatch.setattr(ws.state_store, "close", tracked_close)
+    updating = asyncio.create_task(
+        ws.set_session_profile(session_id,
+                               {"paths": {
+                                   "hide": ["/data/secret"]
+                               }}))
+    closing = None
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        closing = asyncio.create_task(ws.close())
+        await asyncio.sleep(0)
+        assert not closing.done()
+        assert events == []
+        with pytest.raises(RuntimeError, match="Workspace is closed"):
+            await ws.set_session_profile(session_id, {})
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(closing), timeout=0.03)
+        release.set()
+        if failure:
+            with pytest.raises(RuntimeError, match="store unavailable"):
+                await updating
+        else:
+            assert await updating is ws.get_session(session_id)
+        await asyncio.wait_for(closing, 5)
+        assert events == ["write-finished", "store-closed"]
+    finally:
+        release.set()
+        await asyncio.gather(updating, return_exceptions=True)
+        if closing is not None:
+            await closing
+        await ws.close()

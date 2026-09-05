@@ -359,6 +359,12 @@ class SessionManager:
             async with self._locks[session.session_id]:
                 await self._flush_one(session)
 
+    async def settle(self) -> None:
+        """Wait for admitted session writes before their store closes."""
+        for lock in list(self._locks.values()):
+            async with lock:
+                pass
+
     async def _flush_one(self, session: Session) -> None:
         """Persist one session, retrying when another writer races us."""
         sid = session.session_id

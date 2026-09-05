@@ -110,6 +110,13 @@ describe('parseDateExpr', () => {
     )
   })
 
+  it('refuses a zone past a day, as GNU and Python do', () => {
+    for (const zone of ['+99:99', '+24:00', '+23:60']) {
+      expect(parseDateExpr(`2026-01-01T00:00${zone}`, true)).toBeNull()
+    }
+    expect(parseDateExpr('2026-01-01T00:00+23:59', true)).not.toBeNull()
+  })
+
   it('truncates fractional seconds instead of rounding into the next second', () => {
     expect(parseDateExpr('2026-01-01T00:00:00.9999Z', true)).toEqual(
       new Date(Date.UTC(2026, 0, 1, 0, 0, 0, 999)),

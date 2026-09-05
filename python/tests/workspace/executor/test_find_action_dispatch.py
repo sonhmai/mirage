@@ -524,6 +524,26 @@ async def test_ls_renders_a_symlink_row():
 
 
 @pytest.mark.asyncio
+async def test_delete_unlinks_a_symlink_through_the_namespace():
+    # A symlink row comes from the namespace, which no backend can see,
+    # so the removal goes through the op dispatcher the way `rm link`
+    # does; the mount's rm would only report the row absent and leave
+    # the link in place.
+    ws = await _exec_ws()
+    await ws.execute("ln -s a.txt d/link; ln -s nowhere d/dangling",
+                     session_id="s")
+    assert await _run_line(ws, "find d -type l -delete") == ("", "", 0)
+    assert await _run_line(ws, "find d -type l") == ("", "", 0)
+    assert await _run_line(ws, "cat d/a.txt") == ("a\n", "", 0)
+    # An unfiltered -delete meets the link among the backend rows and
+    # removes the whole tree, the directory holding it included.
+    await ws.execute("ln -s a.txt d/sub/link", session_id="s")
+    assert await _run_line(ws, "find d -delete") == ("", "", 0)
+    assert await _run_line(
+        ws, "find d") == ("", "find: 'd': No such file or directory\n", 1)
+
+
+@pytest.mark.asyncio
 async def test_batched_exec_is_one_invocation_across_mounts():
     # GNU: `-exec ... {} +` collects every start point's matches into one
     # batch; the actions run once at the command boundary, not once per

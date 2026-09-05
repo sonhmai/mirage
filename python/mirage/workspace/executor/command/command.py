@@ -79,8 +79,8 @@ JOB_HANDLERS = {
 async def _finish_find(stdout: ByteSource | None, io: IOResult,
                        texts: list[str], registry: MountRegistry,
                        session: Session, execute_fn: ExecuteLine | None,
-                       ns: NamespaceView | None,
-                       stat_path: StatPath | None) -> ByteSource | None:
+                       ns: NamespaceView | None, stat_path: StatPath | None,
+                       dispatch: DispatchFn) -> ByteSource | None:
     """Apply find's actions once, at the command boundary.
 
     Every runner below this point (one mount, a fan-out over nested
@@ -99,6 +99,8 @@ async def _finish_find(stdout: ByteSource | None, io: IOResult,
         execute_fn (ExecuteLine | None): runs an ``-exec`` line.
         ns (NamespaceView | None): the name plane's facts.
         stat_path (StatPath | None): dispatcher stat.
+        dispatch (DispatchFn): the op dispatcher a symlink row is
+            deleted through.
     """
     stdout, action_err, action_exit = await _apply_find_actions(
         stdout,
@@ -109,7 +111,8 @@ async def _finish_find(stdout: ByteSource | None, io: IOResult,
         execute_fn=execute_fn,
         session_id=session.session_id,
         ns=ns,
-        stat_path=stat_path)
+        stat_path=stat_path,
+        dispatch=dispatch)
     if action_err:
         existing = await materialize(io.stderr) if io.stderr else b""
         io.stderr = existing + action_err
@@ -324,7 +327,7 @@ async def handle_command(
         if cmd_name == "find":
             stdout = await _finish_find(stdout, io, cross_texts, registry,
                                         session, execute_fn, cross_ns,
-                                        cross_stat)
+                                        cross_stat, dispatch)
         if cross_parsed.warnings:
             warn = "".join(f"{cmd_name}: {w}\n"
                            for w in cross_parsed.warnings).encode()
@@ -428,7 +431,8 @@ async def handle_command(
                                                     stat_path=single_stat)
         if cmd_name == "find":
             stdout = await _finish_find(stdout, io, texts, registry, session,
-                                        execute_fn, single_ns, single_stat)
+                                        execute_fn, single_ns, single_stat,
+                                        dispatch)
             node.exit_code = io.exit_code
             node.stderr = await materialize(io.stderr) if io.stderr else b""
         if warn_bytes:
@@ -450,7 +454,8 @@ async def handle_command(
                                     routing_decision=routing_decision)
     if cmd_name == "find":
         stdout = await _finish_find(stdout, io, texts, registry, session,
-                                    execute_fn, single_ns, single_stat)
+                                    execute_fn, single_ns, single_stat,
+                                    dispatch)
 
     if warn_bytes:
         existing = await materialize(io.stderr) if io.stderr else b""

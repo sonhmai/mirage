@@ -24,6 +24,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, StatPath
 from mirage.policy import pre_ops_gate
+from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.errors import fs_strerror
 from mirage.utils.path import resolve_path
@@ -126,21 +127,41 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
 
 
 async def _delete(ps: PathSpec, registry: MountRegistry, cwd: str,
+                  ns: NamespaceView | None, dispatch: DispatchFn | None,
                   errors: list[bytes]) -> bool:
     """Delete one accepted row; returns whether it succeeded.
+
+    A symlink row came from the namespace, which no backend can see, so
+    it is unlinked through the op dispatcher the way ``rm link`` is
+    (``strip_link_operands``): that door is where the path gate, the
+    turf's mode and the op ledger fire, and it removes the node the
+    mount's ``rm`` would only report as absent. Every other row is a
+    backend entry, removed by the mount's own ``rm``.
 
     Args:
         ps (PathSpec): the selected row, with its display spelling.
         registry (MountRegistry): used to route the removal.
         cwd (str): the session's working directory.
+        ns (NamespaceView | None): the name plane's facts, whose link
+            view tells a namespace row from a backend one.
+        dispatch (DispatchFn | None): the op dispatcher a link is
+            unlinked through; None outside a workspace, where there is
+            no namespace to hold one.
         errors (list[bytes]): where a failure's line is appended.
     """
     path = ps.raw_path or ps.virtual
+    link = (dispatch is not None and ns is not None and ns.links is not None
+            and ns.links.stat_at(ps.virtual) is not None)
     mount = registry.try_mount_for(ps.virtual)
-    if mount is None:
+    if mount is None and not link:
         errors.append(f"find: cannot delete '{path}': no mount\n".encode())
         return False
     try:
+        if link:
+            assert dispatch is not None
+            await dispatch("unlink", ps)
+            return True
+        assert mount is not None
         # -delete is find's own action, not an `rm` line, so no command
         # rule sees it; it is a removal all the same, so it clears the op
         # door a path rule guards (the same gate `ws.fs`, FUSE and a
@@ -281,6 +302,7 @@ async def _apply_find_actions(
     session_id: str = "",
     ns: NamespaceView | None = None,
     stat_path: StatPath | None = None,
+    dispatch: DispatchFn | None = None,
 ) -> tuple[ByteSource | None, bytes, int]:
     """Apply find's actions (-exec / -delete / -print0 / -ls) to its rows.
 
@@ -320,6 +342,9 @@ async def _apply_find_actions(
             a symlink) renders the way ``ls -l`` renders it.
         stat_path (StatPath | None): dispatcher stat, threaded with it
             and used to find a slash-carrying ``-exec`` head.
+        dispatch (DispatchFn | None): the op dispatcher a ``-delete``
+            unlinks a symlink row through, since the row is namespace
+            state no mount's ``rm`` can reach.
 
     Returns:
         The rows to print, the stderr to append, and the exit status the
@@ -370,7 +395,8 @@ async def _apply_find_actions(
                 # leaves a mount point in place.
                 if _structural(match, registry):
                     continue
-                if not await _delete(match, registry, cwd, errors):
+                if not await _delete(match, registry, cwd, ns, dispatch,
+                                     errors):
                     exit_code = 1
                     break
             else:

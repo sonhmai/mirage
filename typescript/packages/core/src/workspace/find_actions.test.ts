@@ -379,6 +379,34 @@ describe('find -exec isolation', () => {
     }
   })
 
+  it('unlinks a symlink row through the namespace under -delete', async () => {
+    // A symlink row comes from the namespace, which no backend can see,
+    // so the removal goes through the op dispatcher the way `rm link`
+    // does; the mount's rm would only report the row absent and leave
+    // the link in place.
+    const ws = await singleMountWs()
+    try {
+      await ws.execute(
+        'mkdir -p /w/d/sub; printf a > /w/d/a.txt; ln -s a.txt /w/d/link; ln -s nowhere /w/d/dangling; cd /w',
+      )
+      let io = await ws.execute('find d -type l -delete')
+      expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual(['', '', 0])
+      io = await ws.execute('find d -type l')
+      expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual(['', '', 0])
+      io = await ws.execute('cat d/a.txt')
+      expect([io.stdoutText, io.exitCode]).toEqual(['a', 0])
+      // An unfiltered -delete meets the link among the backend rows and
+      // removes the whole tree, the directory holding it included.
+      await ws.execute('ln -s a.txt /w/d/sub/link')
+      io = await ws.execute('find d -delete')
+      expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual(['', '', 0])
+      io = await ws.execute('find d')
+      expect([io.stderrText, io.exitCode]).toEqual(["find: 'd': No such file or directory\n", 1])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('renders a symlink row under -ls', async () => {
     // A symlink is namespace state no backend stat can see, so the
     // delegated ls needs the link view to render the row at all.

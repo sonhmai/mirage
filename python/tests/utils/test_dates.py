@@ -51,6 +51,14 @@ def test_iso_datetime_with_offset_converts_under_utc():
     assert parsed.tzinfo == timezone.utc
 
 
+def test_iso_zone_past_a_day_is_invalid():
+    # GNU refuses `+99:99`; a zone strictly inside a day is also the
+    # rule datetime enforces, and the TypeScript twin mirrors it.
+    for zone in ("+99:99", "+24:00", "+23:60"):
+        assert parse_date_expr(f"2026-01-01T00:00{zone}", utc=True) is None
+    assert parse_date_expr("2026-01-01T00:00+23:59", utc=True) is not None
+
+
 def test_invalid_returns_none():
     assert parse_date_expr("not a date", now=NOW) is None
     assert parse_date_expr("24 hours agoo", now=NOW) is None

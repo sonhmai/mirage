@@ -150,7 +150,15 @@ function parseIsoWords(text: string, utc: boolean): Date | null {
     if (zone !== 'Z' && zone !== 'z') {
       const zm = /^([+-])(\d{2}):?(\d{2})$/.exec(zone)
       if (zm === null) return null
-      offsetMin = (zm[1] === '-' ? -1 : 1) * (Number(zm[2]) * 60 + Number(zm[3]))
+      const zoneHours = Number(zm[2])
+      const zoneMinutes = Number(zm[3])
+      // A zone past 23:59 is refused, as Python's datetime refuses it
+      // (an offset there is strictly inside a day) and as GNU refuses
+      // `+99:99`. gnulib alone takes exactly +-24:00 and folds a minute
+      // field past 59 into hours; that corner is where the two hosts
+      // part from GNU, and they part the same way.
+      if (zoneHours > 23 || zoneMinutes > 59) return null
+      offsetMin = (zm[1] === '-' ? -1 : 1) * (zoneHours * 60 + zoneMinutes)
     }
     return new Date(Date.UTC(year, month, day, hour, minute, second, ms) - offsetMin * 60_000)
   }

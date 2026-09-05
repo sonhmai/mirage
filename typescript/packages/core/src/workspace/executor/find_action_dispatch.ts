@@ -33,6 +33,7 @@ import {
   parseFindExpression,
 } from '../../commands/builtin/find_parse.ts'
 import type { ExecuteFn } from '../expand/node.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 
 export interface FindActionDoors {
   // Runs an `-exec` line in the session; absent outside a workspace,
@@ -46,6 +47,9 @@ export interface FindActionDoors {
   // Dispatcher stat, threaded with it and used to find a
   // slash-carrying `-exec` head.
   statPath?: StatPath | null
+  // The op dispatcher a `-delete` unlinks a symlink row through, since
+  // the row is namespace state no mount's `rm` can reach.
+  dispatch?: DispatchFn | null
 }
 
 const enc = new TextEncoder()
@@ -123,20 +127,37 @@ async function runExec(
   return io.exitCode === 0
 }
 
-/** Delete one accepted row; returns whether it succeeded. */
+/**
+ * Delete one accepted row; returns whether it succeeded.
+ *
+ * A symlink row came from the namespace, which no backend can see, so
+ * it is unlinked through the op dispatcher the way `rm link` is
+ * (`stripLinkOperands`): that door is where the path gate, the turf's
+ * mode and the op ledger fire, and it removes the node the mount's `rm`
+ * would only report as absent. Every other row is a backend entry,
+ * removed by the mount's own `rm`.
+ */
 async function deleteRow(
   ps: PathSpec,
   registry: MountRegistry,
   cwd: string,
+  ns: NamespaceView | null,
+  dispatch: DispatchFn | null,
   errors: Uint8Array[],
 ): Promise<boolean> {
   const path = ps.rawPath || ps.virtual
+  const link = dispatch !== null && (ns?.links?.statAt(ps.virtual) ?? null) !== null
   const mount = registry.tryMountFor(ps.virtual)
-  if (mount === null) {
+  if (mount === null && !link) {
     errors.push(enc.encode(`find: cannot delete '${path}': no mount\n`))
     return false
   }
   try {
+    if (link) {
+      await dispatch('unlink', ps)
+      return true
+    }
+    if (mount === null) return false
     // -delete is find's own action, not an `rm` line, so no command rule
     // sees it; it is a removal all the same, so it clears the op door a
     // path rule guards (the same gate `ws.fs`, FUSE and a redirect
@@ -167,7 +188,11 @@ async function deleteRow(
     }
     return true
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
+    // GNU words it with the errno text; a policy refusal carries its
+    // reason there.
+    const msg =
+      (isFsError(err) ? fsStrerror(err) : null) ??
+      (err instanceof Error ? err.message : String(err))
     errors.push(enc.encode(`find: cannot delete '${path}': ${msg}\n`))
     return false
   }
@@ -300,6 +325,7 @@ export async function applyFindActions(
   const sessionId = doors.sessionId ?? ''
   const ns = doors.ns ?? null
   const statPath = doors.statPath ?? null
+  const dispatch = doors.dispatch ?? null
   if (matchedPaths === null)
     return [null, enc.encode('find: actions require structured matches\n'), 1]
   const matches = [...matchedPaths]
@@ -351,7 +377,7 @@ export async function applyFindActions(
         // A structural row is skipped, not refused, the way Unix leaves
         // a mount point in place.
         if (structural(match, registry)) continue
-        if (!(await deleteRow(match, registry, cwd, errors))) {
+        if (!(await deleteRow(match, registry, cwd, ns, dispatch, errors))) {
           exitCode = 1
           break
         }

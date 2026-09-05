@@ -1678,11 +1678,79 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fl/d/sub && printf A > /data/fl/d/a.txt && printf B > /data/fl/d/sub/b.txt && cd /data/fl && find d -type f -delete -ls -print; echo rc=$?; find d -type f | wc -l; cd / && rm -r /data/fl",
+      "command": "mkdir -p /data/fl/d/sub && printf A > /data/fl/d/a.txt && printf B > /data/fl/d/sub/b.txt && printf K > /data/fl/d/sub/keep && cd /data/fl && find d -name '*.txt' -delete -ls -print; echo rc=$?; find d -type f | wc -l; cd / && rm -r /data/fl",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\n0\n",
+        "stdout": "rc=1\n1\n",
         "stderr": "find: 'd/a.txt': No such file or directory\nfind: 'd/sub/b.txt': No such file or directory\n"
+      }
+    },
+    {
+      "id": "find_delete_unlinks_a_namespace_link",
+      "seq": 981528,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fd/d && printf K > /data/fd/d/keep && cd /data/fd && ln -s keep d/link && ln -s nowhere d/dangling && find d -type l -delete; echo rc=$?; find d | sort; cd / && rm -r /data/fd",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nd\nd/keep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_newermt_rejects_a_zone_past_a_day",
+      "seq": 981529,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fz && printf A > /data/fz/a && cd /data/fz && find a -newermt '2026-01-01T00:00+99:99'; echo rc=$?; find a -newermt '2026-01-01T00:00+23:59' | wc -l; cd / && rm -r /data/fz",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n1\n",
+        "stderr": "find: I cannot figure out how to interpret '2026-01-01T00:00+99:99' as a date or time\n"
       }
     }
   ]

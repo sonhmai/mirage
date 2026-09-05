@@ -88,7 +88,9 @@ export async function handleBackground(
   // (`Decisions.split`): its gates run after the line has returned, and
   // its grants have to stay reserved through the line's end whichever
   // way the line ends, a release for a question left waiting included.
-  // The job revokes its own hand-off when it ends.
+  // The job's whole subtree runs on that hand-off, the lines it
+  // evaluates included (the walker binds it into their door), and the
+  // job revokes it when it ends.
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
 ): Promise<JobHandlerResult> {

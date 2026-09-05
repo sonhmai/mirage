@@ -26,6 +26,9 @@
     "approve? rm -f /data/a.txt",
     "for i in 1 2; do rm -f /data/a.txt; done: ran, exit 0",
     "approve? rm /data/a.txt",
-    "printf /data/a.txt | xargs rm: ran, exit 0"
+    "printf /data/a.txt | xargs rm: ran, exit 0",
+    "approve? rm -f /data/a.txt",
+    "sleep 0.2 && eval 'rm -f /data/a.txt' &: ran, exit 0",
+    "wait: ran, exit 0"
   ]
 }

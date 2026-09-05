@@ -80,8 +80,10 @@ async def handle_background(
     and its grants have to stay reserved through the line's end
     whichever way the line ends, a release for a question left waiting
     included, and through the launch of the same job again by a loop.
-    The job revokes its own hand-off when it ends, which spends what no
-    other hand-off still holds.
+    The job's whole subtree runs on that hand-off, the lines it
+    evaluates included (the walker binds it into their door), and the
+    job revokes it when it ends, which spends what no other hand-off
+    still holds.
     """
     bg_session = session.fork()
     job_handed = (decisions.split(session.session_id, handed,

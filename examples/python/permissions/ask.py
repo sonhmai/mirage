@@ -22,7 +22,7 @@ from mirage.resource.ram import RAMResource
 # `ask` puts one of those commands to a person before it runs.
 ROLE = {
     "commands": {
-        "allow": ["ls", "rm", "printf", "xargs"],
+        "allow": ["ls", "rm", "printf", "xargs", "sleep", "wait", "eval"],
         "ask": [{
             "reason": "deletes are reviewed",
             "commands": ["rm"]
@@ -68,6 +68,12 @@ async def main() -> None:
         # A question is about the words that run: xargs appends its
         # input to rm, so the question names the operand, not a bare rm.
         await run(ws, "printf /data/a.txt | xargs rm")
+        # A job outlives the line that launched it, and a line the job
+        # hands on later (here through eval) runs on the grant the job
+        # took with it: the one question was asked before the launch,
+        # and nothing asks again when the job gets to it.
+        await run(ws, "sleep 0.2 && eval 'rm -f /data/a.txt' &")
+        await run(ws, "wait")
     finally:
         await ws.close()
 

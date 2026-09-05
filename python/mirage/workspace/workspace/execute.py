@@ -93,10 +93,10 @@ async def recurse(
     routing_decision: RouteDecision | None,
     agent_id: str | None,
     nested: NestedRefusal,
-    handed: HandOff,
     cmd: str,
     node: Any = None,
     span: tuple[int, int] | None = None,
+    handed: HandOff | None = None,
     **opts: Any,
 ) -> Any:
     """The executor's internal eval ($(), source, eval, xargs, ...).
@@ -106,14 +106,14 @@ async def recurse(
     reader, the evaluator can't touch it). It inherits the typed
     line's routing decision and agent: nested lines never re-route,
     and an approval they raise is the outer line's agent's. It runs on
-    a hand-off of its own under the line's, standing at the node whose
-    text it evaluates: the outer pass reads into the words a command
-    runs and claims for them at that place, so the grants are the
-    inner line's to run on and nobody else's, and what the inner line's
-    gates claim goes back to the outer line when it ends
+    a hand-off of its own under the one the node that runs it runs on,
+    standing at that node: the outer pass reads into the words a
+    command runs and claims for them at that place, so the grants are
+    the inner line's to run on and nobody else's, and what the inner
+    line's gates claim goes back up when it ends
     (``Decisions.hand_up``), so the next evaluation from the same node
-    (the next batch ``xargs`` hands on) runs on it and the typed line's
-    end spends it.
+    (the next batch ``xargs`` hands on) runs on it and the end of the
+    line or job holding it spends it.
 
     Args:
         ws: the workspace hosting the outer line.
@@ -123,7 +123,6 @@ async def recurse(
         agent_id (str | None): the typed line's agent, inherited.
         nested (NestedRefusal): where the record a nested line earned
             is kept for the typed line.
-        handed (HandOff): the outer line's hand-off.
         cmd (str): the nested command line.
         node (Any): the node whose text ``cmd`` is: the command running
             a line, or the substitution being expanded. None when the
@@ -134,14 +133,26 @@ async def recurse(
             node's text when the node holds several lines (a backtick
             region, whose touching pairs tree-sitter lexes as one
             node), so each stands at its own place.
+        handed (HandOff | None): the hand-off of the subtree that runs
+            this evaluation, bound by the walker at its door
+            (``execute_node``): the line's own for a command in the
+            foreground, a job's own for a command inside a background
+            job, which may reach this after the line has ended. Bound
+            to the line instead, a line a job evaluated late stood
+            under a hand-off already swept: its gate could not see the
+            grant the job held and asked again, and what it claimed
+            went back to a hand-off nothing revokes. None outside a
+            walk, which makes the inner line a line of its own.
     """
-    origin = occurrence_of(node, handed, span) if node is not None else None
+    origin = (occurrence_of(node, handed, span)
+              if node is not None and handed is not None else None)
     io = await ws.execute(cmd,
                           cancel=cancel,
                           record=False,
                           routing_decision=routing_decision,
                           agent_id=agent_id,
-                          handed=HandOff(parent=handed, origin=origin),
+                          handed=(HandOff(parent=handed, origin=origin)
+                                  if handed is not None else None),
                           **opts)
     if isinstance(io, IOResult) and io.refusal is not None:
         nested.latest = io.refusal
@@ -259,13 +270,13 @@ async def execute_line(
         nested = NestedRefusal()
         # The line's hand-off: the grants its passes and gates claim
         # for its commands, which the gates run on and the line's end
-        # spends. A nested evaluation runs on one made under it, so the
-        # line that runs the words a command hands on runs on what this
-        # line's pass claimed for them.
+        # spends. A nested evaluation runs on one made under the
+        # hand-off of the node that runs it, which the walker binds
+        # into the door (execute_node), not this line's: a background
+        # job's subtree runs on a hand-off of the job's own.
         if handed is None:
             handed = HandOff()
-        exec_recursion = partial(recurse, ws, cancel, decision, agent, nested,
-                                 handed)
+        exec_recursion = partial(recurse, ws, cancel, decision, agent, nested)
         if provision:
             name = command_name(command)
             guard = resolve_limit(name) if name else None

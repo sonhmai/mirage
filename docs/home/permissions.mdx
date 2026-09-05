@@ -314,7 +314,11 @@ line has returned, a question that holds the rest of the line does not
 let go of them, and a loop that launches the same job again hands the
 next job the same grant. This also applies when `eval` launches the
 job: in `eval 'sleep 1 && cat secret.txt &'`, the outer line's approval
-stays reserved for the background `cat` after `eval` returns. A line
+stays reserved for the background `cat` after `eval` returns. And it
+applies to a line the job itself evaluates once it is running: in
+`sleep 1 && eval 'cat secret.txt' &`, the `cat` runs on the grant the
+job took with it, long after the line that launched the job has
+returned, and the job's end is what spends it. A line
 the shell evaluates from inside another (`$( )`, `eval`, `source`,
 `xargs`) runs on what the outer line was given for the words it runs,
 so `echo $(cat secret.txt)` is one question, not two, and two such

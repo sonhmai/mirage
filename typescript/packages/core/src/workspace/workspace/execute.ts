@@ -39,6 +39,7 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
+import { withHandOff } from '../node/execute_node.ts'
 import type { ExecuteNodeDeps } from '../node/execute_node.ts'
 import { prejudgeLine, unrefusedNodes } from '../node/explain.ts'
 import { runCommandTree } from '../node/run_tree.ts'
@@ -263,9 +264,10 @@ async function runLine(
 
   // The line's hand-off: the grants its passes and gates claim for its
   // commands, which the gates run on and the line's end spends. A
-  // nested evaluation runs on one made under it, standing at the node
-  // whose text it evaluates, so the line that runs the words a command
-  // hands on runs on what this line's pass claimed for them.
+  // nested evaluation runs on one made under the hand-off of the node
+  // that runs it, which the walker binds into the door (`withHandOff`),
+  // not this line's: a background job's subtree runs on a hand-off of
+  // the job's own.
   const handed: HandOff = options.handed ?? { claimed: [], parent: null, origin: null }
 
   const executeFn: ExecuteFn = async (cmd, opts) => {
@@ -284,10 +286,15 @@ async function runLine(
     // Nested lines never re-route: the evaluator's inner lines keep
     // the typed line's decision (runtime argument, policy, or scripts).
     if (routingDecision !== null) innerOpts.routingDecision = routingDecision
-    innerOpts.handed = {
-      claimed: [],
-      parent: handed,
-      origin: opts.node === undefined ? null : occurrenceOf(opts.node, handed, opts.span),
+    // Under the hand-off the walker bound, standing at the node whose
+    // text this is; outside a walk (no hand-off bound) the inner line
+    // is a line of its own.
+    if (opts.handed !== undefined) {
+      innerOpts.handed = {
+        claimed: [],
+        parent: opts.handed,
+        origin: opts.node === undefined ? null : occurrenceOf(opts.node, opts.handed, opts.span),
+      }
     }
     // `command NAME` re-runs the inner line and must forward the pipe
     // stdin so `... | command cat` filters the upstream output; the same
@@ -305,28 +312,30 @@ async function runLine(
     })
   }
 
-  const deps = {
-    dispatch,
-    handed,
-    registry: env.registry,
-    namespace: env.namespace,
-    jobTable: env.jobTable,
-    executeFn,
-    agentId: options.agentId ?? env.agentId ?? '',
-    workspaceId: env.workspaceId,
-    registerCloser: (fn: () => Promise<void>) => {
-      env.registerCloser(fn)
+  const deps = withHandOff(
+    {
+      dispatch,
+      registry: env.registry,
+      namespace: env.namespace,
+      jobTable: env.jobTable,
+      executeFn,
+      agentId: options.agentId ?? env.agentId ?? '',
+      workspaceId: env.workspaceId,
+      registerCloser: (fn: () => Promise<void>) => {
+        env.registerCloser(fn)
+      },
+      ensureOpen: (resource: Resource) => env.ensureOpen(resource),
+      runtimeBindings: env.runtimes.bindings,
+      // Alias expansion rewrites the head word and reads the result as a
+      // fresh line, so it needs the same parser the line reader used. The
+      // parser is already resolved by the time the tree runs.
+      reparse: (line: string) => parser.parse(line),
+      ...(routingDecision !== null ? { routingDecision } : {}),
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
+      ...(options.sink !== undefined ? { sink: options.sink } : {}),
     },
-    ensureOpen: (resource: Resource) => env.ensureOpen(resource),
-    runtimeBindings: env.runtimes.bindings,
-    // Alias expansion rewrites the head word and reads the result as a
-    // fresh line, so it needs the same parser the line reader used. The
-    // parser is already resolved by the time the tree runs.
-    reparse: (line: string) => parser.parse(line),
-    ...(routingDecision !== null ? { routingDecision } : {}),
-    ...(options.signal !== undefined ? { signal: options.signal } : {}),
-    ...(options.sink !== undefined ? { sink: options.sink } : {}),
-  }
+    handed,
+  )
   // The line runs as its own fork of the session, and everything that
   // judges it runs bound to that fork: admission and the policies it
   // consults (a profile policy reads the mounts as the session it judges

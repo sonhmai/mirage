@@ -1015,6 +1015,47 @@ describe('prejudge scope', () => {
     expect(w.decisions.list('s')).toEqual([])
   })
 
+  it.each([
+    "sleep 0.2 && eval 'cat /data/secret.txt' &",
+    'sleep 0.2 && echo $(cat /data/secret.txt) &',
+  ])('stands a line a job evaluates late under the job: %s', async (line) => {
+    // The job outlives the line, and only then hands a line on (eval) or
+    // expands one ($( )). That line stands under the job's hand-off,
+    // which holds the grant the pass claimed for its cat, so the gate
+    // runs on it and asks nothing more, and the job's end spends it.
+    // Under the finished line's hand-off instead, the gate could not see
+    // the job's grant and asked again, and what it then claimed went
+    // back to a hand-off nothing revokes, standing for good.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute(line, { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(asked).toHaveLength(1)
+    const waited = await w.execute('wait', { sessionId: 's' })
+    expect(waited.exitCode).toBe(0)
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it("leaves what a job's late gate claims to the job to spend", async () => {
+    // xargs completes cat's words at run time, so the pass leaves the
+    // question to the gate, which asks from inside the job after the
+    // line has returned. The answer is claimed for the batch's line and
+    // handed up to the job's hand-off, whose end spends it; parked on
+    // the finished line's, it would stand unspent for good.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute('sleep 0.2 && echo /data/secret.txt | xargs cat &', {
+      sessionId: 's',
+    })
+    expect(ran.exitCode).toBe(0)
+    expect(asked).toEqual([])
+    const waited = await w.execute('wait', { sessionId: 's' })
+    expect(waited.exitCode).toBe(0)
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
   it('asks about a mapfile callback at the gate', async () => {
     // mapfile runs its callback with the index and the record after it,
     // so the callback as typed is a spelling the runtime completes, like

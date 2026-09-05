@@ -280,9 +280,11 @@ async def execute_node(
         stdin (Any): input stream.
         call_stack (CallStack): shell call stack.
         cancel (asyncio.Event | None): event used to abort mid-flight.
-        handed (HandOff | None): the line's hand-off, carried to every
-            command's gate so it spends the grants claimed for this
-            line and never another's.
+        handed (HandOff | None): the hand-off this subtree runs on,
+            carried to every command's gate so it runs on the grants
+            claimed for this line and never another's, and bound into
+            ``execute_fn`` so every line the subtree evaluates stands
+            under it too.
         sink (JobConsole | None): console to write this node's output to
             as it is produced. When set, the node emits and returns no
             stdout; when None it returns stdout as a value, which is
@@ -309,6 +311,19 @@ async def execute_node(
         raise MirageAbortError()
     cs = call_stack if call_stack is not None else CallStack()
     session.errexit_immune = False
+
+    # The hand-off this subtree runs on is the one its nested
+    # evaluations run under. Everything a command hands a line to
+    # (eval, source, xargs, command, a substitution, a herestring, a
+    # redirect target) re-enters through execute_fn, so the hand-off is
+    # bound into it here, at the one door every node goes through,
+    # rather than where the line made it: a background job's subtree
+    # runs on a hand-off of the job's own, and a line it evaluates
+    # after the typed line has ended has to stand under that one.
+    # Under the line's, the inner gate could not see the grant the job
+    # holds and asked again, and what it claimed went back to a
+    # hand-off nothing revokes any more.
+    execute_fn = partial(execute_fn, handed=handed)
 
     recurse = partial(execute_node,
                       dispatch,

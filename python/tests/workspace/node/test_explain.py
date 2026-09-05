@@ -1121,6 +1121,55 @@ async def test_every_job_a_loop_launches_runs_on_one_nod():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("line", [
+    "sleep 0.2 && eval 'cat /data/secret.txt' &",
+    "sleep 0.2 && echo $(cat /data/secret.txt) &",
+])
+async def test_a_line_a_job_evaluates_late_stands_under_the_job(line):
+    # The job outlives the line, and only then hands a line on (eval) or
+    # expands one ($( )). That line stands under the job's hand-off,
+    # which holds the grant the pass claimed for its cat, so the gate
+    # runs on it and asks nothing more, and the job's end spends it.
+    # Under the finished line's hand-off instead, the gate could not see
+    # the job's grant and asked again, and what it then claimed went
+    # back to a hand-off nothing revokes, standing for good.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute(line, session_id="s")
+        assert ran.exit_code == 0
+        assert len(asked) == 1
+        waited = await ws.execute("wait", session_id="s")
+        assert waited.exit_code == 0
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_what_a_jobs_late_gate_claims_is_the_jobs_to_spend():
+    # xargs completes cat's words at run time, so the pass leaves the
+    # question to the gate, which asks from inside the job after the
+    # line has returned. The answer is claimed for the batch's line and
+    # handed up to the job's hand-off, whose end spends it; parked on
+    # the finished line's, it would stand unspent for good.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute(
+            "sleep 0.2 && echo /data/secret.txt | xargs cat &", session_id="s")
+        assert ran.exit_code == 0
+        assert asked == []
+        waited = await ws.execute("wait", session_id="s")
+        assert waited.exit_code == 0
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_mapfile_callback_is_asked_about_at_the_gate():
     # mapfile runs its callback with the index and the record after it,
     # so the callback as typed is a spelling the runtime completes, like

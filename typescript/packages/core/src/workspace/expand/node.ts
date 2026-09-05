@@ -28,13 +28,19 @@ import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from '../../shell/esca
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
 import { expandBraces, expansionWrite, lookupVar } from './variable.ts'
 import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
+import type { HandOff } from '../../policy/types.ts'
 
 /**
  * The executor's door for a nested line. `node` is the node whose text
  * the line is: the command running it (bound by the dispatcher for
  * every word that runs a line) or the substitution being expanded,
  * which names itself. The inner line's commands stand under it, where
- * the judging pass placed them.
+ * the judging pass placed them. `handed` is the hand-off of the subtree
+ * that runs the evaluation, bound by the walker (`withHandOff`): the
+ * line's own for a command in the foreground, a job's own for a command
+ * inside a background job. The inner line runs on a hand-off made under
+ * it, so a line a job evaluates after the typed line has ended still
+ * stands under the hand-off holding the job's grants.
  */
 export type ExecuteFn = (
   command: string,
@@ -43,6 +49,7 @@ export type ExecuteFn = (
     stdin?: ByteSource | null
     node?: TSNodeLike
     span?: readonly [number, number]
+    handed?: HandOff
   },
 ) => Promise<IOResult>
 

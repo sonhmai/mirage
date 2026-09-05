@@ -52,6 +52,7 @@ import {
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
+import type { MountEntry } from '../mount/mount.ts'
 import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { Reconciler } from '../reconcile.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
@@ -376,7 +377,7 @@ export class Dispatcher {
     const filetype = getExtension(p.virtual)
     const fullKwargs: OpKwargs = {
       ...(kwargs ?? {}),
-      ...(kwargs?.index === undefined && mount.index !== undefined ? { index: mount.index } : {}),
+      ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
       ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
     }
     let fullArgs = args ?? []
@@ -496,8 +497,9 @@ export class Dispatcher {
    * the door's own raw registry calls: an indexed backend cannot
    * resolve a nested path without it.
    */
-  private indexKwargs(resource: Resource): OpKwargs {
-    return resource.index !== undefined ? { index: resource.index } : {}
+  private indexKwargs(mount: MountEntry | null): OpKwargs {
+    const index = mount?.index
+    return index !== undefined ? { index } : {}
   }
 
   /**
@@ -524,6 +526,7 @@ export class Dispatcher {
     spec: PathSpec,
     issuer?: symbol,
   ): Promise<unknown> {
+    const mount = this.namespace.mountFor(spec.virtual)
     const write = this.opsRegistry.find(opName, resource.kind)?.write === true
     if (write) {
       // The same pre-ops admission a dispatched op answers, with the
@@ -543,7 +546,7 @@ export class Dispatcher {
     // pins have to ride here as on the main path above, or a cascade
     // read answers from the wrong version of a revision-pinned mount.
     // Python's twin gets both bindings from `Mount.execute_op`.
-    const mount = this.namespace.mountFor(spec.virtual)
+    await mount.ensureReady()
     try {
       return await runWithMountPrefix(rstripSlash(mountPrefix), () =>
         runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
@@ -553,7 +556,7 @@ export class Dispatcher {
             resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
             spec,
             [],
-            this.indexKwargs(resource),
+            this.indexKwargs(mount),
           ),
         ),
       )
@@ -898,6 +901,7 @@ export class Dispatcher {
     const [resource, scope] = resolved
     const mount = this.namespace.tryMountFor(scope.virtual)
     await preOpsGate(this.policies, opName, scope, false, mount?.prefix ?? '', sessionId(), issuer)
+    await mount?.ensureReady()
     const filetype = getExtension(scope.virtual)
     try {
       return await this.opsRegistry.call(
@@ -907,7 +911,7 @@ export class Dispatcher {
         scope,
         [],
         {
-          ...(resource.index !== undefined ? { index: resource.index } : {}),
+          ...this.indexKwargs(mount),
           ...(filetype !== null ? { filetype } : {}),
         },
       )

@@ -159,7 +159,9 @@ class Workspace:
         self._owns_state_store = stores.owned
         self._state_store = stores.state_store
         self._cache: FileCacheMixin = build_file_cache(cache, cache_limit)
+        self._index_config = index
         self._closed = False
+        self._closing = False
         self._async_closed = False
         self._close_lock = asyncio.Lock()
         # Resources reused from another live workspace (copy() / load
@@ -476,6 +478,11 @@ class Workspace:
     def mount(self, prefix: str):
         return self._registry.mount_for(prefix)
 
+    @property
+    def _shutting_down(self) -> bool:
+        """Reject lifecycle changes while runtimes drain into open mounts."""
+        return self._closing or self._closed
+
     def add_mount(self,
                   prefix: str,
                   resource: BaseResource,
@@ -490,15 +497,21 @@ class Workspace:
         Returns:
             MountEntry: the installed mount, with its normalized prefix.
         """
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         check_resource(prefix, resource)
+        # Configure before mount() captures the index in its CacheManager.
+        # An alias must retain the index used by the resource's other mounts.
+        if (self._registry.try_mount_for_prefix(prefix) is None
+                and not any(m.resource is resource
+                            for m in self._registry.mounts())):
+            resource.set_index(self._index_config)
         entry = self._registry.mount(prefix, resource, mode)
         self._ops.set_mounts(self._registry.ops_mounts())
         return entry
 
     async def unmount(self, prefix: str) -> None:
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         await unmount_prefix(self._registry, self._ops, prefix)
 
@@ -509,7 +522,7 @@ class Workspace:
             prefix (str): mount prefix, not a path inside a mount.
             mode (MountMode): the replacement read, write or exec mode.
         """
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         mode = parse_mount_mode(mode)
         self._registry.mount_for_prefix(prefix).mode = mode
@@ -562,7 +575,7 @@ class Workspace:
                 validated through the spec's ``config_model`` (fail
                 loud at install time).
         """
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         return self._registry.clis.install(name, spec, config)
 
@@ -572,7 +585,7 @@ class Workspace:
         Args:
             name (str): installed head word.
         """
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         self._registry.clis.uninstall(name)
 
@@ -613,7 +626,7 @@ class Workspace:
         Raises:
             ValueError: unknown name or duplicate entry.
         """
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         return self._runtimes.add(runtime)
 
@@ -669,7 +682,7 @@ class Workspace:
             RuntimeError: The workspace is closed, or a runtime is
                 already attached.
         """
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         self._watch.attach(runtime)
 
@@ -705,7 +718,7 @@ class Workspace:
             p if isinstance(p, PathSpec) else PathSpec.from_str_path(p)
             for p in raw
         ]
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         return self._watch.watch(specs)
 
@@ -721,7 +734,7 @@ class Workspace:
         Args:
             change (FileEvent): Observed change.
         """
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         await self._watch.notify(change)
 
@@ -1029,7 +1042,7 @@ class Workspace:
             profile: named profile or complete document; None selects the
                 workspace default, and an empty document clears restrictions.
         """
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         if isinstance(profile, Mapping):
             profile = SessionProfile.model_validate(profile)

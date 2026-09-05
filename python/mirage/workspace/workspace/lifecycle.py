@@ -134,6 +134,9 @@ async def close_async(ws: "Workspace", ) -> None:
     Args:
         ws: the workspace being closed.
     """
+    # Stop lifecycle mutations before teardown yields or captures its close
+    # lists. Keep _closed separate so runtime journals can still dispatch.
+    ws._closing = True
     async with ws._close_lock:
         if ws._async_closed:
             return

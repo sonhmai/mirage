@@ -16,8 +16,10 @@ import asyncio
 
 import pytest
 
+from mirage.commands.cli.types import CLISpec
 from mirage.io import IOResult
 from mirage.resource.ram import RAMResource
+from mirage.runtime.base import Runtime
 from mirage.shell.console import Channel
 from mirage.shell.job_table import JobStatus
 from mirage.types import MountMode
@@ -109,3 +111,67 @@ async def test_close_is_idempotent_with_a_job_running():
         for release in _RELEASE:
             release.set()
         await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked_phase", ["runtime", "resource"])
+async def test_close_refuses_lifecycle_changes_but_allows_runtime_drain(
+        monkeypatch, blocked_phase):
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    resource = RAMResource()
+    ws = Workspace({"/m": (resource, MountMode.WRITE)})
+    closes = []
+    drained = []
+
+    async def cli(_inv):
+        return None, IOResult()
+
+    spec = CLISpec(name="held", fn=cli)
+    ws.register_cli("held", spec)
+
+    class DrainingRuntime(Runtime):
+        name = "draining"
+
+        async def close(self):
+            closes.append("runtime")
+            if blocked_phase == "runtime":
+                entered.set()
+                await release.wait()
+            await ws.fs.write("/m/journal.txt", b"drained")
+
+    close_resource = resource.close
+
+    async def closing_resource():
+        closes.append("resource")
+        if blocked_phase == "resource":
+            entered.set()
+            await release.wait()
+        drained.append(await ws.fs.read("/m/journal.txt"))
+        await close_resource()
+
+    monkeypatch.setattr(resource, "close", closing_resource)
+    runtime = DrainingRuntime()
+    ws.add_runtime(runtime)
+    closing = asyncio.create_task(ws.close())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        for mutate in (
+                lambda: ws.add_mount("/late", RAMResource()),
+                lambda: ws.set_mount_mode("/m", MountMode.READ),
+                lambda: ws.add_runtime(runtime),
+                lambda: ws.register_cli("late", spec),
+                lambda: ws.unregister_cli("held"),
+        ):
+            with pytest.raises(RuntimeError, match="Workspace is closed"):
+                mutate()
+        with pytest.raises(RuntimeError, match="Workspace is closed"):
+            await ws.unmount("/m")
+        with pytest.raises(RuntimeError, match="Workspace is closed"):
+            await ws.set_session_profile(ws.default_session_id, {})
+    finally:
+        release.set()
+        await asyncio.wait_for(asyncio.gather(closing, ws.close()), timeout=5)
+
+    assert closes == ["runtime", "resource"]
+    assert drained == [b"drained"]

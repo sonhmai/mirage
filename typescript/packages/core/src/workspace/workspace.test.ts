@@ -15,6 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import type { CacheConfig } from '../cache/file/config.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
+import { IndexType, LookupStatus } from '../cache/index/config.ts'
+import { RedisIndexCacheStore } from '../cache/index/redis.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { FileType, MountMode, ResourceName, type PathSpec } from '../types.ts'
 import { BaseResource, type Resource } from '../resource/base.ts'
@@ -99,6 +101,57 @@ describe('Workspace lifecycle', () => {
     const ws = new Workspace({ '/data': new MockResource() })
     await ws.close()
     await expect(ws.resolve('/data/x')).rejects.toThrow(/closed/)
+  })
+})
+
+describe('Workspace dynamic mount index', () => {
+  it('applies the workspace Redis index to added mounts', async () => {
+    const ws = new Workspace({}, { index: { type: IndexType.REDIS } })
+    const resource = new RAMResource()
+    ws.addMount('/late', resource)
+    try {
+      expect(resource.index).toBeInstanceOf(RedisIndexCacheStore)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('applies the same index TTL to initial and added mounts', async () => {
+    const initial = new RAMResource()
+    const ws = new Workspace({ '/initial': initial }, { index: { ttl: -1 } })
+    const added = new RAMResource()
+    ws.addMount('/late', added)
+    try {
+      for (const resource of [initial, added]) {
+        await resource.index.setDir('/listing', [])
+        expect((await resource.index.listDir('/listing')).status).toBe(LookupStatus.EXPIRED)
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps the index coherent across aliases and duplicate attempts', async () => {
+    const ws = new Workspace({}, { index: { ttl: 3600 } })
+    const resource = new RAMResource()
+    ws.addMount('/late', resource, MountMode.WRITE)
+    const index = resource.index
+    const rejected = new RAMResource()
+    const rejectedIndex = rejected.index
+    try {
+      await index.setDir('/late', [])
+      ws.addMount('/alias', resource)
+      expect(resource.index).toBe(index)
+      expect((await index.listDir('/late')).entries).toEqual([])
+      expect(() => ws.addMount('late/', rejected)).toThrow('duplicate mount prefix')
+      expect(rejected.index).toBe(rejectedIndex)
+      // Mutations must evict the configured store, including after aliasing.
+      await ws.fs.writeFile('/late/new.txt', 'new')
+      expect((await index.listDir('/late')).status).toBe(LookupStatus.NOT_FOUND)
+    } finally {
+      await ws.close()
+      await rejected.close()
+    }
   })
 })
 

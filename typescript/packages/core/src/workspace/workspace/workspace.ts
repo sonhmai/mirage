@@ -14,6 +14,7 @@
 
 import { checkCliVerbs } from '../session/validate.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
+import type { IndexConfig } from '../../cache/index/config.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { IOResult } from '../../io/types.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
@@ -112,6 +113,7 @@ export class Workspace {
   private readonly sharedResources = new Set<Resource>()
   private readonly meta: WorkspaceMeta
   private readonly opsRegistry: OpsRegistry
+  private readonly indexConfig: IndexConfig | undefined
   private shellParser: ShellParser | null
   private readonly shellParserFactory: (() => Promise<ShellParser>) | null
   private shellParserPromise: Promise<ShellParser> | null = null
@@ -164,6 +166,7 @@ export class Workspace {
 
   constructor(resources: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
     const normalized = normalizeResources(resources)
+    this.indexConfig = options.index
     this.registry = new MountRegistry(
       normalized.bare,
       options.mode ?? MountMode.READ,
@@ -834,6 +837,15 @@ export class Workspace {
    */
   addMount(prefix: string, resource: Resource, mode: MountMode = MountMode.READ): MountEntry {
     if (this.shuttingDown) throw new Error('Workspace is closed')
+    // Configure before mount() captures the index in its CacheManager.
+    // An alias must retain the index used by the resource's other mounts.
+    if (
+      this.indexConfig !== undefined &&
+      this.registry.tryMountForPrefix(prefix) === null &&
+      !this.registry.allMounts().some((mount) => mount.resource === resource)
+    ) {
+      resource.setIndex?.(this.indexConfig)
+    }
     const m = this.registry.mount(prefix, resource, mode)
     this.opsRegistry.registerResource(resource)
     const resourceOps = resource.ops?.()

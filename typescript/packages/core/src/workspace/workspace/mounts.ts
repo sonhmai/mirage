@@ -92,12 +92,12 @@ export interface UnmountDeps {
   opsRegistry: OpsRegistry
   opened: Set<Resource>
   openOrder: Resource[]
+  sharedResources: Set<Resource>
   isShuttingDown: () => boolean
 }
 
 /**
- * Remove one mount, closing its resource if the workspace had opened it
- * and no other mount still references it. Operations are shared by kind,
+ * Remove one mount, closing its owned resource when its last alias leaves. Operations are shared by kind,
  * so they remain registered while any mount uses that kind. The virtual
  * root, the device mount, and the history view are permanent. Mirrors the
  * Python `unmount` in `workspace/mounts.py`.
@@ -155,12 +155,13 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
 }
 
 async function closeResource(deps: UnmountDeps, entry: MountEntry): Promise<void> {
-  await entry.activity.wait()
   const resource = entry.resource
+  const shared = deps.sharedResources.has(resource)
+  if (!shared) await entry.activity.wait()
   const idx = deps.openOrder.indexOf(resource)
   if (idx !== -1) deps.openOrder.splice(idx, 1)
-  if (deps.opened.delete(resource)) {
-    deps.registry.retiredResources.add(resource)
-    await resource.close()
-  }
+  deps.opened.delete(resource)
+  if (shared) return
+  deps.registry.retiredResources.add(resource)
+  await resource.close()
 }

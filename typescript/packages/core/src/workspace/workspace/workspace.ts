@@ -860,8 +860,8 @@ export class Workspace {
   }
 
   /**
-   * Remove a mount by prefix. Closes the resource if the workspace had opened
-   * it and no other mount still references it. Drops cache entries under the
+   * Remove a mount by prefix. Closes the owned resource when its last alias
+   * leaves, including resources used without an explicit open. Drops cache entries under the
    * unmounted prefix. Forbidden prefixes: cache root, history view, /dev/.
    * Waits for admitted calls and returned streams before closing the resource.
    * Callers must consume or close streams; closed instances cannot be remounted.
@@ -874,6 +874,7 @@ export class Workspace {
         opsRegistry: this.opsRegistry,
         opened: this.opened,
         openOrder: this.openOrder,
+        sharedResources: this.sharedResources,
         isShuttingDown: () => this.isShuttingDown(),
       },
       prefix,
@@ -1032,7 +1033,8 @@ export class Workspace {
   private async invalidateAllAfterRemote(): Promise<void> {
     await this.dispatcher.clearFileCache()
     for (const m of this.registry.allMounts()) {
-      await m.resource.index?.clear()
+      if (m.cacheManager !== null) await m.cacheManager.clearIndex(m.resource.index)
+      else await m.use(() => m.resource.index?.clear() ?? Promise.resolve())
     }
   }
 

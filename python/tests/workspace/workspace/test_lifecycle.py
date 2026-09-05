@@ -31,10 +31,13 @@ from mirage.resource.ram import RAMResource
 from mirage.runtime.base import Runtime
 from mirage.shell.console import Channel
 from mirage.shell.job_table import JobStatus
-from mirage.types import MountMode, PathSpec
+from mirage.types import (CapacityResult, CapacityState, MountMode, PathSpec,
+                          ResourceName)
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.shared import expand_operands
+from mirage.workspace.executor.command.run import drop_service_caches
+from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.types import ExecutionNode
 
 _RELEASE: list[asyncio.Event] = []
@@ -637,8 +640,10 @@ async def test_close_settles_pending_profile_persistence(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("surface", ["op", "command"])
-@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("surface,streaming", [("op", False), ("op", True),
+                                               ("command", False),
+                                               ("command", True),
+                                               ("df", False)])
 @pytest.mark.parametrize("alias", [None, "initial", "dynamic"])
 async def test_unmount_waits_for_admitted_resource_use(monkeypatch, surface,
                                                        streaming, alias):
@@ -668,6 +673,13 @@ async def test_unmount_waits_for_admitted_resource_use(monkeypatch, surface,
     async def command(accessor, paths, texts, opts):
         return await read_body(), IOResult()
 
+    async def statfs():
+        entered.set()
+        await release.wait()
+        assert not closed
+        return CapacityResult(state=CapacityState.UNKNOWN)
+
+    monkeypatch.setattr(resource, "statfs", statfs)
     resource.register_op(read)
     resources = {"/data": resource}
     if alias == "initial":
@@ -691,6 +703,10 @@ async def test_unmount_waits_for_admitted_resource_use(monkeypatch, surface,
     monkeypatch.setattr(resource, "close", close)
 
     async def consume():
+        if surface == "df":
+            result = await ws.execute("df /data")
+            assert result.exit_code == 0
+            return b"value"
         if surface == "command":
             return (await ws.execute("readvalue /data/file")).stdout
         value, _ = await ws.dispatch("read",
@@ -823,4 +839,71 @@ async def test_unmount_drains_metadata_glob_and_its_index_writes(monkeypatch):
         await asyncio.gather(expanding,
                              *([] if removing is None else [removing]),
                              return_exceptions=True)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["service", "clear"])
+async def test_unmount_drains_service_index_invalidation(monkeypatch, kind):
+    resource = RAMResource()
+    ws = Workspace({"/data": resource})
+    entered, release = asyncio.Event(), asyncio.Event()
+    index = resource.index
+    method = "invalidate" if kind == "service" else "clear"
+    invalidate = getattr(index, method)
+    await index.put("/outside-scope",
+                    IndexEntry(id="stale", name="stale", resource_type="ram"))
+
+    async def delayed_invalidate():
+        entered.set()
+        await release.wait()
+        assert not resource.is_closed
+        await invalidate()
+
+    monkeypatch.setattr(index, method, delayed_invalidate)
+    manager = ws.mount("/data").cache_manager
+    assert manager is not None
+    updating = asyncio.create_task(
+        drop_service_caches(ws._registry, (ResourceName.RAM, )) if kind ==
+        "service" else manager.clear_index(index))
+    removing = None
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        removing = asyncio.create_task(ws.unmount("/data"))
+        await asyncio.sleep(0.02)
+        assert not removing.done()
+        assert not resource.is_closed
+        release.set()
+        await updating
+        await removing
+        assert resource.is_closed
+        if kind == "clear":
+            assert (await index.get("/outside-scope")).entry is None
+    finally:
+        release.set()
+        await asyncio.gather(updating,
+                             *([] if removing is None else [removing]),
+                             return_exceptions=True)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("used", [False, True])
+async def test_unmount_leaves_borrowed_resources_open(used):
+    resource = RAMResource()
+    resource.load_state({"files": {"/file": b"seed"}})
+    ws = Workspace({"/data": resource})
+    state = await to_state_dict(ws)
+    replica = await Workspace.from_state(state, resources={"/data": resource})
+    try:
+        if used:
+            assert (await replica.execute("cat /data/file")).stdout == b"seed"
+        await replica.unmount("/data")
+        assert not resource.is_closed
+        await replica.close()
+        assert not resource.is_closed
+        await ws.close()
+        assert resource.is_closed
+    finally:
+        await replica.close()
         await ws.close()

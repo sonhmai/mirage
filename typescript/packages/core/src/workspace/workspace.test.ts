@@ -745,12 +745,13 @@ describe('Workspace.unmount', () => {
     expect(r.closes).toBe(1)
   })
 
-  it('does not close a resource that was never opened', async () => {
+  it('closes an owned resource even when it was never explicitly opened', async () => {
     const r = new MockResource()
     const ws = new Workspace({ '/x': r })
     await ws.unmount('/x')
-    expect(r.closes).toBe(0)
+    expect(r.closes).toBe(1)
     await ws.close()
+    expect(r.closes).toBe(1)
   })
 
   it('throws on root, history view, /dev/, and unknown prefix', async () => {

@@ -57,6 +57,13 @@ export class CacheManager {
     return this.fileCache === null ? call() : withCacheMutation(this.fileCache, call)
   }
 
+  /** Clear the whole backend index while this mount still owns it. */
+  clearIndex(index: IndexCacheStore | undefined): Promise<void> {
+    return this.withMutation(async () => {
+      if (this.ownsPath(this.prefix || '/')) await index?.clear()
+    })
+  }
+
   /** Bind backend metadata writes to this mount's lifetime. */
   scopeIndex(index: IndexCacheStore): IndexCacheStore {
     if (this.fileCache === null || index instanceof IndexView) return index

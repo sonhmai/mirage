@@ -514,3 +514,65 @@ it.each([false, true])(
     }
   },
 )
+
+it.each(
+  ['snapshot', 'copy'].flatMap((surface) => [false, true].map((opened) => ({ surface, opened }))),
+)(
+  'unmount waits for asynchronous $surface state reads (opened=$opened)',
+  async ({ surface, opened }) => {
+    let enter = (): void => undefined
+    let resume = (): void => undefined
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    const release = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    let closed = false
+    class AsyncStateResource extends BaseResource {
+      readonly kind = 'ram'
+      open(): Promise<void> {
+        return Promise.resolve()
+      }
+      override async getState(): Promise<{ type: string }> {
+        enter()
+        await release
+        expect(closed).toBe(false)
+        return { type: 'ram' }
+      }
+      override async close(): Promise<void> {
+        closed = true
+        await super.close()
+      }
+    }
+    const resource = new AsyncStateResource()
+    const ws = new Workspace({ '/data': resource }, { shellParser: parser })
+    if (opened) await ws.resolve('/data')
+    const capture = (
+      surface === 'copy' ? ws.copy() : ws.snapshot(join(tempDir, 'retired.tar'))
+    ).catch((error: unknown) => error)
+    let removing: Promise<void> | undefined
+    try {
+      await entered
+      let removed = false
+      removing = ws.unmount('/data').then(() => {
+        removed = true
+      })
+      await vi.waitFor(() => {
+        expect(ws.registry.tryMountForPrefix('/data')).toBeNull()
+      })
+      expect(removed).toBe(false)
+      expect(closed).toBe(false)
+      resume()
+      const result: unknown = await capture
+      expect(result).toBeInstanceOf(Error)
+      expect(String(result)).toContain('mounts changed during snapshot')
+      await removing
+      expect(closed).toBe(true)
+    } finally {
+      resume()
+      await Promise.allSettled([capture, ...(removing === undefined ? [] : [removing])])
+      await ws.close()
+    }
+  },
+)

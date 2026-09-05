@@ -317,3 +317,160 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
     await loaded.close()
   })
 })
+
+it.each(['state', 'copy'])(
+  'snapshot prepares new mounts before capturing cache (%s)',
+  async (capture) => {
+    const accessor = new FakeRemoteAccessor()
+    accessor.put('/remote/data/file', new TextEncoder().encode('old'))
+    accessor.put('/remote/outside', new TextEncoder().encode('keep'))
+    accessor.put('/remote/data2/file', new TextEncoder().encode('sibling'))
+    const ws = build(accessor)
+    const fresh = new FakeRemoteAccessor()
+    fresh.put('/remote/data/file', new TextEncoder().encode('new'))
+    const replacement = new FakeRemoteResource(fresh)
+    let clone: Workspace | undefined
+    try {
+      for (const path of ['/remote/data/file', '/remote/outside', '/remote/data2/file']) {
+        const bytes = await recordedDispatch(ws, 'read', path)
+        if (!(bytes instanceof Uint8Array)) throw new Error('expected read bytes')
+        await ws.cache.set(path, bytes)
+      }
+      expect(await ws.cache.get('/remote/data/file')).toEqual(new TextEncoder().encode('old'))
+      ws.addMount('/remote/data', replacement)
+      if (capture === 'copy') {
+        clone = await ws.copy()
+      } else {
+        const state = await toStateDict(ws)
+        expect(state.cache.entries.map((e) => e.key)).not.toContain('/remote/data/file')
+        const ops = new OpsRegistry()
+        ops.register(readOp)
+        ops.register(statOp)
+        clone = await Workspace.fromState(
+          state,
+          { ops, shellParser: parser },
+          {
+            '/remote': ws.mount('/remote').resource,
+            '/remote/data': replacement,
+          },
+        )
+      }
+      expect(await clone.cache.get('/remote/data/file')).toBeNull()
+      expect(await clone.cache.get('/remote/outside')).toEqual(new TextEncoder().encode('keep'))
+      expect(await clone.cache.get('/remote/data2/file')).toEqual(
+        new TextEncoder().encode('sibling'),
+      )
+      const bytes = await clone.dispatch('read', '/remote/data/file')
+      expect(bytes).toEqual(new TextEncoder().encode('new'))
+    } finally {
+      await clone?.close()
+      await ws.close()
+    }
+  },
+)
+
+it.each([
+  { shadow: false, delayed: false },
+  { shadow: true, delayed: false },
+  { shadow: false, delayed: true },
+  { shadow: true, delayed: true },
+])(
+  'snapshot keeps read mount ownership (shadow=$shadow, delayed=$delayed)',
+  async ({ shadow, delayed }) => {
+    const old = new FakeRemoteAccessor()
+    const fresh = new FakeRemoteAccessor()
+    old.put('/remote/data/file', new TextEncoder().encode('old'))
+    fresh.put('/remote/data/file', new TextEncoder().encode('new'))
+    fresh.put('/remote/data/file', new TextEncoder().encode('newer'))
+    const keep = new FakeRemoteAccessor()
+    keep.put('/remote/data/nested/file', new TextEncoder().encode('keep'))
+    const ops = new OpsRegistry()
+    ops.register(readOp)
+    ops.register(statOp)
+    const ws = new Workspace(
+      {
+        [shadow ? '/remote' : '/remote/data']: new FakeRemoteResource(old),
+        '/remote/data/nested': new FakeRemoteResource(keep),
+      },
+      { ops, shellParser: parser },
+    )
+    let enter = (): void => undefined
+    let resume = (): void => undefined
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    const release = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    let reading: Promise<unknown> | undefined
+    try {
+      await recordedDispatch(ws, 'read', '/remote/data/nested/file')
+      if (delayed) {
+        reading = runWithRecording(async () => {
+          const result = await ws.dispatch('read', '/remote/data/file')
+          enter()
+          await release
+          return result
+        }).then(([result, records]) => {
+          ws.records.push(...records)
+          return result
+        })
+        await entered
+      } else {
+        await recordedDispatch(ws, 'read', '/remote/data/file')
+      }
+      if (!shadow) await ws.unmount('/remote/data')
+      ws.addMount('/remote/data', new FakeRemoteResource(fresh))
+      resume()
+      await reading
+      const before = await toStateDict(ws)
+      expect(before.fingerprints?.map((e) => e.path)).toEqual(['/remote/data/nested/file'])
+      await recordedDispatch(ws, 'read', '/remote/data/file')
+      const after = await toStateDict(ws)
+      expect(after.fingerprints).toContainEqual({
+        path: '/remote/data/file',
+        mount_prefix: '/remote/data/',
+        fingerprint: fresh.blobs.get('/remote/data/file')?.fingerprint,
+        revision: fresh.blobs.get('/remote/data/file')?.revision,
+      })
+      expect(after.fingerprints?.map((e) => e.path)).toContain('/remote/data/nested/file')
+    } finally {
+      resume()
+      await reading
+      await ws.close()
+    }
+  },
+)
+
+it('snapshot rejects fingerprints from a retired lazy op', async () => {
+  const old = new FakeRemoteAccessor()
+  old.put('/remote/file', new TextEncoder().encode('old'))
+  const ops = new OpsRegistry()
+  ops.register({
+    ...readOp,
+    fn: async function* (accessor, scope) {
+      const entry = (accessor as FakeRemoteAccessor).blobs.get(scope.virtual)
+      if (entry === undefined) throw new Error('missing fixture')
+      record('read', scope.virtual, 'fake-remote', entry.bytes.length, startOp(), {
+        fingerprint: entry.fingerprint,
+        revision: entry.revision,
+      })
+      yield await Promise.resolve(entry.bytes)
+    },
+  })
+  const ws = new Workspace({ '/remote': new FakeRemoteResource(old) }, { ops, shellParser: parser })
+  try {
+    const id = ws.mount('/remote').mountId
+    const [, records] = await runWithRecording(async () => {
+      const stream = (await ws.dispatch('read', '/remote/file')) as AsyncIterable<Uint8Array>
+      await ws.unmount('/remote')
+      ws.addMount('/remote', new FakeRemoteResource(new FakeRemoteAccessor()))
+      for await (const chunk of stream) expect(chunk).toEqual(new TextEncoder().encode('old'))
+    })
+    ws.records.push(...records)
+    expect(records[0]?.mountId).toBe(id)
+    expect((await toStateDict(ws)).fingerprints).toEqual([])
+  } finally {
+    await ws.close()
+  }
+})

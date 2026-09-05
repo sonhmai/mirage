@@ -147,10 +147,11 @@ def capture_fingerprints(ws: "Workspace", ) -> list[dict[str, Any]]:
             continue
         if rec.fingerprint is None and rec.revision is None:
             continue
-        seen.add(rec.path)
         mount = ws._registry.try_mount_for(rec.path)
-        if mount is None:
+        if mount is None or (rec.mount_id is not None
+                             and rec.mount_id != mount.mount_id):
             continue
+        seen.add(rec.path)
         if not getattr(mount.resource, "SUPPORTS_SNAPSHOT", False):
             continue
         entry: dict[str, Any] = {

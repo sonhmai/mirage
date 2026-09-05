@@ -32,9 +32,9 @@ from mirage.context import (effective_mount_mode, effective_path_mode,
                             strongest_mode_under)
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource, IOResult
-from mirage.observe.context import (push_mount_prefix, push_revisions,
-                                    reset_revisions, with_mount_prefix,
-                                    with_revisions)
+from mirage.observe.context import (push_mount_context, push_revisions,
+                                    reset_active_recorder, reset_revisions,
+                                    with_mount_prefix, with_revisions)
 from mirage.ops.host_io import host_io, with_host_io
 from mirage.ops.registry import RegisteredOp
 from mirage.policy import resolve_limit
@@ -42,6 +42,7 @@ from mirage.resource.base import BaseResource
 from mirage.types import (ConsistencyPolicy, FileType, Limit, MountMode,
                           PathSpec, Producer)
 from mirage.utils.errors import ReadOnlyError, ebusy, enotsup
+from mirage.utils.ids import uuid7
 from mirage.utils.key_prefix import mount_key
 
 # Ops that mutate everything under their endpoints in one backend call
@@ -56,6 +57,7 @@ def _wrap_cmd_streams(
     result: tuple[ByteSource | None, IOResult],
     mount_prefix: str,
     revisions: dict[str, str] | None,
+    mount_id: str | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Wrap any async-iterator streams in ``result`` with the mount
     prefix and active revisions, so ``record_stream`` and
@@ -72,6 +74,7 @@ def _wrap_cmd_streams(
         mount_prefix: prefix to push during stream consumption.
         revisions: revisions map to push during stream consumption
             (None when the mount has no pins installed).
+        mount_id (str | None): identity of the serving mount.
     """
     stream, io = result
     seen: dict[int, ByteSource] = {}
@@ -83,7 +86,7 @@ def _wrap_cmd_streams(
         if oid in seen:
             return seen[oid]
         source = obj.source if isinstance(obj, CachableAsyncIterator) else obj
-        wrapped = with_mount_prefix(mount_prefix, source)
+        wrapped = with_mount_prefix(mount_prefix, source, mount_id)
         if revisions:
             wrapped = with_revisions(revisions, wrapped)
         wrapped = with_host_io(wrapped)
@@ -101,7 +104,7 @@ def _wrap_cmd_streams(
     return stream, io
 
 
-def _wrap_op_stream(result: Any) -> Any:
+def _wrap_op_stream(result: Any, mount_prefix: str, mount_id: str) -> Any:
     """Hold the host-I/O bypass around an op result that streams.
 
     An op that returns an async iterator has not run its body yet: the
@@ -111,12 +114,16 @@ def _wrap_op_stream(result: Any) -> Any:
 
     Args:
         result (Any): whatever the op returned.
+        mount_prefix (str): virtual mount prefix.
+        mount_id (str): identity of the serving mount.
     """
     if isinstance(result, CachableAsyncIterator):
-        result.replace_source(with_host_io(result.source))
+        result.replace_source(
+            with_host_io(
+                with_mount_prefix(mount_prefix, result.source, mount_id)))
         return result
     if hasattr(result, "__aiter__"):
-        return with_host_io(result)
+        return with_host_io(with_mount_prefix(mount_prefix, result, mount_id))
     return result
 
 
@@ -146,6 +153,7 @@ class MountEntry:
             raise ValueError(f"prefix must end with /: {prefix!r}")
         if "//" in prefix:
             raise ValueError(f"prefix must not contain //: {prefix!r}")
+        self.mount_id = uuid7()
         self.prefix = prefix
         self.resource = resource
         self.mode = mode
@@ -604,7 +612,7 @@ class MountEntry:
             session_view=context.session_view,
         )
 
-        prev_prefix = push_mount_prefix(mount_prefix)
+        recording_token = push_mount_context(mount_prefix, self.mount_id)
         revs_token = push_revisions(self.revisions or None)
         prev_manager = push_cache_manager(self.cache_manager)
         # What the command tier's mode guard reads: the write-command
@@ -651,7 +659,8 @@ class MountEntry:
                         cmd_timeout, cmd_name)
                 if result is not None:
                     stream, io = _wrap_cmd_streams(result, mount_prefix,
-                                                   self.revisions or None)
+                                                   self.revisions or None,
+                                                   self.mount_id)
                     io.producer = Producer(command=cmd_name,
                                            prefixes=(self.prefix, ),
                                            declared=cmd.limit)
@@ -660,7 +669,7 @@ class MountEntry:
         finally:
             reset_mount_gate(gate_token)
             reset_revisions(revs_token)
-            push_mount_prefix(prev_prefix)
+            reset_active_recorder(recording_token)
             push_cache_manager(prev_manager)
 
     def supports_op(self, op_name: str, path: str) -> bool:
@@ -747,7 +756,7 @@ class MountEntry:
         op_override = self.command_limits.get(op_name)
         op_timeout = (op_override.timeout_seconds
                       if op_override is not None else None)
-        prev_prefix = push_mount_prefix(mount_prefix)
+        recording_token = push_mount_context(mount_prefix, self.mount_id)
         revs_token = push_revisions(self.revisions or None)
         try:
             for op in levels:
@@ -763,8 +772,8 @@ class MountEntry:
                         result = await run_with_timeout(
                             result, op_timeout, op_name)
                 if result is not None:
-                    return _wrap_op_stream(result)
+                    return _wrap_op_stream(result, mount_prefix, self.mount_id)
             return None
         finally:
             reset_revisions(revs_token)
-            push_mount_prefix(prev_prefix)
+            reset_active_recorder(recording_token)

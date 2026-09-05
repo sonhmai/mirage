@@ -39,6 +39,8 @@ class OpRecord:
             bytes can be re-fetched even if the live object has moved on.
             Strictly stronger than ``fingerprint`` — populated only by
             backends that can guarantee revision durability.
+        mount_id (str | None): In-process mount identity for snapshot
+            ownership checks; never used as a persisted backend revision.
     """
 
     op: str
@@ -49,6 +51,7 @@ class OpRecord:
     duration_ms: int
     fingerprint: str | None = field(default=None)
     revision: str | None = field(default=None)
+    mount_id: str | None = field(default=None, repr=False, compare=False)
 
     @property
     def is_cache(self) -> bool:

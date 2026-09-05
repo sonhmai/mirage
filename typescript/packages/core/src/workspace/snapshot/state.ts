@@ -75,7 +75,9 @@ const VALID_MODES: readonly string[] = [MountMode.READ, MountMode.WRITE, MountMo
 
 export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
   const skip = new Set(['/dev/', normMountPrefix(HISTORY_PREFIX)])
-  const mounts = [...ws.registry.allMounts()].filter((m) => !skip.has(m.prefix))
+  const mounted = [...ws.registry.allMounts()]
+  for (const mount of mounted) await mount.ensureReady()
+  const mounts = mounted.filter((m) => !skip.has(m.prefix))
   const mountSnapshots: MountSnapshot[] = []
   for (let i = 0; i < mounts.length; i++) {
     const m = mounts[i]
@@ -155,6 +157,10 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
   const historyEvents = (await ws.observer.events()).filter(
     (e) => e.type === EVENT_COMMAND || e.type === EVENT_CLEAR || e.type === EVENT_DELETE,
   )
+  const current = ws.registry.allMounts()
+  if (current.length !== mounted.length || mounted.some((m, i) => m !== current[i] || m.retiring)) {
+    throw new Error('mounts changed during snapshot')
+  }
   const fingerprints: FingerprintEntrySnapshot[] = captureFingerprints(ws.records, ws.registry)
   const liveOnly = liveOnlyMountPrefixes(ws.registry)
   const nodes: Record<string, NodeMetaSnapshot> = {}

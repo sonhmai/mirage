@@ -39,6 +39,7 @@ import { runWithCacheManager } from '../../cache/context.ts'
 import type { CacheManager } from '../../cache/manager.ts'
 import { mergeSignals } from '../abort.ts'
 import { runWithMountPrefix, runWithRevisions, withMountPrefix } from '../../observe/context.ts'
+import { uuid7 } from '../../utils/ids.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { type Limit, ConsistencyPolicy, FileType, MountMode, PathSpec } from '../../types.ts'
@@ -87,6 +88,7 @@ export interface MountInit {
 }
 
 export class MountEntry {
+  readonly mountId = uuid7()
   readonly prefix: string
   readonly resource: Resource
   mode: MountMode
@@ -508,103 +510,106 @@ export class MountEntry {
     // this binding is how each write the handler then makes is held to
     // its own region's mode.
     return runWithMountGate(this.prefix, this.mode, () =>
-      runWithMountPrefix(mountPrefix, () =>
-        runWithCacheManager(this.cacheManager, () =>
-          runWithRevisions(
-            this.revisions.size > 0 ? this.revisions : null,
-            async (): Promise<[ByteSource | null, IOResult]> => {
-              // --help / --version short-circuit inside the handler
-              // wrapper and never touch the backend, so a read-only mount
-              // answers them like GNU instead of refusing them as writes.
-              const infoOnly = flags.help === true || flags.version === true
-              for (const cmd of handlers) {
-                // strongestModeUnder, not effectiveMode: a mount whose
-                // only writable region is a show entry still runs the
-                // command, and the op door refuses per path. The
-                // trailing newline is load-bearing: stderr accumulates
-                // across a line, so two refusals in one list ran
-                // together as `...at /ro/rm: read-only mount at /ro/`,
-                // and the node table's twin of this refusal (a symlink
-                // `rm`, rendered by shared.readOnlyError) concatenates
-                // with it.
-                if (
-                  cmd.write &&
-                  !infoOnly &&
-                  strongestModeUnder(this.prefix, this.mode) === MountMode.READ
-                ) {
-                  return [
-                    null,
-                    new IOResult({
-                      exitCode: 1,
-                      stderr: new TextEncoder().encode(
-                        `${cmdName}: read-only mount at ${this.prefix}\n`,
-                      ),
-                    }),
-                  ]
-                }
-                // The dispatch-level guard only sees default limits
-                // (the mount is unknown before routing), so the
-                // mount-resolved timeout must also bound the command
-                // body: eager commands do their work inside cmd.fn,
-                // where the stream-consumption guard never runs.
-                // limitOverride carries the origin mount's cap across
-                // a warm-cache redirect; a null one is "no opinion" and
-                // must not shadow the serving mount's own table (a
-                // path-less command with cwd outside every mount resolves
-                // no origin, but the serving mount's cap still applies —
-                // python always reads the serving mount).
-                const resolvedLimit = resolveLimit(
-                  cmdName,
-                  [],
-                  cmd.limit,
-                  context.limitOverride ?? this.commandLimits.get(cmdName) ?? null,
-                )
-                const cmdTimeout = resolvedLimit !== null ? resolvedLimit.timeoutSeconds : null
-                // runWithTimeout abandons the promise, it cannot cancel
-                // it; the aborted signal lets a runtime kill what it
-                // spawned (python cancels the task instead). The ambient
-                // context.signal is a background job's kill channel, folded
-                // into the same wire. timeoutSeconds rides along so an
-                // engine that executes on the event loop (quickjs) can
-                // interrupt itself when the timer cannot fire.
-                const guard = cmdTimeout !== null && cmdTimeout > 0 ? new AbortController() : null
-                const runSignal = mergeSignals(guard?.signal, context.signal)
-                const runOpts =
-                  runSignal !== undefined
-                    ? {
-                        ...cmdOpts,
-                        signal: runSignal,
-                        ...(cmdTimeout !== null && cmdTimeout > 0
-                          ? { timeoutSeconds: cmdTimeout }
-                          : {}),
-                      }
-                    : cmdOpts
-                let result: CommandFnResult
-                try {
-                  result = await runWithTimeout(
-                    Promise.resolve(cmd.fn(accessor, expandedPaths, texts, runOpts)),
-                    cmdTimeout,
+      runWithMountPrefix(
+        mountPrefix,
+        () =>
+          runWithCacheManager(this.cacheManager, () =>
+            runWithRevisions(
+              this.revisions.size > 0 ? this.revisions : null,
+              async (): Promise<[ByteSource | null, IOResult]> => {
+                // --help / --version short-circuit inside the handler
+                // wrapper and never touch the backend, so a read-only mount
+                // answers them like GNU instead of refusing them as writes.
+                const infoOnly = flags.help === true || flags.version === true
+                for (const cmd of handlers) {
+                  // strongestModeUnder, not effectiveMode: a mount whose
+                  // only writable region is a show entry still runs the
+                  // command, and the op door refuses per path. The
+                  // trailing newline is load-bearing: stderr accumulates
+                  // across a line, so two refusals in one list ran
+                  // together as `...at /ro/rm: read-only mount at /ro/`,
+                  // and the node table's twin of this refusal (a symlink
+                  // `rm`, rendered by shared.readOnlyError) concatenates
+                  // with it.
+                  if (
+                    cmd.write &&
+                    !infoOnly &&
+                    strongestModeUnder(this.prefix, this.mode) === MountMode.READ
+                  ) {
+                    return [
+                      null,
+                      new IOResult({
+                        exitCode: 1,
+                        stderr: new TextEncoder().encode(
+                          `${cmdName}: read-only mount at ${this.prefix}\n`,
+                        ),
+                      }),
+                    ]
+                  }
+                  // The dispatch-level guard only sees default limits
+                  // (the mount is unknown before routing), so the
+                  // mount-resolved timeout must also bound the command
+                  // body: eager commands do their work inside cmd.fn,
+                  // where the stream-consumption guard never runs.
+                  // limitOverride carries the origin mount's cap across
+                  // a warm-cache redirect; a null one is "no opinion" and
+                  // must not shadow the serving mount's own table (a
+                  // path-less command with cwd outside every mount resolves
+                  // no origin, but the serving mount's cap still applies —
+                  // python always reads the serving mount).
+                  const resolvedLimit = resolveLimit(
                     cmdName,
+                    [],
+                    cmd.limit,
+                    context.limitOverride ?? this.commandLimits.get(cmdName) ?? null,
                   )
-                } catch (err) {
-                  if (guard !== null && err instanceof CommandTimeoutError) guard.abort()
-                  throw err
+                  const cmdTimeout = resolvedLimit !== null ? resolvedLimit.timeoutSeconds : null
+                  // runWithTimeout abandons the promise, it cannot cancel
+                  // it; the aborted signal lets a runtime kill what it
+                  // spawned (python cancels the task instead). The ambient
+                  // context.signal is a background job's kill channel, folded
+                  // into the same wire. timeoutSeconds rides along so an
+                  // engine that executes on the event loop (quickjs) can
+                  // interrupt itself when the timer cannot fire.
+                  const guard = cmdTimeout !== null && cmdTimeout > 0 ? new AbortController() : null
+                  const runSignal = mergeSignals(guard?.signal, context.signal)
+                  const runOpts =
+                    runSignal !== undefined
+                      ? {
+                          ...cmdOpts,
+                          signal: runSignal,
+                          ...(cmdTimeout !== null && cmdTimeout > 0
+                            ? { timeoutSeconds: cmdTimeout }
+                            : {}),
+                        }
+                      : cmdOpts
+                  let result: CommandFnResult
+                  try {
+                    result = await runWithTimeout(
+                      Promise.resolve(cmd.fn(accessor, expandedPaths, texts, runOpts)),
+                      cmdTimeout,
+                      cmdName,
+                    )
+                  } catch (err) {
+                    if (guard !== null && err instanceof CommandTimeoutError) guard.abort()
+                    throw err
+                  }
+                  if (result !== null) {
+                    // A warm-cache redirect already resolved the origin
+                    // mount's cap (limitOverride); fold it as the
+                    // declared bound since the origin prefix is not ours.
+                    result[1].producer =
+                      context.limitOverride != null
+                        ? { command: cmdName, prefixes: [], declared: resolvedLimit }
+                        : { command: cmdName, prefixes: [this.prefix], declared: cmd.limit ?? null }
+                    return wrapMountStreams(result, mountPrefix, this.mountId)
+                  }
                 }
-                if (result !== null) {
-                  // A warm-cache redirect already resolved the origin
-                  // mount's cap (limitOverride); fold it as the
-                  // declared bound since the origin prefix is not ours.
-                  result[1].producer =
-                    context.limitOverride != null
-                      ? { command: cmdName, prefixes: [], declared: resolvedLimit }
-                      : { command: cmdName, prefixes: [this.prefix], declared: cmd.limit ?? null }
-                  return wrapMountStreams(result, mountPrefix)
-                }
-              }
-              return [null, new IOResult()]
-            },
+                return [null, new IOResult()]
+              },
+            ),
           ),
-        ),
+        this.mountId,
       ),
     )
   }
@@ -664,20 +669,37 @@ export class MountEntry {
     // the timeout stays here, bounding the backend call itself.
     const opOverride = this.commandLimits.get(opName) ?? null
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
-    return runWithMountPrefix(mountPrefix, () =>
-      runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
-        for (const op of levels) {
-          const result = await runWithTimeout(
-            Promise.resolve(op.fn(accessor, scope, args, effectiveKwargs)),
-            opTimeout,
-            opName,
-          )
-          if (result !== null && result !== undefined) return result
-        }
-        return null
-      }),
+    return runWithMountPrefix(
+      mountPrefix,
+      () =>
+        runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
+          for (const op of levels) {
+            const result = await runWithTimeout(
+              Promise.resolve(op.fn(accessor, scope, args, effectiveKwargs)),
+              opTimeout,
+              opName,
+            )
+            if (result !== null && result !== undefined) {
+              return wrapOpStream(result, mountPrefix, this.mountId)
+            }
+          }
+          return null
+        }),
+      this.mountId,
     )
   }
+}
+
+/** Preserve a streaming operation's recording owner after its dispatch frame exits. */
+export function wrapOpStream(result: unknown, mountPrefix: string, mountId: string): unknown {
+  if (result instanceof CachableAsyncIterator) {
+    result.wrapSource((source) => withMountPrefix(mountPrefix, source, mountId))
+    return result
+  }
+  if (result !== null && typeof result === 'object' && Symbol.asyncIterator in result) {
+    return withMountPrefix(mountPrefix, result as AsyncIterable<Uint8Array>, mountId)
+  }
+  return result
 }
 
 // Push `mountPrefix` back during lazy consumption of anything the command
@@ -688,6 +710,7 @@ export class MountEntry {
 function wrapMountStreams(
   result: [ByteSource | null, IOResult],
   mountPrefix: string,
+  mountId: string,
 ): [ByteSource | null, IOResult] {
   const [stream, io] = result
   const seen = new Map<ByteSource, ByteSource>()
@@ -697,10 +720,10 @@ function wrapMountStreams(
     if (hit !== undefined) return hit
     let wrapped: ByteSource
     if (obj instanceof CachableAsyncIterator) {
-      obj.wrapSource((src) => withMountPrefix(mountPrefix, src))
+      obj.wrapSource((src) => withMountPrefix(mountPrefix, src, mountId))
       wrapped = obj
     } else {
-      wrapped = withMountPrefix(mountPrefix, obj)
+      wrapped = withMountPrefix(mountPrefix, obj, mountId)
     }
     seen.set(obj, wrapped)
     return wrapped

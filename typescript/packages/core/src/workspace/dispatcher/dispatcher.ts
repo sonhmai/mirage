@@ -34,6 +34,7 @@ import { PolicyError } from '../../policy/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { normDir, rstripSlash } from '../../utils/slash.ts'
 import { record, runWithMountPrefix, runWithRevisions, startOp } from '../../observe/context.ts'
+import { wrapOpStream } from '../mount/mount.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
 import { type OpKwargs } from '../../ops/registry.ts'
@@ -407,25 +408,28 @@ export class Dispatcher {
     // prefix has to be active while the op runs or the record loses the
     // mount it belongs to. Mirrors Python's Ops._call.
     try {
-      result = await runWithMountPrefix(rstripSlash(mountPrefix), () =>
-        runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () =>
-          runWithTimeout(
-            Promise.resolve(
-              opName === 'setattr'
-                ? this.applySetattr(resource, scope, p, fullKwargs)
-                : this.opsRegistry.call(
-                    opName,
-                    resource,
-                    resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-                    scope,
-                    fullArgs,
-                    fullKwargs,
-                  ),
+      result = await runWithMountPrefix(
+        rstripSlash(mountPrefix),
+        () =>
+          runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () =>
+            runWithTimeout(
+              Promise.resolve(
+                opName === 'setattr'
+                  ? this.applySetattr(resource, scope, p, fullKwargs)
+                  : this.opsRegistry.call(
+                      opName,
+                      resource,
+                      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+                      scope,
+                      fullArgs,
+                      fullKwargs,
+                    ),
+              ),
+              opTimeout,
+              opName,
             ),
-            opTimeout,
-            opName,
           ),
-        ),
+        mount.mountId,
       )
     } catch (err) {
       const code = (err as { code?: string }).code
@@ -442,6 +446,7 @@ export class Dispatcher {
         memoryAnswered(report)
       }
     }
+    result = wrapOpStream(result, rstripSlash(mountPrefix), mount.mountId)
     // The op ran, whatever invalidation, the post gate, or an output
     // cap do next: stamped here so a failure in any of them cannot
     // erase a transfer the backend already made.
@@ -548,17 +553,20 @@ export class Dispatcher {
     // Python's twin gets both bindings from `Mount.execute_op`.
     await mount.ensureReady()
     try {
-      return await runWithMountPrefix(rstripSlash(mountPrefix), () =>
-        runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
-          this.opsRegistry.call(
-            opName,
-            resource,
-            resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-            spec,
-            [],
-            this.indexKwargs(mount),
+      return await runWithMountPrefix(
+        rstripSlash(mountPrefix),
+        () =>
+          runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
+            this.opsRegistry.call(
+              opName,
+              resource,
+              resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+              spec,
+              [],
+              this.indexKwargs(mount),
+            ),
           ),
-        ),
+        mount.mountId,
       )
     } finally {
       if (write) await this.invalidateAfterWriteByPath(spec.virtual)

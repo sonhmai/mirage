@@ -186,9 +186,9 @@ export function captureFingerprints(
   for (const rec of records) {
     if (rec.op !== 'read' || seen.has(rec.path)) continue
     if (rec.fingerprint === null && rec.revision === null) continue
-    seen.add(rec.path)
     const mount = registry.tryMountFor(rec.path)
-    if (mount === null) continue
+    if (mount === null || (rec.mountId !== null && rec.mountId !== mount.mountId)) continue
+    seen.add(rec.path)
     if (mount.resource.supportsSnapshot !== true) continue
     const entry: FingerprintEntry = { path: rec.path, mount_prefix: mount.prefix }
     if (rec.fingerprint !== null) entry.fingerprint = rec.fingerprint

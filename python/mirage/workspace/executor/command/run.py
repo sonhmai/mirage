@@ -318,7 +318,7 @@ async def drop_service_caches(registry: MountRegistry,
         # listing (github seeds the whole tree once) cannot tell the drop
         # from an empty repository and reports the mount as gone. Expiring
         # keeps that distinction and the next read refetches.
-        await mount.resource.index.invalidate()
+        await mount.index.invalidate()
         if mount.cache_manager is not None:
             await mount.cache_manager.drop_prefix()
 

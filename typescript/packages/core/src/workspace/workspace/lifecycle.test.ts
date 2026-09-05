@@ -14,9 +14,11 @@
 
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
+import { IndexEntry } from '../../cache/index/config.ts'
 import { command } from '../../commands/config.ts'
 import { CommandSpec, Operand } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
+import { CapacityState, ResourceName } from '../../types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { type JobRunner, JobStatus } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
@@ -24,6 +26,7 @@ import { MountMode } from '../../types.ts'
 import { ExecutionNode } from '../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
+import { dropServiceCaches } from '../executor/command/run.ts'
 
 let parser: ShellParser
 
@@ -182,8 +185,12 @@ it.each([
 
 it.each(
   [null, 'initial', 'dynamic'].flatMap((alias) =>
-    [false, true].flatMap((streaming) =>
-      ['op', 'command'].map((surface) => ({ alias, streaming, surface })),
+    ['op', 'command', 'df'].flatMap((surface) =>
+      (surface === 'df' ? [false] : [false, true]).map((streaming) => ({
+        alias,
+        streaming,
+        surface,
+      })),
     ),
   ),
 )(
@@ -216,6 +223,12 @@ it.each(
     if (alias === 'initial') resources['/alias'] = resource
     const ws = new Workspace(resources, { shellParser: parser })
     if (alias === 'dynamic') ws.addMount('/alias', resource)
+    vi.spyOn(resource, 'statfs').mockImplementation(async () => {
+      entered()
+      await release
+      expect(closed).toBe(false)
+      return { state: CapacityState.UNKNOWN }
+    })
     ws.ops.register({ name: 'read', resource: 'ram', filetype: null, write: false, fn: read })
     const [registered] = command({
       name: 'readvalue',
@@ -231,6 +244,11 @@ it.each(
       await closeResource()
     })
     const running = (async () => {
+      if (surface === 'df') {
+        const result = await ws.execute('df /data')
+        expect(result.exitCode).toBe(0)
+        return 'value'
+      }
       if (surface === 'command')
         return new TextDecoder().decode((await ws.execute('readvalue /data/file')).stdout)
       const value = (await ws.dispatch('read', '/data/file')) as
@@ -352,6 +370,59 @@ it('unmount drains an admitted resource open before closing it', async () => {
   } finally {
     resume()
     await Promise.allSettled([reading, ...(removing === undefined ? [] : [removing])])
+    await ws.close()
+  }
+})
+
+it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (kind) => {
+  const resource = new RAMResource()
+  const ws = new Workspace({ '/data': resource })
+  await ws.resolve('/data')
+  let enter = (): void => undefined
+  let resume = (): void => undefined
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve
+  })
+  const release = new Promise<void>((resolve) => {
+    resume = resolve
+  })
+  const index = resource.index
+  const method = kind === 'service' ? 'invalidate' : 'clear'
+  const invalidate = index[method].bind(index)
+  await index.put(
+    '/outside-scope',
+    new IndexEntry({ id: 'stale', name: 'stale', resourceType: 'ram' }),
+  )
+  vi.spyOn(index, method).mockImplementation(async () => {
+    enter()
+    await release
+    expect(resource.isClosed).toBe(false)
+    await invalidate()
+  })
+  const manager = ws.mount('/data').cacheManager
+  if (manager === null) throw new Error('missing cache manager')
+  const updating =
+    kind === 'service'
+      ? dropServiceCaches(ws.registry, [ResourceName.RAM])
+      : manager.clearIndex(index)
+  let removing: Promise<void> | undefined
+  try {
+    await entered
+    let removed = false
+    removing = ws.unmount('/data').then(() => {
+      removed = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(removed).toBe(false)
+    expect(resource.isClosed).toBe(false)
+    resume()
+    await updating
+    await removing
+    expect(resource.isClosed).toBe(true)
+    if (kind === 'clear') expect((await index.get('/outside-scope')).entry).toBeUndefined()
+  } finally {
+    resume()
+    await Promise.allSettled([updating, ...(removing === undefined ? [] : [removing])])
     await ws.close()
   }
 })

@@ -214,7 +214,7 @@ export async function dropServiceCaches(
     // that was never filled, so a backend whose index *is* its listing
     // (github seeds the whole tree once) cannot tell the drop from an empty
     // repository. Expiring keeps that distinction and the next read refetches.
-    await mount.resource.index?.invalidate()
+    await mount.index?.invalidate()
     await mount.cacheManager?.dropPrefix()
   }
 }

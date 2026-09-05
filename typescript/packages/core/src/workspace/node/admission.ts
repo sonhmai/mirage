@@ -397,17 +397,15 @@ export async function admit(
   // cannot outlive the run that raised it. Nothing else here waits on
   // anything outside mirage.
   signal?: AbortSignal,
-  // The command and its line, null outside a line. The gate spends the
-  // grants claimed for its occurrence and never one claimed for
-  // another; a judging pass claims for it.
+  // The command and its line, null outside a line. On a line, every
+  // grant behind the command is claimed on the line's hand-off for that
+  // occurrence, whether a pass that judges the line before it runs
+  // (`prejudgeLine`, `admitLine`) or the gate that runs it is reading,
+  // and spent when the line ends, so one question covers one run rather
+  // than one reader; a reader outside a line spends what it matched. A
+  // refusal needs no such care: the record refuses the agent's retry
+  // from the ledger either way.
   claimant: Claimant | null = null,
-  // True for a pass that judges the command on behalf of the gate that
-  // runs it (`prejudgeLine`, `admitLine`): the grants behind the command
-  // are claimed on the line's hand-off for that gate to spend, so one
-  // question covers one run rather than one pass. A refusal needs no
-  // such care — the record refuses the agent's retry from the ledger
-  // either way. False for the gate.
-  judging = false,
 ): Promise<Refused | Admitted> {
   const gated = await gate(
     name,
@@ -427,7 +425,7 @@ export async function admit(
   // never re-opens a deny.
   const action =
     asked !== null && asked.kind === 'ask'
-      ? await registry.decisions.resolve(ctx, asked, signal, claimant, judging)
+      ? await registry.decisions.resolve(ctx, asked, signal, claimant)
       : asked
   // The ledger stopped waiting on a host because this run was killed
   // while it was deciding. That is the kill landing late, not a ruling,
@@ -513,9 +511,8 @@ async function admitWords(
   redirectWords: readonly Word[] = [],
   signal?: AbortSignal,
   // The command and its line, as `admit` takes it (the lines it runs
-  // stand under it), and whether this is a judging pass.
+  // stand under it).
   claimant: Claimant | null = null,
-  judging = false,
 ): Promise<Refused | null> {
   const head = words[0]
   if (head === undefined) return null
@@ -537,7 +534,6 @@ async function admitWords(
     redirects,
     signal,
     claimant,
-    judging,
   )
   if (!(verdict instanceof Admitted)) return verdict
   if (verdict.scoped) {
@@ -575,7 +571,6 @@ async function admitWords(
         reparse,
         signal,
         claimant?.line ?? null,
-        judging,
         claimant === null ? null : lineFrame(inner.line, claimant.occurrence),
       )
     } else {
@@ -600,7 +595,6 @@ async function admitWords(
         [],
         signal,
         within,
-        judging,
       )
     }
     if (innerRefusal !== null) return innerRefusal
@@ -635,16 +629,15 @@ async function admitWords(
  * policy ever saw. `reparse` parses the text a word runs (`eval`,
  * `sh -c`) the way the line reader parsed the line.
  *
- * No gate follows this pass: the runtime runs the line whole, so the
- * executor calls it as a judging pass over the line's hand-off, on
- * which every grant it matches is claimed rather than spent, and sweeps
- * the hand-off when the line ends. A line held on a question still
- * waiting keeps its earlier answers standing for the retry, exactly as
- * the compound-line pass does, where spending them here asked the human
- * again for each on every retry. `handed` is null outside a line (a
- * bare admission with no run behind it). `frame` is the scope the line
- * is read in, for a line a word runs; null reads `root` as the line
- * itself.
+ * No gate follows this pass: the runtime runs the line whole, so every
+ * grant it matches is claimed on the line's hand-off exactly as any
+ * reader on a line claims, and the executor's sweep spends them when
+ * the line ends. A line held on a question still waiting keeps its
+ * earlier answers standing for the retry, exactly as the compound-line
+ * pass does, where spending them here asked the human again for each on
+ * every retry. `handed` is null outside a line (a bare admission with
+ * no run behind it). `frame` is the scope the line is read in, for a
+ * line a word runs; null reads `root` as the line itself.
  */
 export async function admitLine(
   root: TSNodeLike,
@@ -655,7 +648,6 @@ export async function admitLine(
   reparse: (line: string) => TSNodeLike,
   signal?: AbortSignal,
   handed: HandOff | null = null,
-  judging = false,
   frame: Frame | null = null,
 ): Promise<Refused | null> {
   const rules = session.commands
@@ -680,7 +672,6 @@ export async function admitLine(
       statementRedirects(node, home),
       signal,
       handed === null ? null : { line: handed, occurrence: occurrenceIn(node, scope) },
-      judging,
     )
     if (refusal !== null) return refusal
   }

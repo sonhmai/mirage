@@ -261,11 +261,11 @@ async function runLine(
 
   const nested: NestedRefusal = { latest: null }
 
-  // The line's hand-off: the grants its judging passes claim for its
-  // gates, which the gates spend from and the line's end sweeps. A
+  // The line's hand-off: the grants its passes and gates claim for its
+  // commands, which the gates run on and the line's end spends. A
   // nested evaluation runs on one made under it, standing at the node
-  // whose text it evaluates, so what this line's pass claimed for the
-  // words a command runs is spent by the line that runs them.
+  // whose text it evaluates, so the line that runs the words a command
+  // hands on runs on what this line's pass claimed for them.
   const handed: HandOff = options.handed ?? { claimed: [], parent: null, origin: null }
 
   const executeFn: ExecuteFn = async (cmd, opts) => {
@@ -479,7 +479,6 @@ async function runParsedLine(
         reparse,
         killed,
         handed,
-        true,
       )
       if (refused !== null) {
         held = isPending(refused)

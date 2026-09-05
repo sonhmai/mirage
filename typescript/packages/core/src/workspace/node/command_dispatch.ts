@@ -105,7 +105,7 @@ export async function executeCommand(
   reparse?: (line: string) => TSNodeLike,
   // The agent the line is attributed to, which an approval request names.
   agentId = '',
-  // The line's hand-off, which its gate spends from.
+  // The line's hand-off, which its gate claims on and runs on.
   handed?: HandOff,
 ): Promise<Result> {
   const name = getCommandName(node)
@@ -472,7 +472,7 @@ async function runArgv(
   // because their I/O runs on the shell's own fds outside the admitted
   // command's gate window.
   redirects: readonly PathSpec[] = [],
-  // The line's hand-off, which its gate spends from.
+  // The line's hand-off, which its gate claims on and runs on.
   claimant: Claimant | null = null,
 ): Promise<Result> {
   const name = argv.name

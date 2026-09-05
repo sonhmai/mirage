@@ -46,7 +46,7 @@ PROFILE = {
     "commands": {
         "allow": [
             "ls", "cat", "git", "rm", "mkdir", "cd", "echo", "sleep", "wait",
-            "eval", "command"
+            "eval", "command", "xargs", "touch"
         ],
         "deny": [{
             "reason": "production data is protected",
@@ -63,6 +63,29 @@ PROFILE = {
                 "cat":
                 ["/data/secret.txt", "/data/secret file", "/data/secrét"]
             }
+        }],
+    },
+}
+
+# The same world under a rule that speaks on the command name alone, so
+# a spelling whose operands only the runtime can read is still asked
+# about.
+ASK_CAT = {
+    "commands": {
+        "allow": PROFILE["commands"]["allow"],
+        "ask": [{
+            "reason": "reads need sign-off",
+            "commands": ["cat"]
+        }],
+    },
+}
+
+DENY_CAT = {
+    "commands": {
+        "allow": PROFILE["commands"]["allow"],
+        "deny": [{
+            "reason": "reads are refused",
+            "commands": ["cat"]
         }],
     },
 }
@@ -352,16 +375,17 @@ def _answering(asked: list[str], outcome: Outcome, scope: Scope = Scope.ONCE):
     return host
 
 
-async def _inline_workspace(on_ask) -> Workspace:
+async def _inline_workspace(on_ask, profile=PROFILE) -> Workspace:
     """The same world as the ``ws`` fixture, with a host that answers an
     ask inline.
 
     Args:
         on_ask (AskHandler): the host.
+        profile (dict): the document session ``s`` runs under.
     """
     workspace = Workspace({"/data/": RAMResource()},
                           mode=MountMode.WRITE,
-                          profiles={"r": PROFILE},
+                          profiles={"r": profile},
                           on_ask=on_ask)
     await workspace.execute("mkdir -p /data/prod")
     await workspace.fs.write("/data/prod/x.txt", b"x\n")
@@ -943,5 +967,95 @@ async def test_a_pair_after_a_multibyte_character_runs_on_its_own_nod():
         assert ran.stdout == "é s\n".encode()
         assert len(asked) == 1
         assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", [
+    "for i in 1 2; do touch /data/mark.txt; cat /data/secret.txt; done",
+    "for i in 1 2; do cat /data/secret.txt; done",
+])
+async def test_a_loop_runs_every_visit_of_a_command_on_one_nod(line):
+    # The loop body is one place on the line, visited twice. The grant
+    # for the cat is bound to that place until the line ends, whether
+    # the pass claimed it or the first gate to reach it did (the pass
+    # leaves a one-command body to the gate), so the second iteration
+    # runs on it instead of asking again after the touch ran once more.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute(line, session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout == b"s\ns\n"
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_held_loop_replays_on_the_one_answer_it_was_given(ws):
+    line = "for i in 1 2; do touch /data/mark.txt; cat /data/secret.txt; done"
+    first = await ws.execute(line, session_id="s")
+    assert first.exit_code == 126
+    assert "/data/mark.txt" not in await ws.fs.readdir("/data")
+    pending, = ws.decisions.pending()
+    await ws.decisions.answer(pending.id, Outcome.ALLOW)
+    again = await ws.execute(line, session_id="s")
+    assert again.exit_code == 0
+    assert again.stdout == b"s\ns\n"
+    assert ws.decisions.list("s") == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", [
+    "touch /data/mark.txt && echo /data/secret.txt | xargs cat",
+    "F=/data/secret.txt; touch /data/mark.txt; cat $F",
+])
+async def test_a_spelling_the_runtime_completes_is_asked_about_at_the_gate(
+        line):
+    # The pass reads `xargs cat` as a bare cat and `cat $F` as the word
+    # typed, and the gate reads neither: xargs appends its items and $F
+    # expands. A question asked here about either spelling would be
+    # answered for words that never run, and the gate would ask again
+    # about the words that do, so the pass leaves the question to the
+    # gate and the human is asked once, about the real operand. The
+    # touch has run by then; the hold does not reach a spelling the
+    # runtime completes.
+    seen: list[tuple[str, ...]] = []
+
+    async def host(record):
+        seen.append((record.command, *record.argv))
+        return dataclasses.replace(record,
+                                   outcome=Outcome.ALLOW,
+                                   scope=Scope.ONCE)
+
+    ws = await _inline_workspace(host, ASK_CAT)
+    try:
+        ran = await ws.execute(line, session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout == b"s\n"
+        assert seen == [("cat", "/data/secret.txt")]
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", [
+    "touch /data/mark.txt && echo /data/secret.txt | xargs cat",
+    "F=/data/secret.txt; touch /data/mark.txt; cat $F",
+])
+async def test_a_deny_on_a_spelling_the_runtime_completes_holds_the_line(line):
+    # A deny speaks on the command name alone, which the pass can read
+    # whatever the runtime appends, so it still refuses the whole line
+    # before the touch runs.
+    ws = await _inline_workspace(_answering([], Outcome.ALLOW), DENY_CAT)
+    try:
+        ran = await ws.execute(line, session_id="s")
+        assert ran.exit_code == 126
+        assert ran.stderr == b"cat: Permission denied\n"
+        assert "/data/mark.txt" not in await ws.fs.readdir("/data")
     finally:
         await ws.close()

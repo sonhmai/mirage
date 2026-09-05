@@ -32,7 +32,8 @@ from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (Refused, admit, classified_words,
-                                             gate, redirect_paths,
+                                             gate, is_pending_refusal,
+                                             redirect_paths,
                                              statement_redirects)
 from mirage.workspace.node.inner_lines import Word, inner_lines
 from mirage.workspace.node.occurrence import (Frame, argv_frame, body_frame,
@@ -147,20 +148,31 @@ class Judged:
     Args:
         explanation (Explanation): what the command would do.
         occurrence (Occurrence): the command's place on the line.
+        stated (bool): whether the gate will read the command in the
+            words the pass read: every word literal, and no operand
+            the runtime appends. The gate reads ``cat $F`` as the path
+            ``$F`` expands to and ``xargs cat`` as ``cat`` plus the
+            items on its stdin, so a question the pass asked about
+            either spelling would be answered for words that never
+            run, and the gate would ask again about the words that do.
+            Such a command is judged here for a deny, which speaks on
+            the name alone, and asked about at the gate.
     """
 
     explanation: Explanation
     occurrence: Occurrence
+    stated: bool
 
 
 async def _judge_words(
-        words: list[Word],
-        occurrence: Occurrence,
-        session: Session,
-        registry: MountRegistry,
-        namespace: Namespace | None,
-        agent_id: str = "",
-        redirect_words: tuple[Word, ...] = (),
+    words: list[Word],
+    occurrence: Occurrence,
+    session: Session,
+    registry: MountRegistry,
+    namespace: Namespace | None,
+    agent_id: str = "",
+    redirect_words: tuple[Word, ...] = (),
+    stated: bool = True,
 ) -> list[Judged]:
     """Explain one command and whatever lines it runs in turn, each
     with its occurrence.
@@ -188,10 +200,15 @@ async def _judge_words(
             targets, empty for a command that has none and for the
             inner lines a command runs, which admission reads the same
             way.
+        stated (bool): whether the words reach here as the gate will
+            read them; False under a command the runtime completes,
+            since a line built from its words (``eval``) or run on its
+            operands (``xargs``) is completed with them.
     """
     head = words[0]
     if head.text is None:
-        return [Judged(_unreadable(head.raw), occurrence)]
+        return [Judged(_unreadable(head.raw), occurrence, False)]
+    stated = stated and all(w.text is not None for w in words)
     name = head.value
     args = [w.value for w in words[1:]]
     classified = classified_words(name, args, session, registry)
@@ -205,22 +222,32 @@ async def _judge_words(
                        redirects=redirect_paths(redirect_words, registry,
                                                 session.cwd))
     if isinstance(gated, Refused):
-        return [Judged(_from_refusal(name, tuple(args), gated), occurrence)]
+        return [
+            Judged(_from_refusal(name, tuple(args), gated), occurrence, stated)
+        ]
     ctx, asked = gated
-    out = [Judged(_explained(ctx, session, registry, asked), occurrence)]
+    out = [
+        Judged(_explained(ctx, session, registry, asked), occurrence, stated)
+    ]
     for inner in inner_lines(name, words[1:]):
         if not inner.readable:
             continue
         if inner.line is not None:
             out.extend(await _judge_line(parse(inner.line), session, registry,
                                          namespace, agent_id,
-                                         line_frame(inner.line, occurrence)))
+                                         line_frame(inner.line,
+                                                    occurrence), stated))
         else:
             argv = list(inner.argv)
             within = whole_occurrence(
                 argv_frame([w.value for w in argv], occurrence))
-            out.extend(await _judge_words(argv, within, session, registry,
-                                          namespace, agent_id))
+            out.extend(await _judge_words(argv,
+                                          within,
+                                          session,
+                                          registry,
+                                          namespace,
+                                          agent_id,
+                                          stated=stated and not inner.open))
     return out
 
 
@@ -243,6 +270,31 @@ def _is_verdict(expl: Explanation) -> bool:
     if expl.exit_code == 0:
         return False
     return expl.rule is not None or expl.outcome is Outcome.ALLOW
+
+
+def _refuses(expl: Explanation) -> bool:
+    """Whether an explanation refuses the command outright, rather than
+    reporting a line that would run or a question the host has not
+    answered.
+
+    Args:
+        expl (Explanation): one command's explanation.
+    """
+    return expl.exit_code != 0 and not is_pending_refusal(expl.refusal)
+
+
+def _asks_for(one: Judged) -> bool:
+    """Whether the pass may answer a command's question on the gate's
+    behalf: it may when the gate will read the words the pass read, and
+    a deny is always the pass's to enforce, since it speaks on the name
+    alone. What is left is a question about a spelling the runtime
+    completes, which is the gate's: asked here, it would be answered
+    for words that never run.
+
+    Args:
+        one (Judged): the command's explanation and its place.
+    """
+    return one.stated or _refuses(one.explanation)
 
 
 def _is_judged(expl: Explanation) -> bool:
@@ -484,22 +536,35 @@ async def prejudge_line(
     a line that will not run. That admission hands off: every grant
     behind the command, the one the host gives inline and one it gave
     out of band before the pass alike, is claimed on the line's
-    ``HandOff`` for the per-command gate, which runs the line and
-    spends it, so a compound line costs the human one question per run
-    rather than one per pass. A claimed grant is not seen again by this
-    pass, so a command spelled twice on one line needs two nods, and
-    the hold reaches the whole line rather than breaking after the
-    first spelling ran. When this pass then refuses the line on a
-    later command, no gate runs behind it, so the pass hands back what
-    it claimed (``Decisions.revoke``) and the refusal spends it: left
-    standing, the grant would pass the next line spelling that command
-    on a nod given to one that never ran. The sweep is the executor's
-    (``Decisions.revoke``), and it covers the line from this pass on,
-    whichever way the line ends: a refusal here, a fetch that fails
-    before the run, a kill, or a run that skipped the gate. The one
-    exception is a question left waiting, which holds the line for its
-    retry, and the retry has to find the grants standing or the human
-    is asked again for what they already allowed.
+    ``HandOff`` for the per-command gate, which runs the line on it,
+    and the line's end spends it, so a compound line costs the human
+    one question per run rather than one per pass, and a gate the run
+    reaches twice (a loop body) runs on one nod. A claimed grant is not
+    seen again by this pass, so a command spelled twice on one line
+    needs two nods, and the hold reaches the whole line rather than
+    breaking after the first spelling ran. When this pass then refuses
+    the line on a later command, no gate runs behind it, so the pass
+    hands back what it claimed (``Decisions.revoke``) and the refusal
+    spends it: left standing, the grant would pass the next line
+    spelling that command on a nod given to one that never ran. The
+    sweep is the executor's (``Decisions.revoke``), and it covers the
+    line from this pass on, whichever way the line ends: a refusal
+    here, a fetch that fails before the run, a kill, or a run that
+    skipped the gate. The one exception is a question left waiting,
+    which holds the line for its retry, and the retry has to find the
+    grants standing or the human is asked again for what they already
+    allowed.
+
+    A question is only asked here when the gate will ask the same one.
+    The gate reads a word the runtime expands as its value and the
+    words ``xargs`` or ``find -exec`` hand on with the operands the
+    runtime appends, so a question about ``cat $F`` or a bare ``cat``
+    would be answered for words that never run and the gate would ask
+    again, after the earlier commands ran, about the words that do.
+    Such a command (``Judged.stated`` False) is judged here for a deny,
+    which speaks on the name alone and still holds the line, and its
+    question is left to the gate; the hold does not reach it, which is
+    the limit stated above in another form.
 
     Every command is judged whether or not the session carries a
     document. A coded policy refuses on its own account, and one is
@@ -549,7 +614,7 @@ async def prejudge_line(
         targets = redirect_paths(item.redirects, registry, walked.cwd)
         for index, one in enumerate(explained):
             expl = one.explanation
-            if not _is_judged(expl):
+            if not _is_judged(expl) or not _asks_for(one):
                 continue
             args = list(expl.argv)
             classified = classified_words(expl.command, args, walked, registry)
@@ -567,11 +632,11 @@ async def prejudge_line(
                 redirects=targets if index == 0 else (),
                 cancel=cancel,
                 # This pass judges on the gate's behalf and runs nothing
-                # itself, so a grant the host gives here is handed to the
-                # per-command gate that runs the line, which spends it:
-                # one question per run, not per pass.
-                claimant=Claimant(handed, one.occurrence),
-                judging=True)
+                # itself, so a grant the host gives here is claimed for
+                # the per-command gate that runs the line, and spent
+                # when the line ends: one question per run, not per
+                # pass.
+                claimant=Claimant(handed, one.occurrence))
             if isinstance(answered, Refused):
                 return answered
             # The host answered this one inline. The rest of the line
@@ -641,10 +706,8 @@ async def _verdict_refuses(
         return True
     # hand_off: this pass exists to decide whether a secret is fetched, and
     # the gate behind it still has to admit the line. An answer given here is
-    # left standing for that gate, which consumes it -- so the host is asked
-    # once.
-    action = await registry.decisions.resolve(ctx, asked, cancel, claimant,
-                                              True)
+    # claimed for that gate, which runs on it -- so the host is asked once.
+    action = await registry.decisions.resolve(ctx, asked, cancel, claimant)
     if isinstance(action, Abandoned):
         raise MirageAbortError()
     return action is not None
@@ -730,7 +793,10 @@ async def _command_refused(
                                    item.redirects)
     targets = redirect_paths(item.redirects, registry, walked.cwd)
     for index, judged in enumerate(explained):
-        if not _is_verdict(judged.explanation):
+        # A question about a spelling the runtime completes is the
+        # gate's (``_asks_for``); the node is kept, and over-keeping
+        # only ever over-fetches.
+        if not _is_verdict(judged.explanation) or not _asks_for(judged):
             continue
         # _judge_words lists the statement's own command first and
         # the lines it runs after it, so only the first explanation
@@ -815,6 +881,7 @@ async def _judge_line(
     namespace: Namespace | None,
     agent_id: str,
     frame: Frame,
+    stated: bool = True,
 ) -> list[Judged]:
     """Every command of a line explained, in the order the gate reads
     them, each with its place on the line.
@@ -827,12 +894,14 @@ async def _judge_line(
         namespace (Namespace | None): the link table.
         agent_id (str): the agent the line is attributed to.
         frame (Frame): the scope the line is read in.
+        stated (bool): whether the line's text reaches here as the gate
+            will read it, as ``_judge_words`` takes it.
     """
     out: list[Judged] = []
     for item in _walked_line(ast, session, frame):
-        out.extend(await
-                   _judge_words(item.words, item.occurrence, item.session,
-                                registry, namespace, agent_id, item.redirects))
+        out.extend(await _judge_words(item.words, item.occurrence,
+                                      item.session, registry, namespace,
+                                      agent_id, item.redirects, stated))
     return out
 
 

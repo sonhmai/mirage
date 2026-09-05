@@ -327,8 +327,8 @@ class Occurrence:
 
 @dataclass(frozen=True, slots=True)
 class Claim:
-    """One grant a judging pass matched, and the occurrence it matched
-    it for.
+    """One grant a reader of a line matched, and the occurrence it
+    matched it for.
 
     Args:
         occurrence (Occurrence): the command the grant answers.
@@ -341,19 +341,20 @@ class Claim:
 
 @dataclass(eq=False, slots=True)
 class HandOff:
-    """The ONCE grants a line's judging passes matched to its commands,
-    for the run behind them to spend.
+    """The ONCE grants a line's readers matched to its commands, for the
+    line's end to spend.
 
     One per line, made by the executor and filled by ``Decisions.resolve``
-    as each pass admits a command: every grant it matches, whether the
-    host gave it inline just now or out of band before the pass, is
+    as a pass or a gate admits a command: every grant it matches, whether
+    the host gave it inline just now or out of band before the line, is
     claimed here instead of spent, bound to the occurrence it was
     judged for. A claimed grant is on offer to that occurrence alone,
     so two spellings of one command on a line each need a nod of their
     own, and invisible to every other line of the session while this
-    one lives, so two lines judged at once cannot both run on one nod;
-    the run spends each grant at the gate it was claimed for, and
-    whatever the run never reaches is spent when the line ends
+    one lives, so two lines judged at once cannot both run on one nod.
+    Nothing spends a claim while the line runs: a gate the run reaches
+    again at the same place (a loop body) runs on the same nod, and
+    every claim, reached or not, is spent when the line ends
     (``Decisions.revoke``). A background job the line launches takes
     the claims made for the commands inside it onto a hand-off of its
     own (``Decisions.split``), since its gates run after the line has

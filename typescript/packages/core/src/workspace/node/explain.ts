@@ -40,6 +40,7 @@ import {
   admit,
   classifiedWords,
   gate,
+  isPendingRefusal,
   redirectPaths,
   statementRedirects,
   type Refused,
@@ -85,11 +86,20 @@ interface Walked {
  * One command's explanation and where the command stands. The
  * occurrence is what the pass hands the ledger beside the explanation:
  * a grant claimed for the command is bound to it, so the gate that runs
- * the same occurrence finds it and no other reader does.
+ * the same occurrence finds it and no other reader does. `stated` says
+ * whether the gate will read the command in the words the pass read:
+ * every word literal, and no operand the runtime appends. The gate
+ * reads `cat $F` as the path `$F` expands to and `xargs cat` as `cat`
+ * plus the items on its stdin, so a question the pass asked about
+ * either spelling would be answered for words that never run, and the
+ * gate would ask again about the words that do. Such a command is
+ * judged here for a deny, which speaks on the name alone, and asked
+ * about at the gate.
  */
 interface Judged {
   readonly explanation: Explanation
   readonly occurrence: Occurrence
+  readonly stated: boolean
 }
 
 /**
@@ -193,7 +203,10 @@ async function explained(
  * Explain one command and whatever lines it runs in turn, each with its
  * occurrence. A line the command runs (`eval`, `sh -c`) is parsed on
  * its own and read under the command's occurrence, exactly as the
- * nested evaluation will stand when it runs.
+ * nested evaluation will stand when it runs. `stated` is whether the
+ * words reach here as the gate will read them; false under a command
+ * the runtime completes, since a line built from its words (`eval`) or
+ * run on its operands (`xargs`) is completed with them.
  */
 async function judgeWords(
   words: readonly Word[],
@@ -204,10 +217,14 @@ async function judgeWords(
   agentId: string,
   reparse: (line: string) => TSNodeLike,
   redirectWords: readonly Word[] = [],
+  stated = true,
 ): Promise<Judged[]> {
   const head = words[0]
   if (head === undefined) return []
-  if (head.text === null) return [{ explanation: unreadableWord(head.raw), occurrence }]
+  if (head.text === null) {
+    return [{ explanation: unreadableWord(head.raw), occurrence, stated: false }]
+  }
+  const literal = stated && words.every((w) => w.text !== null)
   const name = wordValue(head)
   const args = words.slice(1).map(wordValue)
   const classified = classifiedWords(name, args, session, registry)
@@ -222,10 +239,12 @@ async function judgeWords(
     null,
     redirectPaths(redirectWords, registry, session.cwd),
   )
-  if (!Array.isArray(gated)) return [{ explanation: fromRefusal(name, args, gated), occurrence }]
+  if (!Array.isArray(gated)) {
+    return [{ explanation: fromRefusal(name, args, gated), occurrence, stated: literal }]
+  }
   const [ctx, asked] = gated
   const out: Judged[] = [
-    { explanation: await explained(ctx, session, registry, asked), occurrence },
+    { explanation: await explained(ctx, session, registry, asked), occurrence, stated: literal },
   ]
   for (const inner of innerLines(name, words.slice(1))) {
     if (!innerReadable(inner)) continue
@@ -239,12 +258,23 @@ async function judgeWords(
           agentId,
           reparse,
           lineFrame(inner.line, occurrence),
+          literal,
         )),
       )
     } else {
       const within = wholeOccurrence(argvFrame(inner.argv.map(wordValue), occurrence))
       out.push(
-        ...(await judgeWords(inner.argv, within, session, registry, namespace, agentId, reparse)),
+        ...(await judgeWords(
+          inner.argv,
+          within,
+          session,
+          registry,
+          namespace,
+          agentId,
+          reparse,
+          [],
+          literal && !inner.open,
+        )),
       )
     }
   }
@@ -415,6 +445,27 @@ function isJudged(expl: Explanation): boolean {
   return expl.exitCode === 0 || isVerdict(expl)
 }
 
+/**
+ * Whether an explanation refuses the command outright, rather than
+ * reporting a line that would run or a question the host has not
+ * answered.
+ */
+function refuses(expl: Explanation): boolean {
+  return expl.exitCode !== 0 && !isPendingRefusal(expl.refusal)
+}
+
+/**
+ * Whether the pass may answer a command's question on the gate's
+ * behalf: it may when the gate will read the words the pass read, and a
+ * deny is always the pass's to enforce, since it speaks on the name
+ * alone. What is left is a question about a spelling the runtime
+ * completes, which is the gate's: asked here, it would be answered for
+ * words that never run.
+ */
+function asksFor(one: Judged): boolean {
+  return one.stated || refuses(one.explanation)
+}
+
 function isVerdict(expl: Explanation): boolean {
   if (expl.exitCode === 0) return false
   return expl.rule !== null || expl.outcome === Outcome.ALLOW
@@ -456,9 +507,21 @@ function isVerdict(expl: Explanation): boolean {
  * records no request; a command it refuses on is then put through the
  * real gate, which is where an ask is recorded, exactly once, for a line
  * that will not run. That admission hands off: a grant the host gives
- * inline is left standing for the per-command gate, which runs the line
- * and spends it, so a compound line costs the human one question per
- * run rather than one per pass.
+ * inline is claimed for the per-command gate, which runs the line on
+ * it, and the line's end spends it, so a compound line costs the human
+ * one question per run rather than one per pass, and a gate the run
+ * reaches twice (a loop body) runs on one nod.
+ *
+ * A question is only asked here when the gate will ask the same one.
+ * The gate reads a word the runtime expands as its value and the words
+ * `xargs` or `find -exec` hand on with the operands the runtime
+ * appends, so a question about `cat $F` or a bare `cat` would be
+ * answered for words that never run and the gate would ask again, after
+ * the earlier commands ran, about the words that do. Such a command
+ * (`Judged.stated` false) is judged here for a deny, which speaks on
+ * the name alone and still holds the line, and its question is left to
+ * the gate; the hold does not reach it, which is the limit stated above
+ * in another form.
  *
  * Every command is judged whether or not the session carries a document.
  * A coded policy refuses on its own account, and one is always
@@ -513,7 +576,7 @@ export async function prejudgeLine(
     const targets = redirectPaths(item.redirects, registry, walked.cwd)
     for (const [index, one] of explained.entries()) {
       const expl = one.explanation
-      if (!isJudged(expl)) continue
+      if (!isJudged(expl) || !asksFor(one)) continue
       const args = [...expl.argv]
       const classified = classifiedWords(expl.command, args, walked, registry)
       const answered = await admit(
@@ -531,10 +594,10 @@ export async function prejudgeLine(
         index === 0 ? targets : [],
         signal,
         // This pass judges on the gate's behalf and runs nothing itself, so
-        // a grant the host gives here is handed to the per-command gate that
-        // runs the line, which spends it: one question per run, not per pass.
+        // a grant the host gives here is claimed for the per-command gate
+        // that runs the line, and spent when the line ends: one question per
+        // run, not per pass.
         { line: handed, occurrence: one.occurrence },
-        true,
       )
       if (!(answered instanceof Admitted)) return answered
       // The host answered this one inline. The rest of the line has not
@@ -593,9 +656,9 @@ async function verdictRefuses(
   if (standing === null) return false
   if (standing.kind === 'deny') return true
   // handOff: this pass exists to decide whether a secret is fetched, and the
-  // gate behind it still has to admit the line. An answer given here is left
-  // standing for that gate, which consumes it — so the host is asked once.
-  const action = await registry.decisions.resolve(ctx, asked, signal, claimant, true)
+  // gate behind it still has to admit the line. An answer given here is
+  // claimed for that gate, which runs on it, so the host is asked once.
+  const action = await registry.decisions.resolve(ctx, asked, signal, claimant)
   if (action !== null && action.kind === 'abandoned') throw makeAbortError()
   return action !== null
 }
@@ -671,7 +734,10 @@ async function commandRefused(
   )
   const targets = redirectPaths(item.redirects, registry, walked.cwd)
   for (const [index, judged] of explained.entries()) {
-    if (!isVerdict(judged.explanation)) continue
+    // A question about a spelling the runtime completes is the gate's
+    // (`asksFor`); the node is kept, and over-keeping only ever
+    // over-fetches.
+    if (!isVerdict(judged.explanation) || !asksFor(judged)) continue
     // judgeWords lists the statement's own command first and the
     // lines it runs after it, so only the first explanation is the
     // command the redirects belong to.
@@ -787,7 +853,8 @@ export async function explainLine(
 /**
  * Every command of a line explained, in the order the gate reads them,
  * each with its place on the line. `frame` is the scope the line is
- * read in.
+ * read in; `stated` is whether the line's text reaches here as the gate
+ * will read it, as `judgeWords` takes it.
  */
 async function judgeLine(
   root: TSNodeLike,
@@ -797,6 +864,7 @@ async function judgeLine(
   agentId: string,
   reparse: (line: string) => TSNodeLike,
   frame: Frame,
+  stated = true,
 ): Promise<Judged[]> {
   const out: Judged[] = []
   for (const item of walkedLine(root, session, reparse, frame)) {
@@ -810,6 +878,7 @@ async function judgeLine(
         agentId,
         reparse,
         item.redirects,
+        stated,
       )),
     )
   }

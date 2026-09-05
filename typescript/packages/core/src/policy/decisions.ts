@@ -286,9 +286,18 @@ export class Decisions {
    * next, and a ONCE grant is only spent once the whole line is
    * answered: spending one while another is still waiting would make
    * the first question come back on every retry. Once the line IS
-   * answered, the pass that runs it spends every ONCE grant behind it,
-   * the ones already on file and the one a host gave inline moments
-   * ago alike, so a nod never outlives the line it was given for.
+   * answered, every ONCE grant behind it, the ones already on file and
+   * the one a host gave inline moments ago alike, is the line's. Off a
+   * line it is spent here, so a nod never outlives the line it was
+   * given for. On a line it is claimed on the line's hand-off for the
+   * reader's occurrence instead, whether the reader is a pass that
+   * judges the line before it runs or the gate that runs it, and spent
+   * when the line ends (`revoke`): the pass and the gate then read one
+   * claim, so a compound line costs one question per run rather than
+   * one per reader, and a gate the run reaches again at the same place
+   * (a loop body, the next batch `xargs` hands on) runs on the same nod
+   * rather than asking after the rest of the body already ran once
+   * more.
    *
    * A refusal is deliberately not spent by the line it was given for.
    * The record stands to refuse the agent's immediate retry of the
@@ -306,14 +315,6 @@ export class Decisions {
    *   evaluated from it, and to nobody else: not to another spelling
    *   of the command on the line, and not to another line judged at
    *   the same time.
-   * @param judging true for a pass that judges the line on behalf of
-   *   the one that runs it — the env pre-pass, the compound-line pass
-   *   that judges every command before any runs, and the pass over a
-   *   line a runtime takes whole. Nothing is spent then: every ONCE
-   *   grant behind the command, the one the host gives now and any
-   *   already on file, is claimed on the line's hand-off for the
-   *   claimant's occurrence, for the gate behind the pass, which runs
-   *   the line and spends them. False for that gate.
    * @returns the refusal, the question left waiting, an Abandoned for a
    *   run killed mid-question, or null to run.
    */
@@ -322,7 +323,6 @@ export class Decisions {
     ask: Ask,
     signal?: AbortSignal,
     claimant: Claimant | null = null,
-    judging = false,
   ): Promise<Deny | Pending | Abandoned | null> {
     const rules = ask.rules ?? [askRule(ctx, ask)]
     const argv = [ctx.command, ...ctx.argv]
@@ -354,35 +354,54 @@ export class Decisions {
     // the grant it gave THIS line would still be standing for the next
     // identical one, and whoever allowed once would have allowed twice.
     const once = this.onceAnswers(sessionId, rules, argv, ctx.cwd, claimant)
-    if (!judging || claimant === null) {
+    if (claimant === null) {
       await this.spend(sessionId, once)
       return null
     }
-    const handed = claimant.line
-    handed.claimed.push(...once.map((decision) => ({ occurrence: claimant.occurrence, decision })))
-    if (once.length > 0) {
-      const live = this.live.get(sessionId) ?? new Set<HandOff>()
-      live.add(handed)
-      this.live.set(sessionId, live)
-    }
+    this.claim(sessionId, claimant, once)
     return null
   }
 
   /**
-   * Spend every grant claimed on a hand-off that no gate spent.
+   * Bind the grants behind a command to its place on the line, for the
+   * line's end to spend.
    *
-   * The hand-off in `resolve` leaves the grants behind a command
-   * standing for the gate that runs the line, and that gate spends each
-   * at the command it was claimed for. Anything that ends the line short
-   * of that gate leaves one unspent: the pass refuses the line on a
-   * later command, a fetch fails before the run, the run is killed, or
-   * a short-circuit skips the command. Either way the grant would stand
-   * for the next line spelling that command, which would then run on a
-   * nod given to a line that never did, so the executor spends what the
-   * gates did not, however the line ended, except when it is held on a
-   * question still waiting. A grant a gate already spent is gone from
-   * the ledger and is passed over; the hand-off is emptied so a second
-   * call is a no-op.
+   * A grant the line already holds for this place, claimed by its pass
+   * or by an earlier visit of the same gate, is left as it is: the
+   * reader found it through that claim, and a second claim would say
+   * nothing new. What is new is claimed on the reader's own hand-off,
+   * which goes live with it, so every other line of the session stops
+   * seeing the grant until this one ends.
+   *
+   * @param sessionId the asking session.
+   * @param claimant the reading command and its line.
+   * @param once the settled ONCE records standing behind the command as
+   *   this reader sees them.
+   */
+  private claim(sessionId: string, claimant: Claimant, once: readonly Decision[]): void {
+    const handed = claimant.line
+    const held = lineage(handed).flatMap((h) => h.claimed.map((c) => c.decision))
+    const fresh = once.filter((r) => !held.includes(r))
+    if (fresh.length === 0) return
+    handed.claimed.push(...fresh.map((decision) => ({ occurrence: claimant.occurrence, decision })))
+    const live = this.live.get(sessionId) ?? new Set<HandOff>()
+    live.add(handed)
+    this.live.set(sessionId, live)
+  }
+
+  /**
+   * Spend every grant claimed on a hand-off: the line's end.
+   *
+   * The claims in `resolve` leave the grants behind a line's commands
+   * standing while the line runs, each bound to the place it was given
+   * for, and this is where they are spent, however the line ended: run
+   * to completion, refused by the pass on a later command, failed on a
+   * fetch before the run, killed, or short-circuited past the command.
+   * Left standing, a grant would pass the next line spelling that
+   * command on a nod given to this one, so the executor calls this
+   * whichever way the line ends, except when it is held on a question
+   * still waiting (`release`). A grant already gone from the ledger is
+   * passed over; the hand-off is emptied so a second call is a no-op.
    *
    * @param sessionId the session the line was judged in.
    * @param handed the line's hand-off.
@@ -503,9 +522,9 @@ export class Decisions {
    * spending nothing, recording no question and never reaching the
    * host. So `explain` can report that a line would be refused, or
    * would still be waiting, without a question arriving for a line
-   * nobody typed. It reads through the same reservations a judging
-   * pass does, so a grant a live line has claimed reads as waiting here
-   * exactly as a run would find it.
+   * nobody typed. It reads through the same reservations a run does,
+   * so a grant a live line has claimed reads as waiting here exactly as
+   * a run would find it.
    *
    * @param claimant the reading command and its line, null for a dry
    *   run outside any line.

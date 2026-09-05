@@ -253,11 +253,11 @@ async def execute_line(
                                            or "", ws._route_policy,
                                            routing_decision)
         nested = NestedRefusal()
-        # The line's hand-off: the grants its judging passes claim for
-        # its gates, which the gates spend from and the line's end
-        # sweeps. A nested evaluation runs on one made under it, so
-        # what this line's pass claimed for the words a command runs is
-        # spent by the line that runs them.
+        # The line's hand-off: the grants its passes and gates claim
+        # for its commands, which the gates run on and the line's end
+        # spends. A nested evaluation runs on one made under it, so the
+        # line that runs the words a command hands on runs on what this
+        # line's pass claimed for them.
         if handed is None:
             handed = HandOff()
         exec_recursion = partial(recurse, ws, cancel, decision, agent, nested,
@@ -286,7 +286,7 @@ async def execute_line(
                 # the retry of a line held on a question.
                 refused = await admit_line(ast, effective_session,
                                            ws._registry, ws._namespace, agent
-                                           or "", cancel, handed, True)
+                                           or "", cancel, handed)
                 if refused is not None:
                     held = is_pending(refused)
                     io = IOResult(exit_code=refused.exit_code,

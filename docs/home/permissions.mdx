@@ -295,9 +295,13 @@ being asked twice, and is spent by it. The literal commands of a compound
 line are judged before execution, and a `once` grant given for one of its commands,
 inline or out of band, is handed to the run; when a later command is
 refused instead, nothing runs and the refusal spends the grant, so the
-next line spelling that command asks again. A grant the run never
-reaches (a `&&` that short-circuited before the command) is spent when
-the line ends, for the same reason. A grant is bound to the place on
+next line spelling that command asks again. Every grant a line was
+given is spent when the line ends, whether the run reached the command
+(a `&&` that short-circuited before it) or reached it more than once: a
+loop body is one place on the line, so
+`for f in a b; do touch $f; cat secret.txt; done` is one question, and
+the second iteration runs on the same nod rather than asking again
+after another `touch`. A grant is bound to the place on
 the line it was given for, so a command spelled twice on one line is two
 questions, a word that expands at run time into a command cannot run on
 the nod a literal spelling elsewhere on the line was given (`$S && cat
@@ -322,7 +326,15 @@ Those commands still pass the execution gate, but an ask there can arrive
 after earlier commands have run. For example,
 `F=/data/secret; echo before > /data/marker; cat $F` can write the marker
 before asking about the expanded `cat`. A pending result does not roll
-back earlier work, so retrying such a line can repeat it.
+back earlier work, so retrying such a line can repeat it. The same holds
+for the operands a command appends at run time: `xargs cat` runs `cat`
+on the items it reads from its input, and `find -exec cat {} \;` on the
+paths it finds. Preflight still refuses such a line for a `deny` on the
+command name, before anything runs, but it never asks about a spelling
+the gate will not read (`cat $F`, a bare `cat`): an answer to that
+question would cover nothing that runs, and the gate would ask again
+about the words that do. The one question is the gate's, about the
+real operands.
 
 ## Dry runs
 

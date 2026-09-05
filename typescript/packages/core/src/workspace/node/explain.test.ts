@@ -31,9 +31,25 @@ import { Workspace } from '../workspace/workspace.ts'
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
 
+const ALLOW = [
+  'ls',
+  'cat',
+  'git',
+  'rm',
+  'mkdir',
+  'cd',
+  'echo',
+  'sleep',
+  'wait',
+  'eval',
+  'command',
+  'xargs',
+  'touch',
+]
+
 const PROFILE = parseSessionProfile({
   commands: {
-    allow: ['ls', 'cat', 'git', 'rm', 'mkdir', 'cd', 'echo', 'sleep', 'wait', 'eval', 'command'],
+    allow: ALLOW,
     deny: [{ reason: 'production data is protected', commands: { rm: ['/data/prod/*'] } }],
     ask: [
       { reason: 'pushes need sign-off', commands: ['git push'] },
@@ -43,6 +59,17 @@ const PROFILE = parseSessionProfile({
       },
     ],
   },
+})
+
+// The same world under a rule that speaks on the command name alone, so
+// a spelling whose operands only the runtime can read is still asked
+// about.
+const ASK_CAT = parseSessionProfile({
+  commands: { allow: ALLOW, ask: [{ reason: 'reads need sign-off', commands: ['cat'] }] },
+})
+
+const DENY_CAT = parseSessionProfile({
+  commands: { allow: ALLOW, deny: [{ reason: 'reads are refused', commands: ['cat'] }] },
 })
 
 const open: Workspace[] = []
@@ -65,12 +92,15 @@ async function ws(): Promise<Workspace> {
   return w
 }
 
-/** The same world as `ws`, with a host that answers an ask inline. */
-async function inlineWs(onAsk: AskHandler): Promise<Workspace> {
+/**
+ * The same world as `ws`, with a host that answers an ask inline, under
+ * `profile` for session `s`.
+ */
+async function inlineWs(onAsk: AskHandler, profile = PROFILE): Promise<Workspace> {
   const parser = await getTestParser()
   const w = new Workspace(
     { '/data': new RAMResource() },
-    { mode: MountMode.WRITE, shellParser: parser, profiles: { r: PROFILE }, onAsk },
+    { mode: MountMode.WRITE, shellParser: parser, profiles: { r: profile }, onAsk },
   )
   open.push(w)
   await w.execute('mkdir -p /data/prod')
@@ -858,5 +888,76 @@ describe('prejudge scope', () => {
     expect(DEC.decode(ran.stdout)).toBe('é s\n')
     expect(asked).toHaveLength(1)
     expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it.each([
+    'for i in 1 2; do touch /data/mark.txt; cat /data/secret.txt; done',
+    'for i in 1 2; do cat /data/secret.txt; done',
+  ])('runs every visit of a command in a loop on one nod: %s', async (line) => {
+    // The loop body is one place on the line, visited twice. The grant for
+    // the cat is bound to that place until the line ends, whether the pass
+    // claimed it or the first gate to reach it did (the pass leaves a
+    // one-command body to the gate), so the second iteration runs on it
+    // instead of asking again after the touch ran once more.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute(line, { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('s\ns\n')
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('replays a held loop on the one answer it was given', async () => {
+    const w = await ws()
+    const line = 'for i in 1 2; do touch /data/mark.txt; cat /data/secret.txt; done'
+    const first = await w.execute(line, { sessionId: 's' })
+    expect(first.exitCode).toBe(126)
+    expect(await w.fs.readdir('/data')).not.toContain('/data/mark.txt')
+    const [pending] = w.decisions.pending()
+    expect(w.decisions.pending()).toHaveLength(1)
+    await w.decisions.answer(pending?.id ?? '', Outcome.ALLOW)
+    const again = await w.execute(line, { sessionId: 's' })
+    expect(again.exitCode).toBe(0)
+    expect(DEC.decode(again.stdout)).toBe('s\ns\n')
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it.each([
+    'touch /data/mark.txt && echo /data/secret.txt | xargs cat',
+    'F=/data/secret.txt; touch /data/mark.txt; cat $F',
+  ])('asks about a spelling the runtime completes at the gate: %s', async (line) => {
+    // The pass reads `xargs cat` as a bare cat and `cat $F` as the word
+    // typed, and the gate reads neither: xargs appends its items and $F
+    // expands. A question asked here about either spelling would be
+    // answered for words that never run, and the gate would ask again
+    // about the words that do, so the pass leaves the question to the
+    // gate and the human is asked once, about the real operand. The touch
+    // has run by then; the hold does not reach a spelling the runtime
+    // completes.
+    const seen: string[][] = []
+    const w = await inlineWs((record) => {
+      seen.push([record.command, ...record.argv])
+      return Promise.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE })
+    }, ASK_CAT)
+    const ran = await w.execute(line, { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('s\n')
+    expect(seen).toEqual([['cat', '/data/secret.txt']])
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it.each([
+    'touch /data/mark.txt && echo /data/secret.txt | xargs cat',
+    'F=/data/secret.txt; touch /data/mark.txt; cat $F',
+  ])('holds the line for a deny on a spelling the runtime completes: %s', async (line) => {
+    // A deny speaks on the command name alone, which the pass can read
+    // whatever the runtime appends, so it still refuses the whole line
+    // before the touch runs.
+    const w = await inlineWs(answering([], Outcome.ALLOW), DENY_CAT)
+    const ran = await w.execute(line, { sessionId: 's' })
+    expect(ran.exitCode).toBe(126)
+    expect(DEC.decode(ran.stderr)).toBe('cat: Permission denied\n')
+    expect(await w.fs.readdir('/data')).not.toContain('/data/mark.txt')
   })
 })

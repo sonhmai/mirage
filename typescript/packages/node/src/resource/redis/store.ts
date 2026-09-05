@@ -119,6 +119,9 @@ export class RedisStore implements RedisStoreLike {
     size: number | null,
   ): Promise<Uint8Array | null> {
     const c = await this.client()
+    const key = this.fk(path)
+    // GETRANGE 0 -1 means the whole value, not an empty window.
+    if (size === 0) return (await c.exists(key)) === 0 ? null : new Uint8Array(0)
     const mod = (await import('redis')) as unknown as {
       RESP_TYPES: { readonly BLOB_STRING: number }
     }
@@ -130,7 +133,6 @@ export class RedisStore implements RedisStoreLike {
     }
     const mapping: Record<number, unknown> = { [mod.RESP_TYPES.BLOB_STRING]: Buffer }
     const end = size === null ? -1 : offset + size - 1
-    const key = this.fk(path)
     const [exists, raw] = await Promise.all([
       typed.exists(key),
       typed.withTypeMapping(mapping).getRange(key, offset, end),

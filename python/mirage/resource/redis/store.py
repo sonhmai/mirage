@@ -124,6 +124,9 @@ class RedisStore:
             size (int | None): how many bytes, or None for the rest.
         """
         key = self._fk(path)
+        if size == 0:
+            # GETRANGE 0 -1 means the whole value, not an empty window.
+            return b"" if await self._client.exists(key) else None
         end = -1 if size is None else offset + size - 1
         async with self._client.pipeline(transaction=False) as pipe:
             pipe.exists(key)

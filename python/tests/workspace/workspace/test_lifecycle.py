@@ -13,9 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
+from uuid import uuid4
 
 import pytest
 
+from mirage.cache.index.config import (IndexConfig, IndexEntry, LookupStatus,
+                                       RedisIndexConfig)
 from mirage.commands.cli.types import CLISpec
 from mirage.io import IOResult
 from mirage.resource.ram import RAMResource
@@ -74,14 +78,17 @@ async def test_retired_command_cannot_cache_bytes_for_replacement_mount():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fail_eviction", [False, True])
+@pytest.mark.parametrize("cache_kind", ["file", "index"])
 async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
-        monkeypatch, fail_eviction):
+        monkeypatch, fail_eviction, cache_kind):
     resource = RAMResource()
     ws = Workspace({"/data": resource})
     cache = ws.cache
     entered = asyncio.Event()
     release = asyncio.Event()
-    evict = cache.evict_prefix
+    store = cache if cache_kind == "file" else resource.index
+    method = "evict_prefix" if cache_kind == "file" else "invalidate_prefix"
+    evict = getattr(store, method)
 
     async def blocked_evict(prefix):
         entered.set()
@@ -90,7 +97,7 @@ async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
             raise RuntimeError("cache unavailable")
         await evict(prefix)
 
-    monkeypatch.setattr(cache, "evict_prefix", blocked_evict)
+    monkeypatch.setattr(store, method, blocked_evict)
     await cache.set("/data", b"root")
     await cache.set("/data/file", b"old")
     await cache.set("/database/file", b"peer")
@@ -104,7 +111,7 @@ async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
             with pytest.raises(RuntimeError, match="cache unavailable"):
                 await removing
             assert ws.mount("/data").resource is resource
-            monkeypatch.setattr(cache, "evict_prefix", evict)
+            monkeypatch.setattr(store, method, evict)
             await ws.unmount("/data")
         else:
             await removing
@@ -115,6 +122,44 @@ async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
     finally:
         release.set()
         await asyncio.gather(removing, return_exceptions=True)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store_kind", ["ram", "redis"])
+async def test_unmount_invalidates_index_before_replacement(store_kind):
+    config = IndexConfig()
+    if store_kind == "redis":
+        url = os.environ.get("REDIS_URL")
+        if not url:
+            pytest.skip("REDIS_URL not set")
+        config = RedisIndexConfig(url=url, key_prefix=f"lifecycle:{uuid4()}:")
+    resource = RAMResource()
+    ws = Workspace({"/data": resource}, index=config)
+    ws.add_mount("/alias", resource)
+    index = resource.index
+    entry = IndexEntry(id="old", name="private.txt", resource_type="file")
+    try:
+        await index.put("/data", entry)
+        for path in ("/data", "/data/nested", "/database", "/alias"):
+            await index.set_dir(path, [("private.txt", entry)])
+        await ws.unmount("/data")
+        replacement = RAMResource()
+        ws.add_mount("/data", replacement)
+        for candidate in (index, replacement.index):
+            for path in ("/data", "/data/private.txt",
+                         "/data/nested/private.txt"):
+                assert (await
+                        candidate.get(path)).status == LookupStatus.NOT_FOUND
+            for path in ("/data", "/data/nested"):
+                assert (
+                    await
+                    candidate.list_dir(path)).status == LookupStatus.NOT_FOUND
+        for path in ("/database", "/alias"):
+            assert (await
+                    index.list_dir(path)).entries == [f"{path}/private.txt"]
+    finally:
+        await index.clear()
         await ws.close()
 
 

@@ -176,6 +176,7 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
             # cache fills while a replacement is waiting for this prefix.
             await cache.remove(norm.rstrip("/"))
             await cache.evict_prefix(norm)
+        await entry.resource.index.invalidate_prefix(norm.rstrip("/"))
         if is_shutting_down():
             raise RuntimeError("Workspace is closed")
         if registry.try_mount_for_prefix(prefix) is not entry:

@@ -15,7 +15,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { CacheConfig } from '../cache/file/config.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
-import { IndexType, LookupStatus } from '../cache/index/config.ts'
+import {
+  IndexEntry,
+  IndexType,
+  LookupStatus,
+  type IndexConfig,
+  type RedisIndexConfig,
+} from '../cache/index/config.ts'
 import { RedisIndexCacheStore } from '../cache/index/redis.ts'
 import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
@@ -163,6 +169,51 @@ describe('Workspace lifecycle', () => {
 })
 
 describe('Workspace dynamic mount index', () => {
+  for (const type of [IndexType.RAM, IndexType.REDIS]) {
+    it.skipIf(type === IndexType.REDIS && process.env.REDIS_URL === undefined)(
+      `invalidates the ${type} index before remounting`,
+      async () => {
+        const url = process.env.REDIS_URL
+        const config: IndexConfig | RedisIndexConfig =
+          type === IndexType.REDIS
+            ? {
+                type,
+                ...(url === undefined ? {} : { url }),
+                keyPrefix: `lifecycle:${crypto.randomUUID()}:`,
+              }
+            : { type }
+        const resource = new RAMResource()
+        const ws = new Workspace({ '/data': resource }, { index: config })
+        ws.addMount('/alias', resource)
+        const index = resource.index
+        const entry = new IndexEntry({ id: 'old', name: 'private.txt', resourceType: 'file' })
+        try {
+          await index.put('/data', entry)
+          for (const path of ['/data', '/data/nested', '/database', '/alias']) {
+            await index.setDir(path, [['private.txt', entry]])
+          }
+          await ws.unmount('/data')
+          const replacement = new RAMResource()
+          ws.addMount('/data', replacement)
+          for (const candidate of [index, replacement.index]) {
+            for (const path of ['/data', '/data/private.txt', '/data/nested/private.txt']) {
+              expect((await candidate.get(path)).status).toBe(LookupStatus.NOT_FOUND)
+            }
+            for (const path of ['/data', '/data/nested']) {
+              expect((await candidate.listDir(path)).status).toBe(LookupStatus.NOT_FOUND)
+            }
+          }
+          for (const path of ['/database', '/alias']) {
+            expect((await index.listDir(path)).entries).toEqual([`${path}/private.txt`])
+          }
+        } finally {
+          await index.clear()
+          await ws.close()
+        }
+      },
+    )
+  }
+
   it('applies the workspace Redis index to added mounts', async () => {
     const ws = new Workspace({}, { index: { type: IndexType.REDIS } })
     const resource = new RAMResource()
@@ -291,9 +342,14 @@ describe('Workspace.execute AbortSignal', () => {
 })
 
 describe('Workspace.unmount', () => {
-  it.each([false, true])(
-    'retains a prefix until cache cleanup succeeds (failure=%s)',
-    async (fails) => {
+  it.each([
+    [false, 'file'],
+    [true, 'file'],
+    [false, 'index'],
+    [true, 'index'],
+  ] as const)(
+    'retains a prefix until cache cleanup succeeds (failure=%s, store=%s)',
+    async (fails, store) => {
       const resource = new RAMResource()
       const ws = new Workspace({ '/data': resource })
       const cache = ws.cache
@@ -305,8 +361,15 @@ describe('Workspace.unmount', () => {
       const release = new Promise<void>((resolve) => {
         resume = resolve
       })
-      const evict = cache.evictPrefix.bind(cache)
-      vi.spyOn(cache, 'evictPrefix').mockImplementationOnce(async (prefix) => {
+      const evict =
+        store === 'file'
+          ? cache.evictPrefix.bind(cache)
+          : resource.index.invalidatePrefix.bind(resource.index)
+      const spy =
+        store === 'file'
+          ? vi.spyOn(cache, 'evictPrefix')
+          : vi.spyOn(resource.index, 'invalidatePrefix')
+      spy.mockImplementationOnce(async (prefix) => {
         enter()
         await release
         if (fails) throw new Error('cache unavailable')

@@ -92,6 +92,7 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
       await cache.remove(norm.slice(0, -1))
       await cache.evictPrefix(norm)
     }
+    await entry.resource.index?.invalidatePrefix(norm.slice(0, -1))
     if (deps.isShuttingDown()) throw new Error('Workspace is closed')
     if (deps.registry.tryMountForPrefix(prefix) !== entry) {
       throw new Error(`mount changed while unmounting: ${prefix}`)

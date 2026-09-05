@@ -291,8 +291,8 @@ settles the ask while the line waits, like a tool-approval prompt. A
 `once` grant given that way is consumed by the line that asked, so the
 next identical line asks again; a refusal stands for the agent's
 immediate retry, which is refused from the record without the human
-being asked twice, and is spent by it. A compound line is judged whole
-before any of it runs, and a `once` grant given for one of its commands,
+being asked twice, and is spent by it. The literal commands of a compound
+line are judged before execution, and a `once` grant given for one of its commands,
 inline or out of band, is handed to the run; when a later command is
 refused instead, nothing runs and the refusal spends the grant, so the
 next line spelling that command asks again. A grant the run never
@@ -306,13 +306,23 @@ offer to a line judged at the same time. The grants given to a line
 for the commands inside a background job it launches are the job's own
 from the moment it is launched, and stay with it until it ends: its
 commands reach their gates after the line has returned, and a question
-that holds the rest of the line does not let go of them. A line the
+that holds the rest of the line does not let go of them. This also
+applies when `eval` launches the job: in
+`eval 'sleep 1 && cat secret.txt &'`, the outer line's approval stays
+reserved for the background `cat` after `eval` returns. A line the
 shell evaluates from inside another (`$( )`, `eval`, `source`, `xargs`)
 spends what the outer line was given for the words it runs, so
 `echo $(cat secret.txt)` is one question, not two, and two such bodies on
 one line are two. A line a whole-line runtime takes is judged the same
 way: an answer it was given stands while a later question on the same
 line waits, so the retry asks only for what is still unanswered.
+
+Preflight cannot determine every command produced by dynamic expansion.
+Those commands still pass the execution gate, but an ask there can arrive
+after earlier commands have run. For example,
+`F=/data/secret; echo before > /data/marker; cat $F` can write the marker
+before asking about the expanded `cat`. A pending result does not roll
+back earlier work, so retrying such a line can repeat it.
 
 ## Dry runs
 

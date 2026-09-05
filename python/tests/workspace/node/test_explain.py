@@ -519,7 +519,12 @@ async def test_a_grant_does_not_outlive_a_line_that_fails_before_it_runs(
 
 
 @pytest.mark.asyncio
-async def test_a_grant_stays_with_a_background_job_until_it_ends():
+@pytest.mark.parametrize("line", [
+    "sleep 0.2 && cat /data/secret.txt &",
+    "eval 'sleep 0.2 && cat /data/secret.txt &'",
+    "eval \"eval 'sleep 0.2 && cat /data/secret.txt &'\"",
+])
+async def test_a_grant_stays_with_a_background_job_until_it_ends(line):
     # The line returns as soon as the job is launched, long before the
     # job's cat reaches its gate. The grant the host gave the line is
     # the job's to spend, so the line's end leaves it standing and the
@@ -528,8 +533,7 @@ async def test_a_grant_stays_with_a_background_job_until_it_ends():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute("sleep 0.2 && cat /data/secret.txt &",
-                               session_id="s")
+        ran = await ws.execute(line, session_id="s")
         assert ran.exit_code == 0
         assert len(asked) == 1
         assert len(ws.decisions.list("s")) == 1
@@ -539,6 +543,23 @@ async def test_a_grant_stays_with_a_background_job_until_it_ends():
         assert ws.decisions.list("s") == ()
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_out_of_band_grant_stays_with_a_nested_background_job(ws):
+    line = "eval 'sleep 0.2 && cat /data/secret.txt > /data/read.txt &'"
+    first = await ws.execute(line, session_id="s")
+    assert first.refusal is not None and first.refusal.kind == "pending"
+    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    ran = await ws.execute(line, session_id="s")
+    assert ran.exit_code == 0
+    assert len(ws.decisions.list("s")) == 1
+    elsewhere, = await ws.explain("cat /data/secret.txt", "s")
+    assert elsewhere.outcome is Outcome.ASK
+    waited = await ws.execute("wait", session_id="s")
+    assert waited.exit_code == 0
+    assert await ws.fs.read("/data/read.txt") == b"s\n"
+    assert ws.decisions.list("s") == ()
 
 
 @pytest.mark.asyncio

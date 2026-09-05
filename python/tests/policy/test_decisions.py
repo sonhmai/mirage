@@ -395,6 +395,36 @@ async def test_a_split_hands_a_jobs_claims_to_a_run_of_its_own():
 
 
 @pytest.mark.asyncio
+async def test_a_split_transfers_ancestor_claims_exclusively_to_the_job():
+    ledger = Decisions()
+    ask = Ask("sign-off", rule=RULE)
+    outer = HandOff()
+    for index in (0, 1):
+        waiting = await ledger.resolve(_ctx(), ask)
+        assert isinstance(waiting, Pending)
+        await ledger.answer(waiting.id, Outcome.ALLOW)
+        assert await ledger.resolve(_ctx(), ask, None, _at(outer, index),
+                                    True) is None
+    nested = HandOff(parent=outer)
+    assert await ledger.resolve(_ctx(), ask, None, _at(nested, 1),
+                                True) is None
+    inner = HandOff(parent=nested)
+    job = ledger.split("s", inner, Occurrence(None, "line", 1, 2))
+    assert [c.occurrence.start for c in outer.claimed] == [0]
+    assert nested.claimed == []
+    assert inner.claimed == []
+    assert [c.occurrence.start for c in job.claimed] == [1]
+    for handed in (inner, nested, outer):
+        await ledger.revoke("s", handed)
+    assert len(ledger.list("s")) == 1
+    assert isinstance(ledger.held(_ctx(), ask), Pending)
+    assert ledger.held(_ctx(), ask, _at(job, 1)) is None
+    assert await ledger.resolve(_ctx(), ask, None, _at(job, 1)) is None
+    await ledger.revoke("s", job)
+    assert ledger.list("s") == ()
+
+
+@pytest.mark.asyncio
 async def test_a_jobs_unspent_grant_is_spent_when_the_job_ends():
     ledger = Decisions()
     ask = Ask("sign-off", rule=RULE)

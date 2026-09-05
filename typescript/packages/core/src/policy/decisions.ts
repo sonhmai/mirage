@@ -400,9 +400,9 @@ export class Decisions {
    * background job, whose gates run after the line has returned and
    * which ends on its own clock.
    *
-   * Every claim standing inside the scope leaves the line's hand-off
-   * for the new one, so the line's end touches only what the line's
-   * own gates would have spent, whether it revokes or, held on a
+   * Every claim standing inside the scope leaves the line and its
+   * ancestors for the new hand-off, so the line's end touches only
+   * what its own gates would have spent, whether it revokes or, held on a
    * question still waiting, releases: the job's grants stay reserved
    * until its gates spend them or its own end revokes them. Held on
    * the line's hand-off, a release for a pending foreground gate let
@@ -416,12 +416,14 @@ export class Decisions {
    */
   split(sessionId: string, handed: HandOff, scope: Occurrence): HandOff {
     const job: HandOff = { claimed: [], parent: handed.parent, origin: handed.origin }
-    const kept: Claim[] = []
-    for (const claim of handed.claimed) {
-      if (encloses(scope, claim.occurrence)) job.claimed.push(claim)
-      else kept.push(claim)
+    for (const owner of lineage(handed)) {
+      const kept: Claim[] = []
+      for (const claim of owner.claimed) {
+        if (!encloses(scope, claim.occurrence)) kept.push(claim)
+        else if (!job.claimed.some((c) => c.decision === claim.decision)) job.claimed.push(claim)
+      }
+      owner.claimed.splice(0, owner.claimed.length, ...kept)
     }
-    handed.claimed.splice(0, handed.claimed.length, ...kept)
     if (job.claimed.length > 0) {
       const live = this.live.get(sessionId) ?? new Set<HandOff>()
       live.add(job)

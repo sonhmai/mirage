@@ -12,6 +12,7 @@ permissions:
       - python/**
       - typescript/**
       - .github/workflows/test_integ.yml
+      - .github/actions/setup-node-pnpm/action.yml
       - .github/actions/integ-battery-setup/action.yml
   pull_request:
     branches: [main]
@@ -50,11 +51,13 @@ jobs:
               - 'data/**'
               - 'python/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
             ts:
               - 'integ/**'
               - 'typescript/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
             database:
               - 'integ/resources/mongodb/**'
@@ -81,11 +84,13 @@ jobs:
               - 'python/mirage/resource/qdrant/**'
               - 'typescript/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
             data:
               - 'integ/**'
               - 'python/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
             observability:
               - 'integ/server/langfuse_compose.yml'
@@ -109,6 +114,7 @@ jobs:
               - 'typescript/packages/node/src/resource/langfuse/**'
               - 'typescript/packages/node/src/resource/jaeger/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
             fuse:
               - 'integ/fuse/**'
               - 'integ/check_json.py'
@@ -119,6 +125,7 @@ jobs:
               - 'typescript/packages/node/src/workspace/fuse.ts'
               - 'typescript/packages/node/src/workspace.ts'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
 
   typescript-build:
@@ -129,17 +136,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install TypeScript dependencies
         working-directory: typescript
@@ -269,17 +269,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: typescript
@@ -689,17 +682,10 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: typescript
@@ -799,17 +785,10 @@ jobs:
       # The notion fake is a Node server shared by both hosts, so this
       # otherwise python-only job needs node to start it. No package build is
       # required: the notion fake imports only node, prisma and the MCP sdk.
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: typescript
@@ -996,7 +975,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install libfuse (fusermount3 + libfuse2 for mfusepy, libfuse3 headers for fuse-native)
+      # fuse-native does not build against any of these. Its binding.gyp
+      # takes both its include dir and its library from the vendored
+      # fuse-shared-library-linux npm package, so what apt is for here is
+      # fusermount3 (to mount at all) and libfuse2 (for python's mfusepy).
+      - name: Install libfuse (fusermount3 to mount, libfuse2 for mfusepy)
         run: |
           sudo apt-get update
           sudo apt-get install -y fuse3 libfuse3-dev libfuse2t64 || \
@@ -1022,19 +1005,12 @@ jobs:
           ./python/.venv/bin/python integ/fuse/fuse.py 2>&1 \
             | ./python/.venv/bin/python integ/check_json.py integ/fuse/truth_fuse.json
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
-      - name: Install dependencies (builds @zkochan/fuse-native against libfuse3)
+      - name: Install dependencies
         working-directory: typescript
         run: pnpm install --frozen-lockfile=false
 
@@ -1278,17 +1254,10 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install TypeScript dependencies
         working-directory: typescript
@@ -1403,17 +1372,10 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: typescript
@@ -1504,17 +1466,10 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: typescript

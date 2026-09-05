@@ -469,7 +469,11 @@ describe('prejudge', () => {
     expect(asked).toHaveLength(2)
   })
 
-  it('leaves a grant with a background job until the job ends', async () => {
+  it.each([
+    'sleep 0.2 && cat /data/secret.txt &',
+    "eval 'sleep 0.2 && cat /data/secret.txt &'",
+    `eval "eval 'sleep 0.2 && cat /data/secret.txt &'"`,
+  ])('leaves a grant with a background job until the job ends: %s', async (line) => {
     // The line returns as soon as the job is launched, long before the
     // job's cat reaches its gate. The grant the host gave the line is the
     // job's to spend, so the line's end leaves it standing and the job's
@@ -477,13 +481,30 @@ describe('prejudge', () => {
     // again from inside the job.
     const asked: string[] = []
     const w = await inlineWs(answering(asked, Outcome.ALLOW))
-    const ran = await w.execute('sleep 0.2 && cat /data/secret.txt &', { sessionId: 's' })
+    const ran = await w.execute(line, { sessionId: 's' })
     expect(ran.exitCode).toBe(0)
     expect(asked).toHaveLength(1)
     expect(w.decisions.list('s')).toHaveLength(1)
     const waited = await w.execute('wait', { sessionId: 's' })
     expect(waited.exitCode).toBe(0)
     expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('keeps an out-of-band grant with a nested background job', async () => {
+    const w = await ws()
+    const line = "eval 'sleep 0.2 && cat /data/secret.txt > /data/read.txt &'"
+    const first = await w.execute(line, { sessionId: 's' })
+    expect(first.refusal?.kind).toBe('pending')
+    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    const ran = await w.execute(line, { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(w.decisions.list('s')).toHaveLength(1)
+    const elsewhere = await w.explain('cat /data/secret.txt', 's')
+    expect(elsewhere[0]?.outcome).toBe(Outcome.ASK)
+    const waited = await w.execute('wait', { sessionId: 's' })
+    expect(waited.exitCode).toBe(0)
+    expect(await w.fs.readFileText('/data/read.txt')).toBe('s\n')
     expect(w.decisions.list('s')).toEqual([])
   })
 

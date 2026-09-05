@@ -406,6 +406,32 @@ describe('decisions', () => {
     expect(ledger.list('s')).toHaveLength(1)
   })
 
+  it('transfers ancestor claims exclusively to the job', async () => {
+    const ledger = new Decisions()
+    const outer = fresh()
+    for (const index of [0, 1]) {
+      const waiting = await ledger.resolve(ctx(), ASK)
+      if (waiting?.kind !== 'pending') throw new Error('unreachable')
+      await ledger.answer(waiting.id, Outcome.ALLOW)
+      expect(await ledger.resolve(ctx(), ASK, undefined, at(outer, index), true)).toBeNull()
+    }
+    const nested = fresh(outer)
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(nested, 1), true)).toBeNull()
+    const inner = fresh(nested)
+    const job = ledger.split('s', inner, { parent: null, source: 'line', start: 1, end: 2 })
+    expect(outer.claimed.map((c) => c.occurrence.start)).toEqual([0])
+    expect(nested.claimed).toEqual([])
+    expect(inner.claimed).toEqual([])
+    expect(job.claimed.map((c) => c.occurrence.start)).toEqual([1])
+    for (const handed of [inner, nested, outer]) await ledger.revoke('s', handed)
+    expect(ledger.list('s')).toHaveLength(1)
+    expect((await ledger.held(ctx(), ASK))?.kind).toBe('pending')
+    expect(await ledger.held(ctx(), ASK, at(job, 1))).toBeNull()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(job, 1))).toBeNull()
+    await ledger.revoke('s', job)
+    expect(ledger.list('s')).toEqual([])
+  })
+
   it("spends a job's unspent grant when the job ends", async () => {
     const ledger = new Decisions()
     const waiting = await ledger.resolve(ctx(), ASK)

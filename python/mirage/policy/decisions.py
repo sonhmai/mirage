@@ -380,9 +380,9 @@ class Decisions:
         own: a background job, whose gates run after the line has
         returned and which ends on its own clock.
 
-        Every claim standing inside the scope leaves the line's hand-off
-        for the new one, so the line's end touches only what the line's
-        own gates would have spent, whether it revokes or, held on a
+        Every claim standing inside the scope leaves the line and its
+        ancestors for the new hand-off, so the line's end touches only
+        what its own gates would have spent, whether it revokes or, held on a
         question still waiting, releases: the job's grants stay reserved
         until its gates spend them or its own end revokes them. Held on
         the line's hand-off, a release for a pending foreground gate let
@@ -398,11 +398,15 @@ class Decisions:
             The job's hand-off, live while it holds a claim.
         """
         job = HandOff(parent=handed.parent, origin=handed.origin)
-        kept: list[Claim] = []
-        for claim in handed.claimed:
-            (job.claimed
-             if encloses(scope, claim.occurrence) else kept).append(claim)
-        handed.claimed[:] = kept
+        for owner in lineage(handed):
+            kept: list[Claim] = []
+            for claim in owner.claimed:
+                if not encloses(scope, claim.occurrence):
+                    kept.append(claim)
+                elif not any(c.decision is claim.decision
+                             for c in job.claimed):
+                    job.claimed.append(claim)
+            owner.claimed[:] = kept
         if job.claimed:
             self._live.setdefault(session_id, []).append(job)
         return job

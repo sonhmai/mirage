@@ -333,6 +333,9 @@ class Session:
     # parent gets its own state back (`snapshot` / `restore`).
     _random_state: int | None = field(default=None, repr=False)
     _random_seed: str | None = field(default=None, repr=False)
+    _random_last: int = field(default=0, repr=False)
+    # Scoped by the executing node so diagnostics follow its redirections.
+    _diagnostics: list[str | bytes] = field(default_factory=list, repr=False)
     # Alias bookkeeping. bash expands an alias when it *parses* the line
     # that uses it, so a definition takes effect from the next line read
     # (`alias x=..; x` on one line finds no `x`; the same two statements
@@ -632,6 +635,7 @@ class Session:
             self._random_seed = (var.value if var is not None
                                  and isinstance(var.value, str) else None)
             self._random_state = None
+            self._random_last = 0
         return saved
 
     def restore(self, state: dict[str, Any]) -> None:

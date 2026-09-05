@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.types import Producer, Refusal
+from mirage.types import PathSpec, Producer, Refusal
 
 ByteSource = bytes | AsyncIterator[bytes]
 
@@ -101,6 +101,9 @@ class IOResult:
     before treating the status as final.
 
     Args:
+        matched_paths (list[PathSpec] | None): Structured selection before
+            display rendering, for commands whose matches feed later actions.
+            None means the command supplied no structured selection.
         stdout (ByteSource | None): Standard output stream.
         stderr (ByteSource | None): Standard error stream.
         exit_code (int): Process exit code.
@@ -139,8 +142,10 @@ class IOResult:
                  cache: list[str] | None = None,
                  producer: Producer | None = None,
                  mutated: bool | None = None,
-                 refusal: Refusal | None = None) -> None:
+                 refusal: Refusal | None = None,
+                 matched_paths: list[PathSpec] | None = None) -> None:
         self.stdout = stdout
+        self.matched_paths = matched_paths
         self.stderr = stderr
         self._exit_code = exit_code
         self.reads: dict[str, ByteSource] = reads if reads is not None else {}
@@ -189,6 +194,7 @@ class IOResult:
         # (exit_on_empty firing at drain time) is still visible.
         result = IOResult(
             stdout=other.stdout,
+            matched_paths=other.matched_paths,
             stderr=merged_stderr,
             reads={
                 **self.reads,

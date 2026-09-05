@@ -523,11 +523,24 @@ export async function findGeneric(
   }
   // Start points print in operand order (GNU); each root's rows were
   // sorted above, and a global sort here would interleave them.
+  const matchedPaths = printfPairs.map(([row, root]) => {
+    const virtual = unrespellRaw(row, root.virtual, root.rawPath || root.virtual)
+    return new PathSpec({
+      virtual,
+      directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
+      resourcePath: mountKey(virtual, mountPrefixOf(root.virtual, root.resourcePath)),
+      rawPath: row,
+      resolved: true,
+    })
+  })
   const out: ByteSource = ENC.encode(matches.length ? matches.join('\n') + '\n' : '')
   if (missing.length > 0) {
-    return [out, new IOResult({ stderr: ENC.encode(missing.join('\n') + '\n'), exitCode: 1 })]
+    return [
+      out,
+      new IOResult({ matchedPaths, stderr: ENC.encode(missing.join('\n') + '\n'), exitCode: 1 }),
+    ]
   }
-  return [out, new IOResult()]
+  return [out, new IOResult({ matchedPaths })]
 }
 
 async function printfStat(

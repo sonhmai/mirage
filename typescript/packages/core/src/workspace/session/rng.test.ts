@@ -18,6 +18,8 @@ import { RANDOM, RANDOM_MAX } from '../../shell/constants.ts'
 import { makeVar } from '../../shell/variable.ts'
 import { nextRandom, seedFrom } from './rng.ts'
 import { Session } from './session.ts'
+import { ArithError } from '../../shell/errors.ts'
+import { sessionView } from './state.ts'
 
 function stored(s: Session): string | undefined {
   const v = s.vars[RANDOM]?.value
@@ -37,17 +39,19 @@ describe('RANDOM generator', () => {
     expect(seedFrom('010', s)).toBe(8)
     expect(seedFrom('x', s)).toBe(42)
     expect(seedFrom('x*2', s)).toBe(84)
-    expect(seedFrom('1.5', s)).toBeNull()
-    expect(seedFrom('1+', s)).toBeNull()
-    expect(seedFrom('08', s)).toBeNull()
+    expect(() => seedFrom('1.5', s)).toThrow(ArithError)
+    expect(() => seedFrom('1+', s)).toThrow(ArithError)
+    expect(() => seedFrom('08', s)).toThrow(ArithError)
   })
 
-  it('leaves the generator alone on a word that does not evaluate', () => {
+  it('leaves the generator alone on a word that does not evaluate', async () => {
     // bash 5.2.37: `RANDOM=0; echo $RANDOM; RANDOM=1.5; echo $RANDOM`
     // prints the error for 1.5 and then 24386, the second draw of seed 0.
     const s = new Session({ sessionId: 's' })
     expect(nextRandom(s, '0')).toBe(20814)
-    expect(nextRandom(s, '1.5')).toBe(24386)
+    await sessionView(s, null).set(RANDOM, '1.5')
+    expect(s.diagnostics).toEqual(['1.5: syntax error: invalid character "."'])
+    expect(nextRandom(s, stored(s))).toBe(24386)
     expect(nextRandom(s, stored(s))).toBe(149)
   })
 
@@ -142,5 +146,32 @@ describe('child RANDOM isolation', () => {
         await ws.close()
       }
     })
+  }
+})
+
+it.each([
+  ['RANDOM=1.5; echo ok:$?', 'ok:0\n', 'bash: 1.5:'],
+  ['RANDOM=0; : $RANDOM; RANDOM=1.5; echo $RANDOM', '24386\n', 'bash: 1.5:'],
+  ['export RANDOM=1.5; echo ok:$?', 'ok:0\n', 'bash: export: 1.5:'],
+  ['declare RANDOM=1.5; echo ok:$?', 'ok:0\n', 'bash: declare: 1.5:'],
+  ['RANDOM=1.5 x=kept; echo $x', 'kept\n', 'bash: 1.5:'],
+  ['{ RANDOM=1.5; echo ok; } 2>/dev/null', 'ok\n', ''],
+  ['RANDOM=42; x=$(RANDOM=1.5; echo ok); echo $x $RANDOM', 'ok 17772\n', 'bash: 1.5:'],
+  ['unset RANDOM; RANDOM=1.5; echo $RANDOM', '1.5\n', ''],
+  ['x=42; RANDOM=x; x=0; echo $RANDOM', '17772\n', ''],
+  ['RANDOM=42; RANDOM=$RANDOM; echo $RANDOM', '9401\n', ''],
+])('reports seed assignment diagnostics: %s', async (command, stdout, prefix) => {
+  const { ws } = await makeIntegrationWS()
+  try {
+    const io = await ws.execute(command)
+    expect(io.exitCode).toBe(0)
+    expect(io.stdoutText).toBe(stdout)
+    if (prefix) {
+      expect(io.stderrText.startsWith(prefix)).toBe(true)
+      expect(io.stderrText).toContain('syntax error')
+      expect(io.stderrText.split('\n')).toHaveLength(2)
+    } else expect(io.stderrText).toBe('')
+  } finally {
+    await ws.close()
   }
 })

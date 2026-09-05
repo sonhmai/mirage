@@ -25,28 +25,10 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import ChildMounts, NamespaceView, StatPath
 from mirage.policy import pre_ops_gate
 from mirage.types import PathSpec
-from mirage.utils.path import resolve_path
 from mirage.workspace.lookup.lookup import lookup
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.types import ExecuteLine
-
-
-def _row_scope(path: str, cwd: str) -> PathSpec:
-    """The scope a printed row names: rows are respelled as the operand
-    was typed, so a relative one resolves against the cwd.
-
-    Args:
-        path (str): the row as find printed it.
-        cwd (str): the session's working directory.
-    """
-    virtual = resolve_path(path, cwd)
-    return PathSpec(
-        virtual=virtual,
-        directory=virtual[:virtual.rfind("/") + 1] or "/",
-        resource_path="",
-        resolved=True,
-    )
 
 
 def exec_line(action: ExecAction, paths: list[str]) -> str:
@@ -116,17 +98,17 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
     return io.exit_code == 0
 
 
-async def _delete(path: str, registry: MountRegistry, cwd: str,
+async def _delete(ps: PathSpec, registry: MountRegistry, cwd: str,
                   errors: list[bytes]) -> bool:
     """Delete one accepted row; returns whether it succeeded.
 
     Args:
-        path (str): the row as find printed it.
+        ps (PathSpec): the selected row, with its display spelling.
         registry (MountRegistry): used to route the removal.
         cwd (str): the session's working directory.
         errors (list[bytes]): where a failure's line is appended.
     """
-    ps = _row_scope(path, cwd)
+    path = ps.raw_path or ps.virtual
     mount = registry.try_mount_for(ps.virtual)
     if mount is None:
         errors.append(f"find: cannot delete '{path}': no mount\n".encode())
@@ -169,10 +151,10 @@ async def _delete(path: str, registry: MountRegistry, cwd: str,
     return True
 
 
-async def _ls_row(path: str, registry: MountRegistry, cwd: str,
+async def _ls_row(ps: PathSpec, registry: MountRegistry, cwd: str,
                   child_mounts: ChildMounts | None, stat_path: StatPath | None,
                   errors: list[bytes]) -> bytes | None:
-    ps = _row_scope(path, cwd)
+    path = ps.raw_path or ps.virtual
     mount = registry.try_mount_for(ps.virtual)
     if mount is None:
         errors.append(f"find: cannot ls '{path}': no mount\n".encode())
@@ -216,24 +198,24 @@ def depth_first_key(path: str) -> tuple[tuple[str, int], ...]:
     return (*((part, 0) for part in parts[:-1]), (parts[-1], 1))
 
 
-def _structural(path: str, registry: MountRegistry, cwd: str) -> bool:
+def _structural(path: PathSpec, registry: MountRegistry) -> bool:
     """Whether a row is a mount point or a namespace-only ancestor of
     one, which are not unlinkable entries. Ancestors use the raw mount
     table like ``is_mount_root``: an ungranted mount still pins its
     ancestors in the namespace.
 
     Args:
-        path (str): the row as find printed it.
+        path (PathSpec): the selected row.
         registry (MountRegistry): the mount table.
-        cwd (str): the session's working directory.
     """
-    virtual = resolve_path(path, cwd)
+    virtual = path.virtual
     return (registry.is_mount_root(virtual)
             or bool(registry.descendant_mounts(virtual)))
 
 
 async def _apply_find_actions(
     stdout: ByteSource | None,
+    matched_paths: list[PathSpec] | None,
     texts: list[str],
     registry: MountRegistry,
     cwd: str,
@@ -266,7 +248,8 @@ async def _apply_find_actions(
     in; ``-depth`` alone reorders the implicit print the same way.
 
     Args:
-        stdout (ByteSource | None): newline-joined match list from find.
+        stdout (ByteSource | None): display output from find.
+        matched_paths (list[PathSpec] | None): matches before rendering.
         texts (list[str]): the expression tokens, already validated.
         registry (MountRegistry): used to route per-match dispatch.
         cwd (str): cwd forwarded to per-match sub-dispatch.
@@ -288,10 +271,11 @@ async def _apply_find_actions(
         return stdout, b"", 0
     if expr.execs and execute_fn is None:
         return None, b"find: -exec: no shell to run the command\n", 1
-    text = (await materialize(stdout)).decode("utf-8", errors="replace")
-    matches = [p for p in text.split("\n") if p]
+    if matched_paths is None:
+        return None, b"find: actions require structured matches\n", 1
+    matches = list(matched_paths)
     if reorders:
-        matches.sort(key=depth_first_key)
+        matches.sort(key=lambda p: depth_first_key(p.raw_path or p.virtual))
     # An expression with no action of its own prints, which is the one
     # implicit action -depth reorders.
     actions = expr.actions or [RowAction("print")]
@@ -299,7 +283,8 @@ async def _apply_find_actions(
     out: list[bytes] = []
     batches: dict[int, list[str]] = {}
     exit_code = 0
-    for path in matches:
+    for match in matches:
+        path = match.raw_path or match.virtual
         for position, action in enumerate(actions):
             if isinstance(action, ExecAction):
                 if action.batch:
@@ -311,7 +296,7 @@ async def _apply_find_actions(
                     break
             elif action.kind == "ls":
                 before = len(errors)
-                row = await _ls_row(path, registry, cwd, child_mounts,
+                row = await _ls_row(match, registry, cwd, child_mounts,
                                     stat_path, errors)
                 if row is not None:
                     out.append(row)
@@ -320,9 +305,9 @@ async def _apply_find_actions(
             elif action.kind == "delete":
                 # A structural row is skipped, not refused, the way Unix
                 # leaves a mount point in place.
-                if _structural(path, registry, cwd):
+                if _structural(match, registry):
                     continue
-                if not await _delete(path, registry, cwd, errors):
+                if not await _delete(match, registry, cwd, errors):
                     exit_code = 1
                     break
             else:

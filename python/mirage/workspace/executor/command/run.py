@@ -462,6 +462,7 @@ async def run_on_mount(
     if cmd_name == "find":
         stdout, action_err, action_exit = await _apply_find_actions(
             stdout,
+            io.matched_paths,
             texts,
             registry,
             session.cwd,

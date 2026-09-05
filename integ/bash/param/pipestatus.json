@@ -577,6 +577,108 @@
         "stdout": "1 0\n1 1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "random_invalid_seed_diagnostic_at_assignment",
+      "seq": 981506,
+      "command": "RANDOM=42; { RANDOM=1.5; echo status:$?; } 2>/data/reviewrng.err; grep -q \"syntax error\" /data/reviewrng.err; echo diagnostic:$?; echo $RANDOM; rm /data/reviewrng.err",
+      "expect": {
+        "exit": 0,
+        "stdout": "status:0\ndiagnostic:0\n17772\n",
+        "stderr": ""
+      },
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "random_seed_expression_is_evaluated_at_assignment",
+      "seq": 981507,
+      "command": "x=42; RANDOM=x; x=0; echo $RANDOM; RANDOM=42; RANDOM=$RANDOM; echo $RANDOM",
+      "expect": {
+        "exit": 0,
+        "stdout": "17772\n9401\n",
+        "stderr": ""
+      },
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "random_invalid_seed_diagnostic_in_substitution",
+      "seq": 981508,
+      "command": "RANDOM=42; { x=$(RANDOM=1.5; echo ok); echo $x $RANDOM; } 2>/data/reviewrng.err; grep -q \"syntax error\" /data/reviewrng.err; echo diagnostic:$?; rm /data/reviewrng.err",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok 17772\ndiagnostic:0\n",
+        "stderr": ""
+      },
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
     }
   ]
 }

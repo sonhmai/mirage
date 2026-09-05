@@ -255,8 +255,8 @@ def _synthesize_find_mount_entries(
     descendants: list[MountEntry],
     texts: list[str],
     raw: str,
-) -> str:
-    """Return synthetic find lines for descendant mount roots.
+) -> list[PathSpec]:
+    """Return synthetic find paths for descendant mount roots.
 
     `find /` and friends should list mount prefixes as directory
     entries even though no per-mount find emits its own root. The
@@ -278,14 +278,14 @@ def _synthesize_find_mount_entries(
     try:
         expr = parse_find_expression(list(texts))
     except FindParseError:
-        return ""
+        return []
     tree = expr.tree
     max_depth = expr.maxdepth
     min_depth = expr.mindepth if expr.mindepth is not None else 0
     parent_depth = len(_path_segments(target_path))
     parent_base = target_path.rstrip("/")
     seen: set[str] = set()
-    out: list[str] = []
+    out: list[PathSpec] = []
     for m in descendants:
         prefix_no_slash = m.prefix.rstrip("/")
         ancestors: list[str] = []
@@ -304,8 +304,13 @@ def _synthesize_find_mount_entries(
             entry = FindEntry(key=candidate, name=base, kind="d", depth=depth)
             if not keep(entry, tree, min_depth):
                 continue
-            out.append(respell_one(candidate, target_path, raw))
-    return "\n".join(out)
+            out.append(
+                PathSpec(virtual=candidate,
+                         directory=candidate,
+                         resource_path="",
+                         resolved=True,
+                         raw_path=respell_one(candidate, target_path, raw)))
+    return out
 
 
 def _drop_shadowed_ls_groups(text: str,
@@ -387,27 +392,6 @@ async def _filter_under_prefixes(
     return ("\n".join(out_lines) + "\n").encode("utf-8") if out_lines else b""
 
 
-async def _drop_mount_root_line(stdout: ByteSource, mount_root: str) -> bytes:
-    """Drop a descendant find's own mount-root line.
-
-    A per-mount find now emits its start directory, so a descendant
-    mount's find yields its mount-root path. The mount-point entry is
-    instead synthesized centrally (with the mount's display name and the
-    full predicate tree applied), so the raw root line is dropped here to
-    avoid a duplicate that skips the name filter.
-
-    Args:
-        stdout (ByteSource): descendant find output.
-        mount_root (str): the descendant mount root path.
-    """
-    data = await materialize(stdout)
-    text = data.decode("utf-8", errors="replace")
-    out_lines = [
-        line for line in text.split("\n") if line != "" and line != mount_root
-    ]
-    return ("\n".join(out_lines) + "\n").encode("utf-8") if out_lines else b""
-
-
 async def _fan_out_traversal(
     cmd_name: str,
     paths: list[PathSpec],
@@ -482,6 +466,8 @@ async def _fan_out_traversal(
         flag_kwargs.pop("max_depth", None)
 
     all_stdout: list[bytes] = []
+    find_matches: list[PathSpec] = []
+    find_matches_complete = True
     merged_io = IOResult()
     final_exit = 0
     success_seen = False
@@ -530,18 +516,29 @@ async def _fan_out_traversal(
             # nothing to the aggregate walk instead of failing it (du
             # across a tree holding a view mount without a du op).
             continue
-        if mount is primary_mount and descendant_prefixes and stdout:
+        if cmd_name == "find" and io.matched_paths is not None:
+            rows = io.matched_paths
+            if mount is primary_mount:
+                rows = [
+                    p for p in rows if not any(
+                        p.virtual == pre or p.virtual.startswith(pre + "/")
+                        for pre in descendant_prefixes)
+                ]
+            else:
+                rows = [
+                    p for p in rows if p.virtual != mount.prefix.rstrip("/")
+                ]
+            find_matches.extend(rows)
+            stdout = None
+        elif mount is primary_mount and descendant_prefixes and stdout:
             stdout = await _filter_under_prefixes(stdout, descendant_prefixes,
                                                   cmd_name)
-        elif mount is not primary_mount and cmd_name == "find" and stdout:
-            # The child's own root line arrives respelled with the
-            # operand's typed base, so drop that spelling, not the
-            # absolute prefix.
-            stdout = await _drop_mount_root_line(stdout, sub_paths[0].raw_path)
 
         if stdout is not None:
             data = await materialize(stdout)
             if data:
+                if cmd_name == "find":
+                    find_matches_complete = False
                 all_stdout.append(data)
         if io.exit_code == 0:
             success_seen = True
@@ -552,8 +549,11 @@ async def _fan_out_traversal(
     if cmd_name == "find":
         synthetic = _synthesize_find_mount_entries(target_path, descendants,
                                                    texts, paths[0].raw_path)
-        if synthetic:
-            all_stdout.append(synthetic.encode("utf-8"))
+        find_matches.extend(synthetic)
+        if not find_matches_complete and find_matches:
+            all_stdout.append(
+                ("\n".join(p.raw_path or p.virtual
+                           for p in find_matches) + "\n").encode())
 
     combined: ByteSource | None
     if du_merge and all_stdout:
@@ -568,25 +568,12 @@ async def _fan_out_traversal(
                                    separate_dirs=du_flags.separate_dirs,
                                    mount_roots=await
                                    _mount_dirs(descendants, stat_path))
-    elif all_stdout and cmd_name == "find" and len(paths) == 1:
-        # GNU lists a directory before its contents, and the per-mount
-        # blocks land here as separate chunks, so plain concatenation
-        # printed a mount root after its own descendants. Every find
-        # line is a bare path at this stage (actions render later), and
-        # a path always sorts before its extensions, so one path sort
-        # restores GNU's invariant and matches the per-mount emit order.
-        # A single-operand walk never visits a path twice, so the set
-        # collapses a synthesized ancestor row against a primary backend
-        # that happens to hold a real directory at the same path.
-        # Multiple operands keep the concatenation: GNU walks operands
-        # in command-line order, which a global sort would not honor.
-        lines = sorted({
-            line
-            for chunk in all_stdout
-            for line in chunk.decode("utf-8", errors="replace").split("\n")
-            if line
-        })
-        combined = ("\n".join(lines) + "\n").encode("utf-8")
+    elif cmd_name == "find" and find_matches and find_matches_complete:
+        if len(paths) == 1:
+            unique = {p.virtual: p for p in find_matches}
+            find_matches = sorted(unique.values(), key=lambda p: p.raw_path)
+        combined = ("\n".join(p.raw_path or p.virtual
+                              for p in find_matches) + "\n").encode("utf-8")
     elif all_stdout:
         # `ls -R` separates directory groups with a blank line, and a
         # per-mount block is one more group; every other format is a
@@ -605,6 +592,7 @@ async def _fan_out_traversal(
     if cmd_name == "find":
         combined, action_err, action_exit = await _apply_find_actions(
             combined,
+            find_matches if find_matches_complete else None,
             texts,
             registry,
             cwd,

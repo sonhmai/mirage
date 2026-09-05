@@ -16,10 +16,11 @@ import pytest
 
 from mirage import MountMode, RAMResource, Workspace
 from mirage.shell.constants import RANDOM, RANDOM_MAX
+from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellVar
 from mirage.workspace.session import Session
 from mirage.workspace.session.rng import next_random, seed_from
-from mirage.workspace.session.state import seed_var
+from mirage.workspace.session.state import seed_var, set_var
 
 
 def test_seed_from_evaluates_the_word_as_arithmetic():
@@ -34,17 +35,23 @@ def test_seed_from_evaluates_the_word_as_arithmetic():
     assert seed_from("010", s) == 8
     assert seed_from("x", s) == 42
     assert seed_from("x*2", s) == 84
-    assert seed_from("1.5", s) is None
-    assert seed_from("1+", s) is None
-    assert seed_from("08", s) is None
+    with pytest.raises(ArithError):
+        seed_from("1.5", s)
+    with pytest.raises(ArithError):
+        seed_from("1+", s)
+    with pytest.raises(ArithError):
+        seed_from("08", s)
 
 
-def test_an_unevaluable_word_leaves_the_generator_alone():
+@pytest.mark.asyncio
+async def test_an_unevaluable_word_leaves_the_generator_alone():
     # bash 5.2.37: `RANDOM=0; echo $RANDOM; RANDOM=1.5; echo $RANDOM`
     # prints the error for 1.5 and then 24386, the second draw of seed 0.
     s = Session(session_id="s")
     assert next_random(s, "0") == 20814
-    assert next_random(s, "1.5") == 24386
+    await set_var(s, None, RANDOM, "1.5")
+    assert s._diagnostics == ['1.5: syntax error: invalid character "."']
+    assert next_random(s, s.vars[RANDOM].value) == 24386
     assert next_random(s, s.vars[RANDOM].value) == 149
 
 
@@ -171,3 +178,31 @@ async def test_child_random_reads_preserve_the_parent_sequence(
         assert await io.stderr_str() == ''
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command,stdout,prefix", [
+    ('RANDOM=1.5; echo ok:$?', 'ok:0\n', 'bash: 1.5:'),
+    ('RANDOM=0; : $RANDOM; RANDOM=1.5; echo $RANDOM', '24386\n', 'bash: 1.5:'),
+    ('export RANDOM=1.5; echo ok:$?', 'ok:0\n', 'bash: export: 1.5:'),
+    ('declare RANDOM=1.5; echo ok:$?', 'ok:0\n', 'bash: declare: 1.5:'),
+    ('RANDOM=1.5 x=kept; echo $x', 'kept\n', 'bash: 1.5:'),
+    ('{ RANDOM=1.5; echo ok; } 2>/dev/null', 'ok\n', ''),
+    ('RANDOM=42; x=$(RANDOM=1.5; echo ok); echo $x $RANDOM', 'ok 17772\n',
+     'bash: 1.5:'),
+    ('unset RANDOM; RANDOM=1.5; echo $RANDOM', '1.5\n', ''),
+    ('x=42; RANDOM=x; x=0; echo $RANDOM', '17772\n', ''),
+    ('RANDOM=42; RANDOM=$RANDOM; echo $RANDOM', '9401\n', ''),
+])
+async def test_random_seed_diagnostics(command, stdout, prefix):
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    io = await ws.execute(command)
+    assert io.exit_code == 0
+    assert await io.stdout_str() == stdout
+    err = await io.stderr_str()
+    if prefix:
+        assert err.startswith(prefix)
+        assert 'syntax error' in err
+        assert err.count('\n') == 1
+    else:
+        assert err == ''

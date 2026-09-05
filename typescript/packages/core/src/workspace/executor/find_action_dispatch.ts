@@ -12,14 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
-import { resolvePath } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { type ByteSource, materialize } from '../../io/types.ts'
 import { getCurrentSession, runWithSuspendedOpPolicies } from '../../context/session_context.ts'
 import { preOpsGate } from '../../policy/policies.ts'
-import { PathSpec } from '../../types.ts'
+import type { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
@@ -44,19 +42,6 @@ export interface FindActionDoors {
 }
 
 const enc = new TextEncoder()
-
-/** The scope a printed row names: rows are respelled as the operand was
- * typed, so a relative one resolves against the cwd. */
-function rowScope(path: string, cwd: string): PathSpec {
-  const virtual = resolvePath(path, cwd)
-  const slash = virtual.lastIndexOf('/')
-  return new PathSpec({
-    resourcePath: stripSlash(virtual),
-    virtual,
-    directory: slash >= 0 ? virtual.slice(0, slash + 1) : '/',
-    resolved: true,
-  })
-}
 
 /**
  * The shell line one `-exec` run becomes. GNU execs the words directly, so
@@ -112,12 +97,12 @@ async function runExec(
 
 /** Delete one accepted row; returns whether it succeeded. */
 async function deleteRow(
-  path: string,
+  ps: PathSpec,
   registry: MountRegistry,
   cwd: string,
   errors: Uint8Array[],
 ): Promise<boolean> {
-  const ps = rowScope(path, cwd)
+  const path = ps.rawPath || ps.virtual
   const mount = registry.tryMountFor(ps.virtual)
   if (mount === null) {
     errors.push(enc.encode(`find: cannot delete '${path}': no mount\n`))
@@ -161,14 +146,14 @@ async function deleteRow(
 }
 
 async function lsRow(
-  path: string,
+  ps: PathSpec,
   registry: MountRegistry,
   cwd: string,
   childMounts: ChildMounts | null,
   statPath: StatPath | null,
   errors: Uint8Array[],
 ): Promise<Uint8Array | null> {
-  const ps = rowScope(path, cwd)
+  const path = ps.rawPath || ps.virtual
   const mount = registry.tryMountFor(ps.virtual)
   if (mount === null) {
     errors.push(enc.encode(`find: cannot ls '${path}': no mount\n`))
@@ -221,8 +206,8 @@ export function compareDepthFirst(a: string, b: string): number {
  * which are not unlinkable entries. Ancestors use the raw mount table
  * like isMountRoot: an ungranted mount still pins its ancestors in the
  * namespace. */
-function structural(path: string, registry: MountRegistry, cwd: string): boolean {
-  const virtual = resolvePath(path, cwd)
+function structural(path: PathSpec, registry: MountRegistry): boolean {
+  const virtual = path.virtual
   return registry.isMountRoot(virtual) || registry.descendantMounts(virtual).length > 0
 }
 
@@ -256,6 +241,7 @@ function hasActions(expr: FindExpr): boolean {
  */
 export async function applyFindActions(
   stdout: ByteSource | null,
+  matchedPaths: readonly PathSpec[] | null,
   texts: readonly string[],
   registry: MountRegistry,
   cwd: string,
@@ -272,9 +258,11 @@ export async function applyFindActions(
   const sessionId = doors.sessionId ?? ''
   const childMounts = doors.childMounts ?? null
   const statPath = doors.statPath ?? null
-  const text = new TextDecoder().decode(await materialize(stdout))
-  const matches = text.split('\n').filter((p) => p !== '')
-  if (reorders) matches.sort(compareDepthFirst)
+  if (matchedPaths === null)
+    return [null, enc.encode('find: actions require structured matches\n'), 1]
+  const matches = [...matchedPaths]
+  if (reorders)
+    matches.sort((a, b) => compareDepthFirst(a.rawPath || a.virtual, b.rawPath || b.virtual))
   // An expression with no action of its own prints, which is the one
   // implicit action -depth reorders.
   const actions: FindAction[] = expr.actions.length > 0 ? expr.actions : [{ kind: 'print' }]
@@ -282,7 +270,8 @@ export async function applyFindActions(
   const out: Uint8Array[] = []
   const batches = new Map<number, string[]>()
   let exitCode = 0
-  for (const path of matches) {
+  for (const match of matches) {
+    const path = match.rawPath || match.virtual
     for (const [position, action] of actions.entries()) {
       if (action.kind === 'exec') {
         if (action.batch) {
@@ -295,14 +284,14 @@ export async function applyFindActions(
         if (!(await runExec(executeFn, sessionId, registry, action, [path], out, errors))) break
       } else if (action.kind === 'ls') {
         const before = errors.length
-        const row = await lsRow(path, registry, cwd, childMounts, statPath, errors)
+        const row = await lsRow(match, registry, cwd, childMounts, statPath, errors)
         if (row !== null) out.push(row)
         else if (errors.length > before) exitCode = 1
       } else if (action.kind === 'delete') {
         // A structural row is skipped, not refused, the way Unix leaves
         // a mount point in place.
-        if (structural(path, registry, cwd)) continue
-        if (!(await deleteRow(path, registry, cwd, errors))) {
+        if (structural(match, registry)) continue
+        if (!(await deleteRow(match, registry, cwd, errors))) {
           exitCode = 1
           break
         }

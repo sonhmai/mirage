@@ -422,3 +422,57 @@ async def test_find_refuses_a_test_after_an_action_before_side_effects(action):
         assert code == 0
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("action",
+                         ["-exec rm {} \\;", "-exec rm {} +", "-delete"])
+async def test_actions_preserve_newline_paths_and_unrelated_files(
+        nested, action):
+    mounts = {"/": RAMResource()}
+    if nested:
+        mounts["/d/nested\nmount"] = RAMResource()
+    ws = Workspace(mounts, mode=MountMode.WRITE)
+    root = "d/nested\nmount" if nested else "d"
+    await ws.execute(f'mkdir -p "{root}"; touch "{root}/a\nb" b')
+    io = await ws.execute(f"find d -type f {action}")
+    assert io.exit_code == 0
+    assert await io.stderr_str() == ""
+    io = await ws.execute(f'test -f b && test ! -e "{root}/a\nb"')
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_print0_preserves_newlines_through_mount_fanout():
+    ws = Workspace({
+        "/": RAMResource(),
+        "/d/nested\nmount": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    await ws.execute('touch "/d/nested\nmount/a\nb"')
+    io = await ws.execute("find /d -print0")
+    assert await io.materialize_stdout(
+    ) == b"/d\0/d/nested\nmount\0/d/nested\nmount/a\nb\0"
+    assert await io.stderr_str() == ""
+
+
+@pytest.mark.asyncio
+async def test_delete_under_or_is_refused_before_any_file_is_removed():
+    ws = _ws()
+    await ws.execute('mkdir d; touch d/keep d/remove')
+    io = await ws.execute('find d -name keep -o -delete')
+    assert io.exit_code == 1
+    assert "supported only in a top-level" in await io.stderr_str()
+    io = await ws.execute('test -f d/keep && test -f d/remove')
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_ls_action_receives_the_whole_newline_path():
+    ws = _ws()
+    await ws.execute('mkdir d; touch "d/a\nb"')
+    io = await ws.execute('find d -type f -ls')
+    assert io.exit_code == 0
+    assert await io.stderr_str() == ''
+    assert 'a\nb' in await io.stdout_str()

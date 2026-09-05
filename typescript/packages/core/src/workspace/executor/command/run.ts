@@ -328,6 +328,7 @@ export async function runOnMount(
     if (cmdName === 'find') {
       const [newStdout, actionErr, actionExit] = await applyFindActions(
         stdout,
+        io.matchedPaths,
         texts,
         registry,
         session.cwd,

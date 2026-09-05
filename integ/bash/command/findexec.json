@@ -743,6 +743,210 @@
         "stderr": "find: 'loop1': Too many levels of symbolic links\n"
       },
       "note": "Rows go to /dev/null: on a backend whose native find ignores the mtime window every row prints, so only the exit codes and the loop refusal are backend-independent here; the mtime comparison itself is pinned on ram in test_find_refs.py / find_refs.test.ts."
+    },
+    {
+      "id": "find_actions_keep_newline_boundaries_0",
+      "seq": 981500,
+      "command": "mkdir -p /data/reviewpaths/d; cd /data/reviewpaths; touch \"d/a\nb\" b; find d -type f -exec rm {} \\;; echo action:$?; test -f b && test ! -e \"d/a\nb\"; echo paths:$?; cd /; rm -r /data/reviewpaths",
+      "expect": {
+        "exit": 0,
+        "stdout": "action:0\npaths:0\n",
+        "stderr": ""
+      },
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "find_actions_keep_newline_boundaries_1",
+      "seq": 981501,
+      "command": "mkdir -p /data/reviewpaths/d; cd /data/reviewpaths; touch \"d/a\nb\" b; find d -type f -exec rm {} +; echo action:$?; test -f b && test ! -e \"d/a\nb\"; echo paths:$?; cd /; rm -r /data/reviewpaths",
+      "expect": {
+        "exit": 0,
+        "stdout": "action:0\npaths:0\n",
+        "stderr": ""
+      },
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "find_actions_keep_newline_boundaries_2",
+      "seq": 981502,
+      "command": "mkdir -p /data/reviewpaths/d; cd /data/reviewpaths; touch \"d/a\nb\" b; find d -type f -delete; echo action:$?; test -f b && test ! -e \"d/a\nb\"; echo paths:$?; cd /; rm -r /data/reviewpaths",
+      "expect": {
+        "exit": 0,
+        "stdout": "action:0\npaths:0\n",
+        "stderr": ""
+      },
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "find_delete_or_refused_before_mutation",
+      "seq": 981503,
+      "command": "mkdir -p /data/reviewor; touch /data/reviewor/keep /data/reviewor/remove; find /data/reviewor -name keep -o -delete; echo find:$?; test -f /data/reviewor/keep && test -f /data/reviewor/remove; echo kept:$?; rm -r /data/reviewor",
+      "expect": {
+        "exit": 0,
+        "stdout": "find:1\nkept:0\n",
+        "stderr": "find: -delete is supported only in a top-level -a chain, not under -o, ! or parentheses\n"
+      },
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "find_newermt_invalid_calendar_date",
+      "seq": 981504,
+      "command": "find /data -newermt 2026-02-31",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: I cannot figure out how to interpret '2026-02-31' as a date or time\n"
+      },
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "find_print0_keeps_newline_boundaries",
+      "seq": 981505,
+      "command": "mkdir -p /data/reviewprint; touch \"/data/reviewprint/a\nb\"; find /data/reviewprint -type f -print0; rm -r /data/reviewprint",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/reviewprint/a\nb\u0000",
+        "stderr": ""
+      },
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
     }
   ]
 }

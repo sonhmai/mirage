@@ -297,3 +297,65 @@ describe('find -exec isolation', () => {
     },
   )
 })
+
+for (const nested of [false, true]) {
+  it.each(['-exec rm {} \\;', '-exec rm {} +', '-delete'])(
+    `preserves newline paths (nested: ${String(nested)}) with %s`,
+    async (action) => {
+      const ws = nested ? await twoMountWs() : await singleMountWs()
+      try {
+        const root = nested ? '/a/d' : '/d'
+        await ws.execute(`mkdir -p ${root}; touch "${root}/a\nb" /bystander`)
+        const io = await ws.execute(`find ${nested ? '/' : '/d'} -name 'a*' -type f ${action}`)
+        expect(io.exitCode).toBe(0)
+        expect(io.stderrText).toBe('')
+        const check = await ws.execute(`test -f /bystander && test ! -e "${root}/a\nb"`)
+        expect(check.exitCode).toBe(0)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+}
+
+it('refuses deletion under OR before removing any file', async () => {
+  const ws = await singleMountWs()
+  try {
+    await ws.execute('mkdir d; touch d/keep d/remove')
+    const io = await ws.execute('find d -name keep -o -delete')
+    expect(io.exitCode).toBe(1)
+    expect(io.stderrText).toContain('supported only in a top-level')
+    expect((await ws.execute('test -f d/keep && test -f d/remove')).exitCode).toBe(0)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('preserves newline mount names and filenames through print0 and ls', async () => {
+  const parser = await getTestParser()
+  const ops = new OpsRegistry()
+  const root = new RAMResource()
+  const nested = new RAMResource()
+  ops.registerResource(root)
+  ops.registerResource(nested)
+  const ws = new Workspace(
+    { '/': root, '/d/nested\nmount': nested },
+    {
+      mode: MountMode.WRITE,
+      ops,
+      shellParser: parser,
+    },
+  )
+  try {
+    await ws.execute('touch "/d/nested\nmount/a\nb"')
+    const printed = await ws.execute('find /d -print0')
+    expect(printed.stdoutText).toBe('/d\0/d/nested\nmount\0/d/nested\nmount/a\nb\0')
+    expect(printed.stderrText).toBe('')
+    const listed = await ws.execute('find /d -type f -ls')
+    expect(listed.exitCode).toBe(0)
+    expect(listed.stderrText).toBe('')
+    expect(listed.stdoutText).toContain('a\nb')
+  } finally {
+    await ws.close()
+  }
+})

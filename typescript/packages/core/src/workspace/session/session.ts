@@ -67,6 +67,7 @@ export interface ChildShellState {
   execOpened: Set<string>
   randomState: number | null
   randomSeed: string | null
+  randomLast: number
   pipeStatus: readonly number[]
 }
 
@@ -392,6 +393,9 @@ export class Session {
   // parent gets its own state back (`snapshot` / `restore`).
   randomState: number | null = null
   randomSeed: string | null = null
+  randomLast = 0
+  // Scoped by the executing node so diagnostics follow its redirections.
+  diagnostics: (string | Uint8Array)[] = []
   positionalArgs: string[]
   // What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
   // sets it to the script file it is running, or to the name given after
@@ -659,6 +663,7 @@ export class Session {
       execOpened: new Set(this.execOpened),
       randomState: this.randomState,
       randomSeed: this.randomSeed,
+      randomLast: this.randomLast,
       // Every pipeline segment sees the statuses of the pipeline before
       // this one, however many statements of its own it runs.
       pipeStatus: [...this.pipeStatus],
@@ -671,6 +676,7 @@ export class Session {
       const word = this.vars[RANDOM]?.value
       this.randomSeed = typeof word === 'string' ? word : null
       this.randomState = null
+      this.randomLast = 0
     }
     return saved
   }
@@ -699,6 +705,7 @@ export class Session {
     this.execStdin = state.execStdin
     this.randomState = state.randomState
     this.randomSeed = state.randomSeed
+    this.randomLast = state.randomLast
     this.pipeStatus = state.pipeStatus
     this.execOpened = state.execOpened
   }

@@ -270,6 +270,13 @@ export function parseFindExpression(tokens: string[]): FindExpr {
   let nested = 0
   let inOr = false
   let mtimeSeen = false
+  const checkActionPlacement = (token: string): void => {
+    if (nested > 0 || inOr) {
+      throw new FindParseError(
+        `find: ${token} is supported only in a top-level -a chain, not under -o, ! or parentheses`,
+      )
+    }
+  }
   // Fold one mtime window into the expression's single window. The flat
   // window cannot evaluate a time test per predicate node, so repeated
   // ones flatten to the union of their windows: the tautology `-mtime +0
@@ -365,6 +372,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       if (tok === '-path') return { op: 'path', pattern: value }
       if (tok === '-type') return typeNode(value)
       if (tok === '-printf') {
+        checkActionPlacement(tok)
         // An action, not a test: it always matches, replaces the default
         // -print rendering, and one format applies to every row (GNU
         // evaluates actions per expression position, which the flat
@@ -409,6 +417,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
     }
     const rowKind = ROW_ACTIONS.get(tok)
     if (rowKind !== undefined) {
+      checkActionPlacement(tok)
       g.actions.push({ kind: rowKind })
       if (rowKind === 'delete') g.depthFirst = true
       return { op: 'true' }
@@ -487,6 +496,9 @@ export function parseFindExpression(tokens: string[]): FindExpr {
         // `-exec false {} ; -o -print` would run the action and then
         // print nothing.
         if (execActions(g.actions).length > 0) throw new FindParseError(EXEC_PLACEMENT)
+        const action = g.actions[0]
+        if (action !== undefined) checkActionPlacement(`-${action.kind}`)
+        if (g.printf !== null) checkActionPlacement('-printf')
       }
       terms.push(andExpr())
     }

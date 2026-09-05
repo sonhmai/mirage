@@ -353,3 +353,42 @@ def test_predicate_after_action_is_refused(action, test):
     with pytest.raises(FindParseError,
                        match='tests after actions are not supported'):
         parse_find_expression(action + test)
+
+
+@pytest.mark.parametrize("action", [
+    ["-print"],
+    ["-print0"],
+    ["-ls"],
+    ["-delete"],
+    ["-printf", "%p"],
+])
+@pytest.mark.parametrize("position", ["left", "right", "not", "group"])
+def test_row_actions_refuse_detachment_from_the_predicate(action, position):
+    expressions = {
+        "left": [*action, "-o", "-print"],
+        "right": ["-name", "keep", "-o", *action],
+        "not": ["!", *action],
+        "group": ["(", *action, ")"],
+    }
+    with pytest.raises(FindParseError, match="supported only in a top-level"):
+        parse_find_expression(expressions[position])
+    parse_find_expression(
+        ["(", "-name", "a", "-o", "-name", "b", ")", *action])
+
+
+@pytest.mark.parametrize("value", [
+    "2026-02-31",
+    "2025-02-29",
+    "2026-04-31",
+    "2026-00-01",
+    "2026-13-01",
+    "2026-01-00",
+    "2026-01-32",
+    "2026-02-31T12:00:00Z",
+    "2026-02-31 1 day",
+    "2026-01-01T24:00:00",
+    "2026-01-01T12:60:00",
+])
+def test_newermt_rejects_invalid_calendar_fields(value):
+    with pytest.raises(FindParseError, match="I cannot figure out"):
+        parse_find_expression(["-newermt", value])

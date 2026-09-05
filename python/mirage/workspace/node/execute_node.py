@@ -27,7 +27,7 @@ from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
-from mirage.shell.errors import ArithError, ReadonlyError
+from mirage.shell.errors import ArithError, ExitSignal, ReadonlyError
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import NodeType as NT
@@ -251,6 +251,53 @@ def _is_bare_exec(command: Any) -> bool:
 
 
 async def execute_node(
+    dispatch: DispatchFn,
+    registry: MountRegistry,
+    namespace: Namespace,
+    job_table: JobTable,
+    execute_fn: Callable[..., Any],
+    agent_id: str,
+    node: Any,
+    session: Session,
+    stdin: Any = None,
+    call_stack: CallStack | None = None,
+    cancel: asyncio.Event | None = None,
+    routing_decision: RouteDecision | None = None,
+    sink: JobConsole | None = None,
+) -> tuple[Any, IOResult, ExecutionNode]:
+    outer = session._diagnostics
+    session._diagnostics = []
+    try:
+        stdout, io, exec_node = await _execute_node(
+            dispatch, registry, namespace, job_table, execute_fn, agent_id,
+            node, session, stdin, call_stack, cancel, routing_decision, sink)
+        if session._diagnostics:
+            err = _diagnostic_stderr(node, session)
+            io.stderr = err + await io.materialize_stderr()
+            exec_node.stderr = err + (exec_node.stderr or b"")
+        return stdout, io, exec_node
+    except ExitSignal as exc:
+        exc.stderr = _diagnostic_stderr(node, session) + exc.stderr
+        raise
+    finally:
+        session._diagnostics = outer
+
+
+def _diagnostic_stderr(node: Any, session: Session) -> bytes:
+    if not session._diagnostics:
+        return b""
+    head = get_text(node).split(None, 1)[0]
+    builtin = head if head in {
+        "export", "declare", "local", "readonly", "read", "printf", "let"
+    } else ""
+    prefix = f"bash: {builtin}: " if builtin else "bash: "
+    return b"".join(
+        message if isinstance(message, bytes) else (prefix + message +
+                                                    "\n").encode()
+        for message in session._diagnostics)
+
+
+async def _execute_node(
     dispatch: DispatchFn,
     registry: MountRegistry,
     namespace: Namespace,

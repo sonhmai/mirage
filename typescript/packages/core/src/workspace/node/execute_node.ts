@@ -45,7 +45,7 @@ import { expandRedirects } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
 import { evaluateArith } from '../../shell/arith.ts'
-import { ArithError, ReadonlyError } from '../../shell/errors.ts'
+import { ExitSignal, ArithError, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import { assignElement } from '../session/elements.ts'
 import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
@@ -283,6 +283,59 @@ function isBareExec(command: TSNodeLike | null): boolean {
 }
 
 export async function executeNode(
+  deps: ExecuteNodeDeps,
+  node: TSNodeLike,
+  session: Session,
+  stdin: ByteSource | null = null,
+  callStack: CallStack | null = null,
+): Promise<Result> {
+  const outer = session.diagnostics
+  session.diagnostics = []
+  try {
+    const [stdout, io, execNode] = await executeNodeBody(deps, node, session, stdin, callStack)
+    if (session.diagnostics.length > 0) {
+      const err = diagnosticStderr(node, session)
+      const existing = await io.materializeStderr()
+      const merged = new Uint8Array(err.length + existing.length)
+      merged.set(err)
+      merged.set(existing, err.length)
+      io.stderr = merged
+      execNode.stderr = merged
+    }
+    return [stdout, io, execNode]
+  } catch (err) {
+    if (err instanceof ExitSignal) {
+      const extra = diagnosticStderr(node, session)
+      const merged = new Uint8Array(extra.length + err.stderr.length)
+      merged.set(extra)
+      merged.set(err.stderr, extra.length)
+      err.stderr = merged
+    }
+    throw err
+  } finally {
+    session.diagnostics = outer
+  }
+}
+
+function diagnosticStderr(node: TSNodeLike, session: Session): Uint8Array {
+  const head = getText(node).trimStart().split(/\s+/, 1)[0] ?? ''
+  const builtin = ['export', 'declare', 'local', 'readonly', 'read', 'printf', 'let'].includes(head)
+    ? head
+    : ''
+  const prefix = builtin === '' ? 'bash: ' : `bash: ${builtin}: `
+  const parts = session.diagnostics.map((message) =>
+    typeof message === 'string' ? new TextEncoder().encode(prefix + message + '\n') : message,
+  )
+  const result = new Uint8Array(parts.reduce((size, part) => size + part.length, 0))
+  let offset = 0
+  for (const part of parts) {
+    result.set(part, offset)
+    offset += part.length
+  }
+  return result
+}
+
+async function executeNodeBody(
   deps: ExecuteNodeDeps,
   node: TSNodeLike,
   session: Session,

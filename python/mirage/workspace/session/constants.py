@@ -72,9 +72,11 @@ TRANSIENT_FIELDS: tuple[str, ...] = (
     "_local_frames",
     "_cmdsub_seq",
     "_cmdsub_status",
+    "_diagnostics",
     "_pipe_status_pending",
     "_random_state",
     "_random_seed",
+    "_random_last",
     "_parse_seq",
     "_parse_current",
     "_alias_marks",
@@ -113,5 +115,6 @@ CHILD_SHELL_FIELDS: tuple[str, ...] = (
     "_getopts_optind",
     "_random_state",
     "_random_seed",
+    "_random_last",
     "pipe_status",
 )

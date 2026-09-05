@@ -16,7 +16,7 @@ import type { SessionView } from '../../ops/types.ts'
 import { PolicyDenied, preSessionGate, type Policies } from '../../policy/index.ts'
 import { evaluateArith } from '../../shell/arith.ts'
 import { arrayExtent, arrayGet, arrayHas, arrayValues, type ShellArray } from '../../shell/array.ts'
-import { PIPESTATUS, RANDOM, RANDOM_UNSET } from '../../shell/constants.ts'
+import { PIPESTATUS, RANDOM, RANDOM_MODULUS, RANDOM_UNSET } from '../../shell/constants.ts'
 import { ArithError } from '../../shell/errors.ts'
 import type { ElementOps } from '../../shell/types.ts'
 import { varHidden } from '../../utils/hidden.ts'
@@ -397,6 +397,19 @@ async function setVar(
     value: rendered,
     sessionId: session.sessionId,
   })
+  if (name === RANDOM && session.randomSeed !== RANDOM_UNSET && typeof shaped === 'string') {
+    try {
+      const value = BigInt(integerText(session, shaped))
+      const modulus = BigInt(RANDOM_MODULUS)
+      session.randomState = Number(((value % modulus) + modulus) % modulus)
+    } catch (err) {
+      if (!(err instanceof ArithError)) throw err
+      session.diagnostics.push(err.message)
+      return
+    }
+    session.randomSeed = shaped
+    session.randomLast = 0
+  }
   let stored = existing === undefined ? makeVar(shaped) : withValue(existing, shaped)
   // An agent write to a managed name shadows session-locally: the
   // pointer drops and the record becomes a plain variable for this

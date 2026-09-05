@@ -22,7 +22,8 @@ from mirage.policy.types import SessionContext
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
                                 array_values)
-from mirage.shell.constants import PIPESTATUS, RANDOM, RANDOM_UNSET
+from mirage.shell.constants import (PIPESTATUS, RANDOM, RANDOM_MODULUS,
+                                    RANDOM_UNSET)
 from mirage.shell.errors import ArithError
 from mirage.shell.types import ElementOps
 from mirage.shell.variable import (ShellValue, ShellVar, VarAttr, coerce_value,
@@ -529,6 +530,16 @@ async def set_var(session: Session,
                        key=name,
                        value=rendered,
                        session_id=session.session_id))
+    if name == RANDOM and session._random_seed != RANDOM_UNSET and isinstance(
+            value, str):
+        try:
+            seed = int(_integer_text(session, value)) % RANDOM_MODULUS
+        except ArithError as exc:
+            session._diagnostics.append(str(exc))
+            return
+        session._random_state = seed
+        session._random_seed = value
+        session._random_last = 0
     stored = ShellVar(value) if existing is None else with_value(
         existing, value)
     # An agent write to a managed name shadows session-locally: the

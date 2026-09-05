@@ -24,26 +24,13 @@ import {
   RANDOM_ZERO_SEED,
 } from '../../shell/constants.ts'
 import { evaluateArith } from '../../shell/arith.ts'
-import { ArithError } from '../../shell/errors.ts'
 import { makeVar, withValue } from '../../shell/variable.ts'
 import type { Session } from './session.ts'
 import { sessionElements, visibleEnv } from './state.ts'
 
-/** The generator seed an assignment `RANDOM=word` sets, or null. bash
- * evaluates the word as arithmetic (`assign_random` calls `evalexp`), so
- * `RANDOM=1+2` seeds 3, `RANDOM=0x10` seeds 16, `RANDOM=x` reads `x`, and
- * an unset name is 0. A word that does not evaluate (`RANDOM=1.5`) is
- * bash's arithmetic error: the message prints and the generator is left
- * alone, which is the null here. The seed truncates to 32 bits, as
- * `sbrand` does. */
-export function seedFrom(word: string, session: Session): number | null {
-  let value: bigint
-  try {
-    value = evaluateArith(word, visibleEnv(session), 0, sessionElements(session)).value
-  } catch (err) {
-    if (err instanceof ArithError) return null
-    throw err
-  }
+/** Evaluate a host-supplied seed; invalid arithmetic propagates. */
+export function seedFrom(word: string, session: Session): number {
+  const value = evaluateArith(word, visibleEnv(session), 0, sessionElements(session)).value
   const modulus = BigInt(RANDOM_MODULUS)
   return Number(((value % modulus) + modulus) % modulus)
 }
@@ -72,33 +59,10 @@ export function valueOf(state: number): number {
   return ((state >>> 16) ^ (state & 0xffff)) & RANDOM_MAX
 }
 
-/** The value the previous draw returned, read off the word it wrote
- * back; 0 after a reseed, which is what `sbrand` resets it to. */
-function lastValue(seed: string | null): number {
-  return seed !== null && /^[0-9]+$/.test(seed) ? Number(seed) : 0
-}
-
-/**
- * Step `$RANDOM` and return its value, or null once it is unset.
- *
- * The variable store is the seed door and the record, as in bash: an
- * assignment `RANDOM=42` reseeds because the stored word differs from the
- * value the last read wrote back, and every read writes its value back so
- * `declare -p RANDOM` shows it and a repeated `RANDOM=42` reseeds again.
- * `unset RANDOM` strips the special meaning in bash, so the name reads as
- * an ordinary unset variable from then on: `unsetVar` marks the session
- * (RANDOM_UNSET) and a store that no longer holds the name after a read
- * says the same. The write-back is the shell's own bookkeeping on a name
- * it defines, not a user assignment, so it does not pass the session
- * plane's door.
- *
- * A draw never returns the value before it (bash's `get_random_number`
- * redraws on a repeat), and a reseed or a fresh generator starts that
- * comparison from 0, as `sbrand` does. A stored word that does not
- * evaluate is the assignment bash refused: the sequence continues as if
- * it had not happened. The refusal's message is bash's at assignment
- * time, which a reseed decided at the read cannot voice.
- */
+/** Draw from the session generator, or null after RANDOM is unset.
+ * Shell assignments validate and seed at the session door. A host-seeded
+ * variable is consumed here on its first read. Reseeding resets repeat
+ * suppression to zero independently of the stored word. */
 export function nextRandom(session: Session, stored: string | undefined): number | null {
   if (
     session.randomSeed === RANDOM_UNSET ||
@@ -118,7 +82,7 @@ export function nextRandom(session: Session, stored: string | undefined): number
     last = 0
   } else {
     state = session.randomState
-    last = lastValue(session.randomSeed)
+    last = session.randomLast
   }
   let value: number
   do {
@@ -126,6 +90,7 @@ export function nextRandom(session: Session, stored: string | undefined): number
     value = valueOf(state)
   } while (value === last)
   session.randomState = state
+  session.randomLast = value
   const word = String(value)
   const existing = session.vars[RANDOM]
   session.vars[RANDOM] = existing !== undefined ? withValue(existing, word) : makeVar(word)

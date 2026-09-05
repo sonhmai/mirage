@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Producer, Refusal } from '../types.ts'
+import type { PathSpec, Producer, Refusal } from '../types.ts'
 import { CachableAsyncIterator } from './cachable_iterator.ts'
 
 export type ByteSource = Uint8Array | AsyncIterable<Uint8Array>
@@ -70,10 +70,13 @@ export interface IOResultInit {
   cache?: string[]
   producer?: Producer | null
   mutated?: boolean | null
+  matchedPaths?: PathSpec[] | null
   refusal?: Refusal | null
 }
 
 export class IOResult {
+  // Structured selection before display rendering, for later actions.
+  matchedPaths: PathSpec[] | null
   stdout: ByteSource | null
   stderr: ByteSource | null
   private _exitCode: number
@@ -101,6 +104,7 @@ export class IOResult {
   streamSource: IOResult | null
 
   constructor(init: IOResultInit = {}) {
+    this.matchedPaths = init.matchedPaths ?? null
     this.stdout = init.stdout ?? null
     this.stderr = init.stderr ?? null
     this._exitCode = init.exitCode ?? 0
@@ -162,6 +166,7 @@ export class IOResult {
     // firing at drain time) is still visible.
     const result = new IOResult({
       stdout: other.stdout,
+      matchedPaths: other.matchedPaths,
       stderr: mergedStderr,
       reads: { ...this.reads, ...other.reads },
       writes: { ...this.writes, ...other.writes },

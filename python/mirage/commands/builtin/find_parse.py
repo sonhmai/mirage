@@ -335,6 +335,13 @@ _EXEC_PLACEMENT = ("find: -exec is supported only in a top-level -a chain, "
                    "not under -o, ! or parentheses")
 
 
+def _check_action_placement(state: _State, token: str) -> None:
+    if state.nested > 0 or state.in_or:
+        raise FindParseError(
+            f"find: {token} is supported only in a top-level -a chain, "
+            "not under -o, ! or parentheses")
+
+
 def _peek(state: _State) -> str | None:
     return state.tokens[state.pos] if state.pos < len(state.tokens) else None
 
@@ -414,6 +421,7 @@ def _parse_primary(state: _State) -> PredNode:
         if tok == "-type":
             return _type_node(value)
         if tok == "-printf":
+            _check_action_placement(state, tok)
             # An action, not a test: it always matches, replaces the
             # default -print rendering, and one format applies to every
             # row (GNU evaluates actions per expression position, which
@@ -448,6 +456,7 @@ def _parse_primary(state: _State) -> PredNode:
         state.expr.uses_empty = True
         return Empty()
     if tok in _ROW_ACTIONS:
+        _check_action_placement(state, tok)
         state.expr.actions.append(RowAction(_ROW_ACTIONS[tok]))
         if tok == "-delete":
             state.expr.depth_first = True
@@ -521,6 +530,12 @@ def _parse_or(state: _State) -> PredNode:
             # action and then print nothing.
             if state.expr.execs:
                 raise FindParseError(_EXEC_PLACEMENT)
+            if state.expr.actions:
+                action = state.expr.actions[0]
+                assert isinstance(action, RowAction)
+                _check_action_placement(state, f"-{action.kind}")
+            if state.expr.printf is not None:
+                _check_action_placement(state, "-printf")
         terms.append(_parse_and(state))
     return terms[0] if len(terms) == 1 else Or(terms)
 

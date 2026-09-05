@@ -285,3 +285,37 @@ describe('tests after actions', () => {
     })
   }
 })
+
+describe('action placement', () => {
+  for (const action of [['-print'], ['-print0'], ['-ls'], ['-delete'], ['-printf', '%p']]) {
+    it.each([
+      [...action, '-o', '-print'],
+      ['-name', 'keep', '-o', ...action],
+      ['!', ...action],
+      ['(', ...action, ')'],
+    ])(`refuses detached ${action[0] ?? ''}: %j`, (...tokens) => {
+      expect(() => parseFindExpression(tokens)).toThrow('supported only in a top-level')
+    })
+    it(`allows ${action[0] ?? ''} after grouped tests`, () => {
+      expect(() =>
+        parseFindExpression(['(', '-name', 'a', '-o', '-name', 'b', ')', ...action]),
+      ).not.toThrow()
+    })
+  }
+})
+
+it.each([
+  '2026-02-31',
+  '2025-02-29',
+  '2026-04-31',
+  '2026-00-01',
+  '2026-13-01',
+  '2026-01-00',
+  '2026-01-32',
+  '2026-02-31T12:00:00Z',
+  '2026-02-31 1 day',
+  '2026-01-01T24:00:00',
+  '2026-01-01T12:60:00',
+])('rejects invalid calendar fields: %s', (value) => {
+  expect(() => parseFindExpression(['-newermt', value])).toThrow('I cannot figure out')
+})

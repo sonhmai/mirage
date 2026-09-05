@@ -98,6 +98,7 @@ async function expandBacktickRegion(
     }
     const io = await executeFn(`( ${text}\n)`, { sessionId: session.sessionId })
     out += (await io.stdoutStr()).replace(/\n+$/, '')
+    session.diagnostics.push(await io.materializeStderr())
     session.cmdsubSeq += 1
     session.cmdsubStatus = io.exitCode
   }
@@ -382,6 +383,7 @@ export async function expandNodeMarked(
     // Record the substitution's status: an assignment-only statement
     // whose value ran substitutions reports the last one's status as
     // its own (see assignmentStatus).
+    session.diagnostics.push(await io.materializeStderr())
     session.cmdsubSeq += 1
     session.cmdsubStatus = io.exitCode
     return prefix + text

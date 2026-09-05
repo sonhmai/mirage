@@ -975,7 +975,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install libfuse (fusermount3 + libfuse2 for mfusepy, libfuse3 headers for fuse-native)
+      # fuse-native does not build against any of these. Its binding.gyp
+      # takes both its include dir and its library from the vendored
+      # fuse-shared-library-linux npm package, so what apt is for here is
+      # fusermount3 (to mount at all) and libfuse2 (for python's mfusepy).
+      - name: Install libfuse (fusermount3 to mount, libfuse2 for mfusepy)
         run: |
           sudo apt-get update
           sudo apt-get install -y fuse3 libfuse3-dev libfuse2t64 || \
@@ -1006,7 +1010,7 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Install dependencies (builds @zkochan/fuse-native against libfuse3)
+      - name: Install dependencies
         working-directory: typescript
         run: pnpm install --frozen-lockfile=false
 

@@ -2184,6 +2184,119 @@
           }
         }
       ]
+    },
+    {
+      "id": "metadata_globs_follow_dynamic_mount_ownership",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/parent": {
+            "resource": "cached-ram",
+            "config": {
+              "files": {
+                "/child/stale.txt": "ancestor\n"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "mkdir -p /parent/child; ls /parent/child",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "stale.txt\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "mount",
+          "path": "/parent/child",
+          "resource": "cached-ram",
+          "mode": "write",
+          "config": {
+            "files": {
+              "/fresh.txt": "child\n"
+            }
+          },
+          "expect": {
+            "value": "/parent/child/"
+          }
+        },
+        {
+          "op": "exec",
+          "command": "touch /parent/child/*.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "chmod 600 /parent/child/*.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "chown 123 /parent/child/*.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "chgrp 456 /parent/child/*.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "ls /parent/child; stat -c '%a %u %g' /parent/child/fresh.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "fresh.txt\n600 123 456\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "unmount",
+          "path": "/parent/child"
+        },
+        {
+          "op": "exec",
+          "command": "cat /parent/child/stale.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "ancestor\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
     }
   ]
 }

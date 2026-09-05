@@ -201,6 +201,16 @@ class MountEntry:
         finally:
             release()
 
+    async def expand_glob(self, paths: list[PathSpec],
+                          prefix: str) -> list[PathSpec]:
+        """Keep the resource open and prepared while its glob hook runs."""
+        async with self.use():
+            if self.cache_manager is None:
+                return await self.resource.resolve_glob(paths, prefix=prefix)
+            async with self.cache_manager.mutation():
+                await self.ensure_ready()
+                return await self.resource.resolve_glob(paths, prefix=prefix)
+
     @property
     def index(self) -> IndexCacheStore:
         index = self.resource.index

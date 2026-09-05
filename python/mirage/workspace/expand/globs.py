@@ -14,7 +14,6 @@
 
 import dataclasses
 
-from mirage.cache.file.io import mutation_lock
 from mirage.ops.config import NamespaceLinks
 from mirage.ops.namespace_view import child_mount_names, namespace_names
 from mirage.shell.constants import SHOPT_DEFAULTS
@@ -32,18 +31,6 @@ from mirage.workspace.session import Session
 # listing per directory, so an accidental `**` over a large tree is
 # bounded rather than open-ended.
 GLOBSTAR_MAX_DEPTH = 32
-
-
-async def _backend_glob(registry: MountRegistry, mount: MountEntry,
-                        paths: list[PathSpec], prefix: str) -> list[PathSpec]:
-    """Prepare the mount; drain resource index writes before eviction."""
-    async with mount.use():
-        cache = registry.file_cache
-        if cache is None:
-            return await mount.resource.resolve_glob(paths, prefix=prefix)
-        async with mutation_lock(cache):
-            await mount.ensure_ready()
-            return await mount.resource.resolve_glob(paths, prefix=prefix)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -252,7 +239,7 @@ async def _level_matches(registry: MountRegistry, mount: MountEntry,
                     pattern=seg,
                     resolved=False)
     try:
-        matches = await _backend_glob(registry, owner, [spec], prefix)
+        matches = await owner.expand_glob([spec], prefix)
     except OSError:
         # This parent is not a listable directory; bash skips it during
         # descent. A nested mount root or a link under it is still real.
@@ -549,8 +536,7 @@ async def resolve_globs(
                     # spec has no literal to reinstate, so an empty list
                     # means no match and every spec returned is one.
                     resolved = _merge_namespace(
-                        list(await _backend_glob(registry, mount, [item.dir],
-                                                 prefix)),
+                        list(await mount.expand_glob([item.dir], prefix)),
                         _namespace_children(registry, links, directory,
                                             pattern), directory, prefix,
                         registry, mount)

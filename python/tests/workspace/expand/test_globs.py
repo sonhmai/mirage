@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.ram.readdir import readdir as ram_readdir
@@ -24,12 +24,10 @@ from mirage.utils.key_prefix import mount_key
 from mirage.workspace import Workspace
 from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.expand.globs import resolve_globs
+from mirage.workspace.mount.mount import MountEntry
 
 
 def _mock_registry(resolve_result=None):
-    mount = MagicMock()
-    mount.prefix = "/data/"
-    mount.ensure_ready = AsyncMock()
 
     async def _resolve_glob(scopes, prefix=""):
         if callable(resolve_result):
@@ -41,8 +39,9 @@ def _mock_registry(resolve_result=None):
         # dir-shaped ask with the directory itself.
         return [s for s in scopes if not s.pattern]
 
-    mount.resource = MagicMock()
-    mount.resource.resolve_glob = _resolve_glob
+    resource = RAMResource()
+    resource.resolve_glob = _resolve_glob
+    mount = MountEntry("/data/", resource, MountMode.READ)
 
     reg = MagicMock()
     reg.file_cache = None

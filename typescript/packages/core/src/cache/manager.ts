@@ -18,6 +18,7 @@ import { rstripSlash } from '../utils/slash.ts'
 import type { FileCache } from './file/mixin.ts'
 import type { IndexCacheStore } from './index/store.ts'
 import { IndexView } from './index/view.ts'
+import { withCacheMutation } from './file/io.ts'
 
 /**
  * Post-mutation cache coherence for one mount.
@@ -49,6 +50,11 @@ export class CacheManager {
     this.prefix = rstripSlash(prefix)
     this.cachesReads = cachesReads
     this.ownsPath = ownsPath
+  }
+
+  /** Drain raw backend index access before mount cache eviction. */
+  withMutation<T>(call: () => Promise<T>): Promise<T> {
+    return this.fileCache === null ? call() : withCacheMutation(this.fileCache, call)
   }
 
   /** Bind backend metadata writes to this mount's lifetime. */

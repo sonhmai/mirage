@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 
+from mirage.cache.file.io import mutation_lock
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
@@ -56,6 +58,15 @@ class CacheManager:
         self._prefix = prefix.rstrip("/")
         self._caches_reads = caches_reads
         self._owns_path = owns_path
+
+    @asynccontextmanager
+    async def mutation(self) -> AsyncIterator[None]:
+        """Drain raw backend index access before mount cache eviction."""
+        if self._file_cache is None:
+            yield
+            return
+        async with mutation_lock(self._file_cache):
+            yield
 
     def scope_index(self, index: IndexCacheStore) -> IndexCacheStore:
         """Bind backend metadata writes to this mount's lifetime."""

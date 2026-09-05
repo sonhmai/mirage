@@ -139,6 +139,17 @@ export class MountEntry {
     this.consistency = init.consistency ?? ConsistencyPolicy.LAZY
   }
 
+  /** Prepare and retain the resource while its glob hook reads metadata. */
+  async expandGlob(paths: readonly PathSpec[], prefix: string): Promise<PathSpec[]> {
+    return this.use(async () => {
+      const call = async (): Promise<PathSpec[]> => {
+        await this.ensureReady()
+        return this.resource.glob === undefined ? [...paths] : this.resource.glob(paths, prefix)
+      }
+      return this.cacheManager === null ? call() : this.cacheManager.withMutation(call)
+    })
+  }
+
   /** Metadata access bound to this mount's ownership. */
   get index(): IndexCacheStore | undefined {
     const index = this.resource.index
@@ -493,8 +504,7 @@ export class MountEntry {
           }),
       )
 
-      const expandedPaths =
-        this.resource.glob !== undefined ? await this.resource.glob(prefixedPaths) : prefixedPaths
+      const expandedPaths = await this.expandGlob(prefixedPaths, '')
 
       const accessor = (this.resource as { accessor?: Accessor }).accessor ?? NOOP_ACCESSOR
       const cmdOpts: CommandOpts = {

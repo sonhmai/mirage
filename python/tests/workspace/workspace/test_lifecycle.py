@@ -15,6 +15,7 @@
 import asyncio
 import errno
 import os
+from fnmatch import fnmatchcase
 from uuid import uuid4
 
 import pytest
@@ -33,16 +34,25 @@ from mirage.shell.job_table import JobStatus
 from mirage.types import MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace import Workspace
+from mirage.workspace.executor.builtins.shared import expand_operands
 from mirage.workspace.types import ExecutionNode
 
 _RELEASE: list[asyncio.Event] = []
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("action", ["glob", "midpath", "provision"])
+@pytest.mark.parametrize("action", [
+    "glob", "midpath", "provision", "metadata", "touch", "chmod", "chown",
+    "chgrp"
+])
 async def test_first_mount_access_prepares_expansion_and_provision(action):
 
     class IndexedRAM(RAMResource):
+
+        def set_index(self, config=None):
+            # Keep the backend's shared index across workspace configuration.
+            if not hasattr(self, "_index"):
+                super().set_index(config)
 
         async def resolve_glob(self, paths, prefix=""):
             listing = await self.index.list_dir(paths[0].directory.rstrip("/")
@@ -50,12 +60,13 @@ async def test_first_mount_access_prepares_expansion_and_provision(action):
             if listing.entries is not None:
                 return [
                     PathSpec.from_str_path(key, mount_key(key, prefix))
-                    for key in listing.entries
+                    for key in listing.entries if fnmatchcase(
+                        key.rsplit("/", 1)[-1], paths[0].pattern or "*")
                 ]
             return await super().resolve_glob(paths, prefix)
 
     ancestor = RAMResource()
-    ws = Workspace({"/": ancestor})
+    ws = Workspace({"/": ancestor}, index=IndexConfig(ttl=600))
     replacement = IndexedRAM()
     replacement._index = ancestor.index
     replacement.load_state({
@@ -72,12 +83,33 @@ async def test_first_mount_access_prepares_expansion_and_provision(action):
         [("stale.txt",
           IndexEntry(id="old", name="stale.txt", resource_type="file"))])
     await ws.cache.set("/data/file", b"old")
-    ws.add_mount("/data", replacement)
+    ws.add_mount("/data", replacement, MountMode.WRITE)
     try:
         if action == "provision":
             result = await ws.execute("cat /data/file", provision=True)
             assert result.cache_hits == 0
             assert (await ws.execute("cat /data/file")).stdout == b"new"
+        elif action == "metadata":
+            expanded = await expand_operands(ws._namespace, [
+                PathSpec(virtual="/data/*.txt",
+                         directory="/data/",
+                         resource_path="*.txt",
+                         pattern="*.txt",
+                         resolved=False)
+            ])
+            assert [p.virtual for p in expanded] == ["/data/fresh.txt"]
+        elif action in {"touch", "chmod", "chown", "chgrp"}:
+            command = {
+                "touch": "touch",
+                "chmod": "chmod 600",
+                "chown": "chown 123",
+                "chgrp": "chgrp 456"
+            }[action]
+            result = await ws.execute(command + " /data/*.txt")
+            assert result.exit_code == 0, result.stderr
+            assert (
+                await
+                ws.execute("echo /data/*.txt")).stdout == b"/data/fresh.txt\n"
         else:
             pattern = "/data/*/*.txt" if action == "midpath" else "/data/*.txt"
             result = await ws.execute("echo " + pattern)
@@ -737,5 +769,58 @@ async def test_workspace_close_waits_for_resource_retirements(
         release.set()
         await asyncio.gather(removing,
                              *([closing] if closing else []),
+                             return_exceptions=True)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_unmount_drains_metadata_glob_and_its_index_writes(monkeypatch):
+    resource = RAMResource()
+    ws = Workspace({"/data": resource}, index=IndexConfig(ttl=600))
+    entered, release = asyncio.Event(), asyncio.Event()
+    closed = False
+    index = resource.index
+    close_resource = resource.close
+
+    async def close():
+        nonlocal closed
+        closed = True
+        await close_resource()
+
+    async def glob(paths, prefix=""):
+        entered.set()
+        await release.wait()
+        assert not closed
+        await index.set_dir("/data", [
+            ("late", IndexEntry(id="late", name="late", resource_type="file"))
+        ])
+        return []
+
+    monkeypatch.setattr(resource, "resolve_glob", glob)
+    monkeypatch.setattr(resource, "close", close)
+    expanding = asyncio.create_task(
+        expand_operands(ws._namespace, [
+            PathSpec(virtual="/data/*",
+                     directory="/data/",
+                     resource_path="*",
+                     pattern="*",
+                     resolved=False)
+        ]))
+    removing = None
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        removing = asyncio.create_task(ws.unmount("/data"))
+        await asyncio.sleep(0.02)
+        assert not removing.done()
+        assert not closed
+        release.set()
+        await expanding
+        await removing
+        assert closed
+        assert (await index.list_dir("/data")).entries is None
+    finally:
+        release.set()
+        await asyncio.gather(expanding,
+                             *([] if removing is None else [removing]),
                              return_exceptions=True)
         await ws.close()

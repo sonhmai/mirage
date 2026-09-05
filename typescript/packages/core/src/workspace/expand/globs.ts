@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { childMountNames, namespaceNames } from '../../ops/namespace_view.ts'
-import { withCacheMutation } from '../../cache/file/io.ts'
 import type { NamespaceLinks } from '../../ops/config.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -65,23 +64,6 @@ export function globOptions(session: Session): GlobOptions {
 
 export interface ResourceWithGlob extends Resource {
   glob(paths: readonly PathSpec[], prefix?: string): Promise<PathSpec[]>
-}
-
-async function backendGlob(
-  registry: MountRegistry,
-  mount: MountEntry,
-  paths: readonly PathSpec[],
-  prefix: string,
-): Promise<PathSpec[]> {
-  await mount.ensureReady()
-  const resource = mount.resource as Resource & Partial<ResourceWithGlob>
-  const glob = async (): Promise<PathSpec[]> => {
-    return mount.use(() =>
-      resource.glob === undefined ? Promise.resolve([]) : resource.glob(paths, prefix),
-    )
-  }
-  // Resource hooks own their index access; drain their writes before eviction.
-  return registry.fileCache === null ? glob() : withCacheMutation(registry.fileCache, glob)
 }
 
 // Virtual paths a directory owes the namespace, matching a segment.
@@ -222,7 +204,7 @@ async function levelMatches(
       resolved: false,
     })
     try {
-      const matches = await backendGlob(registry, owner, [spec], prefix)
+      const matches = await owner.expandGlob([spec], prefix)
       // A descent step yields children, so a match that is the parent
       // itself is not one. A backend asked to list a path that is really
       // a file answers with that file, which walked back out as a
@@ -465,7 +447,7 @@ export async function resolveGlobs(
           // to `xa.txt` lost its first match to that ambiguity. The
           // directory-shaped spec has no literal to reinstate, so an
           // empty list means no match and every spec returned is one.
-          const own = await backendGlob(registry, mount, [withPrefix.dir], prefix)
+          const own = await mount.expandGlob([withPrefix.dir], prefix)
           resolved = mergeNamespace(own, extra, directory, registry, mount)
         }
         if (resolved.length === 0) {

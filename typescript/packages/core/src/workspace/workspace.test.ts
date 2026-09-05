@@ -25,6 +25,7 @@ import {
 import { RedisIndexCacheStore } from '../cache/index/redis.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import { mountKey } from '../utils/key_prefix.ts'
+import { globNameMatches, globPattern } from '../utils/glob_walk.ts'
 import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { op, OpsRegistry } from '../ops/registry.ts'
@@ -36,6 +37,7 @@ import type { MountResolver } from '../runtime/resolver.ts'
 import type { BridgeDispatchFn, RunArgs, RunResult } from '../runtime/types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { expandOperands } from './executor/builtins/shared.ts'
 
 class MockResource extends BaseResource implements Resource {
   readonly kind = 'mock'
@@ -52,7 +54,7 @@ class MockResource extends BaseResource implements Resource {
 }
 
 describe('Workspace lifecycle', () => {
-  it.each(['glob', 'midpath', 'provision'])(
+  it.each(['glob', 'midpath', 'provision', 'metadata', 'touch', 'chmod', 'chown', 'chgrp'])(
     'prepares the first %s access to a dynamic mount',
     async (action) => {
       class IndexedRAM extends RAMResource {
@@ -65,7 +67,11 @@ describe('Workspace lifecycle', () => {
           const directory = parent === '' ? '/' : parent
           const listing = await this.index.listDir(directory)
           if (listing.entries != null)
-            return listing.entries.map((key) => PathSpec.fromStrPath(key, mountKey(key, prefix)))
+            return listing.entries
+              .filter((key) =>
+                globNameMatches(key.split('/').at(-1) ?? '', globPattern(paths[0]?.pattern ?? '*')),
+              )
+              .map((key) => PathSpec.fromStrPath(key, mountKey(key, prefix)))
           return super.glob(paths, prefix)
         }
       }
@@ -87,12 +93,35 @@ describe('Workspace lifecycle', () => {
         ['stale.txt', new IndexEntry({ id: 'old', name: 'stale.txt', resourceType: 'file' })],
       ])
       await ws.cache.set('/data/file', bytes.encode('old'))
-      ws.addMount('/data', replacement)
+      ws.addMount('/data', replacement, MountMode.WRITE)
       try {
         if (action === 'provision') {
           const result = await ws.provision('cat /data/file')
           expect(result.cacheHits).toBe(0)
           expect((await ws.execute('cat /data/file')).stdout).toEqual(bytes.encode('new'))
+        } else if (action === 'metadata') {
+          const expanded = await expandOperands(ws.namespace, [
+            new PathSpec({
+              virtual: '/data/*.txt',
+              directory: '/data/',
+              resourcePath: '*.txt',
+              pattern: '*.txt',
+              resolved: false,
+            }),
+          ])
+          expect(expanded.map((p) => p.virtual)).toEqual(['/data/fresh.txt'])
+        } else if (['touch', 'chmod', 'chown', 'chgrp'].includes(action)) {
+          const command = {
+            touch: 'touch',
+            chmod: 'chmod 600',
+            chown: 'chown 123',
+            chgrp: 'chgrp 456',
+          }[action as 'touch' | 'chmod' | 'chown' | 'chgrp']
+          const result = await ws.execute(command + ' /data/*.txt')
+          expect(result.exitCode, new TextDecoder().decode(result.stderr)).toBe(0)
+          expect((await ws.execute('echo /data/*.txt')).stdout).toEqual(
+            bytes.encode('/data/fresh.txt\n'),
+          )
         } else {
           const pattern = action === 'midpath' ? '/data/*/*.txt' : '/data/*.txt'
           expect((await ws.execute('echo ' + pattern)).stdout).toEqual(
@@ -1079,6 +1108,65 @@ it('updates default-profile policy for unbound ops without replacing the session
     expect(ws.getSession(ws.defaultSessionId)).toBe(session)
     expect(new TextDecoder().decode(await ws.fs.readFile('/data/file'))).toBe('kept')
   } finally {
+    await ws.close()
+  }
+})
+
+it('unmount drains metadata globs and their index writes', async () => {
+  const resource = new RAMResource()
+  const ws = new Workspace({ '/data': resource })
+  await ws.resolve('/data')
+  let enter = (): void => undefined
+  let resume = (): void => undefined
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve
+  })
+  const release = new Promise<void>((resolve) => {
+    resume = resolve
+  })
+  let closed = false
+  const index = resource.index
+  const closeResource = resource.close.bind(resource)
+  vi.spyOn(resource, 'close').mockImplementation(async () => {
+    closed = true
+    await closeResource()
+  })
+  vi.spyOn(resource, 'glob').mockImplementation(async () => {
+    enter()
+    await release
+    expect(closed).toBe(false)
+    await index.setDir('/data', [
+      ['late', new IndexEntry({ id: 'late', name: 'late', resourceType: 'file' })],
+    ])
+    return []
+  })
+  const expanding = expandOperands(ws.namespace, [
+    new PathSpec({
+      virtual: '/data/*',
+      directory: '/data/',
+      resourcePath: '*',
+      pattern: '*',
+      resolved: false,
+    }),
+  ])
+  let removing: Promise<void> | undefined
+  try {
+    await entered
+    let removed = false
+    removing = ws.unmount('/data').then(() => {
+      removed = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(removed).toBe(false)
+    expect(closed).toBe(false)
+    resume()
+    await expanding
+    await removing
+    expect(closed).toBe(true)
+    expect((await index.listDir('/data')).entries).toBeUndefined()
+  } finally {
+    resume()
+    await Promise.allSettled([expanding, ...(removing === undefined ? [] : [removing])])
     await ws.close()
   }
 })

@@ -40,3 +40,23 @@ async def cancellable_sleep(
         p.cancel()
     if cancel_task in done:
         raise MirageAbortError()
+
+
+async def run_cancellable(coro, cancel: asyncio.Event | None):
+    """Cancel and join the command task before reporting a caller abort."""
+    if cancel is None:
+        return await coro
+    task = asyncio.ensure_future(coro)
+    waiter = asyncio.create_task(cancel.wait())
+    try:
+        await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
+        if cancel.is_set():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise MirageAbortError()
+        return await task
+    finally:
+        waiter.cancel()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, waiter, return_exceptions=True)

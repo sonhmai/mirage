@@ -96,6 +96,7 @@ export async function handleCommand(
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
   routingDecision?: RouteDecision,
+  signal?: AbortSignal,
 ): Promise<Result> {
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
@@ -264,6 +265,7 @@ export async function handleCommand(
       csScopes = expanded.filter((p): p is PathSpec => typeof p !== 'string')
     }
     const runCtx: RunOnMountCtx = {
+      ...(signal !== undefined ? { signal } : {}),
       registry,
       session,
       dispatch,
@@ -426,6 +428,7 @@ export async function handleCommand(
   }
 
   const runCtx: RunOnMountCtx = {
+    ...(signal !== undefined ? { signal } : {}),
     registry,
     session,
     dispatch,

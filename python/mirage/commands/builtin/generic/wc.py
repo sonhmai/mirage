@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from mirage.cache.read_through import cache_aware_read
+from mirage.io.cooperative import chunks
 from mirage.commands.builtin.utils.operands import operands_io
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import resolve_source
@@ -14,7 +15,6 @@ from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn
 from mirage.utils.errors import FS_ERRORS, fs_error_line
-from mirage.utils.stream import ensure_stream
 from mirage.utils.width import advance_column, is_space
 
 _TOTAL_MODES = frozenset({"auto", "always", "only", "never"})
@@ -115,7 +115,7 @@ async def wc(src: bytes | AsyncIterator[bytes]) -> WCCounts:
     column = 0
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
-    async for chunk in ensure_stream(src):
+    async for chunk in chunks(src):
         bytes_count += len(chunk)
         lines += chunk.count(b"\n")
         text = decoder.decode(chunk)

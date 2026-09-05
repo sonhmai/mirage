@@ -14,6 +14,8 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.io.cooperative import Checkpoint, chunks
+
 
 def char_width(data: bytes) -> int:
     """How many bytes ``data``'s first character spans, decoded as UTF-8.
@@ -41,7 +43,8 @@ def char_width(data: bytes) -> int:
 class AsyncLineIterator:
 
     def __init__(self, source: AsyncIterator[bytes]) -> None:
-        self._source = source
+        self._source = chunks(source)
+        self._checkpoint = Checkpoint()
         self._buf = b""
         self._exhausted = False
 
@@ -56,21 +59,8 @@ class AsyncLineIterator:
 
     async def readline(self) -> bytes | None:
         """Return next line (without trailing newline), or None at EOF."""
-        while b"\n" not in self._buf:
-            if self._exhausted:
-                if self._buf:
-                    remaining = self._buf
-                    self._buf = b""
-                    return remaining
-                return None
-            try:
-                chunk = await self._source.__anext__()
-            except StopAsyncIteration:
-                self._exhausted = True
-                continue
-            self._buf += chunk
-        line, self._buf = self._buf.split(b"\n", 1)
-        return line
+        data, found = await self.read_until(b"\n")
+        return data if found or data else None
 
     async def read_until(self, delim: bytes) -> tuple[bytes, bool]:
         """Read up to (not including) ``delim``, or to EOF.
@@ -83,19 +73,26 @@ class AsyncLineIterator:
             was found (False means EOF ended the read, which is what
             ``read`` reports as status 1).
         """
-        while delim not in self._buf:
-            if self._exhausted:
-                remaining = self._buf
+        parts = []
+        try:
+            await self._checkpoint.run()
+            while True:
+                index = self._buf.find(delim)
+                if index >= 0:
+                    parts.append(self._buf[:index])
+                    self._buf = self._buf[index + len(delim):]
+                    return b"".join(parts), True
+                parts.append(self._buf)
                 self._buf = b""
-                return remaining, False
-            try:
-                chunk = await self._source.__anext__()
-            except StopAsyncIteration:
-                self._exhausted = True
-                continue
-            self._buf += chunk
-        data, self._buf = self._buf.split(delim, 1)
-        return data, True
+                if self._exhausted:
+                    return b"".join(parts), False
+                try:
+                    self._buf = await self._source.__anext__()
+                except StopAsyncIteration:
+                    self._exhausted = True
+        except BaseException:
+            await self._source.aclose()
+            raise
 
     async def read_chars(self, count: int,
                          delim: bytes | None) -> tuple[bytes, bool]:
@@ -128,6 +125,7 @@ class AsyncLineIterator:
         taken = 0
         need = max(len(delim) if delim is not None else 1, 4)
         while taken < count:
+            await self._checkpoint.run()
             # One pull can split a character or a multibyte delimiter
             # across chunks, so top the buffer up to the widest either
             # could be before reading its first byte as a whole one.

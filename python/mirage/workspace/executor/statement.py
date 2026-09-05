@@ -54,6 +54,22 @@ def record_status(session: Session,
         session.pipe_status = (code, )
 
 
+def carry_status(session: Session) -> None:
+    """Park the status just recorded again, for the boundary that closes
+    the enclosing statement to claim rather than stamp over.
+
+    A conditional list that short-circuits has closed its left pipeline
+    and runs nothing else, and bash reports the list as that pipeline:
+    ``true | false && true`` keeps ``0 1``. The list is not a pipeline
+    of its own, so without this its boundary would stamp the aggregate
+    ``1``.
+
+    Args:
+        session (Session): shell session carrying the status.
+    """
+    session._pipe_status_pending = session.pipe_status
+
+
 async def finish_statement(
     stdout: ByteSource | None,
     io: IOResult,

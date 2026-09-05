@@ -184,10 +184,13 @@ async function install(
   for (const r of redirects) {
     if (typeof r.target === 'number') {
       // Keyed on the descriptor claimed, not the operator's direction:
-      // `2<&-` closes stderr and `0>&-` stdin, as in bash. `<&0` restores
-      // stdin; a dup of a descriptor onto itself changes nothing.
+      // `2<&-` closes stderr and `0>&-` stdin, as in bash. A dup of a
+      // descriptor onto itself changes nothing, so `0<&0` keeps the file
+      // an earlier `exec <f` bound; another descriptor onto stdin
+      // restores the ambient input.
       if (r.fd === FD_STDIN) {
-        session.execStdin = r.target === FD_CLOSE ? new Uint8Array() : null
+        if (r.target === FD_CLOSE) session.execStdin = new Uint8Array()
+        else if (r.target !== FD_STDIN) session.execStdin = null
       } else if (r.target === FD_CLOSE) {
         bind(session, r.fd, CLOSED, false)
       } else {

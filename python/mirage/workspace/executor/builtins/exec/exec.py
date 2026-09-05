@@ -115,10 +115,14 @@ async def _install(dispatch: DispatchFn, session: Session,
         if isinstance(r.target, int):
             # Keyed on the descriptor claimed, not the operator's
             # direction: `2<&-` closes stderr and `0>&-` stdin, as in
-            # bash. `<&0` restores stdin; a dup of a descriptor onto
-            # itself changes nothing.
+            # bash. A dup of a descriptor onto itself changes nothing,
+            # so `0<&0` keeps the file an earlier `exec <f` bound;
+            # another descriptor onto stdin restores the ambient input.
             if r.fd == FD_STDIN:
-                session.exec_stdin = b"" if r.target == FD_CLOSE else None
+                if r.target == FD_CLOSE:
+                    session.exec_stdin = b""
+                elif r.target != FD_STDIN:
+                    session.exec_stdin = None
             elif r.target == FD_CLOSE:
                 _bind(session, r.fd, CLOSED, False)
             else:

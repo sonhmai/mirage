@@ -41,6 +41,18 @@ export function recordStatus(session: Session, code: number, transparent = false
 }
 
 /**
+ * Park the status just recorded again, for the boundary that closes the
+ * enclosing statement to claim rather than stamp over. A conditional
+ * list that short-circuits has closed its left pipeline and runs
+ * nothing else, and bash reports the list as that pipeline:
+ * `true | false && true` keeps `0 1`. The list is not a pipeline of its
+ * own, so without this its boundary would stamp the aggregate `1`.
+ */
+export function carryStatus(session: Session): void {
+  session.pipeStatusPending = session.pipeStatus
+}
+
+/**
  * Finalize a completed statement and seed $? for the next one.
  *
  * Every statement boundary must do the same dance: apply a VALUE

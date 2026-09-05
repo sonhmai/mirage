@@ -18,7 +18,7 @@ import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { divertStatement } from './builtins/exec/index.ts'
-import { finishStatement, recordStatus } from './statement.ts'
+import { carryStatus, finishStatement, recordStatus } from './statement.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
@@ -180,8 +180,10 @@ export async function handleConnection(
     const leftBytes = await finishStatement(leftStdout, leftIo, session, left)
     if (leftIo.exitCode !== 0) {
       // The failing command is left of the final `&&`, which bash
-      // exempts from `set -e`.
+      // exempts from `set -e`. The list ran only its left side, so the
+      // list boundary reports that pipeline.
       session.errexitImmune = true
+      carryStatus(session)
       return [
         leftBytes,
         leftIo,
@@ -207,6 +209,7 @@ export async function handleConnection(
   if (op === NT.OR) {
     const leftBytes = await finishStatement(leftStdout, leftIo, session, left)
     if (leftIo.exitCode === 0) {
+      carryStatus(session)
       return [
         leftBytes,
         leftIo,

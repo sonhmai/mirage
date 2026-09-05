@@ -29,7 +29,9 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.types import NodeType as NT
 from mirage.workspace.executor.builtins.exec import divert_statement
 from mirage.workspace.executor.jobs import handle_background
-from mirage.workspace.executor.statement import finish_statement, record_status
+from mirage.workspace.executor.statement import (carry_status,
+                                                 finish_statement,
+                                                 record_status)
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -169,8 +171,10 @@ async def handle_connection(
                                             left)
         if left_io.exit_code != 0:
             # The failing command is left of the final `&&`, which bash
-            # exempts from `set -e`.
+            # exempts from `set -e`. The list ran only its left side, so
+            # the list boundary reports that pipeline.
             session.errexit_immune = True
+            carry_status(session)
             return left_bytes, left_io, ExecutionNode(
                 op="&&", exit_code=left_io.exit_code, children=children)
         try:
@@ -190,6 +194,7 @@ async def handle_connection(
         left_bytes = await finish_statement(left_stdout, left_io, session,
                                             left)
         if left_io.exit_code == 0:
+            carry_status(session)
             return left_bytes, left_io, ExecutionNode(
                 op="||", exit_code=left_io.exit_code, children=children)
         try:

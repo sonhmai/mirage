@@ -262,7 +262,7 @@ export function getSubshellBody(node: TSNodeLike): TSNodeLike[] {
   return [...node.namedChildren]
 }
 
-const REDIRECT_NODE_TYPES: ReadonlySet<string> = new Set([
+export const REDIRECT_NODE_TYPES: ReadonlySet<string> = new Set([
   NT.FILE_REDIRECT,
   NT.HEREDOC_REDIRECT,
   NT.HERESTRING_REDIRECT,

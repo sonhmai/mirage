@@ -951,6 +951,74 @@
         "stdout": "42 42\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "pipestatus_short_circuited_list_keeps_the_pipeline_it_ran",
+      "seq": 981517,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "true | false && true; echo \"${PIPESTATUS[*]}\"; false | true || true; echo \"${PIPESTATUS[*]}\"; true | false || false | true; echo \"${PIPESTATUS[*]}\"; false | true && true | true | false; echo \"${PIPESTATUS[*]}\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 1\n1 0\n1 0\n0 0 1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipestatus_redirected_statement_is_as_transparent_as_its_command",
+      "seq": 981518,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "false | true; echo hi >/data/pipest_out; echo \"${PIPESTATUS[*]}\"; rm /data/pipest_out; false | true; cat </data/missing; echo \"${PIPESTATUS[*]}\"; false | true; { cat; } </data/missing; echo \"${PIPESTATUS[*]}\"; false | true; true | cat </data/missing; echo \"${PIPESTATUS[*]}\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n1\n1 0\n0 1\n",
+        "stderr": "/data/missing: No such file or directory\n/data/missing: No such file or directory\n/data/missing: No such file or directory\n"
+      }
     }
   ]
 }

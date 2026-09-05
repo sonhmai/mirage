@@ -59,22 +59,28 @@ def test_transparent_statement_keeps_the_inner_record():
     assert s.pipe_status == (1, 0)
 
 
-@pytest.mark.parametrize("line,transparent", [
-    ("{ a; }", True),
-    ("(a)", False),
-    ("(( 1 ))", False),
-    ("! a", True),
-    ("a | b", False),
-    ("a && b", False),
-    ("a > f", True),
-    ("if a; then b; fi", True),
-    ("for i in 1; do a; done", True),
-    ("while a; do b; done", True),
-    ("case x in x) a;; esac", True),
-    ("f() { a; }", True),
-    ("a", False),
-    ("x=1", False),
-])
+@pytest.mark.parametrize(
+    "line,transparent",
+    [
+        ("{ a; }", True),
+        ("(a)", False),
+        ("(( 1 ))", False),
+        ("! a", True),
+        ("a | b", False),
+        ("a && b", False),
+        # A redirected statement is as transparent as what it redirects.
+        ("a > f", False),
+        ("> f", False),
+        ("{ a; } > f", True),
+        ("if a; then b; fi > f", True),
+        ("if a; then b; fi", True),
+        ("for i in 1; do a; done", True),
+        ("while a; do b; done", True),
+        ("case x in x) a;; esac", True),
+        ("f() { a; }", True),
+        ("a", False),
+        ("x=1", False),
+    ])
 def test_pipeline_transparent(line, transparent):
     assert pipeline_transparent(parse(line).named_children[0]) is transparent
 
@@ -86,41 +92,62 @@ async def _out(ws: Workspace, line: str) -> str:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("line,expected", [
-    ("false | true; echo ${PIPESTATUS[@]}", "1 0"),
-    ("false; echo ${PIPESTATUS[@]} $PIPESTATUS ${#PIPESTATUS[@]}", "1 1 1"),
-    ("true | false | true; echo ${PIPESTATUS[1]} ${PIPESTATUS[*]}", "1 0 1 0"),
-    ("(false | true); echo ${PIPESTATUS[@]}", "0"),
-    ("if false | true; then :; fi; echo ${PIPESTATUS[@]}", "0"),
-    ("false | true; x=1; echo ${PIPESTATUS[@]}", "0"),
-    ("false | true; echo ${PIPESTATUS[@]}; echo ${PIPESTATUS[@]}", "1 0\n0"),
-    ("set -o pipefail; false | true; echo $? ${PIPESTATUS[@]}", "1 1 0"),
-    ("echo \"[${PIPESTATUS[@]}]\"", "[]"),
-    ("! false | true; echo $? ${PIPESTATUS[@]}", "1 1 0"),
-    ("f() { false | true; }; f; echo ${PIPESTATUS[@]}", "0"),
-    ("false | true; { true; false; } | echo ${PIPESTATUS[*]}", "1 0"),
-    ("false | true; f() { true; false; }; f | echo ${PIPESTATUS[*]}", "1 0"),
-    ("false | { true; false; }; echo ${PIPESTATUS[*]}", "1 1"),
-    ("false | ( true; false ); echo ${PIPESTATUS[*]}", "1 1"),
-    ("g() { false | true; return 5; }; g; echo ${PIPESTATUS[@]}", "5"),
-    ("exit 3 | true; echo ${PIPESTATUS[@]}", "3 0"),
-    ("false | true > /dev/null; echo ${PIPESTATUS[@]}", "1 0"),
-    ("{ false | true; }; echo ${PIPESTATUS[@]}", "1 0"),
-    ("{ { false | true; }; }; echo ${PIPESTATUS[@]}", "1 0"),
-    ("for i in 1; do false | true; done; echo ${PIPESTATUS[@]}", "1 0"),
-    ("if true; then false | true; fi; echo ${PIPESTATUS[@]}", "1 0"),
-    ("case x in x) false | true;; esac; echo ${PIPESTATUS[@]}", "1 0"),
-    ("false | true; :; echo ${PIPESTATUS[@]}", "0"),
-    ("false | true; [[ -n x ]]; echo ${PIPESTATUS[@]}", "0"),
-    ("false | true; (( 1 )); echo ${PIPESTATUS[@]}", "0"),
-    ("false | true; echo ${PIPESTATUS[5]:-unset} ${#PIPESTATUS[@]} "
-     "${!PIPESTATUS[@]}", "unset 2 0 1"),
-    ("PIPESTATUS=(9 9); echo ${PIPESTATUS[@]}", "0"),
-    ("false | true; f() { :; }; echo ${PIPESTATUS[@]}", "1 0"),
-    ("true && false | true; echo ${PIPESTATUS[@]}", "1 0"),
-    ("false | true && true; echo ${PIPESTATUS[@]}", "0"),
-    ("false && false | true; echo ${PIPESTATUS[@]}", "1"),
-])
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        ("false | true; echo ${PIPESTATUS[@]}", "1 0"),
+        ("false; echo ${PIPESTATUS[@]} $PIPESTATUS ${#PIPESTATUS[@]}",
+         "1 1 1"),
+        ("true | false | true; echo ${PIPESTATUS[1]} ${PIPESTATUS[*]}",
+         "1 0 1 0"),
+        ("(false | true); echo ${PIPESTATUS[@]}", "0"),
+        ("if false | true; then :; fi; echo ${PIPESTATUS[@]}", "0"),
+        ("false | true; x=1; echo ${PIPESTATUS[@]}", "0"),
+        ("false | true; echo ${PIPESTATUS[@]}; echo ${PIPESTATUS[@]}",
+         "1 0\n0"),
+        ("set -o pipefail; false | true; echo $? ${PIPESTATUS[@]}", "1 1 0"),
+        ("echo \"[${PIPESTATUS[@]}]\"", "[]"),
+        ("! false | true; echo $? ${PIPESTATUS[@]}", "1 1 0"),
+        ("f() { false | true; }; f; echo ${PIPESTATUS[@]}", "0"),
+        ("false | true; { true; false; } | echo ${PIPESTATUS[*]}", "1 0"),
+        ("false | true; f() { true; false; }; f | echo ${PIPESTATUS[*]}",
+         "1 0"),
+        ("false | { true; false; }; echo ${PIPESTATUS[*]}", "1 1"),
+        ("false | ( true; false ); echo ${PIPESTATUS[*]}", "1 1"),
+        ("g() { false | true; return 5; }; g; echo ${PIPESTATUS[@]}", "5"),
+        ("exit 3 | true; echo ${PIPESTATUS[@]}", "3 0"),
+        ("false | true > /dev/null; echo ${PIPESTATUS[@]}", "1 0"),
+        ("{ false | true; }; echo ${PIPESTATUS[@]}", "1 0"),
+        ("{ { false | true; }; }; echo ${PIPESTATUS[@]}", "1 0"),
+        ("for i in 1; do false | true; done; echo ${PIPESTATUS[@]}", "1 0"),
+        ("if true; then false | true; fi; echo ${PIPESTATUS[@]}", "1 0"),
+        ("case x in x) false | true;; esac; echo ${PIPESTATUS[@]}", "1 0"),
+        ("false | true; :; echo ${PIPESTATUS[@]}", "0"),
+        ("false | true; [[ -n x ]]; echo ${PIPESTATUS[@]}", "0"),
+        ("false | true; (( 1 )); echo ${PIPESTATUS[@]}", "0"),
+        ("false | true; echo ${PIPESTATUS[5]:-unset} ${#PIPESTATUS[@]} "
+         "${!PIPESTATUS[@]}", "unset 2 0 1"),
+        ("PIPESTATUS=(9 9); echo ${PIPESTATUS[@]}", "0"),
+        ("false | true; f() { :; }; echo ${PIPESTATUS[@]}", "1 0"),
+        ("true && false | true; echo ${PIPESTATUS[@]}", "1 0"),
+        ("false | true && true; echo ${PIPESTATUS[@]}", "0"),
+        ("false && false | true; echo ${PIPESTATUS[@]}", "1"),
+        # A short-circuited list reports the pipeline it did run.
+        ("true | false && true; echo ${PIPESTATUS[@]}", "0 1"),
+        ("false | true || true; echo ${PIPESTATUS[@]}", "1 0"),
+        ("true | false || false | true; echo ${PIPESTATUS[@]}", "1 0"),
+        # A redirected statement is as transparent as what it redirects: a
+        # simple command stamps its one-segment status whether or not the
+        # redirect opened, a redirected group keeps the stale record.
+        ("false | true; echo hi >/f; echo ${PIPESTATUS[@]}", "0"),
+        ("false | true; cat </missing; echo ${PIPESTATUS[@]}", "1"),
+        ("false | true; (cat) </missing; echo ${PIPESTATUS[@]}", "1"),
+        ("false | true; </missing; echo ${PIPESTATUS[@]}", "1"),
+        ("false | true; { cat; } </missing; echo ${PIPESTATUS[@]}", "1 0"),
+        ("false | true; if true; then :; fi </missing; echo ${PIPESTATUS[@]}",
+         "1 0"),
+        ("false | true; true | cat </missing; echo ${PIPESTATUS[@]}", "0 1"),
+    ])
 async def test_pipestatus_matches_bash(line, expected):
     # Every expectation here was pinned against GNU bash 5.2 on
     # debian:stable-slim.

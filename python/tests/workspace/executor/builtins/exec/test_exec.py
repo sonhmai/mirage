@@ -75,6 +75,19 @@ async def test_stdin_redirect_feeds_read():
 
 
 @pytest.mark.asyncio
+async def test_stdin_dup_onto_itself_keeps_the_bound_file():
+    # bash: `0<&0` and `0>&0` are a descriptor dup onto itself, so the
+    # file an earlier `exec <f` bound stays; `<&-` still closes it.
+    ws = _ws()
+    io = await ws.execute(
+        "printf 'l1\\nl2\\n' > /data/in; exec < /data/in; exec 0<&0; "
+        "read a; exec 0>&0; read b; echo $a-$b; exec <&-; read c; echo rc=$?",
+        session_id="reader")
+    assert (await io.stdout_str()) == "l1-l2\nrc=1\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_bare_exec_is_a_noop():
     ws = _ws()
     io = await ws.execute("exec; echo ok", session_id="reader")

@@ -1780,12 +1780,13 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fs/b /data/fs/a && printf x > /data/fs/b/x && printf y > /data/fs/a/y && cd /data/fs && find b a -depth; find b a -depth -print -delete; echo rc=$?; find . -mindepth 1 | wc -l; cd / && rm -r /data/fs",
+      "command": "mkdir -p /data/fs/b /data/fs/a && printf x > /data/fs/b/x && printf y > /data/fs/a/y && printf k > /data/fs/b/keep && printf k > /data/fs/a/keep && cd /data/fs && find b a -depth; find b a -depth -type f -name '?' -print -delete; echo rc=$?; find . -mindepth 1 | sort; cd / && rm -r /data/fs",
       "expect": {
         "exit": 0,
-        "stdout": "b/x\nb\na/y\na\nb/x\nb\na/y\na\nrc=0\n0\n",
+        "stdout": "b/keep\nb/x\nb\na/keep\na/y\na\nb/x\na/y\nrc=0\n./a\n./a/keep\n./b\n./b/keep\n",
         "stderr": ""
-      }
+      },
+      "note": "A directory that loses its last file vanishes on s3, gridfs and hf, so every directory keeps a file and -delete takes only the single-letter names; the print pins the start-point order."
     },
     {
       "id": "find_depth_orders_a_trailing_slash_start_point_last",
@@ -1814,12 +1815,13 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/ft/d/sub && printf A > /data/ft/d/a.txt && printf B > /data/ft/d/sub/b.txt && printf K > /data/ft/keep && cd /data/ft && find d/ -depth; find d/ -delete; echo rc=$?; find . -mindepth 1; cd / && rm -r /data/ft",
+      "command": "mkdir -p /data/ft/d/sub && printf A > /data/ft/d/a.txt && printf B > /data/ft/d/sub/b.txt && printf K > /data/ft/d/keep && printf K > /data/ft/d/sub/keep && cd /data/ft && find d/ -depth; find d/ -name '*.txt' -delete; echo rc=$?; find d/ | sort; cd / && rm -r /data/ft",
       "expect": {
         "exit": 0,
-        "stdout": "d/a.txt\nd/sub/b.txt\nd/sub\nd/\nrc=0\n./keep\n",
+        "stdout": "d/a.txt\nd/keep\nd/sub/b.txt\nd/sub/keep\nd/sub\nd/\nrc=0\nd/\nd/keep\nd/sub\nd/sub/keep\n",
         "stderr": ""
-      }
+      },
+      "note": "A directory that loses its last file vanishes on s3, gridfs and hf, so both directories keep a file and -delete takes only the .txt rows; the unit tests remove the whole tree through the trailing-slash start point on ram."
     },
     {
       "id": "find_ls_renders_finds_own_layout",

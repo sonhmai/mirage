@@ -440,6 +440,15 @@ const CASES: [string, string, string, string, number][] = [
     0,
   ],
   [
+    // bash 5.2: `0<&0` and `0>&0` are a descriptor dup onto itself, so
+    // the file an earlier `exec <f` bound stays; `<&-` still closes it.
+    'exec_stdin_dup_onto_itself_keeps_the_bound_file',
+    "printf 'l1\\nl2\\n' > /data/in; ( exec < /data/in; exec 0<&0; read a; exec 0>&0; read b; echo $a-$b; exec <&-; read c; echo rc=$? )",
+    'l1-l2\nrc=1\n',
+    '',
+    0,
+  ],
+  [
     'exec_failed_redirect_diagnostic_goes_where_stderr_pointed',
     '( exec 2> /data/e < /data/missing; echo toerr >&2 ); cat /data/e',
     '/data/missing: No such file or directory\n',

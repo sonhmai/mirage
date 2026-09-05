@@ -297,7 +297,7 @@ def get_subshell_body(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     return list(node.named_children)
 
 
-_REDIRECT_NODE_TYPES = frozenset({
+REDIRECT_NODE_TYPES = frozenset({
     NT.FILE_REDIRECT,
     NT.HEREDOC_REDIRECT,
     NT.HERESTRING_REDIRECT,
@@ -425,7 +425,7 @@ def get_redirects(
     creating/truncating the file).
     """
     nc = node.named_children
-    command = nc[0] if nc and nc[0].type not in _REDIRECT_NODE_TYPES else None
+    command = nc[0] if nc and nc[0].type not in REDIRECT_NODE_TYPES else None
     redirects: list[Redirect] = []
 
     claimed: int | None = None

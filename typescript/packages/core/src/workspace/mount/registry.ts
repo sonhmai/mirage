@@ -121,6 +121,7 @@ export class MountRegistry {
       m.resource.index ?? null,
       m.prefix,
       cachesReads(m.resource),
+      () => !m.retiring,
     )
   }
 

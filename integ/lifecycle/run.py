@@ -30,12 +30,31 @@ from mirage.context import reset_current_session, set_current_session
 from mirage.errors import classify
 from mirage.policy import Policy
 from mirage.policy.types import CommandContext, Deny, OpsContext
-from mirage.resource.registry import build_resource
+from mirage.resource.ram import RAMResource
+from mirage.resource.registry import build_resource, register_resource
 from mirage.runtime.types import ScriptSource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 
 SUITE = Path(__file__).with_name("cases.json")
+
+
+class CachedRAMResource(RAMResource):
+    """A local fixture exercising the same read cache as remote resources."""
+
+    caches_reads = True
+
+    def __init__(self, files: dict[str, str] | None = None) -> None:
+        super().__init__()
+        self.load_state({
+            "files": {
+                path: data.encode()
+                for path, data in (files or {}).items()
+            }
+        })
+
+
+register_resource("cached-ram", CachedRAMResource)
 
 
 class RulePolicy(Policy):
@@ -69,6 +88,9 @@ async def action(ws: Workspace, step: dict[str, Any],
                  policies: dict[str, RulePolicy]) -> Any:
     """Run one host API action; no shell command mutates the mount table."""
     op = step["op"]
+    if op == "cached":
+        value = await ws.cache.get(step["path"])
+        return value.decode() if value is not None else None
     if op in {"read", "write", "readdir", "stat"} and "session" in step:
         token = set_current_session(ws.get_session(step["session"]))
         try:

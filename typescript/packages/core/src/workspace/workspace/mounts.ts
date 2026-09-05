@@ -58,6 +58,7 @@ export interface UnmountDeps {
   opsRegistry: OpsRegistry
   opened: Set<Resource>
   openOrder: Resource[]
+  isShuttingDown: () => boolean
 }
 
 /**
@@ -79,8 +80,28 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
   if (norm === HISTORY_PREFIX + '/') {
     throw new Error(`cannot unmount history view: ${HISTORY_PREFIX}`)
   }
-  const removed = deps.registry.unmount(prefix)
-  const resource = removed.resource
+  const entry = deps.registry.tryMountForPrefix(prefix)
+  if (entry === null) throw new Error(`no mount at prefix: ${norm}`)
+  if (entry.retiring) throw new Error(`mount is being unmounted: ${norm}`)
+  entry.retiring = true
+  try {
+    const cache = deps.registry.fileCache
+    if (cache !== null) {
+      // Retain the mount until cleanup succeeds; retiring prevents new
+      // cache fills while a replacement is waiting for this prefix.
+      await cache.remove(norm.slice(0, -1))
+      await cache.evictPrefix(norm)
+    }
+    if (deps.isShuttingDown()) throw new Error('Workspace is closed')
+    if (deps.registry.tryMountForPrefix(prefix) !== entry) {
+      throw new Error(`mount changed while unmounting: ${prefix}`)
+    }
+    deps.registry.unmount(prefix)
+  } catch (error) {
+    entry.retiring = false
+    throw error
+  }
+  const resource = entry.resource
   const remaining = deps.registry.allMounts()
   const stillMounted = remaining.some((m) => m.resource === resource)
   const kindStillMounted = remaining.some((m) => m.resource.kind === resource.kind)

@@ -70,6 +70,7 @@ def _dispatcher(policies: Policies) -> tuple[Dispatcher, MagicMock]:
     namespace.follow = MagicMock(side_effect=lambda p: p)
     mount = MagicMock()
     mount.prefix = "/data/"
+    mount.retiring = False
     mount.resource.caches_reads = True
     mount.execute_op = AsyncMock(return_value=b"cold")
     namespace.try_mount_for = MagicMock(return_value=mount)

@@ -51,6 +51,7 @@ async def _set_cached(
     path: str,
     data: bytes,
     records: list[OpRecord] | None,
+    is_cacheable: Callable[[str], bool] | None,
 ) -> None:
     fingerprint = read_fingerprint(records, path)
     if fingerprint is None and await cache.get(path) == data:
@@ -59,12 +60,14 @@ async def _set_cached(
         # fingerprint stamped on the cold read with the MD5 default and
         # force ALWAYS mode to evict and refetch on every read.
         return
-    await cache.set(path, data, fingerprint=fingerprint)
+    if is_cacheable is None or is_cacheable(path):
+        await cache.set(path, data, fingerprint=fingerprint)
 
 
 def _drop_drain_task(cache: FileCacheMixin, path: str,
                      task: asyncio.Task[Any]) -> None:
-    cache._drain_tasks.pop(path, None)
+    if cache._drain_tasks.get(path) is task:
+        cache._drain_tasks.pop(path, None)
 
 
 async def apply_io(
@@ -83,18 +86,19 @@ async def apply_io(
         if data is None:
             continue
         if isinstance(data, bytes):
-            await _set_cached(cache, path, data, records)
+            await _set_cached(cache, path, data, records, is_cacheable)
         elif isinstance(data, CachableAsyncIterator):
             if data.exhausted:
                 await _set_cached(cache, path, b"".join(data.buffered_chunks),
-                                  records)
+                                  records, is_cacheable)
             else:
                 if (hasattr(cache, "_drain_tasks")
                         and path not in cache._drain_tasks
                         and not await cache.exists(path)):
                     task = asyncio.create_task(
                         _background_drain(cache, path, data,
-                                          cache.drain_budget, records))
+                                          cache.drain_budget, records,
+                                          is_cacheable))
                     cache._drain_tasks[path] = task
                     task.add_done_callback(
                         partial(_drop_drain_task, cache, path))
@@ -112,6 +116,7 @@ async def _background_drain(
     it: CachableAsyncIterator,
     max_bytes: int,
     records: list[OpRecord] | None = None,
+    is_cacheable: Callable[[str], bool] | None = None,
 ) -> None:
     """Drain an unconsumed stream and write to cache.
 
@@ -126,9 +131,11 @@ async def _background_drain(
     try:
         materialized = await it.drain_bounded(max_bytes)
         if materialized is not None:
-            await cache.add(path,
-                            materialized,
-                            fingerprint=read_fingerprint(records, path))
+            if (cache._drain_tasks.get(path) is asyncio.current_task()
+                    and (is_cacheable is None or is_cacheable(path))):
+                await cache.add(path,
+                                materialized,
+                                fingerprint=read_fingerprint(records, path))
         else:
             logger.info(
                 "cache drain budget exceeded for %s "

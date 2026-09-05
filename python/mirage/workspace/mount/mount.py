@@ -148,6 +148,7 @@ class MountEntry:
         self.resource = resource
         self.mode = mode
         self.consistency = consistency
+        self.retiring = False
         self.cache_manager: CacheManager | None = None
         # Per-path revision pins installed at Workspace.load time. Read
         # functions consult these via the ``revision_for`` contextvar

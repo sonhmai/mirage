@@ -141,7 +141,8 @@ class MountRegistry:
 
     def _attach_manager(self, m: MountEntry) -> None:
         m.cache_manager = CacheManager(self._file_cache, m.resource.index,
-                                       m.prefix, m.resource.caches_reads)
+                                       m.prefix, m.resource.caches_reads,
+                                       lambda: not m.retiring)
 
     def mount(
         self,

@@ -34,17 +34,20 @@ export class CacheManager {
   private readonly index: IndexCacheStore | null
   private readonly prefix: string
   private readonly cachesReads: boolean
+  private readonly isActive: () => boolean
 
   constructor(
     fileCache: FileCache | null,
     index: IndexCacheStore | null,
     prefix: string,
     cachesReads: boolean,
+    isActive: () => boolean = () => true,
   ) {
     this.fileCache = fileCache
     this.index = index
     this.prefix = rstripSlash(prefix)
     this.cachesReads = cachesReads
+    this.isActive = isActive
   }
 
   /**
@@ -98,10 +101,11 @@ export class CacheManager {
    * command knowing about it. No-op for local or non-caching mounts.
    */
   async cachedBytes(path: PathSpec): Promise<Uint8Array | null> {
-    if (!this.cachesReads || this.fileCache === null) return null
+    if (!this.cachesReads || this.fileCache === null || !this.isActive()) return null
     const key = this.cacheKey(path)
     if (await this.fileCache.exists(key)) {
-      return this.fileCache.get(key)
+      const cached = await this.fileCache.get(key)
+      return this.isActive() ? cached : null
     }
     return null
   }

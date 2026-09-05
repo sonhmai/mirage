@@ -22,11 +22,100 @@ from mirage.resource.ram import RAMResource
 from mirage.runtime.base import Runtime
 from mirage.shell.console import Channel
 from mirage.shell.job_table import JobStatus
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 from mirage.workspace.types import ExecutionNode
 
 _RELEASE: list[asyncio.Event] = []
+
+
+@pytest.mark.asyncio
+async def test_retired_command_cannot_cache_bytes_for_replacement_mount():
+
+    class CachedRAM(RAMResource):
+        caches_reads = True
+
+    old = CachedRAM()
+    old.load_state({"files": {"/file": b"old"}})
+    replacement = CachedRAM()
+    replacement.load_state({"files": {"/file": b"new"}})
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def gate(_inv):
+        entered.set()
+        await release.wait()
+        return None, IOResult()
+
+    ws = Workspace({"/data": old})
+    ws.register_cli("gate", CLISpec(name="gate", fn=gate))
+    retired = ws.mount("/data").cache_manager
+    running = asyncio.create_task(ws.execute("cat /data/file; gate"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        await ws.unmount("/data")
+        ws.add_mount("/data", replacement)
+        release.set()
+        result = await asyncio.wait_for(running, timeout=5)
+        assert result.stdout == b"old"
+        assert await ws.cache.get("/data/file") is None
+        assert (await ws.execute("cat /data/file")).stdout == b"new"
+        assert await ws.cache.get("/data/file") == b"new"
+        assert retired is not None
+        assert await retired.cached_bytes(
+            PathSpec(virtual="/data/file",
+                     directory="/data/",
+                     resource_path="file")) is None
+    finally:
+        release.set()
+        await asyncio.gather(running, return_exceptions=True)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_eviction", [False, True])
+async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
+        monkeypatch, fail_eviction):
+    resource = RAMResource()
+    ws = Workspace({"/data": resource})
+    cache = ws.cache
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    evict = cache.evict_prefix
+
+    async def blocked_evict(prefix):
+        entered.set()
+        await release.wait()
+        if fail_eviction:
+            raise RuntimeError("cache unavailable")
+        await evict(prefix)
+
+    monkeypatch.setattr(cache, "evict_prefix", blocked_evict)
+    await cache.set("/data", b"root")
+    await cache.set("/data/file", b"old")
+    await cache.set("/database/file", b"peer")
+    removing = asyncio.create_task(ws.unmount("data/"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        with pytest.raises(ValueError, match="duplicate mount prefix"):
+            ws.add_mount("/data", RAMResource())
+        release.set()
+        if fail_eviction:
+            with pytest.raises(RuntimeError, match="cache unavailable"):
+                await removing
+            assert ws.mount("/data").resource is resource
+            monkeypatch.setattr(cache, "evict_prefix", evict)
+            await ws.unmount("/data")
+        else:
+            await removing
+        assert await cache.get("/data") is None
+        assert await cache.get("/data/file") is None
+        assert await cache.get("/database/file") == b"peer"
+        ws.add_mount("/data", RAMResource())
+    finally:
+        release.set()
+        await asyncio.gather(removing, return_exceptions=True)
+        await ws.close()
 
 
 def _workspace() -> Workspace:

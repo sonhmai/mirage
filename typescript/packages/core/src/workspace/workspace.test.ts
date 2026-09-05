@@ -12,13 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { CacheConfig } from '../cache/file/config.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import { IndexType, LookupStatus } from '../cache/index/config.ts'
 import { RedisIndexCacheStore } from '../cache/index/redis.ts'
+import { CLISpec } from '../commands/cli/types.ts'
+import { IOResult } from '../io/types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
-import { FileType, MountMode, ResourceName, type PathSpec } from '../types.ts'
+import { FileType, MountMode, ResourceName, PathSpec } from '../types.ts'
 import { BaseResource, type Resource } from '../resource/base.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
@@ -42,6 +44,62 @@ class MockResource extends BaseResource implements Resource {
 }
 
 describe('Workspace lifecycle', () => {
+  it('does not cache a retired command result for a replacement mount', async () => {
+    class CachedRAM extends RAMResource {
+      override readonly cachesReads = true
+    }
+    const old = new CachedRAM()
+    old.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('old') } })
+    const replacement = new CachedRAM()
+    replacement.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('new') } })
+    let enter = (): void => undefined
+    let resume = (): void => undefined
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    const release = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    const ws = new Workspace({ '/data': old }, { shellParser: await getTestParser() })
+    ws.registerCli(
+      'gate',
+      new CLISpec({
+        name: 'gate',
+        fn: async () => {
+          enter()
+          await release
+          return [null, new IOResult()]
+        },
+      }),
+    )
+    const retired = ws.mount('/data').cacheManager
+    const running = ws.execute('cat /data/file; gate')
+    try {
+      await entered
+      await ws.unmount('/data')
+      ws.addMount('/data', replacement)
+      resume()
+      expect(new TextDecoder().decode((await running).stdout)).toBe('old')
+      expect(await ws.cache.get('/data/file')).toBeNull()
+      expect(new TextDecoder().decode((await ws.execute('cat /data/file')).stdout)).toBe('new')
+      expect(await ws.cache.get('/data/file')).toEqual(new TextEncoder().encode('new'))
+      expect(retired).not.toBeNull()
+      expect(
+        await retired?.cachedBytes(
+          new PathSpec({
+            virtual: '/data/file',
+            directory: '/data/',
+            resourcePath: 'file',
+          }),
+        ),
+      ).toBeNull()
+    } finally {
+      resume()
+      await running
+      await ws.close()
+    }
+  })
+
   it('does not open resources at construction time', () => {
     const ram = new MockResource()
     new Workspace({ '/data': ram })
@@ -233,6 +291,59 @@ describe('Workspace.execute AbortSignal', () => {
 })
 
 describe('Workspace.unmount', () => {
+  it.each([false, true])(
+    'retains a prefix until cache cleanup succeeds (failure=%s)',
+    async (fails) => {
+      const resource = new RAMResource()
+      const ws = new Workspace({ '/data': resource })
+      const cache = ws.cache
+      let enter = (): void => undefined
+      let resume = (): void => undefined
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve
+      })
+      const release = new Promise<void>((resolve) => {
+        resume = resolve
+      })
+      const evict = cache.evictPrefix.bind(cache)
+      vi.spyOn(cache, 'evictPrefix').mockImplementationOnce(async (prefix) => {
+        enter()
+        await release
+        if (fails) throw new Error('cache unavailable')
+        await evict(prefix)
+      })
+      const bytes = new TextEncoder()
+      await cache.set('/data', bytes.encode('root'))
+      await cache.set('/data/file', bytes.encode('old'))
+      await cache.set('/database/file', bytes.encode('peer'))
+      const removing = ws.unmount('data/').then(
+        () => null,
+        (error: unknown) => error,
+      )
+      try {
+        await entered
+        expect(() => ws.addMount('/data', new RAMResource())).toThrow('duplicate mount prefix')
+        resume()
+        const result = await removing
+        if (fails) {
+          expect(result).toEqual(new Error('cache unavailable'))
+          expect(ws.mount('/data').resource).toBe(resource)
+          await ws.unmount('/data')
+        } else {
+          expect(result).toBeNull()
+        }
+        expect(await cache.get('/data')).toBeNull()
+        expect(await cache.get('/data/file')).toBeNull()
+        expect(await cache.get('/database/file')).toEqual(bytes.encode('peer'))
+        ws.addMount('/data', new RAMResource())
+      } finally {
+        resume()
+        await removing
+        await ws.close()
+      }
+    },
+  )
+
   it.each([false, true])(
     'preserves root operations after removing every user RAM mount (explicit root: %s)',
     async (explicitRoot) => {

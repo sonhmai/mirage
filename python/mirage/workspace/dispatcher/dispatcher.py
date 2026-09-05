@@ -358,7 +358,7 @@ class Dispatcher:
         if caches_reads and not raw and op in DISPATCH_READ_OPS:
             cached = await self._cache.get(path.virtual)
             if cached is not None and await self._reconciler.may_serve_cached(
-                    mount, path.virtual):
+                    mount, path.virtual) and not mount.retiring:
                 # The cache holds the whole object, so a ranged read is
                 # answered by slicing it, never by handing back the
                 # whole file: the window is what the caller asked for
@@ -873,19 +873,32 @@ class Dispatcher:
         raw, _ = await self.dispatch("readdir", scope)
         return raw
 
-    async def apply_io(self,
-                       io: IOResult,
-                       records: list[OpRecord] | None = None) -> None:
+    async def apply_io(
+            self,
+            io: IOResult,
+            records: list[OpRecord] | None = None,
+            is_cacheable: Callable[[str], bool] | None = None) -> None:
         await cache_io.apply_io(self._cache,
                                 io,
-                                self.is_cacheable_path,
+                                is_cacheable or self.is_cacheable_path,
                                 records=records)
+
+    def capture_cacheable_paths(self) -> Callable[[str], bool]:
+        """Bind deferred command results to the mounts that produced them."""
+        mounts = {m.prefix: m for m in self._namespace.registry.mounts()}
+
+        def cacheable(path: str) -> bool:
+            mount = self._namespace.try_mount_for(path)
+            return (mount is not None and mounts.get(mount.prefix) is mount
+                    and not mount.retiring and mount.resource.caches_reads)
+
+        return cacheable
 
     def is_cacheable_path(self, path: str) -> bool:
         mount = self._namespace.try_mount_for(path)
         if mount is None:
             return False
-        return mount.resource.caches_reads
+        return not mount.retiring and mount.resource.caches_reads
 
     async def invalidate_all_after_remote(self) -> None:
         """Drop the file cache and every mount index wholesale.

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import inspect
+from collections.abc import Callable
 
 from mirage.cache.index import IndexConfig
 from mirage.ops import Ops
@@ -136,7 +137,8 @@ def install_mounts(registry: MountRegistry, specs: list[MountSpec],
     return implicit_root
 
 
-async def unmount(registry: MountRegistry, ops: Ops, prefix: str) -> None:
+async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
+                  is_shutting_down: Callable[[], bool]) -> None:
     """Remove one mount, closing its resource if nothing else uses it.
 
     The virtual root, the device mount, and the history view are
@@ -148,6 +150,7 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str) -> None:
         registry (MountRegistry): the workspace's mount table.
         ops (Ops): the ops facade to detach the prefix from.
         prefix (str): the mount's virtual prefix.
+        is_shutting_down: live admission check after asynchronous cleanup.
 
     Raises:
         ValueError: the prefix names a permanent mount.
@@ -160,7 +163,27 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str) -> None:
         raise ValueError("cannot unmount reserved prefix: '/dev/'")
     if norm == HISTORY_PREFIX + "/":
         raise ValueError(f"cannot unmount history view: {HISTORY_PREFIX!r}")
-    removed = registry.unmount(prefix)
+    entry = registry.try_mount_for_prefix(prefix)
+    if entry is None:
+        raise ValueError(f"no mount at prefix: {norm!r}")
+    if entry.retiring:
+        raise ValueError(f"mount is being unmounted: {norm!r}")
+    entry.retiring = True
+    try:
+        cache = registry.file_cache
+        if cache is not None:
+            # Retain the mount until cleanup succeeds; retiring prevents new
+            # cache fills while a replacement is waiting for this prefix.
+            await cache.remove(norm.rstrip("/"))
+            await cache.evict_prefix(norm)
+        if is_shutting_down():
+            raise RuntimeError("Workspace is closed")
+        if registry.try_mount_for_prefix(prefix) is not entry:
+            raise ValueError(f"mount changed while unmounting: {prefix!r}")
+        removed = registry.unmount(prefix)
+    except BaseException:
+        entry.retiring = False
+        raise
     ops.unmount(prefix)
     remaining = registry.mounts()
     still_instance = any(m.resource is removed.resource for m in remaining)

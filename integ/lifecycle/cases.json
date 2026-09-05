@@ -1936,6 +1936,157 @@
           "op": "close"
         }
       ]
+    },
+    {
+      "id": "remount_evicts_the_previous_resources_cached_bytes",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "resource": "cached-ram",
+            "config": {
+              "files": {
+                "/file.txt": "old account\n"
+              }
+            }
+          },
+          "/database": {
+            "resource": "cached-ram",
+            "config": {
+              "files": {
+                "/file.txt": "peer\n"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cat /data/file.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "old account\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/file.txt",
+          "expect": {
+            "value": "old account\n"
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /database/file.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "peer\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/database/file.txt",
+          "expect": {
+            "value": "peer\n"
+          }
+        },
+        {
+          "op": "unmount",
+          "path": "/data"
+        },
+        {
+          "op": "cached",
+          "path": "/data/file.txt",
+          "expect": {
+            "value": null
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/database/file.txt",
+          "expect": {
+            "value": "peer\n"
+          }
+        },
+        {
+          "op": "mount",
+          "path": "/data",
+          "resource": "cached-ram",
+          "config": {
+            "files": {
+              "/file.txt": "new account\n"
+            }
+          },
+          "expect": {
+            "value": "/data/"
+          }
+        },
+        {
+          "op": "read",
+          "path": "/data/file.txt",
+          "expect": {
+            "value": "new account\n"
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/file.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "new account\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/file.txt",
+          "expect": {
+            "value": "new account\n"
+          }
+        },
+        {
+          "op": "unmount",
+          "path": "/data"
+        },
+        {
+          "op": "mount",
+          "path": "/data",
+          "resource": "cached-ram",
+          "config": {
+            "files": {}
+          },
+          "expect": {
+            "value": "/data/"
+          }
+        },
+        {
+          "op": "read",
+          "path": "/data/file.txt",
+          "expect": {
+            "errno": "ENOENT"
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /database/file.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "peer\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
     }
   ]
 }

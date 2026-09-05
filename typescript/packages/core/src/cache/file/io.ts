@@ -49,6 +49,7 @@ async function setCached(
   path: string,
   data: Uint8Array,
   records: readonly OpRecord[] | undefined,
+  isCacheable: ((path: string) => boolean) | undefined,
 ): Promise<void> {
   const fingerprint = readFingerprint(records, path)
   if (fingerprint === null && bytesEqual(await cache.get(path), data)) {
@@ -58,7 +59,9 @@ async function setCached(
     // force ALWAYS mode to evict and refetch on every read.
     return
   }
-  await cache.set(path, data, { fingerprint })
+  if (isCacheable === undefined || isCacheable(path)) {
+    await cache.set(path, data, { fingerprint })
+  }
 }
 
 export async function applyIo(
@@ -73,14 +76,21 @@ export async function applyIo(
     const source = io.reads[path] ?? io.writes[path]
     if (source === undefined) continue
     if (source instanceof Uint8Array) {
-      await setCached(cache, path, source, records)
+      await setCached(cache, path, source, records, isCacheable)
     } else if (source instanceof CachableAsyncIterator) {
       if (source.exhausted) {
-        await setCached(cache, path, concat(source.bufferedChunks), records)
+        await setCached(cache, path, concat(source.bufferedChunks), records, isCacheable)
       } else {
         const tasks = cache.drainTasks
         if (tasks !== undefined && !tasks.has(path) && !(await cache.exists(path))) {
-          const task = backgroundDrain(cache, tasks, path, source, drainBudget(cache), records)
+          const task: Promise<void> = backgroundDrain(
+            cache,
+            path,
+            source,
+            drainBudget(cache),
+            () => tasks.get(path) === task && (isCacheable === undefined || isCacheable(path)),
+            records,
+          )
           tasks.set(path, task)
           void task.finally(() => {
             if (tasks.get(path) === task) tasks.delete(path)
@@ -89,7 +99,7 @@ export async function applyIo(
       }
     } else {
       const data = await materialize(source)
-      await setCached(cache, path, data, records)
+      await setCached(cache, path, data, records, isCacheable)
     }
   }
   for (const path of Object.keys(io.writes)) {
@@ -106,16 +116,16 @@ export async function applyIo(
 // their read record lazily, once the GET response arrives.
 async function backgroundDrain(
   cache: FileCache,
-  tasks: Map<string, Promise<void>>,
   path: string,
   it: CachableAsyncIterator,
   maxBytes: number,
+  isCurrent: () => boolean,
   records?: readonly OpRecord[],
 ): Promise<void> {
   try {
     const materialized = await it.drainBounded(maxBytes)
     if (materialized === null) return
-    if (tasks.has(path)) {
+    if (isCurrent()) {
       await cache.add(path, materialized, { fingerprint: readFingerprint(records, path) })
     }
   } catch (err) {

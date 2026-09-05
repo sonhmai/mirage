@@ -880,6 +880,7 @@ export class Workspace {
         opsRegistry: this.opsRegistry,
         opened: this.opened,
         openOrder: this.openOrder,
+        isShuttingDown: () => this.isShuttingDown(),
       },
       prefix,
     )

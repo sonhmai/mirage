@@ -89,6 +89,7 @@ export class MountEntry {
   readonly resource: Resource
   mode: MountMode
   readonly consistency: ConsistencyPolicy
+  retiring = false
 
   /**
    * Per-path revision pins installed at Workspace.load time. Read

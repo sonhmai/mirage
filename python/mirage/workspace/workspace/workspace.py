@@ -513,7 +513,8 @@ class Workspace:
     async def unmount(self, prefix: str) -> None:
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
-        await unmount_prefix(self._registry, self._ops, prefix)
+        await unmount_prefix(self._registry, self._ops, prefix,
+                             lambda: self._shutting_down)
 
     def set_mount_mode(self, prefix: str, mode: MountMode) -> None:
         """Change an exact mount's ceiling, retaining data and session caps.
@@ -1123,10 +1124,14 @@ class Workspace:
 
     # ── execution ────────────────────────────────────────────────────────────
 
-    async def apply_io(self,
-                       io: IOResult,
-                       records: list[OpRecord] | None = None) -> None:
-        await self._dispatcher.apply_io(io, records=records)
+    async def apply_io(
+            self,
+            io: IOResult,
+            records: list[OpRecord] | None = None,
+            is_cacheable: Callable[[str], bool] | None = None) -> None:
+        await self._dispatcher.apply_io(io,
+                                        records=records,
+                                        is_cacheable=is_cacheable)
 
     @overload
     async def execute(

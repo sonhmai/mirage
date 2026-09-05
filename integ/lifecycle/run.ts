@@ -17,13 +17,16 @@ import { readFileSync } from 'node:fs'
 import {
   Workspace as NodeWorkspace,
   buildResource as buildNodeResource,
+  registerResourceFactory as registerNodeResource,
 } from '@struktoai/mirage-node'
 import {
   Workspace as BrowserWorkspace,
   buildResource as buildBrowserResource,
+  registerResourceFactory as registerBrowserResource,
 } from '@struktoai/mirage-browser'
 import { MountMode } from '@struktoai/mirage-core/types'
 import type { Resource } from '@struktoai/mirage-core/resource/base'
+import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
 import type {
   Workspace,
   WorkspaceOptions,
@@ -53,7 +56,7 @@ interface Case {
 
 type Step = (
   | ({ op: 'mount'; path: string; mode?: MountMode } & ResourceConfig)
-  | { op: 'unmount' | 'read' | 'readdir' | 'stat'; path: string }
+  | { op: 'unmount' | 'read' | 'readdir' | 'stat' | 'cached'; path: string }
   | { op: 'write'; path: string; data: string }
   | { op: 'exec'; command: string; session?: string }
   | { op: 'set_mode'; path: string; mode: MountMode }
@@ -102,6 +105,25 @@ const HOSTS: Host[] = [
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
+class CachedRAMResource extends RAMResource {
+  override readonly cachesReads = true
+}
+
+// Register a fixture through the same factory extension point as an embedder.
+for (const register of [registerNodeResource, registerBrowserResource]) {
+  register('cached-ram', (config) => {
+    const resource = new CachedRAMResource()
+    const files = (config.files ?? {}) as Record<string, string>
+    resource.loadState({
+      type: 'ram',
+      files: Object.fromEntries(
+        Object.entries(files).map(([path, data]) => [path, ENC.encode(data)]),
+      ),
+    })
+    return Promise.resolve(resource)
+  })
+}
+
 async function action(
   host: Host,
   ws: Workspace,
@@ -113,6 +135,10 @@ async function action(
     return runWithSession(ws.getSession(session), () => action(host, ws, unbound, policies))
   }
   switch (step.op) {
+    case 'cached': {
+      const value = await ws.cache.get(step.path)
+      return value === null ? null : DEC.decode(value)
+    }
     case 'mount': {
       const resource = await host.build(step.resource, step.config ?? {})
       try {

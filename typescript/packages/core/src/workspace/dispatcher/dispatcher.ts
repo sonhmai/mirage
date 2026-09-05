@@ -332,7 +332,11 @@ export class Dispatcher {
     const raw = kwargs?.filetype === null
     if (caches && !raw && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
-      if (cached !== null && (await this.reconciler.mayServeCached(mount, p.virtual))) {
+      if (
+        cached !== null &&
+        (await this.reconciler.mayServeCached(mount, p.virtual)) &&
+        !mount.retiring
+      ) {
         // The cache holds the whole object, so a ranged read is answered
         // by slicing it, never by handing back the whole file: the
         // window is what the caller asked for instead of the file, and
@@ -1022,10 +1026,30 @@ export class Dispatcher {
   isCacheablePath = (path: string): boolean => {
     const mount = this.namespace.tryMountFor(path)
     if (mount === null) return false
-    return cachesReads(mount.resource)
+    return !mount.retiring && cachesReads(mount.resource)
   }
 
-  async applyIo(io: IOResult, records?: readonly OpRecord[]): Promise<void> {
-    await applyIo(this.cache, io, this.isCacheablePath, records)
+  /** Bind deferred command results to the mounts that produced them. */
+  captureCacheablePaths(): (path: string) => boolean {
+    const mounts = new Map(
+      this.namespace.mountPrefixes().map((p) => [p, this.namespace.mountFor(p)]),
+    )
+    return (path) => {
+      const mount = this.namespace.tryMountFor(path)
+      return (
+        mount !== null &&
+        mounts.get(mount.prefix) === mount &&
+        !mount.retiring &&
+        cachesReads(mount.resource)
+      )
+    }
+  }
+
+  async applyIo(
+    io: IOResult,
+    records?: readonly OpRecord[],
+    isCacheable: (path: string) => boolean = this.isCacheablePath,
+  ): Promise<void> {
+    await applyIo(this.cache, io, isCacheable, records)
   }
 }

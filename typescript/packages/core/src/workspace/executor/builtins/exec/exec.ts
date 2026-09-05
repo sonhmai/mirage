@@ -15,7 +15,7 @@
 import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from '../../../../shell/constants.ts'
+import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN } from '../../../../shell/constants.ts'
 import { badDescriptorLine, unsupportedDescriptor } from '../../../../shell/descriptors.ts'
 import { type Redirect, RedirectKind } from '../../../../shell/types.ts'
 import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
@@ -25,7 +25,7 @@ import { ExecutionNode } from '../../../types.ts'
 import { createFile } from '../../create.ts'
 import { toScope } from '../scope.ts'
 import type { EXEC_STREAM_FIELDS } from './constants.ts'
-import { CLOSED } from './constants.ts'
+import { CLOSED, TO_STDERR, TO_STDIN, TO_STDOUT } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 
 /** The `exec` builtin without redirects: bare `exec` is a no-op that
@@ -51,13 +51,66 @@ function errorLine(label: string, err: unknown): Uint8Array {
 }
 
 /** The shell-attributed refusal of an `exec` redirect line; the line is
- * null once it was written where the line's own stderr redirect pointed. */
-function execFailure(line: Uint8Array | null): Result {
+ * null once it was written where the line's own stderr redirect pointed,
+ * and `out` carries it when that redirect pointed at the terminal's
+ * stdout. */
+function execFailure(line: Uint8Array | null, out: Uint8Array | null = null): Result {
   return [
-    null,
+    out,
     new IOResult({ exitCode: 1, stderr: line }),
     new ExecutionNode({ command: 'exec', exitCode: 1, ...(line !== null ? { stderr: line } : {}) }),
   ]
+}
+
+/**
+ * What a descriptor points at right now, named so a dup can copy it: a
+ * path with its append flag, `CLOSED`, or one of the terminal's own
+ * streams (`&0`, `&1`, `&2`). The terminal streams are named rather than
+ * left as null because a dup copies the *target*, not the role: after
+ * `exec 1>&2`, fd 1 is the terminal's stderr whatever fd 2 is later
+ * pointed at, and `exec 2>&1` after that puts stderr back on the
+ * terminal's stderr, as bash does. Stdin is always the read end, so a
+ * stream bound to it (`exec 1>&0`) has nowhere to write.
+ */
+function identity(session: Session, fd: number): [string, boolean] {
+  if (fd === FD_STDIN) return [TO_STDIN, false]
+  if (fd === FD_STDERR) return [session.execStderr ?? TO_STDERR, session.execStderrAppend]
+  return [session.execStdout ?? TO_STDOUT, session.execStdoutAppend]
+}
+
+/** Point a writing stream at an identity. A stream on its own terminal
+ * end is stored as null, the undiverted state every reader of
+ * `execStdout`/`execStderr` already knows. */
+function bind(session: Session, fd: number, id: string, append: boolean): void {
+  if (fd === FD_STDERR) {
+    session.execStderr = id === TO_STDERR ? null : id
+    session.execStderrAppend = append
+  } else {
+    session.execStdout = id === TO_STDOUT ? null : id
+    session.execStdoutAppend = append
+  }
+}
+
+/**
+ * Deliver one stream's bytes where its binding points: to the terminal's
+ * stdout, to the terminal's stderr, into a file, or nowhere. Returns the
+ * bytes for each terminal stream and whether the write failed: a stream
+ * bound to stdin (`exec 1>&0`) cannot be written, which is bash's `write
+ * error: Bad file descriptor`.
+ */
+async function route(
+  dispatch: DispatchFn,
+  session: Session,
+  binding: string | null,
+  data: Uint8Array,
+  own: string,
+): Promise<[Uint8Array | null, Uint8Array | null, boolean]> {
+  const target = binding ?? own
+  if (target === TO_STDOUT) return [data, null, false]
+  if (target === TO_STDERR) return [null, data, false]
+  if (target === TO_STDIN) return [null, null, true]
+  if (target !== CLOSED) await appendTo(dispatch, session, target, data)
+  return [null, null, false]
 }
 
 type StreamBindings = Pick<Session, (typeof EXEC_STREAM_FIELDS)[number]>
@@ -79,8 +132,7 @@ function bindingsOf(session: Session): StreamBindings {
  * before the line, so an `echo` after it still reaches the terminal. The
  * diagnostic itself goes through the descriptors as they stood at the
  * failure, which is why `exec 2>e </missing` writes it into `e` and
- * nothing reaches the terminal; a stderr the line did not move is left
- * to the statement's own diversion.
+ * `exec 2>&1 </missing` prints it on stdout.
  */
 async function rollBack(
   dispatch: DispatchFn,
@@ -90,9 +142,8 @@ async function rollBack(
 ): Promise<Result> {
   const partial = session.execStderr
   Object.assign(session, saved)
-  if (partial === null || partial === saved.execStderr) return execFailure(err)
-  await appendTo(dispatch, session, partial, err)
-  return execFailure(null)
+  const [out, errBytes] = await route(dispatch, session, partial, err, TO_STDERR)
+  return execFailure(errBytes, out)
 }
 
 function scopeOf(target: unknown): PathSpec {
@@ -138,14 +189,9 @@ async function install(
       if (r.fd === FD_STDIN) {
         session.execStdin = r.target === FD_CLOSE ? new Uint8Array() : null
       } else if (r.target === FD_CLOSE) {
-        if (r.fd === FD_STDERR) session.execStderr = CLOSED
-        else session.execStdout = CLOSED
-      } else if (r.fd === FD_STDERR && r.target === FD_STDOUT) {
-        session.execStderr = session.execStdout
-        session.execStderrAppend = session.execStdoutAppend
-      } else if (r.fd === FD_STDOUT && r.target === FD_STDERR) {
-        session.execStdout = session.execStderr
-        session.execStdoutAppend = session.execStderrAppend
+        bind(session, r.fd, CLOSED, false)
+      } else {
+        bind(session, r.fd, ...identity(session, r.target))
       }
       continue
     }
@@ -212,29 +258,73 @@ async function openTarget(
 }
 
 /**
- * Send one statement's output to the shell's `exec` targets: a stream
- * pointing at a file is appended to it and cleared so it does not also
- * reach the terminal; a closed stream drops. Returns the stdout that
- * should still bubble up (null once diverted).
+ * Send one statement's output where the shell's `exec` bindings point. A
+ * stream bound to a file is appended to it (the first write to each
+ * target having truncated it at `exec` time), one bound to the other
+ * terminal stream crosses over (`exec 2>&1` puts stderr on stdout), a
+ * closed one is dropped, and one bound to stdin fails with bash's `write
+ * error: Bad file descriptor`, which is reported on stderr through
+ * stderr's own binding and makes the statement's status 1. `command` is
+ * the statement's recorded line; its first word names the writer in a
+ * write error. Returns the stdout that should still bubble up (null once
+ * nothing is left for the terminal).
  */
 export async function divertStatement(
   dispatch: DispatchFn,
   session: Session,
   stdout: Uint8Array | null,
   io: IOResult,
+  command: string,
 ): Promise<Uint8Array | null> {
-  if (session.execStdout !== null) {
-    if (stdout !== null && stdout.byteLength > 0) {
-      await appendTo(dispatch, session, session.execStdout, stdout)
-    }
-    stdout = null
+  const outParts: Uint8Array[] = []
+  const errParts: Uint8Array[] = []
+  let failed = false
+  if (stdout !== null && stdout.byteLength > 0) {
+    const [out, err, unwritable] = await route(
+      dispatch,
+      session,
+      session.execStdout,
+      stdout,
+      TO_STDOUT,
+    )
+    if (out !== null) outParts.push(out)
+    if (err !== null) errParts.push(err)
+    failed = unwritable
   }
-  if (session.execStderr !== null && io.stderr != null) {
-    const data = await materialize(io.stderr)
-    if (data.byteLength > 0) await appendTo(dispatch, session, session.execStderr, data)
-    io.stderr = null
+  let stderr = await materialize(io.stderr)
+  if (failed) {
+    const first = command.trim().split(/\s+/)[0]
+    const name = first === undefined || first === '' ? 'bash' : first
+    stderr = joinBytes([
+      stderr,
+      new TextEncoder().encode(`${name}: write error: Bad file descriptor\n`),
+    ])
+    io.exitCode = 1
   }
-  return stdout
+  if (stderr.byteLength > 0) {
+    const [out, err, unwritable] = await route(
+      dispatch,
+      session,
+      session.execStderr,
+      stderr,
+      TO_STDERR,
+    )
+    if (out !== null) outParts.push(out)
+    if (err !== null) errParts.push(err)
+    if (unwritable) io.exitCode = 1
+  }
+  io.stderr = errParts.length > 0 ? joinBytes(errParts) : null
+  return outParts.length > 0 ? joinBytes(outParts) : null
+}
+
+function joinBytes(parts: Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0))
+  let offset = 0
+  for (const p of parts) {
+    out.set(p, offset)
+    offset += p.byteLength
+  }
+  return out
 }
 
 async function appendTo(

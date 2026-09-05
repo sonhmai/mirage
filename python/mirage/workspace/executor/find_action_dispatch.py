@@ -25,6 +25,7 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, StatPath
 from mirage.policy import pre_ops_gate
 from mirage.types import PathSpec
+from mirage.utils.errors import fs_strerror
 from mirage.utils.path import resolve_path
 from mirage.workspace.lookup.lookup import lookup
 from mirage.workspace.lookup.types import Consumer
@@ -180,20 +181,44 @@ async def _delete(ps: PathSpec, registry: MountRegistry, cwd: str,
 async def _ls_row(ps: PathSpec, registry: MountRegistry, cwd: str,
                   ns: NamespaceView | None, stat_path: StatPath | None,
                   errors: list[bytes]) -> bytes | None:
+    """Render one accepted row the way ``ls -ld`` would.
+
+    A row that cannot be listed (an earlier ``-delete`` removed it, or
+    the backend refuses it) is GNU's ``find: 'path': <reason>``, with
+    the reason taken from ls's own last field the way ``_delete`` reads
+    rm's; None with a line appended is the caller's signal to end the
+    row's chain.
+
+    Args:
+        ps (PathSpec): the selected row, with its display spelling.
+        registry (MountRegistry): used to route the listing.
+        cwd (str): the session's working directory.
+        ns (NamespaceView | None): the name plane's facts, so a symlink
+            or mount-point row renders.
+        stat_path (StatPath | None): dispatcher stat, threaded with it.
+        errors (list[bytes]): where a failure's line is appended.
+    """
     path = ps.raw_path or ps.virtual
     mount = registry.try_mount_for(ps.virtual)
     if mount is None:
-        errors.append(f"find: cannot ls '{path}': no mount\n".encode())
+        errors.append(f"find: '{path}': no mount\n".encode())
         return None
     try:
-        ls_out, _ = await mount.execute_cmd(
+        ls_out, ls_io = await mount.execute_cmd(
             "ls", [ps], [], {
                 "args_l": True,
                 "d": True
             }, ExecContext(cwd=cwd, ns=ns, stat_path=stat_path))
     except (FileNotFoundError, NotADirectoryError, PermissionError,
             ValueError) as exc:
-        errors.append(f"find: cannot ls '{path}': {exc}\n".encode())
+        why = fs_strerror(exc) if isinstance(exc, OSError) else None
+        errors.append(f"find: '{path}': {why or exc}\n".encode())
+        return None
+    if ls_io.exit_code != 0:
+        err = await materialize(ls_io.stderr) if ls_io.stderr else b""
+        why = err.decode("utf-8", errors="replace").strip().rsplit(": ", 1)[-1]
+        errors.append(f"find: '{path}'"
+                      f"{': ' + why if why else ''}\n".encode())
         return None
     if ls_out is None:
         return None
@@ -269,9 +294,10 @@ async def _apply_find_actions(
     ``-exec echo {} ";" -print -exec echo again {} ";"`` alternates the
     three per match. A batched ``-exec ... {} +`` collects the match at
     its position and runs once after the walk; a failing batch is
-    find's exit 1, as is a row it could not delete or list; a failing
-    per-match run is not, and neither is a command that cannot be
-    found, which GNU reports per match and carries on from with exit 0.
+    find's exit 1, as is a row it could not delete or list, and
+    either ends that row's chain; a failing per-match run is not, and
+    neither is a command that cannot be found, which GNU reports per
+    match and carries on from with exit 0.
     An action other than ``-print`` suppresses the implicit print.
     ``-delete`` runs at its position, so a later ``-exec`` sees the row
     gone, and a row it cannot delete ends the chain with GNU's line and
@@ -335,7 +361,10 @@ async def _apply_find_actions(
                 if row is not None:
                     out.append(row)
                 elif len(errors) > before:
+                    # A row -ls cannot list is false, so the chain ends
+                    # for it, as GNU's does.
                     exit_code = 1
+                    break
             elif action.kind == "delete":
                 # A structural row is skipped, not refused, the way Unix
                 # leaves a mount point in place.

@@ -192,3 +192,45 @@ async def test_a_failed_later_redirect_puts_every_earlier_one_back():
         assert await _file(ws, "/data/g3") == ""
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_dups_copy_the_terminal_stream_they_name():
+    # bash 5.2: `exec 2>&1` puts stderr on the terminal's stdout, `exec
+    # 1>&2` the reverse, and a dup copies the target as it stood, so
+    # `1>&2` then `2>&1` leaves both on stderr.
+    ws = _ws()
+    try:
+        io = await ws.execute("( exec 2>&1; echo err >&2 ); echo after >&2")
+        assert (await io.stdout_str(), await
+                io.stderr_str()) == ("err\n", "after\n")
+        io = await ws.execute("( exec 1>&2; echo a ); echo b")
+        assert (await io.stdout_str(), await io.stderr_str()) == ("b\n", "a\n")
+        io = await ws.execute("( exec 1>&2; exec 2>&1; echo a; echo b >&2 )")
+        assert (await io.stdout_str(), await io.stderr_str()) == ("", "a\nb\n")
+        io = await ws.execute(
+            "( exec 2>&1 < /data/missing; echo out; echo err >&2 )")
+        assert (await io.stdout_str(), await
+                io.stderr_str(), io.exit_code) == (
+                    "/data/missing: No such file or directory\nout\n", "err\n",
+                    0)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stream_bound_to_stdin_cannot_be_written():
+    # bash 5.2: after `exec 1>&0` every write to stdout is `write error:
+    # Bad file descriptor`, status 1; with stderr bound there the
+    # message itself has nowhere to go.
+    ws = _ws()
+    try:
+        io = await ws.execute(
+            "( exec 1>&0; echo hi; echo rc=$? >&2; echo again ); echo back")
+        assert (await io.stdout_str(), await io.stderr_str()) == (
+            "back\n", "echo: write error: Bad file descriptor\nrc=1\n"
+            "echo: write error: Bad file descriptor\n")
+        io = await ws.execute("( exec 2>&0; echo hi >&2; echo rc=$? )")
+        assert (await io.stdout_str(), await io.stderr_str()) == ("rc=1\n", "")
+    finally:
+        await ws.close()

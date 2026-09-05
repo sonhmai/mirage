@@ -73,6 +73,14 @@ export async function mergeOperandIos(results: OperandRun[], exitCode: number): 
     io = await io.merge(run.io)
   }
   io.exitCode = exitCode
+  // A merge keeps the last run's rows; the operands' rows are wanted
+  // together and in order, since find's actions run once over all of
+  // them at the command boundary (`-exec {} +` is one batch across start
+  // points, as in GNU). One run without them means the whole selection
+  // is unstructured.
+  const rows = results.map((run) => run.io.matchedPaths)
+  const known = rows.filter((r): r is PathSpec[] => r !== null)
+  io.matchedPaths = known.length === rows.length ? known.flat() : null
   return io
 }
 

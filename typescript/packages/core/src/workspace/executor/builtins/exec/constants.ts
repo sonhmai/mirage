@@ -17,6 +17,15 @@
 // descriptor to fail, a documented divergence.
 export const CLOSED = ''
 
+// What a dup names when it copies one of the terminal's own streams
+// (`exec 2>&1`, `exec 1>&2`, `exec 1>&0`): the target, not the role, so a
+// later rebinding of the copied descriptor does not move the copy.
+// Distinct from every path (a virtual path starts with `/`) and from
+// CLOSED.
+export const TO_STDIN = '&0'
+export const TO_STDOUT = '&1'
+export const TO_STDERR = '&2'
+
 // The session fields an `exec` redirect line binds, put back as one
 // unit when a later redirect on the line fails.
 export const EXEC_STREAM_FIELDS = [

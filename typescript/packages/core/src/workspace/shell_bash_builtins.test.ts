@@ -415,6 +415,31 @@ const CASES: [string, string, string, string, number][] = [
     0,
   ],
   [
+    // bash 5.2: a dup copies the terminal stream it names, so `2>&1` puts
+    // stderr on stdout and `1>&2` then `2>&1` leaves both on stderr.
+    'exec_dup_copies_the_terminal_stream_it_names',
+    '( exec 2>&1; echo err >&2 ); ( exec 1>&2; echo a ); ( exec 1>&2; exec 2>&1; echo c; echo d >&2 ); echo after >&2',
+    'err\n',
+    'a\nc\nd\nafter\n',
+    0,
+  ],
+  [
+    'exec_failed_redirect_diagnostic_follows_a_dup_to_stdout',
+    '( exec 2>&1 < /data/missing; echo out; echo err >&2 )',
+    '/data/missing: No such file or directory\nout\n',
+    'err\n',
+    0,
+  ],
+  [
+    // bash 5.2: after `exec 1>&0` every write to stdout is `write error:
+    // Bad file descriptor`, status 1.
+    'exec_stream_bound_to_stdin_cannot_be_written',
+    '( exec 1>&0; echo hi; echo rc=$? >&2; echo again ); ( exec 2>&0; echo hi >&2; echo rc=$? ); echo back',
+    'rc=1\nback\n',
+    'echo: write error: Bad file descriptor\nrc=1\necho: write error: Bad file descriptor\n',
+    0,
+  ],
+  [
     'exec_failed_redirect_diagnostic_goes_where_stderr_pointed',
     '( exec 2> /data/e < /data/missing; echo toerr >&2 ); cat /data/e',
     '/data/missing: No such file or directory\n',

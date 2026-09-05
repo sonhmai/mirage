@@ -18,15 +18,14 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
-from mirage.shell.constants import (FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN,
-                                    FD_STDOUT)
+from mirage.shell.constants import FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN
 from mirage.shell.descriptors import (bad_descriptor_line,
                                       unsupported_descriptor)
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.workspace.executor.builtins.exec.constants import (
-    CLOSED, EXEC_STREAM_FIELDS)
+    CLOSED, EXEC_STREAM_FIELDS, TO_STDERR, TO_STDIN, TO_STDOUT)
 from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.create import create_file
@@ -121,16 +120,9 @@ async def _install(dispatch: DispatchFn, session: Session,
             if r.fd == FD_STDIN:
                 session.exec_stdin = b"" if r.target == FD_CLOSE else None
             elif r.target == FD_CLOSE:
-                if r.fd == FD_STDERR:
-                    session.exec_stderr = CLOSED
-                else:
-                    session.exec_stdout = CLOSED
-            elif r.fd == FD_STDERR and r.target == FD_STDOUT:
-                session.exec_stderr = session.exec_stdout
-                session.exec_stderr_append = session.exec_stdout_append
-            elif r.fd == FD_STDOUT and r.target == FD_STDERR:
-                session.exec_stdout = session.exec_stderr
-                session.exec_stdout_append = session.exec_stderr_append
+                _bind(session, r.fd, CLOSED, False)
+            else:
+                _bind(session, r.fd, *_identity(session, r.target))
             continue
         if ((r.kind == RedirectKind.STDIN) != (r.fd == FD_STDIN)):
             return bad_descriptor_line(r.fd)
@@ -161,7 +153,7 @@ async def _roll_back(
     session: Session,
     saved: dict[str, str | bytes | bool | None],
     err: bytes,
-) -> tuple[None, IOResult, ExecutionNode]:
+) -> tuple[bytes | None, IOResult, ExecutionNode]:
     """Undo a redirect list that failed part-way, the way bash does.
 
     bash keeps the side effect of opening each earlier target (`exec
@@ -169,8 +161,7 @@ async def _roll_back(
     where it stood before the line, so an `echo` after it still reaches
     the terminal. The diagnostic itself goes through the descriptors as
     they stood at the failure, which is why `exec 2>e </missing` writes
-    it into `e` and nothing reaches the terminal; a stderr the line did
-    not move is left to the statement's own diversion.
+    it into `e` and `exec 2>&1 </missing` prints it on stdout.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
@@ -182,10 +173,9 @@ async def _roll_back(
     partial = session.exec_stderr
     for name, value in saved.items():
         setattr(session, name, value)
-    if partial is None or partial == saved["exec_stderr"]:
-        return _exec_failure(err)
-    await _append(dispatch, session, partial, err)
-    return _exec_failure(None)
+    out, err_bytes, _ = await _route(dispatch, session, partial, err,
+                                     TO_STDERR)
+    return _exec_failure(err_bytes, out)
 
 
 async def _open_target(dispatch: DispatchFn, session: Session, scope: PathSpec,
@@ -226,18 +216,101 @@ def _error_line(label: str, exc: OSError) -> bytes:
     return (f"{label}: {strerror}\n" if strerror else f"{label}\n").encode()
 
 
-def _exec_failure(err: bytes | None) -> tuple[None, IOResult, ExecutionNode]:
+def _exec_failure(
+    err: bytes | None,
+    out: bytes | None = None,
+) -> tuple[bytes | None, IOResult, ExecutionNode]:
     """The shell-attributed refusal of an `exec` redirect line.
 
     Args:
         err (bytes | None): the diagnostic, already in the shell's
             voice, or None once it was written where the line's own
             stderr redirect pointed.
+        out (bytes | None): the diagnostic again, when that redirect
+            pointed at the terminal's stdout.
     """
-    return None, IOResult(exit_code=1,
-                          stderr=err), ExecutionNode(command="exec",
-                                                     exit_code=1,
-                                                     stderr=err or b"")
+    return out, IOResult(exit_code=1,
+                         stderr=err), ExecutionNode(command="exec",
+                                                    exit_code=1,
+                                                    stderr=err or b"")
+
+
+def _identity(session: Session, fd: int) -> tuple[str, bool]:
+    """What a descriptor points at right now, named so a dup can copy it.
+
+    A path with its append flag, `CLOSED`, or one of the terminal's
+    own streams (`&0`, `&1`, `&2`). The terminal streams are named
+    rather than left as None because a dup copies the *target*, not
+    the role: after `exec 1>&2`, fd 1 is the terminal's stderr whatever
+    fd 2 is later pointed at, and `exec 2>&1` after that puts stderr
+    back on the terminal's stderr, as bash does. Stdin is always the
+    read end, so a stream bound to it (`exec 1>&0`) has nowhere to
+    write.
+
+    Args:
+        session (Session): shell session state.
+        fd (int): the descriptor being copied.
+    """
+    if fd == FD_STDIN:
+        return TO_STDIN, False
+    if fd == FD_STDERR:
+        return (TO_STDERR if session.exec_stderr is None else
+                session.exec_stderr, session.exec_stderr_append)
+    return (TO_STDOUT if session.exec_stdout is None else session.exec_stdout,
+            session.exec_stdout_append)
+
+
+def _bind(session: Session, fd: int, identity: str, append: bool) -> None:
+    """Point a writing stream at an identity.
+
+    A stream on its own terminal end is stored as None, the undiverted
+    state every reader of `exec_stdout`/`exec_stderr` already knows.
+
+    Args:
+        session (Session): shell session state.
+        fd (int): the descriptor being bound, 1 or 2.
+        identity (str): what `_identity` named, or `CLOSED`.
+        append (bool): whether writes append, for a path.
+    """
+    if fd == FD_STDERR:
+        session.exec_stderr = None if identity == TO_STDERR else identity
+        session.exec_stderr_append = append
+    else:
+        session.exec_stdout = None if identity == TO_STDOUT else identity
+        session.exec_stdout_append = append
+
+
+async def _route(
+    dispatch: DispatchFn,
+    session: Session,
+    binding: str | None,
+    data: bytes,
+    own: str,
+) -> tuple[bytes | None, bytes | None, bool]:
+    """Deliver one stream's bytes where its binding points.
+
+    To the terminal's stdout, to the terminal's stderr, into a file, or
+    nowhere. Returns the bytes for each terminal stream and whether the
+    write failed: a stream bound to stdin (`exec 1>&0`) cannot be
+    written, which is bash's `write error: Bad file descriptor`.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher.
+        session (Session): shell session state.
+        binding (str | None): the stream's `exec` binding.
+        data (bytes): what the statement wrote on it.
+        own (str): the stream's own terminal end, used when undiverted.
+    """
+    target = own if binding is None else binding
+    if target == TO_STDOUT:
+        return data, None, False
+    if target == TO_STDERR:
+        return None, data, False
+    if target == TO_STDIN:
+        return None, None, True
+    if target != CLOSED:
+        await _append(dispatch, session, target, data)
+    return None, None, False
 
 
 async def divert_statement(
@@ -245,34 +318,53 @@ async def divert_statement(
     session: Session,
     stdout: bytes | None,
     io: IOResult,
+    command: str,
 ) -> bytes | None:
-    """Send one statement's output to the shell's `exec` targets.
+    """Send one statement's output where the shell's `exec` bindings point.
 
     Called after each top-level statement when an `exec` redirect is in
-    force: stdout and stderr that point at a file are appended to it
-    (the first write to each target having truncated it at `exec`
-    time), and the stream is cleared so it does not also reach the
-    terminal. A closed stream is dropped. Returns the stdout that
-    should still bubble up, which is None once it has been diverted.
+    force: a stream bound to a file is appended to it (the first write
+    to each target having truncated it at `exec` time), one bound to
+    the other terminal stream crosses over (`exec 2>&1` puts stderr on
+    stdout), a closed one is dropped, and one bound to stdin fails with
+    bash's `write error: Bad file descriptor`, which is reported on
+    stderr through stderr's own binding and makes the statement's
+    status 1. Returns the stdout that should still bubble up, which is
+    None once nothing is left for the terminal.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
         session (Session): shell session state.
         stdout (bytes | None): the statement's materialized stdout.
-        io (IOResult): the statement's result; its stderr is diverted
-            in place.
+        io (IOResult): the statement's result; its stderr and exit
+            status are amended in place.
+        command (str): the statement's recorded line; its first word
+            names the writer in a write error.
     """
-    if session.exec_stdout is not None and stdout:
-        await _append(dispatch, session, session.exec_stdout, stdout)
-        stdout = None
-    elif session.exec_stdout is not None:
-        stdout = None
-    if session.exec_stderr is not None and io.stderr is not None:
-        data = await materialize(io.stderr) or b""
-        if data:
-            await _append(dispatch, session, session.exec_stderr, data)
-        io.stderr = None
-    return stdout
+    out_parts: list[bytes] = []
+    err_parts: list[bytes] = []
+    failed = False
+    if stdout:
+        out, err, failed = await _route(dispatch, session, session.exec_stdout,
+                                        stdout, TO_STDOUT)
+        out_parts.extend(x for x in (out, ) if x)
+        err_parts.extend(x for x in (err, ) if x)
+    stderr = (await materialize(io.stderr) or b"") if io.stderr else b""
+    if failed:
+        words = command.split()
+        stderr += (f"{words[0] if words else 'bash'}: write error: "
+                   "Bad file descriptor\n").encode()
+        io.exit_code = 1
+    if stderr:
+        out, err, unwritable = await _route(dispatch, session,
+                                            session.exec_stderr, stderr,
+                                            TO_STDERR)
+        out_parts.extend(x for x in (out, ) if x)
+        err_parts.extend(x for x in (err, ) if x)
+        if unwritable:
+            io.exit_code = 1
+    io.stderr = b"".join(err_parts) or None
+    return b"".join(out_parts) or None
 
 
 async def _append(dispatch: DispatchFn, session: Session, target: str,

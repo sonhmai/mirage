@@ -223,8 +223,13 @@ async def _run_program(
         if dispatch is not None and (session.exec_stdout is not None
                                      or session.exec_stderr is not None):
             materialized = await materialize(stdout)
+            before_divert = io.exit_code
             stdout = await divert_statement(dispatch, session, materialized,
-                                            io)
+                                            io, last_exec.command or "")
+            if io.exit_code != before_divert:
+                # A write the binding refused is the statement's failure,
+                # which `$?` has to show.
+                record_status(session, io.exit_code)
         if stdout is not None:
             all_stdout.append(stdout)
         merged_io = await merged_io.merge(io)

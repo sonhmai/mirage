@@ -14,6 +14,7 @@
 
 import { compareCodePoints } from '../../utils/sort.ts'
 import { resolvePath } from '../../utils/path.ts'
+import { fsStrerror, isFsError } from '../../utils/errors.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { type ByteSource, materialize } from '../../io/types.ts'
 import { getCurrentSession, runWithSuspendedOpPolicies } from '../../context/session_context.ts'
@@ -183,11 +184,11 @@ async function lsRow(
   const path = ps.rawPath || ps.virtual
   const mount = registry.tryMountFor(ps.virtual)
   if (mount === null) {
-    errors.push(enc.encode(`find: cannot ls '${path}': no mount\n`))
+    errors.push(enc.encode(`find: '${path}': no mount\n`))
     return null
   }
   try {
-    const [lsOut] = await mount.executeCmd(
+    const [lsOut, lsIo] = await mount.executeCmd(
       'ls',
       [ps],
       [],
@@ -199,12 +200,22 @@ async function lsRow(
         ...(statPath !== null ? { statPath } : {}),
       },
     )
+    if (lsIo.exitCode !== 0) {
+      // ls names the reason last, and find says the same thing about
+      // the row as it was typed, the way a failed -delete re-voices rm.
+      const said = new TextDecoder().decode(await materialize(lsIo.stderr)).trim()
+      const why = said.slice(said.lastIndexOf(': ') + 2)
+      errors.push(enc.encode(`find: '${path}'${why === '' ? '' : `: ${why}`}\n`))
+      return null
+    }
     if (lsOut === null) return null
     const line = new TextDecoder().decode(await materialize(lsOut)).replace(/\n+$/, '')
     return line === '' ? null : enc.encode(`${line}\n`)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    errors.push(enc.encode(`find: cannot ls '${path}': ${msg}\n`))
+    const why =
+      (isFsError(err) ? fsStrerror(err) : null) ??
+      (err instanceof Error ? err.message : String(err))
+    errors.push(enc.encode(`find: '${path}': ${why}\n`))
     return null
   }
 }
@@ -258,7 +269,8 @@ function hasActions(expr: FindExpr): boolean {
  * -print -exec echo again {} ";"` alternates the three per match. A
  * batched `-exec ... {} +` collects the match at its position and runs
  * once after the walk; a failing batch is find's exit 1, as is a row it
- * could not delete or list; a failing per-match run is not, and neither
+ * could not delete or list, and either ends that row's chain; a failing
+ * per-match run is not, and neither
  * is a command that cannot be found, which GNU reports per match and
  * carries on from with exit 0. An action other than `-print` suppresses
  * the implicit print. `-delete` runs at its position, so a later `-exec`
@@ -329,7 +341,12 @@ export async function applyFindActions(
         const before = errors.length
         const row = await lsRow(match, registry, cwd, ns, statPath, errors)
         if (row !== null) out.push(row)
-        else if (errors.length > before) exitCode = 1
+        else if (errors.length > before) {
+          // A row -ls cannot list is false, so the chain ends for it, as
+          // GNU's does.
+          exitCode = 1
+          break
+        }
       } else if (action.kind === 'delete') {
         // A structural row is skipped, not refused, the way Unix leaves
         // a mount point in place.

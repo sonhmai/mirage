@@ -31,10 +31,9 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, StatPath
 from mirage.types import FileType, PathSpec, Producer
 from mirage.utils.path import respell_one
-from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
-from mirage.workspace.types import ExecuteLine, ExecutionNode
+from mirage.workspace.types import ExecutionNode
 
 # `tree` is deliberately absent: its output is one document (root line,
 # drawing, summary), so a second per-mount block would print a second of
@@ -404,8 +403,6 @@ async def _fan_out_traversal(
     stdin: ByteSource | None,
     ns: NamespaceView | None = None,
     stat_path: StatPath | None = None,
-    execute_fn: ExecuteLine | None = None,
-    session_id: str = "",
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a traversal command across the parent mount + descendant mounts.
 
@@ -590,22 +587,10 @@ async def _fan_out_traversal(
         final_io_exit = final_exit
 
     if cmd_name == "find":
-        combined, action_err, action_exit = await _apply_find_actions(
-            combined,
-            find_matches if find_matches_complete else None,
-            texts,
-            registry,
-            cwd,
-            execute_fn=execute_fn,
-            session_id=session_id,
-            ns=ns,
-            stat_path=stat_path)
-        if action_err:
-            existing = (await materialize(merged_io.stderr)
-                        if merged_io.stderr else b"")
-            merged_io.stderr = existing + action_err
-        if final_io_exit == 0:
-            final_io_exit = action_exit
+        # The structured rows ride out for the command boundary, which
+        # applies find's actions once over every operand's matches.
+        merged_io.matched_paths = (find_matches
+                                   if find_matches_complete else None)
 
     merged_io.exit_code = final_io_exit
     merged_io.producer = Producer(
@@ -630,8 +615,6 @@ async def run_with_fanout(
     *,
     stdin: ByteSource | None = None,
     resolve_hint: PathSpec | None = None,
-    execute_fn: ExecuteLine | None = None,
-    session_id: str = "",
 ) -> tuple[ByteSource | None, IOResult]:
     """One operand's native run, fanned out over the mounts nested in it.
 
@@ -659,9 +642,6 @@ async def run_with_fanout(
         resolve_hint (PathSpec | None): mount-resolution path for a run
             with no operand of its own (the stream strategy's single
             native run over the merged bytes).
-        execute_fn (ExecuteLine | None): runs a line in the session, for
-            find's ``-exec``.
-        session_id (str): the session the line runs under.
     """
     if not _should_fan_out(cmd_name, paths, flag_kwargs, registry):
         return await run_single(cmd_name,
@@ -693,7 +673,5 @@ async def run_with_fanout(
                                              cmd_name,
                                              stdin,
                                              ns=ns,
-                                             stat_path=stat_path,
-                                             execute_fn=execute_fn,
-                                             session_id=session_id)
+                                             stat_path=stat_path)
     return stdout, io

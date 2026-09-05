@@ -237,6 +237,74 @@
         "stdout": "visible\n0\nexmissing.txt: No such file or directory\n",
         "stderr": "exmissing.txt: No such file or directory\ntoerr\n"
       }
+    },
+    {
+      "id": "exec_dup_copies_the_terminal_stream_it_names",
+      "seq": 940107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( exec 2>&1; echo err >&2 ); ( exec 1>&2; echo a ); ( exec 1>&2; exec 2>&1; echo c; echo d >&2 ); ( exec 2>&1 < exmissing.txt; echo out; echo err2 >&2 ); echo after >&2",
+      "expect": {
+        "exit": 0,
+        "stdout": "err\nexmissing.txt: No such file or directory\nout\n",
+        "stderr": "a\nc\nd\nerr2\nafter\n"
+      }
+    },
+    {
+      "id": "exec_stream_bound_to_stdin_cannot_be_written",
+      "seq": 940108,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( exec 1>&0; echo hi; echo rc=$? >&2; echo again ); ( exec 2>&0; echo hi >&2; echo rc=$? ); echo back",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nback\n",
+        "stderr": "echo: write error: Bad file descriptor\nrc=1\necho: write error: Bad file descriptor\n"
+      }
     }
   ]
 }

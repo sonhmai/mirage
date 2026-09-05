@@ -266,7 +266,11 @@ async function runProgram(
     // terminal and stderr lands in its own target.
     if (dispatch !== undefined && (session.execStdout !== null || session.execStderr !== null)) {
       const bytes = stdout === null ? null : await materialize(stdout)
-      stdout = await divertStatement(dispatch, session, bytes, io)
+      const beforeDivert = io.exitCode
+      stdout = await divertStatement(dispatch, session, bytes, io, lastExec.command ?? '')
+      // A write the binding refused is the statement's failure, which
+      // `$?` has to show.
+      if (io.exitCode !== beforeDivert) recordStatus(session, io.exitCode)
     }
     if (stdout !== null) allStdout.push(stdout)
     mergedIo = await mergedIo.merge(io)

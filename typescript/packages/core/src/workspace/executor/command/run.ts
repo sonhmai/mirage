@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource } from '../../../io/types.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult } from '../../../io/types.ts'
 import type { Resource } from '../../../resource/base.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { FileStat, ResourceName } from '../../../types.ts'
@@ -37,8 +37,6 @@ import { VFSRuntime } from '../../../runtime/table.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { Session } from '../../session/session.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { applyFindActions } from '../find_action_dispatch.ts'
-import type { ExecuteFn } from '../../expand/node.ts'
 import { pathAllowed } from '../../../context/session_context.ts'
 import { CommandTimeoutError } from '../../../commands/errors.ts'
 import { UsageError } from '../../../commands/errors.ts'
@@ -58,8 +56,6 @@ export interface RunOnMountCtx {
   ensureOpen?: (resource: Resource) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
   routingDecision?: RouteDecision
-  // Runs a line in the session, for find's `-exec`.
-  executeFn?: ExecuteFn
 }
 
 /**
@@ -235,16 +231,8 @@ export async function runOnMount(
   flagKwargs: Flags,
   opts: RunOnMountOpts = {},
 ): Promise<[ByteSource | null, IOResult]> {
-  const {
-    registry,
-    session,
-    dispatch,
-    namespace,
-    ensureOpen,
-    runtimeBindings,
-    routingDecision,
-    executeFn,
-  } = ctx
+  const { registry, session, dispatch, namespace, ensureOpen, runtimeBindings, routingDecision } =
+    ctx
   const hint = opts.resolveHint ?? null
   let mount = opts.mount ?? null
   if (mount === null) {
@@ -323,31 +311,7 @@ export async function runOnMount(
       ...(session.abortSignal !== null ? { signal: session.abortSignal } : {}),
       limitOverride,
     })
-    let stdout = initialStdout
-    if (cmdName === 'find') {
-      const [newStdout, actionErr, actionExit] = await applyFindActions(
-        stdout,
-        io.matchedPaths,
-        texts,
-        registry,
-        session.cwd,
-        {
-          ...(executeFn !== undefined ? { executeFn } : {}),
-          sessionId: session.sessionId,
-          ns,
-          statPath,
-        },
-      )
-      stdout = newStdout
-      if (actionErr.length > 0) {
-        const existing = await materialize(io.stderr)
-        const merged = new Uint8Array(existing.length + actionErr.length)
-        merged.set(existing, 0)
-        merged.set(actionErr, existing.length)
-        io.stderr = merged
-      }
-      if (io.exitCode === 0) io.exitCode = actionExit
-    }
+    const stdout = initialStdout
     const prefix = rstripSlash(mount.prefix)
     if (prefix !== '') {
       io.reads = prefixKeys(io.reads, prefix)

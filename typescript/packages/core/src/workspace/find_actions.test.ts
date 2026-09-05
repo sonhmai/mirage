@@ -278,6 +278,56 @@ describe('find -exec isolation', () => {
     }
   })
 
+  it('batches -exec {} + once across start points on different mounts', async () => {
+    // GNU: `-exec ... {} +` collects every start point's matches into one
+    // batch; the actions run once at the command boundary, not once per
+    // operand's native run.
+    const ws = await twoMountWs()
+    const out = async (line: string): Promise<[string, string, number]> => {
+      const r = await ws.execute(line, { sessionId: 's' })
+      return [r.stdoutText, r.stderrText, r.exitCode]
+    }
+    try {
+      ws.createSession('s')
+      await ws.execute('touch /a/x.txt /b/y.txt', { sessionId: 's' })
+      expect(await out('find /a /b -maxdepth 0 -exec echo batch {} +')).toEqual([
+        'batch /a /b\n',
+        '',
+        0,
+      ])
+      expect(await out('find /a /b -type f -exec echo {} \\;')).toEqual([
+        '/a/x.txt\n/b/y.txt\n',
+        '',
+        0,
+      ])
+      expect(await out('find /a /b -type f -exec echo {} + -print')).toEqual([
+        '/a/x.txt\n/b/y.txt\n/a/x.txt /b/y.txt\n',
+        '',
+        0,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('ends the chain of a row -ls cannot list', async () => {
+    // GNU find 4.9: a row -delete removed is `find: 'd/a.txt': No such
+    // file or directory` at -ls, exit 1, and -print never runs for it.
+    const ws = await singleMountWs()
+    try {
+      await ws.execute('mkdir -p /w/d/sub; printf a > /w/d/a.txt; printf x > /w/d/sub/c.txt; cd /w')
+      const io = await ws.execute('find d -type f -delete -ls -print')
+      expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([
+        '',
+        "find: 'd/a.txt': No such file or directory\nfind: 'd/sub/c.txt': No such file or directory\n",
+        1,
+      ])
+      expect((await ws.execute('find d -type f')).stdoutText).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('prints every row twice for a repeated -print', async () => {
     // GNU runs both actions; one explicit -print is the implicit one.
     const ws = await singleMountWs()

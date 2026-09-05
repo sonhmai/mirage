@@ -337,7 +337,9 @@ export async function handleSubshell(
       stdout = await finishStatement(stdout, io, session, child)
       if (dispatch !== undefined && (session.execStdout !== null || session.execStderr !== null)) {
         const bytes = stdout === null ? null : await materialize(stdout)
-        stdout = await divertStatement(dispatch, session, bytes, io)
+        const beforeDivert = io.exitCode
+        stdout = await divertStatement(dispatch, session, bytes, io, childExec.command ?? '')
+        if (io.exitCode !== beforeDivert) recordStatus(session, io.exitCode)
       }
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)

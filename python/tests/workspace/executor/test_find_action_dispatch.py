@@ -521,3 +521,36 @@ async def test_ls_renders_a_symlink_row():
     assert [r.split()[-3:] for r in rows] == [["d/dangling", "->", "nowhere"],
                                               ["d/link", "->", "a.txt"]]
     assert all("lrwxrwxrwx" in r for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_batched_exec_is_one_invocation_across_mounts():
+    # GNU: `-exec ... {} +` collects every start point's matches into one
+    # batch; the actions run once at the command boundary, not once per
+    # operand's native run.
+    ws = _ws_two_mounts()
+    ws.create_session("s")
+    await ws.execute("touch /a/x.txt /b/y.txt", session_id="s")
+    assert await _run_line(
+        ws,
+        "find /a /b -maxdepth 0 -exec echo batch {} +") == ("batch /a /b\n",
+                                                            "", 0)
+    assert await _run_line(
+        ws, r"find /a /b -type f -exec echo {} \;") == ("/a/x.txt\n/b/y.txt\n",
+                                                        "", 0)
+    assert await _run_line(ws,
+                           "find /a /b -type f -exec echo {} + -print") == (
+                               "/a/x.txt\n/b/y.txt\n/a/x.txt /b/y.txt\n", "",
+                               0)
+
+
+@pytest.mark.asyncio
+async def test_a_row_ls_cannot_list_ends_its_chain():
+    # GNU find 4.9: a row -delete removed is `find: 'd/a.txt': No such
+    # file or directory` at -ls, exit 1, and -print never runs for it.
+    ws = await _exec_ws()
+    assert await _run_line(ws, "find d -type f -delete -ls -print") == (
+        "", "find: 'd/a.txt': No such file or directory\n"
+        "find: 'd/b.txt': No such file or directory\n"
+        "find: 'd/sub/c.txt': No such file or directory\n", 1)
+    assert await _run_line(ws, "find d -type f") == ("", "", 0)

@@ -35,13 +35,12 @@ from mirage.workspace.executor.builtins.links import (link_target_stat,
                                                       path_exists,
                                                       path_readdir, path_stat)
 from mirage.workspace.executor.command.flags import parse_flags
-from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.session import Session, env_snapshot, session_view
-from mirage.workspace.types import ExecuteLine, ExecutionNode
+from mirage.workspace.types import ExecutionNode
 
 
 async def exec_node(cmd_str: str, io: IOResult,
@@ -354,7 +353,6 @@ async def run_on_mount(
     resolve_hint: PathSpec | None = None,
     mount: MountEntry | None = None,
     routing_decision: RouteDecision | None = None,
-    execute_fn: ExecuteLine | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run one already-parsed command on the mount that owns its paths.
 
@@ -380,8 +378,6 @@ async def run_on_mount(
             is empty (a stream command running in stdin mode).
         mount: Pre-resolved mount; skips resolution and session mode
             checks, which the caller already performed.
-        execute_fn (ExecuteLine | None): runs a line in the session, for
-            find's ``-exec``.
     """
     if mount is None:
         resolve_paths = paths or ([resolve_hint] if resolve_hint else [])
@@ -458,23 +454,6 @@ async def run_on_mount(
         # and the TypeScript executor.
         return None, IOResult(exit_code=read_fail_exit(cmd_name, exc),
                               stderr=format_fs_error(cmd_name, exc, paths))
-
-    if cmd_name == "find":
-        stdout, action_err, action_exit = await _apply_find_actions(
-            stdout,
-            io.matched_paths,
-            texts,
-            registry,
-            session.cwd,
-            execute_fn=execute_fn,
-            session_id=session.session_id,
-            ns=ns,
-            stat_path=stat_path)
-        if action_err:
-            existing = await materialize(io.stderr) if io.stderr else b""
-            io.stderr = existing + action_err
-        if io.exit_code == 0:
-            io.exit_code = action_exit
 
     prefix = mount.prefix.rstrip("/")
     if prefix:

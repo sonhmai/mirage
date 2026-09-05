@@ -20,8 +20,6 @@ import { FileType, PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
-import { applyFindActions } from './find_action_dispatch.ts'
-import type { ExecuteFn } from '../expand/node.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { keep } from '../../commands/builtin/find_eval.ts'
@@ -345,8 +343,6 @@ export async function fanOutTraversal(
   // mount is not a reason for `find` to stop seeing one.
   ns?: NamespaceView,
   statPath: StatPath | null = null,
-  executeFn?: ExecuteFn,
-  sessionId = '',
 ): Promise<Result> {
   const targetPath = paths[0]?.virtual ?? cwd
   let descendants = allowedDescendants(registry, targetPath)
@@ -503,7 +499,7 @@ export async function fanOutTraversal(
     }
   }
 
-  let finalIoExit = successSeen ? 0 : finalExit
+  const finalIoExit = successSeen ? 0 : finalExit
   let combined: ByteSource | null = null
   if (duMerge && allStdout.length > 0) {
     combined = mergeDuBlocks(allStdout, targetPath, paths[0]?.rawPath ?? targetPath, {
@@ -532,28 +528,9 @@ export async function fanOutTraversal(
   }
 
   if (cmdName === 'find') {
-    const [newCombined, actionErr, actionExit] = await applyFindActions(
-      combined,
-      findMatchesComplete ? findMatches : null,
-      texts,
-      registry,
-      cwd,
-      {
-        ...(executeFn !== undefined ? { executeFn } : {}),
-        sessionId,
-        ns: ns ?? null,
-        statPath,
-      },
-    )
-    combined = newCombined
-    if (actionErr.length > 0) {
-      const existing = await materialize(mergedIo.stderr)
-      const merged = new Uint8Array(existing.length + actionErr.length)
-      merged.set(existing, 0)
-      merged.set(actionErr, existing.length)
-      mergedIo.stderr = merged
-    }
-    if (finalIoExit === 0) finalIoExit = actionExit
+    // The structured rows ride out for the command boundary, which
+    // applies find's actions once over every operand's matches.
+    mergedIo.matchedPaths = findMatchesComplete ? findMatches : null
   }
 
   mergedIo.exitCode = finalIoExit
@@ -587,8 +564,6 @@ export function runWithFanout(
   ns: NamespaceView | undefined,
   ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
   statPath: StatPath | null = null,
-  executeFn?: ExecuteFn,
-  sessionId = '',
 ): RunSingle {
   return async (cmdName, paths, texts, flagKwargs, opts) => {
     const stdin = opts?.stdin ?? null
@@ -617,8 +592,6 @@ export function runWithFanout(
       ensureOpen,
       ns,
       statPath,
-      executeFn,
-      sessionId,
     )
     return [stdout, io]
   }

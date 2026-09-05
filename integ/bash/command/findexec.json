@@ -777,11 +777,10 @@
         "sharepoint",
         "sharepoint-prefix",
         "ssh",
-        "nextcloud",
         "gdrive",
         "gdrive-folder"
       ],
-      "note": "box, hf, hf-prefix, s3 and s3-prefix are excused in integ/target_exceptions.json: python cannot create the newline-bearing name there."
+      "note": "box, hf, hf-prefix, s3, s3-prefix and nextcloud are excused in integ/target_exceptions.json: python cannot create the newline-bearing name on the first five, and Nextcloud's WebDAV refuses it for both hosts."
     },
     {
       "id": "find_actions_keep_newline_boundaries_1",
@@ -807,11 +806,10 @@
         "sharepoint",
         "sharepoint-prefix",
         "ssh",
-        "nextcloud",
         "gdrive",
         "gdrive-folder"
       ],
-      "note": "box, hf, hf-prefix, s3 and s3-prefix are excused in integ/target_exceptions.json: python cannot create the newline-bearing name there."
+      "note": "box, hf, hf-prefix, s3, s3-prefix and nextcloud are excused in integ/target_exceptions.json: python cannot create the newline-bearing name on the first five, and Nextcloud's WebDAV refuses it for both hosts."
     },
     {
       "id": "find_actions_keep_newline_boundaries_2",
@@ -837,11 +835,10 @@
         "sharepoint",
         "sharepoint-prefix",
         "ssh",
-        "nextcloud",
         "gdrive",
         "gdrive-folder"
       ],
-      "note": "box, hf, hf-prefix, s3 and s3-prefix are excused in integ/target_exceptions.json: python cannot create the newline-bearing name there."
+      "note": "box, hf, hf-prefix, s3, s3-prefix and nextcloud are excused in integ/target_exceptions.json: python cannot create the newline-bearing name on the first five, and Nextcloud's WebDAV refuses it for both hosts."
     },
     {
       "id": "find_delete_or_refused_before_mutation",
@@ -935,11 +932,10 @@
         "sharepoint",
         "sharepoint-prefix",
         "ssh",
-        "nextcloud",
         "gdrive",
         "gdrive-folder"
       ],
-      "note": "box, hf, hf-prefix, s3 and s3-prefix are excused in integ/target_exceptions.json: python cannot create the newline-bearing name there."
+      "note": "box, hf, hf-prefix, s3, s3-prefix and nextcloud are excused in integ/target_exceptions.json: python cannot create the newline-bearing name on the first five, and Nextcloud's WebDAV refuses it for both hosts."
     },
     {
       "id": "find_newer_printf_refusal_1",
@@ -1653,6 +1649,40 @@
         "exit": 0,
         "stdout": "ran d/a.txt\nd/a.txt\nran d/a.txt\nrc=0\n",
         "stderr": "find: './missing.sh': No such file or directory\n"
+      }
+    },
+    {
+      "id": "find_ls_failure_ends_the_rows_chain",
+      "seq": 981527,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fl/d/sub && printf A > /data/fl/d/a.txt && printf B > /data/fl/d/sub/b.txt && cd /data/fl && find d -type f -delete -ls -print; echo rc=$?; find d -type f | wc -l; cd / && rm -r /data/fl",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n0\n",
+        "stderr": "find: 'd/a.txt': No such file or directory\nfind: 'd/sub/b.txt': No such file or directory\n"
       }
     }
   ]

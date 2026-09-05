@@ -24,6 +24,7 @@ import type {
   Decision,
   HandOff,
   Occurrence,
+  SessionDecisionsQuery,
 } from './types.ts'
 
 const RULE: CommandRule = { reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }
@@ -441,6 +442,56 @@ describe('decisions', () => {
     expect(ledger.list('s')).toEqual([])
     expect(await ledger.resolve(ctx(), ASK)).toBeNull()
     expect(asked).toBe(2)
+  })
+
+  it('claims an inline grant before the ledger yields to its store', async () => {
+    // A host's inline nod is claimed for the asking line in the same step
+    // that records it, before the flush waits on the store. A line judged
+    // during that wait finds the grant claimed, not standing, and asks for
+    // itself; it used to take the nod, and the first line, resuming to
+    // find its nod gone, ran on nothing at all. The in-memory ledger never
+    // yields, which is what hid the window.
+    const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+    const held = new Map<string, readonly Decision[]>()
+    let flushes = 0
+    const store: SessionDecisionsQuery = {
+      decisionSessions: () => [...held.keys()],
+      decisionsOf: (sessionId) => held.get(sessionId) ?? [],
+      setDecisions: (sessionId, records) => {
+        held.set(sessionId, records)
+      },
+      flush: async () => {
+        flushes += 1
+        await tick()
+      },
+    }
+    let asked = 0
+    const ledger = new Decisions(store, (r) => {
+      asked += 1
+      return Promise.resolve({ ...r, outcome: Outcome.ALLOW, scope: Scope.ONCE })
+    })
+    const first = fresh()
+    const second = fresh()
+    let done = false
+    const running = ledger.resolve(ctx(), ASK, undefined, at(first)).finally(() => {
+      done = true
+    })
+    // Two flushes in, the question has been recorded and then answered,
+    // and the first line is parked in the flush of its answer.
+    for (let i = 0; i < 20 && flushes < 2; i += 1) await tick()
+    expect(flushes).toBe(2)
+    expect(done).toBe(false)
+    expect(ledger.list('s').map((r) => r.outcome)).toEqual([Outcome.ALLOW])
+    expect(asked).toBe(1)
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(second))).toBeNull()
+    expect(asked).toBe(2)
+    expect(await running).toBeNull()
+    expect(first.claimed).toHaveLength(1)
+    expect(second.claimed).toHaveLength(1)
+    expect(ledger.list('s')).toHaveLength(2)
+    await ledger.revoke('s', first)
+    await ledger.revoke('s', second)
+    expect(ledger.list('s')).toEqual([])
   })
 
   it("binds a gate's own answer to its place on the line", async () => {

@@ -260,6 +260,32 @@ class Decisions:
             KeyError: no waiting record has that id.
             ValueError: the outcome is ASK.
         """
+        self._write_answer(decision_id, outcome, scope, note)
+        await self._flush()
+
+    def _write_answer(self, decision_id: str, outcome: Outcome, scope: Scope,
+                      note: str) -> Decision:
+        """Settle a waiting record in the session's records, leaving the
+        store to be flushed by the caller.
+
+        Synchronous on purpose: the records change and nothing yields,
+        so a line that answered inline can claim the grant in the same
+        step (:meth:`_raise`), and a line judged while the flush then
+        waits on the store finds it claimed rather than standing.
+
+        Args:
+            decision_id (str): the id the agent was told to quote.
+            outcome (Outcome): ALLOW or DENY.
+            scope (Scope): how far the answer reaches.
+            note (str): what to record alongside it.
+
+        Returns:
+            The settled record.
+
+        Raises:
+            KeyError: no waiting record has that id.
+            ValueError: the outcome is ASK.
+        """
         if outcome is Outcome.ASK:
             raise ValueError("ASK is the question, not an answer")
         for key in self._keys():
@@ -273,8 +299,7 @@ class Decisions:
                                                note=note)
                 self._set(key,
                           (*records[:index], answered, *records[index + 1:]))
-                await self._flush()
-                return
+                return answered
         raise KeyError(decision_id)
 
     async def resolve(
@@ -350,15 +375,16 @@ class Decisions:
         for rule, record in answers:
             if record is not None:
                 continue
-            action = await self._raise(ctx, rule, argv, cancel)
+            action = await self._raise(ctx, rule, argv, cancel, claimant)
             if action is not None:
                 return action
         # Every rule is answered and the line may run. The ledger is read
         # again rather than trusting the entry snapshot, because a host
-        # that answered inline settled its record during the loop above:
-        # without the re-read, the grant it gave THIS line would still be
-        # standing for the next identical one, and whoever allowed once
-        # would have allowed twice.
+        # that answered inline settled its record during the loop above
+        # (and, on a line, _raise has already claimed it): without the
+        # re-read, the grant it gave THIS line would still be standing
+        # for the next identical one, and whoever allowed once would have
+        # allowed twice.
         once = self._once_answers(ctx.session_id, rules, argv, ctx.cwd,
                                   claimant)
         if claimant is None:
@@ -584,12 +610,22 @@ class Decisions:
         rule: CommandRule,
         argv: tuple[str, ...],
         cancel: asyncio.Event | None = None,
+        claimant: Claimant | None = None,
     ) -> Deny | Pending | Abandoned | None:
         """Record one rule of a line as a question and put it to the
         host, None when the host said yes.
 
         A question already waiting is reused rather than duplicated, so
         a retry keeps quoting one id.
+
+        A ONCE grant the host gives is claimed for the asking command in
+        the same step that records it, before the store is flushed. The
+        write to the records is synchronous and the flush is not, and
+        a line judged while the flush waited on a persistent store found
+        the grant standing, claimed it and ran on it, while this line,
+        resuming to find its own nod claimed by another, ran on nothing:
+        one nod, two runs. Claimed first, the grant is hidden from the
+        other line, which asks for itself.
 
         The host is given the run's kill channel and the wait is bounded
         by it, because a host that asks a person can take an unbounded
@@ -608,6 +644,8 @@ class Decisions:
             rule (CommandRule): the rule nothing answers.
             argv (tuple[str, ...]): the line's words, name first.
             cancel (asyncio.Event | None): the run's kill channel.
+            claimant (Claimant | None): the asking command and its line,
+                None outside a line.
         """
         record = self._waiting(ctx, rule, argv)
         if record is None:
@@ -630,7 +668,12 @@ class Decisions:
             return said
         if said is None or said.outcome is None:
             return Pending(record.id, rule.reason)
-        await self.answer(record.id, said.outcome, said.scope, said.note)
+        settled = self._write_answer(record.id, said.outcome, said.scope,
+                                     said.note)
+        if (claimant is not None and settled.outcome is Outcome.ALLOW
+                and settled.scope is Scope.ONCE):
+            self._claim(ctx.session_id, claimant, (settled, ))
+        await self._flush()
         if said.outcome is Outcome.DENY:
             return Deny(rule.reason)
         return None

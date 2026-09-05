@@ -261,6 +261,23 @@ export class Decisions {
     scope: Scope = Scope.ONCE,
     note = '',
   ): Promise<void> {
+    this.writeAnswer(decisionId, outcome, scope, note)
+    await this.flush()
+  }
+
+  /**
+   * Settle a waiting record in the session's records, leaving the store
+   * to be flushed by the caller.
+   *
+   * Synchronous on purpose: the records change and nothing yields, so a
+   * line that answered inline can claim the grant in the same step
+   * (`raise`), and a line judged while the flush then waits on the store
+   * finds it claimed rather than standing.
+   *
+   * @returns the settled record.
+   * @throws when no waiting record has that id, or the outcome is ASK.
+   */
+  private writeAnswer(decisionId: string, outcome: Outcome, scope: Scope, note: string): Decision {
     if (outcome === Outcome.ASK) throw new Error('ASK is the question, not an answer')
     for (const key of this.keys()) {
       const records = [...this.records(key)]
@@ -268,10 +285,10 @@ export class Decisions {
       if (index === -1) continue
       const record = records[index]
       if (record === undefined) continue
-      records[index] = { ...record, outcome, scope, note }
+      const settled: Decision = { ...record, outcome, scope, note }
+      records[index] = settled
       this.set(key, records)
-      await this.flush()
-      return
+      return settled
     }
     throw new Error(`no decision waiting with id ${decisionId}`)
   }
@@ -345,14 +362,15 @@ export class Decisions {
     }
     for (const [rule, record] of answers) {
       if (record !== null) continue
-      const action = await this.raise(ctx, rule, argv, signal)
+      const action = await this.raise(ctx, rule, argv, signal, claimant)
       if (action !== null) return action
     }
     // Every rule is answered and the line may run. The ledger is read again
     // rather than trusting the entry snapshot, because a host that answered
-    // inline settled its record during the loop above: without the re-read,
-    // the grant it gave THIS line would still be standing for the next
-    // identical one, and whoever allowed once would have allowed twice.
+    // inline settled its record during the loop above (and, on a line,
+    // `raise` has already claimed it): without the re-read, the grant it
+    // gave THIS line would still be standing for the next identical one,
+    // and whoever allowed once would have allowed twice.
     const once = this.onceAnswers(sessionId, rules, argv, ctx.cwd, claimant)
     if (claimant === null) {
       await this.spend(sessionId, once)
@@ -584,6 +602,15 @@ export class Decisions {
     rule: CommandRule,
     argv: readonly string[],
     signal?: AbortSignal,
+    // The asking command and its line, null outside a line: a ONCE grant
+    // the host gives is claimed for it in the same step that records it,
+    // before the store is flushed. The write to the records is
+    // synchronous and the flush is not, and a line judged while the flush
+    // waited on a persistent store found the grant standing, claimed it
+    // and ran on it, while this line, resuming to find its own nod claimed
+    // by another, ran on nothing: one nod, two runs. Claimed first, the
+    // grant is hidden from the other line, which asks for itself.
+    claimant: Claimant | null = null,
   ): Promise<Deny | Pending | Abandoned | null> {
     let record = this.waiting(ctx, rule, argv)
     if (record === null) {
@@ -611,7 +638,11 @@ export class Decisions {
     if (said?.outcome == null) {
       return { kind: 'pending', id: record.id, reason: rule.reason }
     }
-    await this.answer(record.id, said.outcome, said.scope, said.note)
+    const settled = this.writeAnswer(record.id, said.outcome, said.scope, said.note)
+    if (claimant !== null && settled.outcome === Outcome.ALLOW && settled.scope === Scope.ONCE) {
+      this.claim(ctx.sessionId ?? '', claimant, [settled])
+    }
+    await this.flush()
     if (said.outcome === Outcome.DENY) {
       return { kind: 'deny', reason: rule.reason, scope: 'command' }
     }

@@ -371,3 +371,32 @@ async def test_snapshot_rejects_fingerprint_from_retired_lazy_op():
     finally:
         scope.close()
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shadow", [False, True])
+async def test_restored_drift_checks_do_not_follow_replaced_mounts(shadow):
+    prefix = "/" if shadow else "/data"
+    with patch_s3_multi({"old": {}, "new": {"file": b"new"}}):
+        ancestor = S3Resource(_config().model_copy(update={"bucket": "old"}))
+        replacement = S3Resource(
+            _config().model_copy(update={"bucket": "new"}))
+        source = Workspace({prefix: ancestor})
+        loaded = None
+        try:
+            state = await to_state_dict(source)
+            state["fingerprints"] = [{
+                "path": "/data/file",
+                "mount_prefix": prefix,
+                "fingerprint": "old-account"
+            }]
+            loaded = await Workspace.from_state(state,
+                                                resources={prefix: ancestor})
+            if not shadow:
+                await loaded.unmount("/data")
+            loaded.add_mount("/data", replacement)
+            assert (await loaded.execute("cat /data/file")).stdout == b"new"
+        finally:
+            if loaded is not None:
+                await loaded.close()
+            await source.close()

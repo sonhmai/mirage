@@ -474,3 +474,39 @@ it('snapshot rejects fingerprints from a retired lazy op', async () => {
     await ws.close()
   }
 })
+
+it.each([false, true])(
+  'restored drift checks do not follow replaced mounts (shadow=%s)',
+  async (shadow) => {
+    const prefix = shadow ? '/remote' : '/remote/data'
+    const ancestor = new FakeRemoteResource(new FakeRemoteAccessor())
+    const fresh = new FakeRemoteAccessor()
+    fresh.put('/remote/data/file', new TextEncoder().encode('new'))
+    const ops = new OpsRegistry()
+    ops.register(readOp)
+    ops.register(statOp)
+    const source = new Workspace({ [prefix]: ancestor }, { ops, shellParser: parser })
+    let loaded: Workspace | undefined
+    try {
+      const state = await toStateDict(source)
+      state.fingerprints = [
+        { path: '/remote/data/file', mount_prefix: prefix, fingerprint: 'old-account' },
+      ]
+      loaded = await Workspace.fromState(
+        state,
+        { ops, shellParser: parser },
+        { [prefix]: ancestor },
+      )
+      if (!shadow) await loaded.unmount('/remote/data')
+      loaded.addMount('/remote/data', new FakeRemoteResource(fresh))
+      ops.register(readOp)
+      ops.register(statOp)
+      expect(await loaded.dispatch('read', '/remote/data/file')).toEqual(
+        new TextEncoder().encode('new'),
+      )
+    } finally {
+      await loaded?.close()
+      await source.close()
+    }
+  },
+)

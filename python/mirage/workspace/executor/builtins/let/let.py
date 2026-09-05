@@ -23,6 +23,7 @@ from mirage.workspace.executor.builtins.shared import (readonly_refusal,
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import Session
 from mirage.workspace.session.elements import assign_element
+from mirage.workspace.session.rng import random_reader
 from mirage.workspace.session.state import (ensure_var_visible,
                                             session_elements, session_view,
                                             visible_env)
@@ -62,7 +63,8 @@ async def handle_let(
         try:
             arith = evaluate_arith(expr,
                                    visible_env(session),
-                                   elements=session_elements(session))
+                                   elements=session_elements(session),
+                                   read_var=random_reader(session))
         except ArithError as exc:
             err = f"bash: let: {expr}: {exc}\n".encode()
             return None, IOResult(exit_code=1,

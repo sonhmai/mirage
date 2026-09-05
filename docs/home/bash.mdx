@@ -221,14 +221,16 @@ is refused because backend filtering cannot preserve that evaluation order.
 All actions (`-exec`, `-print`, `-print0`, `-printf`, `-ls`, and `-delete`)
 refuse placement under `-o`, negation, or parentheses. Tests may be grouped
 before a trailing action. Action operands retain whole filenames, including
-embedded newlines, across mount boundaries.
+embedded newlines, across mount boundaries. `-printf` must be the only action;
+combining it with other actions or repeating it is refused.
 `-delete` runs where it is written, so a later `-exec` sees the row gone, and
 it turns on `-depth`, which lists a directory after its contents. `-newer FILE`
 reads a symlink reference itself under the default `-P` and its target under
 `-H` or `-L`, as GNU find does.
 `-newermt` accepts GNU date expressions such as `yesterday`, `24 hours ago`,
 and `@1700000000`, with unzoned dates interpreted as UTC. Invalid calendar
-dates are refused.
+dates are refused. `-newer` and `-newermt` must be in a top-level AND chain;
+placing them under OR, negation, or parentheses is refused.
 
 ## Supported bash syntax
 
@@ -237,9 +239,9 @@ Mirage Bash is a tree-sitter-bash parser plus a custom executor. It implements t
 ### Supported
 
 - **Operators:** pipes `|`, `|&`; lists `&&`, `||`, `;`; background `&`.
-- **Redirects:** `>`, `>>`, `>|`, `<`, `2>`, `2>&1`, `>&2`, `&>`, `&>>`, `>&-` (a closed stdout fails the write, as GNU echo reports), heredoc `<<`, herestring `<<<`. The shell models descriptors 0, 1 and 2 only: a redirect naming any other (`3>f`, `>&3`, `exec 3>&-`) is refused with `3: Bad file descriptor` and exit `1`, the line continuing as it would after any redirect error. Duplications involving fd 0 follow the same left-to-right rules. Writing to a read-only descriptor fails; reading a closed or write-only descriptor produces empty input, an approximation of a failed read.
+- **Redirects:** `>`, `>>`, `>|`, `<`, `2>`, `2>&1`, `>&2`, `&>`, `&>>`, `>&-` (a closed stdout fails the write, as GNU echo reports), heredoc `<<`, herestring `<<<`. The shell models descriptors 0, 1 and 2 only: a redirect naming any other (`3>f`, `>&3`, `exec 3>&-`) is refused with `3: Bad file descriptor` and exit `1`, the line continuing as it would after any redirect error. Duplications involving fd 0 follow the same left-to-right rules. Writing to a read-only descriptor fails; reading a closed or write-only descriptor produces empty input, an approximation of a failed read. Persistent `exec` file redirects must open fd 0 for input or fd 1/2 for output; cross-direction forms such as `exec 0>file` are refused before opening that target.
 - **Substitutions:** command substitution `` `cmd` `` and `$(cmd)`; arithmetic `$((expr))` (an invalid expression such as `$((1/0))` aborts the line with exit `1` and `bash: 1/0: division by 0`, as a non-interactive bash does); parameter expansion `${VAR}`, `${VAR:-default}`, `${VAR%suffix}`, etc.; input-direction process substitution `<(cmd)`.
-- **Shell variables:** `$?`, `$#`, `$@`, `$*`, `$0`..`$9`, `$$`, `$!`, `$RANDOM` (bash 5.2's generator, so `RANDOM=42` draws bash's own sequence; assigning seeds it immediately; invalid arithmetic seeds emit a diagnostic without changing the sequence or failing the assignment; `unset RANDOM` strips it, as in bash) and `${PIPESTATUS[@]}` (the per-segment statuses of the last pipeline).
+- **Shell variables:** `$?`, `$#`, `$@`, `$*`, `$0`..`$9`, `$$`, `$!`, `$RANDOM` (bash 5.2's generator, so `RANDOM=42` draws bash's own sequence; bare `RANDOM` in arithmetic draws lazily too; assigning seeds it immediately; invalid arithmetic seeds emit a diagnostic without changing the sequence or failing the assignment; `unset RANDOM` strips it, as in bash) and `${PIPESTATUS[@]}` (the per-segment statuses of the last pipeline).
 - **Control flow:** `if`/`elif`/`else`/`fi`, `for`, `while`, `until`, `case`, `select`, `function name() {}`, `break`, `continue`, `return`.
 - **Grouping:** subshells `(cmd)`, compound `{ cmd; }`, negation `! cmd`.
 - **Builtins:** `cd`, `pwd`, `echo`, `printf`, `printenv`, `read`, `source`, `.`, `eval`, `export`, `unset`, `local`, `declare` (including `-A`), `let`, `set`, `shopt`, `alias`, `umask`, `mapfile`, `shift`, `exec` (redirect-only form), `disown`, `trap` (no-op), `test`, `[`, `[[`, `true`, `false`, `sleep`, `xargs`, `timeout`, `bash`, `sh`, `python`, `python3`, `man`, `command`, `type`, `which`.

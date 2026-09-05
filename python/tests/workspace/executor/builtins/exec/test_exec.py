@@ -133,3 +133,35 @@ async def test_opened_targets_take_the_umask_mode():
         session_id="reader")
     assert (await io.stdout_str()) == "600 /data/m\n600 /data/a\n"
     await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("redirect, fd", [('0>', 0), ('0>>', 0), ('0>|', 0),
+                                          ('1<', 1), ('2<', 2)])
+async def test_cross_direction_file_redirect_is_refused(redirect, fd):
+    ws = _ws()
+    try:
+        await ws.execute(
+            "echo original > /data/input; echo readable > /data/source")
+        await ws.execute("exec </data/source")
+        io = await ws.execute(f"exec {redirect}/data/input")
+        assert io.exit_code == 1
+        assert await io.stderr_str() == f"{fd}: Bad file descriptor\n"
+        io = await ws.execute("read value; echo visible:$value; echo error >&2"
+                              )
+        assert await io.stdout_str() == "visible:readable\n"
+        assert await io.stderr_str() == "error\n"
+        assert await _file(ws, "/data/input") == "original\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_stdin_file_redirect_persists():
+    ws = _ws()
+    try:
+        await ws.execute("echo readable > /data/input; exec 0</data/input")
+        io = await ws.execute("read value; echo $value")
+        assert await io.stdout_str() == "readable\n"
+    finally:
+        await ws.close()

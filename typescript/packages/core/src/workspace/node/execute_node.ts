@@ -34,6 +34,7 @@ import {
   getPipelineCommands,
   getRedirects,
   getText,
+  getParts,
   getUnsetArgs,
   getWhileParts,
 } from '../../shell/helpers.ts'
@@ -44,6 +45,7 @@ import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
+import { randomReader } from '../session/rng.ts'
 import { evaluateArith } from '../../shell/arith.ts'
 import { ExitSignal, ArithError, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
@@ -141,7 +143,13 @@ async function evalCforExpr(
     // Reads resolve against the visible env so a hidden name counts as
     // unset; a hidden write refuses through the session door
     // (ensureVarVisible), caught by the loop beside ReadonlyError.
-    result = evaluateArith(text, visibleEnv(session), 0, sessionElements(session))
+    result = evaluateArith(
+      text,
+      visibleEnv(session),
+      0,
+      sessionElements(session),
+      randomReader(session),
+    )
   } catch (err) {
     if (!(err instanceof ArithError)) throw err
     throw new ArithError(`${text}: ${err.message}`)
@@ -278,7 +286,7 @@ export interface ExecuteNodeDeps {
  */
 function isBareExec(command: TSNodeLike | null): boolean {
   if (command?.type !== NT.COMMAND) return false
-  const named = command.namedChildren
+  const named = getParts(command)
   return named.length === 1 && named[0]?.type === NT.COMMAND_NAME && getText(named[0]) === 'exec'
 }
 
@@ -584,7 +592,13 @@ async function executeNodeBody(
       // Reads resolve against the visible env so a hidden name counts
       // as unset; a hidden write refuses below, in this command's own
       // voice like the readonly refusal.
-      result = evaluateArith(expr, visibleEnv(session), 0, sessionElements(session))
+      result = evaluateArith(
+        expr,
+        visibleEnv(session),
+        0,
+        sessionElements(session),
+        randomReader(session),
+      )
     } catch (err) {
       if (!(err instanceof ArithError)) throw err
       const errBytes = new TextEncoder().encode(`bash: ((: ${expr}: ${err.message}\n`)

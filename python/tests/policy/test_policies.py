@@ -450,3 +450,28 @@ async def test_wants_for_refines_wants_per_session():
     # A policy speaking for every session settles it, wherever it stands.
     both = Policies([ForSomeSessions(), ForEveryone()])
     assert await both.wants_for("pre_session", "b") is True
+
+
+@pytest.mark.asyncio
+async def test_remove_by_identity_refreshes_hooks_and_keeps_admission_order():
+    policies = Policies()
+
+    class RemovesItself(Policy):
+
+        async def pre_command(self, ctx):
+            assert policies.remove(self)
+            return None
+
+    first = RemovesItself()
+    last = DenyWeird()
+    policies.add(first)
+    policies.add(last)
+    assert not policies.remove(DenyWeird())
+    refusal = await policies.pre_command(_ctx("weird"))
+    assert isinstance(refusal, Deny)
+    assert refusal.reason == "nope"
+    assert policies.wants("pre_command")
+    assert policies.remove(last)
+    assert not policies.wants("pre_command")
+    assert not policies.remove(first)
+    assert await policies.pre_command(_ctx("weird")) is None

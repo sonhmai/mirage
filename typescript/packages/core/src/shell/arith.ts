@@ -365,6 +365,7 @@ class ArithEvaluator {
     private readonly writes: Map<string, ArithWrite>,
     private readonly depth: number,
     private readonly elements: ElementOps | null,
+    private readonly readVar: ((name: string) => string | null) | null,
   ) {}
 
   private coerce(raw: string | null): bigint {
@@ -380,13 +381,14 @@ class ArithEvaluator {
         { ...this.env, ...this.updates },
         this.depth + 1,
         this.elements,
+        this.readVar,
       )
       return value
     }
   }
 
   private lookup(name: string): bigint {
-    const pending = this.updates[name] ?? this.env[name]
+    const pending = this.updates[name] ?? this.readVar?.(name) ?? this.env[name]
     if (pending !== undefined) return this.coerce(pending)
     // A bare array name reads as element 0 (`a=(4 5)` then `$((a))` is
     // 4); the env holds scalars only, so the element resolver answers
@@ -545,6 +547,7 @@ export function evaluateArith(
   env: Readonly<Record<string, string>>,
   depth = 0,
   elements: ElementOps | null = null,
+  readVar: ((name: string) => string | null) | null = null,
 ): ArithResult {
   const tokens = tokenize(expr)
   if (tokens.length === 0) return { value: 0n, writes: [] }
@@ -552,6 +555,8 @@ export function evaluateArith(
   const updates: Record<string, string> = {}
   const elemUpdates = new Map<string, string>()
   const writes = new Map<string, ArithWrite>()
-  const value = new ArithEvaluator(env, updates, elemUpdates, writes, depth, elements).run(node)
+  const value = new ArithEvaluator(env, updates, elemUpdates, writes, depth, elements, readVar).run(
+    node,
+  )
   return { value, writes: [...writes.values()] }
 }

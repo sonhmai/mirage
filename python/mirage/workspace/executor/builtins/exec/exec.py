@@ -111,6 +111,8 @@ async def install_exec_redirects(
                 session.exec_stdout = session.exec_stderr
                 session.exec_stdout_append = session.exec_stderr_append
             continue
+        if ((r.kind == RedirectKind.STDIN) != (r.fd == FD_STDIN)):
+            return _exec_failure(bad_descriptor_line(r.fd))
         scope = _to_scope(r.target) if isinstance(r.target, str) else r.target
         if r.kind == RedirectKind.STDIN:
             try:
@@ -125,8 +127,8 @@ async def install_exec_redirects(
                 session._exec_opened.add(path)
         except FS_ERRORS as exc:
             return _exec_error(scope.raw_path, exc)
-        streams = ((["stderr"] if r.kind == RedirectKind.STDERR else
-                    ["stdout"]) if r.fd != FD_BOTH else ["stdout", "stderr"])
+        streams = ((["stderr"] if r.fd == FD_STDERR else ["stdout"])
+                   if r.fd != FD_BOTH else ["stdout", "stderr"])
         for stream in streams:
             setattr(session, f"exec_{stream}", path)
             setattr(session, f"exec_{stream}_append", r.append)

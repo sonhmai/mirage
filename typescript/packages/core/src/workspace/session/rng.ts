@@ -24,6 +24,7 @@ import {
   RANDOM_ZERO_SEED,
 } from '../../shell/constants.ts'
 import { evaluateArith } from '../../shell/arith.ts'
+import { varHidden } from '../../utils/hidden.ts'
 import { makeVar, withValue } from '../../shell/variable.ts'
 import type { Session } from './session.ts'
 import { sessionElements, visibleEnv } from './state.ts'
@@ -96,4 +97,13 @@ export function nextRandom(session: Session, stored: string | undefined): number
   session.vars[RANDOM] = existing !== undefined ? withValue(existing, word) : makeVar(word)
   session.randomSeed = word
   return value
+}
+
+/** Bind lazy arithmetic RANDOM reads to a session. */
+export function randomReader(session: Session): (name: string) => string | null {
+  return (name) => {
+    if (name !== RANDOM || varHidden(session.hiddenVars, name)) return null
+    const value = nextRandom(session, visibleEnv(session)[name])
+    return value === null ? null : String(value)
+  }
 }

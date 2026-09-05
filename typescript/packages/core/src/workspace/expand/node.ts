@@ -21,6 +21,7 @@ import { sessionElements, visibleEnv } from '../session/state.ts'
 import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
+import { randomReader } from '../session/rng.ts'
 import { evaluateArith } from '../../shell/arith.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from '../../shell/escapes.ts'
@@ -361,7 +362,13 @@ export async function expandNodeMarked(
           // counts as unset; the write-back below lands on the raw env
           // (policy-ungated until expansion goes async), with the
           // hidden gate applied inside expansionWrite.
-          arith = evaluateArith(expr, visibleEnv(session), 0, sessionElements(session))
+          arith = evaluateArith(
+            expr,
+            visibleEnv(session),
+            0,
+            sessionElements(session),
+            randomReader(session),
+          )
         } catch (err) {
           if (!(err instanceof ArithError)) throw err
           throw arithExit(expr, err)
@@ -394,7 +401,13 @@ export async function expandNodeMarked(
     const expr = await expandArith(tsNode, session, executeFn, callStack, view)
     let result: ArithResult
     try {
-      result = evaluateArith(expr, visibleEnv(session), 0, sessionElements(session))
+      result = evaluateArith(
+        expr,
+        visibleEnv(session),
+        0,
+        sessionElements(session),
+        randomReader(session),
+      )
     } catch (err) {
       if (err instanceof ArithError) throw arithExit(expr, err)
       throw err

@@ -101,6 +101,176 @@
         "stdout": "code=1\nstill\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "exec_cross_direction_file_refusal_1",
+      "seq": 980013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo original > /data/execinput; exec 0>/data/execinput; echo code=$?; echo visible; cat /data/execinput",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\nvisible\noriginal\n",
+        "stderr": "0: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "exec_cross_direction_file_refusal_2",
+      "seq": 980014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo original > /data/execinput; exec 0>>/data/execinput; echo code=$?; echo visible; cat /data/execinput",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\nvisible\noriginal\n",
+        "stderr": "0: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "exec_cross_direction_file_refusal_3",
+      "seq": 980015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo original > /data/execinput; exec 0>|/data/execinput; echo code=$?; echo visible; cat /data/execinput",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\nvisible\noriginal\n",
+        "stderr": "0: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "exec_cross_direction_file_refusal_4",
+      "seq": 980016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo original > /data/execinput; exec 1</data/execinput; echo code=$?; echo visible; cat /data/execinput",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\nvisible\noriginal\n",
+        "stderr": "1: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "exec_cross_direction_file_refusal_5",
+      "seq": 980017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo original > /data/execinput; exec 2</data/execinput; echo code=$?; echo visible; cat /data/execinput",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\nvisible\noriginal\n",
+        "stderr": "2: Bad file descriptor\n"
+      }
     }
   ]
 }

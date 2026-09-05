@@ -98,6 +98,9 @@ export async function installExecRedirects(
       }
       continue
     }
+    if ((r.kind === RedirectKind.STDIN) !== (r.fd === FD_STDIN)) {
+      return execFailure(badDescriptorLine(r.fd))
+    }
     const scope = scopeOf(r.target)
     if (r.kind === RedirectKind.STDIN) {
       try {
@@ -117,11 +120,7 @@ export async function installExecRedirects(
       return execError(scope.rawPath, err)
     }
     const streams =
-      r.fd === FD_BOTH
-        ? ['stdout', 'stderr']
-        : r.kind === RedirectKind.STDERR
-          ? ['stderr']
-          : ['stdout']
+      r.fd === FD_BOTH ? ['stdout', 'stderr'] : r.fd === FD_STDERR ? ['stderr'] : ['stdout']
     for (const stream of streams) {
       if (stream === 'stderr') {
         session.execStderr = path

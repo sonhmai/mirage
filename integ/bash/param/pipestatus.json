@@ -367,7 +367,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "RANDOM=42; a=$RANDOM; RANDOM=42; b=$RANDOM; [ \"$a\" = \"$b\" ] && echo seeded $a; c=$RANDOM; d=$RANDOM; [ \"$c\" != \"$d\" ] && echo varies; unset RANDOM; echo \"[$RANDOM]\"",
+      "command": "( RANDOM=42; a=$RANDOM; RANDOM=42; b=$RANDOM; [ \"$a\" = \"$b\" ] && echo seeded $a; c=$RANDOM; d=$RANDOM; [ \"$c\" != \"$d\" ] && echo varies; unset RANDOM; echo \"[$RANDOM]\" )",
       "expect": {
         "exit": 0,
         "stdout": "seeded 17772\nvaries\n[]\n",
@@ -401,7 +401,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "RANDOM=42; a=$RANDOM; RANDOM=42; (: $RANDOM); b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept; unset RANDOM; (echo \"[$RANDOM]\")",
+      "command": "( RANDOM=42; a=$RANDOM; RANDOM=42; (: $RANDOM); b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept; unset RANDOM; (echo \"[$RANDOM]\") )",
       "expect": {
         "exit": 0,
         "stdout": "parent kept\n[]\n",
@@ -435,7 +435,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "RANDOM=42; a=$RANDOM; RANDOM=42; echo $RANDOM | cat >/dev/null; b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept",
+      "command": "( RANDOM=42; a=$RANDOM; RANDOM=42; echo $RANDOM | cat >/dev/null; b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept )",
       "expect": {
         "exit": 0,
         "stdout": "parent kept\n",
@@ -469,7 +469,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "RANDOM=42; a=$RANDOM; RANDOM=42; x=$(echo $RANDOM); b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept",
+      "command": "( RANDOM=42; a=$RANDOM; RANDOM=42; x=$(echo $RANDOM); b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept )",
       "expect": {
         "exit": 0,
         "stdout": "parent kept\n",
@@ -503,7 +503,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "RANDOM=42; a=$RANDOM; RANDOM=42; x=`echo $RANDOM`; b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept",
+      "command": "( RANDOM=42; a=$RANDOM; RANDOM=42; x=`echo $RANDOM`; b=$RANDOM; [ \"$a\" = \"$b\" ] && echo parent kept )",
       "expect": {
         "exit": 0,
         "stdout": "parent kept\n",
@@ -537,7 +537,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "RANDOM=42; a=$RANDOM; b=$RANDOM; RANDOM=42; a=$RANDOM; echo x | { read x; : $RANDOM; }; x=$(echo $RANDOM); c=$RANDOM; [ \"$b\" = \"$c\" ] && echo parent kept",
+      "command": "( RANDOM=42; a=$RANDOM; b=$RANDOM; RANDOM=42; a=$RANDOM; echo x | { read x; : $RANDOM; }; x=$(echo $RANDOM); c=$RANDOM; [ \"$b\" = \"$c\" ] && echo parent kept )",
       "expect": {
         "exit": 0,
         "stdout": "parent kept\n",
@@ -581,7 +581,7 @@
     {
       "id": "random_invalid_seed_diagnostic_at_assignment",
       "seq": 981506,
-      "command": "RANDOM=42; { RANDOM=1.5; echo status:$?; } 2>/data/reviewrng.err; grep -q \"syntax error\" /data/reviewrng.err; echo diagnostic:$?; echo $RANDOM; rm /data/reviewrng.err",
+      "command": "( RANDOM=42; { RANDOM=1.5; echo status:$?; } 2>/data/reviewrng.err; grep -q \"syntax error\" /data/reviewrng.err; echo diagnostic:$?; echo $RANDOM; rm /data/reviewrng.err )",
       "expect": {
         "exit": 0,
         "stdout": "status:0\ndiagnostic:0\n17772\n",
@@ -615,7 +615,7 @@
     {
       "id": "random_seed_expression_is_evaluated_at_assignment",
       "seq": 981507,
-      "command": "x=42; RANDOM=x; x=0; echo $RANDOM; RANDOM=42; RANDOM=$RANDOM; echo $RANDOM",
+      "command": "( x=42; RANDOM=x; x=0; echo $RANDOM; RANDOM=42; RANDOM=$RANDOM; echo $RANDOM )",
       "expect": {
         "exit": 0,
         "stdout": "17772\n9401\n",
@@ -649,7 +649,7 @@
     {
       "id": "random_invalid_seed_diagnostic_in_substitution",
       "seq": 981508,
-      "command": "RANDOM=42; { x=$(RANDOM=1.5; echo ok); echo $x $RANDOM; } 2>/data/reviewrng.err; grep -q \"syntax error\" /data/reviewrng.err; echo diagnostic:$?; rm /data/reviewrng.err",
+      "command": "( RANDOM=42; { x=$(RANDOM=1.5; echo ok); echo $x $RANDOM; } 2>/data/reviewrng.err; grep -q \"syntax error\" /data/reviewrng.err; echo diagnostic:$?; rm /data/reviewrng.err )",
       "expect": {
         "exit": 0,
         "stdout": "ok 17772\ndiagnostic:0\n",
@@ -679,6 +679,278 @@
         "gdrive-folder",
         "box"
       ]
+    },
+    {
+      "id": "random_arithmetic_read_1",
+      "seq": 981509,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( RANDOM=42; echo $((RANDOM)) $((RANDOM)) $RANDOM )",
+      "expect": {
+        "exit": 0,
+        "stdout": "17772 26794 1435\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "random_arithmetic_read_2",
+      "seq": 981510,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( RANDOM=42; echo $((RANDOM+RANDOM)) $RANDOM )",
+      "expect": {
+        "exit": 0,
+        "stdout": "44566 1435\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "random_arithmetic_read_3",
+      "seq": 981511,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( RANDOM=42; echo $((0 && RANDOM)) $((1 || RANDOM)) $((1 ? 5 : RANDOM)) $RANDOM )",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 1 5 17772\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "random_arithmetic_read_4",
+      "seq": 981512,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( x=RANDOM; RANDOM=42; echo $((x)) $((x)) $RANDOM )",
+      "expect": {
+        "exit": 0,
+        "stdout": "17772 26794 1435\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "random_arithmetic_read_5",
+      "seq": 981513,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( RANDOM=42; (( x=RANDOM )); let 'y=RANDOM'; echo $x $y $RANDOM )",
+      "expect": {
+        "exit": 0,
+        "stdout": "17772 26794 1435\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "random_arithmetic_read_6",
+      "seq": 981514,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( RANDOM=42; for ((i=0; i<2; i++)); do echo $((RANDOM)); done; echo $RANDOM )",
+      "expect": {
+        "exit": 0,
+        "stdout": "17772\n26794\n1435\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "random_arithmetic_read_7",
+      "seq": 981515,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( RANDOM=42; [[ RANDOM -eq 17772 ]]; echo $? $RANDOM )",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 26794\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "random_arithmetic_read_8",
+      "seq": 981516,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( unset RANDOM; RANDOM=42; echo $((RANDOM)) $((RANDOM)) )",
+      "expect": {
+        "exit": 0,
+        "stdout": "42 42\n",
+        "stderr": ""
+      }
     }
   ]
 }

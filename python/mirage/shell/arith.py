@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from mirage.shell.constants import (ARITH_ASSIGN_OPS, ARITH_ELEM,
@@ -344,16 +344,25 @@ class ArithEvaluator:
     """
 
     def __init__(self, env: Mapping[str, str], updates: dict[str, str],
-                 elem_updates: dict[tuple[str, str],
-                                    str], writes: dict[tuple[str, str | None],
-                                                       str], depth: int,
-                 elements: ElementOps | None) -> None:
+                 elem_updates: dict[tuple[str, str], str],
+                 writes: dict[tuple[str, str | None],
+                              str], depth: int, elements: ElementOps | None,
+                 read_var: Callable[[str], str | None] | None) -> None:
         self.env = env
         self.updates = updates
         self.elem_updates = elem_updates
         self.writes = writes
         self.depth = depth
         self.elements = elements
+        self.read_var = read_var
+
+    def _merged_env(self) -> dict[str, str]:
+        merged = {
+            name: value
+            for name in self.env if (value := self.env.get(name)) is not None
+        }
+        merged.update(self.updates)
+        return merged
 
     def _coerce(self, raw: str | None) -> int:
         raw = (raw or "").strip()
@@ -366,18 +375,19 @@ class ArithEvaluator:
                 raise ArithError(
                     f"expression recursion level exceeded (error token is "
                     f'"{raw}")') from None
-            result = evaluate_arith(raw, {
-                **dict(self.env),
-                **self.updates
-            },
+            result = evaluate_arith(raw,
+                                    self._merged_env(),
                                     depth=self.depth + 1,
-                                    elements=self.elements)
+                                    elements=self.elements,
+                                    read_var=self.read_var)
             return result.value
 
     def lookup(self, name: str) -> int:
         raw = self.updates.get(name)
         if raw is None:
-            value = self.env.get(name)
+            value = self.read_var(name) if self.read_var is not None else None
+            if value is None:
+                value = self.env.get(name)
             if value is None and self.elements is not None:
                 # A bare array name reads as element 0 (`a=(4 5)` then
                 # `$((a))` is 4); the env holds scalars only, so the
@@ -390,7 +400,7 @@ class ArithEvaluator:
         if self.elements is None:
             raise ArithError('syntax error: operand expected (error token '
                              'is "[")')
-        merged = {**dict(self.env), **self.updates}
+        merged = self._merged_env()
         return self.elements.resolve(name, subscript, merged)
 
     def read_target(self, target: tuple[Any, ...]) -> int:
@@ -508,10 +518,12 @@ class ArithEvaluator:
         raise ArithError(f'unsupported operator "{op}"')
 
 
-def evaluate_arith(expr: str,
-                   env: Mapping[str, str],
-                   depth: int = 0,
-                   elements: ElementOps | None = None) -> ArithResult:
+def evaluate_arith(
+        expr: str,
+        env: Mapping[str, str],
+        depth: int = 0,
+        elements: ElementOps | None = None,
+        read_var: Callable[[str], str | None] | None = None) -> ArithResult:
     """Evaluate a bash arithmetic expression.
 
     Implements bash's arithmetic grammar over 64-bit wrapping integers:
@@ -534,6 +546,9 @@ def evaluate_arith(expr: str,
         depth (int): recursion depth for variable re-evaluation.
         elements (ElementOps | None): array-element callbacks; None
             outside a session.
+        read_var (Callable[[str], str | None] | None): dynamic scalar reads;
+            None results fall back to the environment. Called only for
+            evaluated nodes, including recursive variable expressions.
 
     Returns:
         ArithResult: the value plus the assignments made, in order, for
@@ -550,8 +565,8 @@ def evaluate_arith(expr: str,
     updates: dict[str, str] = {}
     elem_updates: dict[tuple[str, str], str] = {}
     writes: dict[tuple[str, str | None], str] = {}
-    value = ArithEvaluator(env, updates, elem_updates, writes, depth,
-                           elements).run(node)
+    value = ArithEvaluator(env, updates, elem_updates, writes, depth, elements,
+                           read_var).run(node)
     return ArithResult(
         value,
         tuple(

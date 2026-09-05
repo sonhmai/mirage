@@ -72,24 +72,21 @@ const stat = (_accessor: Accessor, p: PathSpec): Promise<FileStat> =>
         }),
   )
 
-// Backend ops follow the executor contract: specs arrive in the
-// resource view (virtual == mountPath) and entries come back the same
-// way. The fakes translate to the '/data'-prefixed fixture keys.
+// Backend ops retain full virtual paths, matching the executor and its index.
 const readdir = (_accessor: Accessor, p: PathSpec): Promise<string[]> =>
-  Promise.resolve((TREE[`/data${p.virtual}`] ?? []).map((e) => e.slice('/data'.length)))
+  Promise.resolve(TREE[p.virtual] ?? [])
 
 const resolveGlob = (_accessor: Accessor, paths: readonly PathSpec[]): Promise<PathSpec[]> => {
   const out: PathSpec[] = []
   for (const p of paths) {
     if (p.pattern !== null && p.pattern !== '') {
       const suffix = p.pattern.replace(/^\*+/, '')
-      for (const e of TREE[`/data${p.directory}`.replace(/\/$/, '')] ?? []) {
+      for (const e of TREE[p.directory.replace(/\/$/, '')] ?? []) {
         if (e.endsWith(suffix)) {
-          const rel = e.slice('/data'.length)
           out.push(
             new PathSpec({
-              virtual: rel,
-              directory: rel.slice(0, rel.lastIndexOf('/') + 1),
+              virtual: e,
+              directory: e.slice(0, e.lastIndexOf('/') + 1),
               resourcePath: mountKey(e, '/data'),
               resolved: true,
             }),

@@ -285,6 +285,21 @@ class Policies:
         self._policies.append(policy)
         self._rescan()
 
+    def remove(self, policy: Policy) -> bool:
+        """Remove one registration by identity; return whether it existed.
+
+        Host-side only, like add(). Other policies keep their order.
+
+        Args:
+            policy (Policy): the exact instance passed to add().
+        """
+        for index, entry in enumerate(self._policies):
+            if entry is policy:
+                del self._policies[index]
+                self._rescan()
+                return True
+        return False
+
     def wants(self, hook: str) -> bool:
         """True when any policy overrides ``hook``.
 
@@ -312,7 +327,7 @@ class Policies:
             session_id (str): the session, empty when none is bound.
         """
         base = getattr(Policy, hook)
-        for policy in self._policies:
+        for policy in tuple(self._policies):
             if getattr(type(policy), hook) is base:
                 continue
             if not isinstance(policy, SessionScopedMixin):
@@ -346,7 +361,9 @@ class Policies:
         base = getattr(Policy, hook)
         limits: list[Limit] = []
         asked: Ask | None = None
-        for policy in self._policies:
+        # Keep this gate's order stable if the host edits registrations
+        # while a hook awaits. Changes take effect at the next gate.
+        for policy in tuple(self._policies):
             if getattr(type(policy), hook) is base:
                 continue
             name = type(policy).__name__

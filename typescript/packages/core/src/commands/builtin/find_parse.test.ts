@@ -319,3 +319,51 @@ it.each([
 ])('rejects invalid calendar fields: %s', (value) => {
   expect(() => parseFindExpression(['-newermt', value])).toThrow('I cannot figure out')
 })
+
+it.each([
+  [
+    ['-newer', 'ref', '-o', '-name', 'keep'],
+    'find: -newer is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['-name', 'keep', '-o', '-newer', 'ref'],
+    'find: -newer is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['!', '-newer', 'ref'],
+    'find: -newer is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['(', '-newer', 'ref', ')'],
+    'find: -newer is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['-newermt', '2000-01-01', '-o', '-name', 'keep'],
+    'find: -newermt is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['-name', 'keep', '-o', '-newermt', '2000-01-01'],
+    'find: -newermt is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['!', '-newermt', '2000-01-01'],
+    'find: -newermt is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['(', '-newermt', '2000-01-01', ')'],
+    'find: -newermt is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [['-printf', '%p\\n', '-exec', 'true', '{}', ';'], 'find: -exec cannot be combined with -printf'],
+  [['-exec', 'true', '{}', ';', '-printf', '%p\\n'], 'find: -exec cannot be combined with -printf'],
+  [['-printf', '%p\\n', '-print'], 'find: -printf cannot be combined with other actions'],
+  [['-print', '-printf', '%p\\n'], 'find: -printf cannot be combined with other actions'],
+  [['-printf', '%p\\n', '-print0'], 'find: -printf cannot be combined with other actions'],
+  [['-print0', '-printf', '%p\\n'], 'find: -printf cannot be combined with other actions'],
+  [['-printf', '%p\\n', '-ls'], 'find: -printf cannot be combined with other actions'],
+  [['-ls', '-printf', '%p\\n'], 'find: -printf cannot be combined with other actions'],
+  [['-printf', '%p\\n', '-delete'], 'find: -printf cannot be combined with other actions'],
+  [['-delete', '-printf', '%p\\n'], 'find: -printf cannot be combined with other actions'],
+  [['-printf', '%p', '-printf', '%f'], 'find: multiple -printf actions are not supported'],
+])('refuses detached newer tests and mixed printf: %s', (tokens, message) => {
+  expect(() => parseFindExpression(tokens)).toThrow(message)
+})

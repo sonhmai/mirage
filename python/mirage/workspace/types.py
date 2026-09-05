@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any
 
 from mirage.io import IOResult
@@ -66,5 +66,5 @@ class ExecutionNode:
         if self.children:
             d["children"] = [c.to_dict() for c in self.children]
         if self.records:
-            d["records"] = [asdict(r) for r in self.records]
+            d["records"] = [r.to_dict() for r in self.records]
         return d

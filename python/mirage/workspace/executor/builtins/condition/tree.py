@@ -22,6 +22,7 @@ from mirage.workspace.executor.builtins.condition.constants import (
 from mirage.workspace.executor.builtins.condition.operators import (
     apply_file_pair, apply_unary)
 from mirage.workspace.session import visible_env
+from mirage.workspace.session.rng import random_reader
 from mirage.workspace.session.state import seed_var, session_elements
 
 from mirage.workspace.executor.builtins.condition.types import (  # isort: skip
@@ -92,10 +93,12 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
             elements = session_elements(ctx.session)
             li = evaluate_arith(node.left,
                                 visible_env(ctx.session),
-                                elements=elements).value
+                                elements=elements,
+                                read_var=random_reader(ctx.session)).value
             ri = evaluate_arith(node.right,
                                 visible_env(ctx.session),
-                                elements=elements).value
+                                elements=elements,
+                                read_var=random_reader(ctx.session)).value
         except ArithError:
             raise CondError("mirage: syntax error in conditional expression")
         return compare(li, ri)

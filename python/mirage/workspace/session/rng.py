@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import time
+from collections.abc import Callable
 from dataclasses import replace
 
 from mirage.shell.arith import evaluate_arith
@@ -20,6 +21,7 @@ from mirage.shell.constants import (RANDOM, RANDOM_A, RANDOM_M, RANDOM_MAX,
                                     RANDOM_MODULUS, RANDOM_Q, RANDOM_R,
                                     RANDOM_UNSET, RANDOM_ZERO_SEED)
 from mirage.shell.variable import ShellVar
+from mirage.utils.hidden import var_hidden
 from mirage.workspace.session.session import Session
 from mirage.workspace.session.state import session_elements, visible_env
 
@@ -99,3 +101,19 @@ def next_random(session: Session, stored: str | None) -> int | None:
                             if existing is not None else ShellVar(word))
     session._random_seed = word
     return value
+
+
+def random_reader(session: Session) -> Callable[[str], str | None]:
+    """Bind lazy arithmetic RANDOM reads to a session.
+
+    Args:
+        session (Session): generator and visibility state.
+    """
+
+    def read(name: str) -> str | None:
+        if name != RANDOM or var_hidden(session.hidden_vars, name):
+            return None
+        value = next_random(session, visible_env(session).get(name))
+        return None if value is None else str(value)
+
+    return read

@@ -175,3 +175,30 @@ it.each([
     await ws.close()
   }
 })
+
+it.each([
+  ['RANDOM=42; echo $((RANDOM)) $((RANDOM)) $RANDOM', '17772 26794 1435\n'],
+  ['RANDOM=42; echo $((RANDOM+RANDOM)) $RANDOM', '44566 1435\n'],
+  [
+    'RANDOM=42; echo $((0 && RANDOM)) $((1 || RANDOM)) $((1 ? 5 : RANDOM)) $RANDOM',
+    '0 1 5 17772\n',
+  ],
+  ['x=RANDOM; RANDOM=42; echo $((x)) $((x)) $RANDOM', '17772 26794 1435\n'],
+  ["RANDOM=42; (( x=RANDOM )); let 'y=RANDOM'; echo $x $y $RANDOM", '17772 26794 1435\n'],
+  [
+    'RANDOM=42; for ((i=0; i<2; i++)); do echo $((RANDOM)); done; echo $RANDOM',
+    '17772\n26794\n1435\n',
+  ],
+  ['RANDOM=42; [[ RANDOM -eq 17772 ]]; echo $? $RANDOM', '0 26794\n'],
+  ['unset RANDOM; RANDOM=42; echo $((RANDOM)) $((RANDOM))', '42 42\n'],
+])('draws RANDOM lazily in arithmetic: %s', async (command, stdout) => {
+  const { ws } = await makeIntegrationWS()
+  try {
+    const io = await ws.execute(command)
+    expect(io.exitCode).toBe(0)
+    expect(io.stdoutText).toBe(stdout)
+    expect(io.stderrText).toBe('')
+  } finally {
+    await ws.close()
+  }
+})

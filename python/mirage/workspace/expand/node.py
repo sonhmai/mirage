@@ -33,6 +33,7 @@ from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
 from mirage.workspace.expand.variable import (_lookup_var, expand_braces,
                                               expansion_write)
 from mirage.workspace.session import Session, visible_env
+from mirage.workspace.session.rng import random_reader
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.session.state import session_elements
 
@@ -403,7 +404,8 @@ async def expand_node_marked(
             # `$((X=5))` exactly as it governs `X=5`.
             result = evaluate_arith(expr,
                                     visible_env(session),
-                                    elements=session_elements(session))
+                                    elements=session_elements(session),
+                                    read_var=random_reader(session))
         except ArithError as exc:
             raise arith_exit(expr, exc) from exc
         for write in result.writes:

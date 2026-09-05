@@ -270,6 +270,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
   let nested = 0
   let inOr = false
   let mtimeSeen = false
+  let newerToken: string | null = null
   const checkActionPlacement = (token: string): void => {
     if (nested > 0 || inOr) {
       throw new FindParseError(
@@ -372,6 +373,9 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       if (tok === '-path') return { op: 'path', pattern: value }
       if (tok === '-type') return typeNode(value)
       if (tok === '-printf') {
+        if (g.printf !== null) {
+          throw new FindParseError('find: multiple -printf actions are not supported')
+        }
         checkActionPlacement(tok)
         // An action, not a test: it always matches, replaces the default
         // -print rendering, and one format applies to every row (GNU
@@ -392,6 +396,10 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       if (tok === '-size') {
         ;[g.minSize, g.maxSize] = parseSize(value)
         return { op: 'true' }
+      }
+      if (tok === '-newer' || tok === '-newermt') {
+        checkActionPlacement(tok)
+        newerToken = tok
       }
       if (tok === '-newer') {
         // Resolved by the executor (`find_refs.ts`) into -newermt, since
@@ -491,6 +499,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       afterOperator(tok)
       if (nested === 0) {
         inOr = true
+        if (newerToken !== null) checkActionPlacement(newerToken)
         // An action already parsed sits on the left of this `-o`, which
         // is the same detachment from the tree seen from the other side:
         // `-exec false {} ; -o -print` would run the action and then
@@ -515,6 +524,9 @@ export function parseFindExpression(tokens: string[]): FindExpr {
     // -printf rows are rendered by the backend's generic before the
     // executor sees them, so there is no path left to hand -exec.
     throw new FindParseError('find: -exec cannot be combined with -printf')
+  }
+  if (g.actions.length > 0 && g.printf !== null) {
+    throw new FindParseError('find: -printf cannot be combined with other actions')
   }
   return { tree, ...g }
 }

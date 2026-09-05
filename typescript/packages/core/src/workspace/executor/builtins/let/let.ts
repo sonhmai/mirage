@@ -14,6 +14,7 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
+import { randomReader } from '../../../session/rng.ts'
 import { evaluateArith } from '../../../../shell/arith.ts'
 import type { ArithResult } from '../../../../shell/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
@@ -51,7 +52,13 @@ export async function handleLet(
   for (const expr of args) {
     let result: ArithResult
     try {
-      result = evaluateArith(expr, visibleEnv(session), 0, sessionElements(session))
+      result = evaluateArith(
+        expr,
+        visibleEnv(session),
+        0,
+        sessionElements(session),
+        randomReader(session),
+      )
     } catch (err) {
       if (!(err instanceof ArithError)) throw err
       const errBytes = new TextEncoder().encode(`bash: let: ${expr}: ${err.message}\n`)

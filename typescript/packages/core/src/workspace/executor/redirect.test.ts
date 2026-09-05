@@ -614,3 +614,35 @@ describe('descriptor zero duplication', () => {
     }
   })
 })
+
+it.each([
+  ['0>', 0],
+  ['0>>', 0],
+  ['0>|', 0],
+  ['1<', 1],
+  ['2<', 2],
+])('refuses persistent cross-direction files: %s', async (redirect, fd) => {
+  const { ws } = await makeIntegrationWS({ input: 'original\n', source: 'readable\n' })
+  try {
+    await ws.execute('exec </data/source')
+    const io = await ws.execute(`exec ${redirect}/data/input`)
+    expect(io.exitCode).toBe(1)
+    expect(io.stderrText).toBe(`${String(fd)}: Bad file descriptor\n`)
+    const after = await ws.execute('read value; echo visible:$value; echo error >&2')
+    expect(after.stdoutText).toBe('visible:readable\n')
+    expect(after.stderrText).toBe('error\n')
+    expect((await ws.execute('cat /data/input')).stdoutText).toBe('original\n')
+  } finally {
+    await ws.close()
+  }
+})
+
+it('persists an explicit stdin file redirect', async () => {
+  const { ws } = await makeIntegrationWS({ input: 'readable\n' })
+  try {
+    await ws.execute('exec 0</data/input')
+    expect((await ws.execute('read value; echo $value')).stdoutText).toBe('readable\n')
+  } finally {
+    await ws.close()
+  }
+})

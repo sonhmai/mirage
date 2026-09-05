@@ -66,7 +66,7 @@ class DriftQueue:
     """
 
     def __init__(self) -> None:
-        self._entries: list[tuple[str, str]] = []
+        self._entries: list[tuple[str, str, str | None]] = []
         self._pending = False
 
     @property
@@ -76,16 +76,20 @@ class DriftQueue:
     @property
     def paths(self) -> list[str]:
         """Paths still queued for a check (audit surface)."""
-        return [path for path, _ in self._entries]
+        return [path for path, _, _ in self._entries]
 
-    def queue(self, path: str, fingerprint: str) -> None:
+    def queue(self,
+              path: str,
+              fingerprint: str,
+              mount_id: str | None = None) -> None:
         """Record one path to check against its live source.
 
         Args:
             path (str): virtual path recorded in the snapshot.
             fingerprint (str): marker the snapshot recorded for it.
+            mount_id (str | None): identity of the mount being restored.
         """
-        self._entries.append((path, fingerprint))
+        self._entries.append((path, fingerprint, mount_id))
         self._pending = True
 
     async def drain(self, mount_for: TryMountFor) -> None:
@@ -107,8 +111,8 @@ class DriftQueue:
         if not self._entries:
             return
         checks = [
-            check_drift(mount_for, path, fingerprint)
-            for path, fingerprint in self._entries
+            check_drift(mount_for, path, fingerprint, mount_id)
+            for path, fingerprint, mount_id in self._entries
         ]
         self._entries.clear()
         results = await asyncio.gather(*checks, return_exceptions=True)
@@ -147,10 +151,11 @@ def capture_fingerprints(ws: "Workspace", ) -> list[dict[str, Any]]:
             continue
         if rec.fingerprint is None and rec.revision is None:
             continue
-        seen.add(rec.path)
         mount = ws._registry.try_mount_for(rec.path)
-        if mount is None:
+        if mount is None or (rec.mount_id is not None
+                             and rec.mount_id != mount.mount_id):
             continue
+        seen.add(rec.path)
         if not getattr(mount.resource, "SUPPORTS_SNAPSHOT", False):
             continue
         entry: dict[str, Any] = {
@@ -197,7 +202,7 @@ def install_fingerprints(
             continue
         fingerprint = f.get(FingerprintKey.FINGERPRINT)
         if fingerprint is not None:
-            ws._drift.queue(path, fingerprint)
+            ws._drift.queue(path, fingerprint, mount.mount_id)
 
 
 def live_only_mount_prefixes(ws: "Workspace", ) -> list[str]:
@@ -222,8 +227,10 @@ def live_only_mount_prefixes(ws: "Workspace", ) -> list[str]:
     return out
 
 
-async def check_drift(mount_for: TryMountFor, path: str,
-                      recorded: str) -> None:
+async def check_drift(mount_for: TryMountFor,
+                      path: str,
+                      recorded: str,
+                      mount_id: str | None = None) -> None:
     """Stat `path` against its mount and raise ContentDriftError if the
     live fingerprint does not match `recorded`.
 
@@ -235,19 +242,24 @@ async def check_drift(mount_for: TryMountFor, path: str,
             mount, None for none.
         path (str): Virtual path to check.
         recorded (str): Fingerprint recorded at snapshot time.
+        mount_id (str | None): instance that owns the queued check.
 
     Raises:
         ContentDriftError: live fingerprint differs from recorded.
     """
     mount = mount_for(path)
-    if mount is None:
+    if mount is None or (mount_id is not None and mount.mount_id != mount_id):
         return
     if not getattr(mount.resource, "SUPPORTS_SNAPSHOT", False):
         return
     try:
         stat = await mount.execute_op("stat", path)
     except FileNotFoundError as exc:
+        if mount_for(path) is not mount:
+            return
         raise ContentDriftError(path, recorded, None) from exc
+    if mount_for(path) is not mount:
+        return
     live = getattr(stat, "fingerprint", None)
     if live is None:
         return

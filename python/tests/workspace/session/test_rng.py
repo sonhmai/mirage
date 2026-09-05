@@ -206,3 +206,28 @@ async def test_random_seed_diagnostics(command, stdout, prefix):
         assert err.count('\n') == 1
     else:
         assert err == ''
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command, stdout",
+    [('RANDOM=42; echo $((RANDOM)) $((RANDOM)) $RANDOM', '17772 26794 1435\n'),
+     ('RANDOM=42; echo $((RANDOM+RANDOM)) $RANDOM', '44566 1435\n'),
+     ('RANDOM=42; echo $((0 && RANDOM)) $((1 || RANDOM)) '
+      '$((1 ? 5 : RANDOM)) $RANDOM', '0 1 5 17772\n'),
+     ('x=RANDOM; RANDOM=42; echo $((x)) $((x)) $RANDOM', '17772 26794 1435\n'),
+     ("RANDOM=42; (( x=RANDOM )); let 'y=RANDOM'; echo $x $y $RANDOM",
+      '17772 26794 1435\n'),
+     ('RANDOM=42; for ((i=0; i<2; i++)); do echo $((RANDOM)); '
+      'done; echo $RANDOM', '17772\n26794\n1435\n'),
+     ('RANDOM=42; [[ RANDOM -eq 17772 ]]; echo $? $RANDOM', '0 26794\n'),
+     ('unset RANDOM; RANDOM=42; echo $((RANDOM)) $((RANDOM))', '42 42\n')])
+async def test_arithmetic_random_reads_are_lazy(command, stdout):
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        io = await ws.execute(command)
+        assert io.exit_code == 0
+        assert await io.stdout_str() == stdout
+        assert await io.stderr_str() == ""
+    finally:
+        await ws.close()

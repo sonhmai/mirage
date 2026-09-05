@@ -231,6 +231,7 @@ class _State:
     nested: int = 0
     in_or: bool = False
     mtime_seen: bool = False
+    newer_token: str | None = None
     expr: FindExpr = field(default_factory=lambda: FindExpr(tree=TrueNode()))
 
 
@@ -421,6 +422,9 @@ def _parse_primary(state: _State) -> PredNode:
         if tok == "-type":
             return _type_node(value)
         if tok == "-printf":
+            if state.expr.printf is not None:
+                raise FindParseError(
+                    "find: multiple -printf actions are not supported")
             _check_action_placement(state, tok)
             # An action, not a test: it always matches, replaces the
             # default -print rendering, and one format applies to every
@@ -438,6 +442,9 @@ def _parse_primary(state: _State) -> PredNode:
         if tok == "-size":
             state.expr.min_size, state.expr.max_size = _size_arg(value)
             return TrueNode()
+        if tok in ("-newer", "-newermt"):
+            _check_action_placement(state, tok)
+            state.newer_token = tok
         if tok == "-newer":
             # Resolved by the executor (`find_refs.py`) into -newermt,
             # since only the dispatcher can stat the reference.
@@ -524,6 +531,8 @@ def _parse_or(state: _State) -> PredNode:
         _after_operator(state, tok)
         if state.nested == 0:
             state.in_or = True
+            if state.newer_token is not None:
+                _check_action_placement(state, state.newer_token)
             # An action already parsed sits on the left of this `-o`,
             # which is the same detachment from the tree seen from the
             # other side: `-exec false {} ; -o -print` would run the
@@ -600,4 +609,7 @@ def parse_find_expression(tokens: list[str]) -> FindExpr:
         # -printf rows are rendered by the backend's generic before the
         # executor sees them, so there is no path left to hand -exec.
         raise FindParseError("find: -exec cannot be combined with -printf")
+    if state.expr.actions and state.expr.printf is not None:
+        raise FindParseError(
+            "find: -printf cannot be combined with other actions")
     return state.expr

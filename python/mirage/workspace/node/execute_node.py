@@ -60,6 +60,7 @@ from mirage.workspace.node.test_expr import (expand_double_bracket,
                                              expand_test_expr)
 from mirage.workspace.session import Session
 from mirage.workspace.session.elements import assign_element
+from mirage.workspace.session.rng import random_reader
 from mirage.workspace.session.state import (ensure_var_visible,
                                             session_elements, session_view,
                                             visible_env)
@@ -68,8 +69,8 @@ from mirage.workspace.types import ExecutionNode
 from mirage.shell.helpers import (  # isort: skip
     get_case_items, get_case_word, get_cfor_parts, get_for_parts,
     get_function_body, get_function_name, get_if_branches, get_list_parts,
-    get_negated_command, get_pipeline_commands, get_redirects, get_text,
-    get_unset_args, get_while_parts)
+    get_negated_command, get_parts, get_pipeline_commands, get_redirects,
+    get_text, get_unset_args, get_while_parts)
 
 
 async def _eval_cfor_expr(
@@ -111,7 +112,8 @@ async def _eval_cfor_expr(
         # (ensure_var_visible), caught by the loop beside ReadonlyError.
         result = evaluate_arith(text,
                                 visible_env(session),
-                                elements=session_elements(session))
+                                elements=session_elements(session),
+                                read_var=random_reader(session))
     except ArithError as exc:
         raise ArithError(f"{text}: {exc}") from exc
     for write in result.writes:
@@ -245,7 +247,7 @@ def _is_bare_exec(command: Any) -> bool:
     """
     if command is None or command.type != NT.COMMAND:
         return False
-    named = command.named_children
+    named = get_parts(command)
     return (len(named) == 1 and named[0].type == NT.COMMAND_NAME
             and get_text(named[0]) == "exec")
 
@@ -522,7 +524,8 @@ async def _execute_node(
             # command's own voice like the readonly refusal.
             arith = evaluate_arith(expr,
                                    visible_env(session),
-                                   elements=session_elements(session))
+                                   elements=session_elements(session),
+                                   read_var=random_reader(session))
         except ArithError as exc:
             err = f"bash: ((: {expr}: {exc}\n".encode()
             return None, IOResult(exit_code=1,

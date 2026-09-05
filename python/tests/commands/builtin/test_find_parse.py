@@ -392,3 +392,57 @@ def test_row_actions_refuse_detachment_from_the_predicate(action, position):
 def test_newermt_rejects_invalid_calendar_fields(value):
     with pytest.raises(FindParseError, match="I cannot figure out"):
         parse_find_expression(["-newermt", value])
+
+
+@pytest.mark.parametrize(
+    "tokens, message",
+    [(['-newer', 'ref', '-o', '-name', 'keep'
+       ], 'find: -newer is supported only in a top-level -a chain, '
+      'not under -o, ! or parentheses'),
+     (['-name', 'keep', '-o', '-newer', 'ref'
+       ], 'find: -newer is supported only in a top-level -a chain, '
+      'not under -o, ! or parentheses'),
+     (['!', '-newer', 'ref'
+       ], 'find: -newer is supported only in a top-level -a chain, '
+      'not under -o, ! or parentheses'),
+     (['(', '-newer', 'ref', ')'
+       ], 'find: -newer is supported only in a top-level -a chain, '
+      'not under -o, ! or parentheses'),
+     (['-newermt', '2000-01-01', '-o', '-name', 'keep'
+       ], 'find: -newermt is supported only in a top-level -a chain, '
+      'not under -o, ! or parentheses'),
+     (['-name', 'keep', '-o', '-newermt', '2000-01-01'
+       ], 'find: -newermt is supported only in a top-level -a chain, '
+      'not under -o, ! or parentheses'),
+     (['!', '-newermt', '2000-01-01'
+       ], 'find: -newermt is supported only in a top-level -a chain, '
+      'not under -o, ! or parentheses'),
+     (['(', '-newermt', '2000-01-01', ')'
+       ], 'find: -newermt is supported only in a top-level -a chain, '
+      'not under -o, ! or parentheses'),
+     (['-printf', '%p\\n', '-exec', 'true', '{}', ';'
+       ], 'find: -exec cannot be combined with -printf'),
+     (['-exec', 'true', '{}', ';', '-printf', '%p\\n'
+       ], 'find: -exec cannot be combined with -printf'),
+     (['-printf', '%p\\n', '-print'
+       ], 'find: -printf cannot be combined with other actions'),
+     (['-print', '-printf', '%p\\n'
+       ], 'find: -printf cannot be combined with other actions'),
+     (['-printf', '%p\\n', '-print0'
+       ], 'find: -printf cannot be combined with other actions'),
+     (['-print0', '-printf', '%p\\n'
+       ], 'find: -printf cannot be combined with other actions'),
+     (['-printf', '%p\\n', '-ls'
+       ], 'find: -printf cannot be combined with other actions'),
+     (['-ls', '-printf', '%p\\n'
+       ], 'find: -printf cannot be combined with other actions'),
+     (['-printf', '%p\\n', '-delete'
+       ], 'find: -printf cannot be combined with other actions'),
+     (['-delete', '-printf', '%p\\n'
+       ], 'find: -printf cannot be combined with other actions'),
+     (['-printf', '%p', '-printf', '%f'
+       ], 'find: multiple -printf actions are not supported')])
+def test_newer_placement_and_mixed_printf_refusals(tokens, message):
+    with pytest.raises(FindParseError) as exc:
+        parse_find_expression(tokens)
+    assert str(exc.value) == message

@@ -20,10 +20,14 @@ runs:
         version: ${{ inputs.pnpm-version }}
 
     - name: Set up Node
-      id: node
       uses: actions/setup-node@v7
       with:
         node-version: ${{ inputs.node-version }}
+
+    - name: Read the installed Node version
+      id: node
+      shell: bash
+      run: echo "node-version=$(node --version)" >> "$GITHUB_OUTPUT"
 
     - name: Locate the pnpm store
       id: store

@@ -355,10 +355,11 @@ class HandOff:
     Nothing spends a claim while the line runs: a gate the run reaches
     again at the same place (a loop body) runs on the same nod, and
     every claim, reached or not, is spent when the line ends
-    (``Decisions.revoke``). A background job the line launches takes
-    the claims made for the commands inside it onto a hand-off of its
-    own (``Decisions.split``), since its gates run after the line has
-    returned and it ends on its own clock. Compared by identity,
+    (``Decisions.revoke``). A background job the line launches holds a
+    copy of the claims made for the commands inside it on a hand-off
+    of its own (``Decisions.split``), since its gates run after the
+    line has returned and it ends on its own clock; a grant is spent
+    when the last hand-off holding it ends. Compared by identity,
     because the hand-off is the line.
 
     A line the executor evaluates from inside another (``$( )``,
@@ -366,8 +367,11 @@ class HandOff:
     hand-off of its own, linked to the outer line's through ``parent``
     and standing under the node that ran it through ``origin``: the
     outer pass reads into the words it runs, so the grants it claimed
-    for them are the inner line's to spend, at the occurrences the
-    outer pass computed for them.
+    for them are the inner line's to run on, at the occurrences the
+    outer pass computed for them, and what the inner line's own gates
+    claim is handed to the outer line when it ends
+    (``Decisions.hand_up``), for the next evaluation from the same node
+    to run on and the typed line's end to spend.
 
     Args:
         claimed (list[Claim]): the grants matched so far, in the order

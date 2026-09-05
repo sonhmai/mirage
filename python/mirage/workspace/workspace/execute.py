@@ -109,7 +109,11 @@ async def recurse(
     a hand-off of its own under the line's, standing at the node whose
     text it evaluates: the outer pass reads into the words a command
     runs and claims for them at that place, so the grants are the
-    inner line's to spend and nobody else's.
+    inner line's to run on and nobody else's, and what the inner line's
+    gates claim goes back to the outer line when it ends
+    (``Decisions.hand_up``), so the next evaluation from the same node
+    (the next batch ``xargs`` hands on) runs on it and the typed line's
+    end spends it.
 
     Args:
         ws: the workspace hosting the outer line.
@@ -431,6 +435,12 @@ async def execute_line(
         finally:
             if held:
                 ws._registry.decisions.release(effective_session.session_id,
+                                               handed)
+            elif handed.parent is not None:
+                # A nested evaluation's claims are the outer line's to
+                # keep for the next evaluation from the same node and
+                # to spend at its own end.
+                ws._registry.decisions.hand_up(effective_session.session_id,
                                                handed)
             else:
                 await ws._registry.decisions.revoke(

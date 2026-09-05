@@ -22,7 +22,7 @@ from mirage.resource.ram import RAMResource
 # `ask` puts one of those commands to a person before it runs.
 ROLE = {
     "commands": {
-        "allow": ["ls", "rm"],
+        "allow": ["ls", "rm", "printf", "xargs"],
         "ask": [{
             "reason": "deletes are reviewed",
             "commands": ["rm"]
@@ -61,6 +61,13 @@ async def main() -> None:
         await run(ws, "rm /data/a.txt")
         # Once means once: the same line asks again.
         await run(ws, "rm /data/a.txt")
+        # One place on the line is one question, however often the run
+        # visits it: the loop body asks once and both iterations run on
+        # the answer.
+        await run(ws, "for i in 1 2; do rm -f /data/a.txt; done")
+        # A question is about the words that run: xargs appends its
+        # input to rm, so the question names the operand, not a bare rm.
+        await run(ws, "printf /data/a.txt | xargs rm")
     finally:
         await ws.close()
 

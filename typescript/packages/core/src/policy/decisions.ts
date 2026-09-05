@@ -17,7 +17,6 @@ import { Outcome } from './types.ts'
 import type {
   Abandoned,
   Ask,
-  Claim,
   Claimant,
   CommandContext,
   CommandRule,
@@ -408,7 +407,8 @@ export class Decisions {
   }
 
   /**
-   * Spend every grant claimed on a hand-off: the line's end.
+   * Spend every grant claimed on a hand-off that no other live hand-off
+   * still holds: the line's end.
    *
    * The claims in `resolve` leave the grants behind a line's commands
    * standing while the line runs, each bound to the place it was given
@@ -417,34 +417,45 @@ export class Decisions {
    * fetch before the run, killed, or short-circuited past the command.
    * Left standing, a grant would pass the next line spelling that
    * command on a nod given to this one, so the executor calls this
-   * whichever way the line ends, except when it is held on a question
-   * still waiting (`release`). A grant already gone from the ledger is
+   * whichever way a typed line or a job ends, except when a line is
+   * held on a question still waiting (`release`); a nested evaluation
+   * hands its claims up instead (`handUp`). A grant a job launched from
+   * the line still holds a copy of (`split`) is left standing for the
+   * job's own end to spend. A grant already gone from the ledger is
    * passed over; the hand-off is emptied so a second call is a no-op.
    *
    * @param sessionId the session the line was judged in.
    * @param handed the line's hand-off.
    */
   async revoke(sessionId: string, handed: HandOff): Promise<void> {
+    const elsewhere: Decision[] = []
+    for (const other of this.live.get(sessionId) ?? []) {
+      if (other !== handed) elsewhere.push(...other.claimed.map((c) => c.decision))
+    }
     await this.spend(
       sessionId,
-      handed.claimed.map((c) => c.decision),
+      handed.claimed.map((c) => c.decision).filter((d) => !elsewhere.includes(d)),
     )
     this.release(sessionId, handed)
   }
 
   /**
-   * Hand the claims made for one part of a line to a run of its own: a
-   * background job, whose gates run after the line has returned and
+   * Share the claims made for one part of a line with a run of its own:
+   * a background job, whose gates run after the line has returned and
    * which ends on its own clock.
    *
-   * Every claim standing inside the scope leaves the line and its
-   * ancestors for the new hand-off, so the line's end touches only
-   * what its own gates would have spent, whether it revokes or, held on a
-   * question still waiting, releases: the job's grants stay reserved
-   * until its gates spend them or its own end revokes them. Held on
-   * the line's hand-off, a release for a pending foreground gate let
-   * go of the job's grants with the rest, and a line judged while the
-   * job slept could take them.
+   * Every claim standing inside the scope, on the line or a line it was
+   * evaluated from, is copied onto the new hand-off, and the line keeps
+   * its own: a grant is spent when the last hand-off holding it ends
+   * (`revoke`), so the line's end, a release for a question still
+   * waiting included, leaves the job's copy standing and hidden from
+   * every other line, and a loop that launches the same job again hands
+   * the next job a copy of the same grant. Moving the claim instead left
+   * the second job with nothing, and it asked again after it had already
+   * been launched; sharing one hand-off between line and job let a
+   * release for a pending foreground gate let go of the job's grants
+   * with the rest, and a line judged while the job slept could take
+   * them.
    *
    * @param sessionId the session the line was judged in.
    * @param handed the line's hand-off.
@@ -454,12 +465,14 @@ export class Decisions {
   split(sessionId: string, handed: HandOff, scope: Occurrence): HandOff {
     const job: HandOff = { claimed: [], parent: handed.parent, origin: handed.origin }
     for (const owner of lineage(handed)) {
-      const kept: Claim[] = []
       for (const claim of owner.claimed) {
-        if (!encloses(scope, claim.occurrence)) kept.push(claim)
-        else if (!job.claimed.some((c) => c.decision === claim.decision)) job.claimed.push(claim)
+        if (
+          encloses(scope, claim.occurrence) &&
+          !job.claimed.some((c) => c.decision === claim.decision)
+        ) {
+          job.claimed.push(claim)
+        }
       }
-      owner.claimed.splice(0, owner.claimed.length, ...kept)
     }
     if (job.claimed.length > 0) {
       const live = this.live.get(sessionId) ?? new Set<HandOff>()
@@ -467,6 +480,37 @@ export class Decisions {
       this.live.set(sessionId, live)
     }
     return job
+  }
+
+  /**
+   * Leave a nested line's claims with the line it was evaluated from, at
+   * the line's end.
+   *
+   * A line the executor evaluates from inside another (`$( )`, `eval`, a
+   * batch `xargs` hands on) ends before the outer line does, and what
+   * its gates claimed is the outer line's: the next evaluation from the
+   * same node (the next batch, the next iteration of a loop around the
+   * `eval`) stands at the same occurrence and runs on it, and the typed
+   * line's end spends it. Spending here instead asked again for every
+   * batch.
+   *
+   * @param sessionId the session the line was judged in.
+   * @param handed the nested line's hand-off, whose `parent` is the line
+   *   it was evaluated from.
+   * @throws when the hand-off is a typed line's, whose claims are spent
+   *   (`revoke`), not handed up.
+   */
+  handUp(sessionId: string, handed: HandOff): void {
+    const parent = handed.parent
+    if (parent === null) throw new Error("a typed line's claims are spent, not handed up")
+    const known = parent.claimed.map((c) => c.decision)
+    parent.claimed.push(...handed.claimed.filter((c) => !known.includes(c.decision)))
+    if (parent.claimed.length > 0) {
+      const live = this.live.get(sessionId) ?? new Set<HandOff>()
+      live.add(parent)
+      this.live.set(sessionId, live)
+    }
+    this.release(sessionId, handed)
   }
 
   /**
@@ -486,36 +530,41 @@ export class Decisions {
   /**
    * The session's records as one line may read them.
    *
-   * A claimed grant is on offer to exactly one reader: the command it
-   * was claimed for, on the line that claimed it or a line evaluated
-   * from that line, whether the pass or the gate is reading. Every
-   * other claim is hidden. A grant claimed by another line is that
-   * line's to spend, and reading it here would let two lines judged at
-   * once both pass on one nod, the second of them running its earlier
-   * commands before its gate found the grant gone. A grant claimed for
-   * another occurrence on this line is that occurrence's: reading it
-   * would let a word that expands at run time into the same command
-   * run on the nod a literal spelling was given, and would let one nod
-   * answer two spellings. A pass re-reading an occurrence its outer
-   * line's pass already claimed finds it answered, which is how a
-   * nested line runs on the outer line's questions rather than asking
-   * them again.
+   * A claimed grant is on offer to exactly one place: the command it
+   * was claimed for, read on the line that claimed it, a line evaluated
+   * from that line, or a job launched from it holding a copy of the
+   * claim, whether the pass or the gate is reading. Every other claim is
+   * hidden. A grant claimed by another line is that line's to run on,
+   * and reading it here would let two lines judged at once both pass on
+   * one nod, the second of them running its earlier commands before its
+   * gate found the grant gone. A grant claimed for another occurrence
+   * on this line is that occurrence's: reading it would let a word that
+   * expands at run time into the same command run on the nod a literal
+   * spelling was given, and would let one nod answer two spellings. A
+   * pass re-reading an occurrence its outer line's pass already claimed
+   * finds it answered, which is how a nested line runs on the outer
+   * line's questions rather than asking them again.
    */
   private standing(sessionId: string, claimant: Claimant | null): readonly Decision[] {
     const held = this.records(sessionId)
-    const own = claimant === null ? [] : lineage(claimant.line)
+    const live = this.live.get(sessionId)
+    if (live === undefined || live.size === 0) return held
+    const offered: Decision[] =
+      claimant === null
+        ? []
+        : lineage(claimant.line).flatMap((h) =>
+            h.claimed
+              .filter((c) => sameOccurrence(c.occurrence, claimant.occurrence))
+              .map((c) => c.decision),
+          )
     const taken: Decision[] = []
-    for (const other of this.live.get(sessionId) ?? []) {
-      const mine = own.includes(other)
+    for (const other of live) {
       for (const claim of other.claimed) {
-        if (mine && claimant !== null && sameOccurrence(claim.occurrence, claimant.occurrence)) {
-          continue
-        }
-        taken.push(claim.decision)
+        if (!offered.includes(claim.decision)) taken.push(claim.decision)
       }
     }
     if (taken.length === 0) return held
-    return held.filter((r) => !taken.some((t) => t === r))
+    return held.filter((r) => !taken.includes(r))
   }
 
   /** Every ONCE answer standing behind this line, as the ledger holds it now. */

@@ -423,18 +423,22 @@ class Decisions:
 
     def split(self, session_id: str, handed: HandOff,
               scope: Occurrence) -> HandOff:
-        """Hand the claims made for one part of a line to a run of its
-        own: a background job, whose gates run after the line has
+        """Share the claims made for one part of a line with a run of
+        its own: a background job, whose gates run after the line has
         returned and which ends on its own clock.
 
-        Every claim standing inside the scope leaves the line and its
-        ancestors for the new hand-off, so the line's end touches only
-        what its own gates would have spent, whether it revokes or, held on a
-        question still waiting, releases: the job's grants stay reserved
-        until its gates spend them or its own end revokes them. Held on
-        the line's hand-off, a release for a pending foreground gate let
-        go of the job's grants with the rest, and a line judged while
-        the job slept could take them.
+        Every claim standing inside the scope, on the line or a line it
+        was evaluated from, is copied onto the new hand-off, and the
+        line keeps its own: a grant is spent when the last hand-off
+        holding it ends (:meth:`revoke`), so the line's end, a release
+        for a question still waiting included, leaves the job's copy
+        standing and hidden from every other line, and a loop that
+        launches the same job again hands the next job a copy of the
+        same grant. Moving the claim instead left the second job with
+        nothing, and it asked again after it had already been launched;
+        sharing one hand-off between line and job let a release for a
+        pending foreground gate let go of the job's grants with the
+        rest, and a line judged while the job slept could take them.
 
         Args:
             session_id (str): the session the line was judged in.
@@ -446,20 +450,49 @@ class Decisions:
         """
         job = HandOff(parent=handed.parent, origin=handed.origin)
         for owner in lineage(handed):
-            kept: list[Claim] = []
             for claim in owner.claimed:
-                if not encloses(scope, claim.occurrence):
-                    kept.append(claim)
-                elif not any(c.decision is claim.decision
-                             for c in job.claimed):
+                if encloses(scope, claim.occurrence) and not any(
+                        c.decision is claim.decision for c in job.claimed):
                     job.claimed.append(claim)
-            owner.claimed[:] = kept
         if job.claimed:
             self._live.setdefault(session_id, []).append(job)
         return job
 
+    def hand_up(self, session_id: str, handed: HandOff) -> None:
+        """Leave a nested line's claims with the line it was evaluated
+        from, at the line's end.
+
+        A line the executor evaluates from inside another (``$( )``,
+        ``eval``, a batch ``xargs`` hands on) ends before the outer line
+        does, and what its gates claimed is the outer line's: the next
+        evaluation from the same node (the next batch, the next
+        iteration of a loop around the ``eval``) stands at the same
+        occurrence and runs on it, and the typed line's end spends it.
+        Spending here instead asked again for every batch.
+
+        Args:
+            session_id (str): the session the line was judged in.
+            handed (HandOff): the nested line's hand-off, whose
+                ``parent`` is the line it was evaluated from.
+
+        Raises:
+            ValueError: the hand-off is a typed line's, whose claims are
+                spent (:meth:`revoke`), not handed up.
+        """
+        parent = handed.parent
+        if parent is None:
+            raise ValueError("a typed line's claims are spent, not handed up")
+        known = [c.decision for c in parent.claimed]
+        parent.claimed.extend(c for c in handed.claimed
+                              if not any(c.decision is k for k in known))
+        live = self._live.setdefault(session_id, [])
+        if parent.claimed and not any(h is parent for h in live):
+            live.append(parent)
+        self.release(session_id, handed)
+
     async def revoke(self, session_id: str, handed: HandOff) -> None:
-        """Spend every grant claimed on a hand-off: the line's end.
+        """Spend every grant claimed on a hand-off that no other live
+        hand-off still holds: the line's end.
 
         The claims in :meth:`resolve` leave the grants behind a line's
         commands standing while the line runs, each bound to the place
@@ -468,18 +501,27 @@ class Decisions:
         command, failed on a fetch before the run, killed, or
         short-circuited past the command. Left standing, a grant would
         pass the next line spelling that command on a nod given to this
-        one, so the executor calls this whichever way the line ends,
-        except when it is held on a question still waiting
-        (:meth:`release`). A grant already gone from the ledger is
-        passed over; the hand-off is emptied so a second call is a
+        one, so the executor calls this whichever way a typed line or a
+        job ends, except when a line is held on a question still
+        waiting (:meth:`release`); a nested evaluation hands its claims
+        up instead (:meth:`hand_up`). A grant a job launched from the
+        line still holds a copy of (:meth:`split`) is left standing for
+        the job's own end to spend. A grant already gone from the ledger
+        is passed over; the hand-off is emptied so a second call is a
         no-op.
 
         Args:
             session_id (str): the session the line was judged in.
             handed (HandOff): the line's hand-off.
         """
-        await self._spend(session_id,
-                          tuple(c.decision for c in handed.claimed))
+        elsewhere = [
+            c.decision for other in self._live.get(session_id, ())
+            if other is not handed for c in other.claimed
+        ]
+        await self._spend(
+            session_id,
+            tuple(c.decision for c in handed.claimed
+                  if not any(c.decision is e for e in elsewhere)))
         self.release(session_id, handed)
 
     def release(self, session_id: str, handed: HandOff) -> None:
@@ -503,20 +545,21 @@ class Decisions:
                   claimant: Claimant | None) -> tuple[Decision, ...]:
         """The session's records as one reader may see them.
 
-        A claimed grant is on offer to exactly one reader: the command
-        it was claimed for, on the line that claimed it or a line
-        evaluated from that line, whether the pass or the gate is
-        reading. Every other claim is hidden. A grant claimed by
-        another line is that line's to spend, and reading it here would
-        let two lines judged at once both pass on one nod, the second
-        of them running its earlier commands before its gate found the
-        grant gone. A grant claimed for another occurrence on this line
-        is that occurrence's: reading it would let a word that expands
-        at run time into the same command run on the nod a literal
-        spelling was given, and would let one nod answer two spellings.
-        A pass re-reading an occurrence its outer line's pass already
-        claimed finds it answered, which is how a nested line runs on
-        the outer line's questions rather than asking them again.
+        A claimed grant is on offer to exactly one place: the command it
+        was claimed for, read on the line that claimed it, a line
+        evaluated from that line, or a job launched from it holding a
+        copy of the claim, whether the pass or the gate is reading.
+        Every other claim is hidden. A grant claimed by another line is
+        that line's to run on, and reading it here would let two lines
+        judged at once both pass on one nod, the second of them running
+        its earlier commands before its gate found the grant gone. A
+        grant claimed for another occurrence on this line is that
+        occurrence's: reading it would let a word that expands at run
+        time into the same command run on the nod a literal spelling
+        was given, and would let one nod answer two spellings. A pass
+        re-reading an occurrence its outer line's pass already claimed
+        finds it answered, which is how a nested line runs on the outer
+        line's questions rather than asking them again.
 
         Args:
             session_id (str): the asking session.
@@ -524,15 +567,19 @@ class Decisions:
                 line, None outside a line.
         """
         held = self._records(session_id)
-        own = lineage(claimant.line) if claimant is not None else ()
-        taken: list[Decision] = []
-        for other in self._live.get(session_id, ()):
-            mine = any(other is h for h in own)
-            for claim in other.claimed:
-                if mine and claimant is not None and (claim.occurrence
-                                                      == claimant.occurrence):
-                    continue
-                taken.append(claim.decision)
+        live = self._live.get(session_id, ())
+        if not live:
+            return held
+        offered: list[Decision] = []
+        if claimant is not None:
+            offered = [
+                c.decision for h in lineage(claimant.line) for c in h.claimed
+                if c.occurrence == claimant.occurrence
+            ]
+        taken = [
+            c.decision for other in live for c in other.claimed
+            if not any(c.decision is o for o in offered)
+        ]
         if not taken:
             return held
         return tuple(r for r in held if not any(r is t for t in taken))

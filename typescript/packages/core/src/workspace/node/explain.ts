@@ -258,7 +258,7 @@ async function judgeWords(
           agentId,
           reparse,
           lineFrame(inner.line, occurrence),
-          literal,
+          literal && !inner.open,
         )),
       )
     } else {

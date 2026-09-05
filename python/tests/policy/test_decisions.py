@@ -373,10 +373,10 @@ def test_encloses_reads_a_span_and_the_lines_evaluated_inside_it():
 
 @pytest.mark.asyncio
 async def test_a_split_hands_a_jobs_claims_to_a_run_of_its_own():
-    """A background job takes the claims made inside its span onto a
-    hand-off of its own, so the line's end, a release for a question
-    left waiting included, lets go of the line's claims alone, and the
-    job's stay reserved until the job ends."""
+    """A background job takes a copy of the claims made inside its span
+    onto a hand-off of its own, so the line's end, a release for a
+    question left waiting included, lets go of the line's claims alone,
+    and the job's stay reserved until the job ends."""
     ledger = Decisions()
     ask = Ask("sign-off", rule=RULE)
     handed = HandOff()
@@ -387,7 +387,7 @@ async def test_a_split_hands_a_jobs_claims_to_a_run_of_its_own():
         assert await ledger.resolve(_ctx(), ask, None, _at(handed,
                                                            index)) is None
     job = ledger.split("s", handed, Occurrence(None, "line", 1, 2))
-    assert [c.occurrence.start for c in handed.claimed] == [0]
+    assert [c.occurrence.start for c in handed.claimed] == [0, 1]
     assert [c.occurrence.start for c in job.claimed] == [1]
     ledger.release("s", handed)
     # The line's grant is on offer again; the job's is not.
@@ -400,7 +400,7 @@ async def test_a_split_hands_a_jobs_claims_to_a_run_of_its_own():
 
 
 @pytest.mark.asyncio
-async def test_a_split_transfers_ancestor_claims_exclusively_to_the_job():
+async def test_a_split_shares_ancestor_claims_with_the_job():
     ledger = Decisions()
     ask = Ask("sign-off", rule=RULE)
     outer = HandOff()
@@ -414,7 +414,7 @@ async def test_a_split_transfers_ancestor_claims_exclusively_to_the_job():
     assert await ledger.resolve(_ctx(), ask, None, _at(nested, 1)) is None
     inner = HandOff(parent=nested)
     job = ledger.split("s", inner, Occurrence(None, "line", 1, 2))
-    assert [c.occurrence.start for c in outer.claimed] == [0]
+    assert [c.occurrence.start for c in outer.claimed] == [0, 1]
     assert nested.claimed == []
     assert inner.claimed == []
     assert [c.occurrence.start for c in job.claimed] == [1]
@@ -793,3 +793,68 @@ async def test_an_inline_grant_is_claimed_before_the_ledger_yields():
     await ledger.revoke("s", first)
     await ledger.revoke("s", second)
     assert ledger.list("s") == ()
+
+
+@pytest.mark.asyncio
+async def test_every_job_launched_from_one_place_runs_on_its_grant():
+    """A loop launching the same job twice hands each job a copy of the
+    grant claimed for the one place they share; the grant stays hidden
+    from every other line while any holder lives and is spent when the
+    last of them ends."""
+    ledger = Decisions()
+    ask = Ask("sign-off", rule=RULE)
+    waiting = await ledger.resolve(_ctx(), ask)
+    assert isinstance(waiting, Pending)
+    await ledger.answer(waiting.id, Outcome.ALLOW)
+    line = HandOff()
+    assert await ledger.resolve(_ctx(), ask, None, _at(line)) is None
+    scope = Occurrence(None, "line", 0, 1)
+    first = ledger.split("s", line, scope)
+    second = ledger.split("s", line, scope)
+    assert len(first.claimed) == 1
+    assert len(second.claimed) == 1
+    await ledger.revoke("s", line)
+    assert len(ledger.list("s")) == 1
+    assert isinstance(ledger.held(_ctx(), ask), Pending)
+    assert await ledger.resolve(_ctx(), ask, None, _at(first)) is None
+    await ledger.revoke("s", first)
+    assert len(ledger.list("s")) == 1
+    assert await ledger.resolve(_ctx(), ask, None, _at(second)) is None
+    await ledger.revoke("s", second)
+    assert ledger.list("s") == ()
+
+
+@pytest.mark.asyncio
+async def test_a_nested_lines_claims_are_handed_to_the_line_it_ran_from():
+    """What a nested line's gate claims goes to the outer line when the
+    nested line ends, so the next evaluation from the same node runs
+    on it, and the typed line's end spends it; a typed line's own
+    hand-off is spent, never handed up."""
+    asked = []
+
+    async def allow(record: Decision) -> Decision:
+        asked.append(record.id)
+        return dataclasses.replace(record,
+                                   outcome=Outcome.ALLOW,
+                                   scope=Scope.ONCE)
+
+    ledger = Decisions(on_ask=allow)
+    ask = Ask("sign-off", rule=RULE)
+    outer = HandOff()
+    first = HandOff(parent=outer)
+    assert await ledger.resolve(_ctx(), ask, None, _at(first)) is None
+    assert len(asked) == 1
+    assert len(first.claimed) == 1
+    ledger.hand_up("s", first)
+    assert first.claimed == []
+    assert len(outer.claimed) == 1
+    assert isinstance(ledger.held(_ctx(), ask), Pending)
+    second = HandOff(parent=outer)
+    assert await ledger.resolve(_ctx(), ask, None, _at(second)) is None
+    assert len(asked) == 1
+    ledger.hand_up("s", second)
+    assert len(outer.claimed) == 1
+    await ledger.revoke("s", outer)
+    assert ledger.list("s") == ()
+    with pytest.raises(ValueError):
+        ledger.hand_up("s", HandOff())

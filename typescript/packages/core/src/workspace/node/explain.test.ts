@@ -45,6 +45,8 @@ const ALLOW = [
   'command',
   'xargs',
   'touch',
+  'printf',
+  'mapfile',
 ]
 
 const PROFILE = parseSessionProfile({
@@ -959,5 +961,77 @@ describe('prejudge scope', () => {
     expect(ran.exitCode).toBe(126)
     expect(DEC.decode(ran.stderr)).toBe('cat: Permission denied\n')
     expect(await w.fs.readdir('/data')).not.toContain('/data/mark.txt')
+  })
+
+  it('runs every batch xargs hands on on one nod', async () => {
+    // Each batch xargs hands on is a nested line of its own, evaluated
+    // from the one xargs node, so every batch's cat stands at the same
+    // place. What the first batch's gate claims is handed to the outer
+    // line when the batch ends, and the second batch runs on it.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute("printf '/data/secret.txt /data/secret.txt' | xargs -n1 cat", {
+      sessionId: 's',
+    })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('s\ns\n')
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('replays every batch of a held xargs line on one answer', async () => {
+    const w = await ws()
+    const line = "printf '/data/secret.txt /data/secret.txt' | xargs -n1 cat"
+    const first = await w.execute(line, { sessionId: 's' })
+    expect(first.refusal?.kind).toBe('pending')
+    const [pending] = w.decisions.pending()
+    expect(w.decisions.pending()).toHaveLength(1)
+    await w.decisions.answer(pending?.id ?? '', Outcome.ALLOW)
+    const again = await w.execute(line, { sessionId: 's' })
+    expect(again.exitCode).toBe(0)
+    expect(DEC.decode(again.stdout)).toBe('s\ns\n')
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('runs every job a loop launches on one nod', async () => {
+    // The loop body launches a job from one place twice (through eval,
+    // whose line is a program: a `&` written directly in a loop body still
+    // runs in the foreground). Each job takes a copy of the grant claimed
+    // for that place, the line's end leaves the grant standing while a job
+    // holds it, and the last job's end spends it.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute(
+      "for i in 1 2; do eval 'sleep 0.2 && cat /data/secret.txt >> /data/read.txt &'; done",
+      { sessionId: 's' },
+    )
+    expect(ran.exitCode).toBe(0)
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toHaveLength(1)
+    const waited = await w.execute('wait', { sessionId: 's' })
+    expect(waited.exitCode).toBe(0)
+    expect(await w.fs.readFileText('/data/read.txt')).toBe('s\ns\n')
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('asks about a mapfile callback at the gate', async () => {
+    // mapfile runs its callback with the index and the record after it,
+    // so the callback as typed is a spelling the runtime completes, like
+    // the words xargs hands on: the pass leaves its question to the gate,
+    // which asks once about the words that run.
+    const seen: string[][] = []
+    const w = await inlineWs((record) => {
+      seen.push([record.command, ...record.argv])
+      return Promise.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE })
+    }, ASK_CAT)
+    await w.execute(
+      "touch /data/mark.txt && printf 'x\\n' | mapfile -t -c 1 -C 'cat /data/secret.txt'",
+      {
+        sessionId: 's',
+      },
+    )
+    expect(seen).toEqual([['cat', '/data/secret.txt', '0', 'x']])
+    expect(w.decisions.list('s')).toEqual([])
   })
 })

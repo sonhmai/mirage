@@ -588,7 +588,7 @@ async def _admit_words(
             refusal = await admit_line(parse(inner.line), session, registry,
                                        namespace, agent_id, cancel,
                                        claimant.line if claimant else None,
-                                       frame)
+                                       frame, inner.open)
         else:
             argv = list(inner.argv)
             within = (Claimant(
@@ -619,6 +619,7 @@ async def admit_line(
     cancel: asyncio.Event | None = None,
     handed: HandOff | None = None,
     frame: Frame | None = None,
+    open_: bool = False,
 ) -> Refused | None:
     """Admit every command of a line a runtime takes whole.
 
@@ -667,6 +668,10 @@ async def admit_line(
             line (a bare admission with no run behind it).
         frame (Frame | None): the scope the line is read in, for a line
             a word runs; None reads ``ast`` as the line itself.
+        open_ (bool): whether the runtime appends operands the gate
+            cannot read to the line (``mapfile -C``'s callback, which
+            runs with the index and the record after it), as
+            ``_admit_words`` takes it for each of its commands.
     """
     rules = session.commands
     home = home_dir(session)
@@ -681,7 +686,7 @@ async def admit_line(
             continue
         refusal = await _admit_words(
             words,
-            False,
+            open_,
             session,
             registry,
             namespace,

@@ -46,7 +46,7 @@ PROFILE = {
     "commands": {
         "allow": [
             "ls", "cat", "git", "rm", "mkdir", "cd", "echo", "sleep", "wait",
-            "eval", "command", "xargs", "touch"
+            "eval", "command", "xargs", "touch", "printf", "mapfile"
         ],
         "deny": [{
             "reason": "production data is protected",
@@ -1057,5 +1057,90 @@ async def test_a_deny_on_a_spelling_the_runtime_completes_holds_the_line(line):
         assert ran.exit_code == 126
         assert ran.stderr == b"cat: Permission denied\n"
         assert "/data/mark.txt" not in await ws.fs.readdir("/data")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_every_batch_xargs_hands_on_runs_on_one_nod():
+    # Each batch xargs hands on is a nested line of its own, evaluated
+    # from the one xargs node, so every batch's cat stands at the same
+    # place. What the first batch's gate claims is handed to the outer
+    # line when the batch ends, and the second batch runs on it.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute(
+            "printf '/data/secret.txt /data/secret.txt' | xargs -n1 cat",
+            session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout == b"s\ns\n"
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_held_xargs_line_replays_every_batch_on_one_answer(ws):
+    line = "printf '/data/secret.txt /data/secret.txt' | xargs -n1 cat"
+    first = await ws.execute(line, session_id="s")
+    assert first.refusal is not None and first.refusal.kind == "pending"
+    pending, = ws.decisions.pending()
+    await ws.decisions.answer(pending.id, Outcome.ALLOW)
+    again = await ws.execute(line, session_id="s")
+    assert again.exit_code == 0
+    assert again.stdout == b"s\ns\n"
+    assert ws.decisions.list("s") == ()
+
+
+@pytest.mark.asyncio
+async def test_every_job_a_loop_launches_runs_on_one_nod():
+    # The loop body launches a job from one place twice (through eval,
+    # whose line is a program: a `&` written directly in a loop body
+    # still runs in the foreground). Each job takes a copy of the grant
+    # claimed for that place, the line's end leaves the grant standing
+    # while a job holds it, and the last job's end spends it.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute(
+            "for i in 1 2; do eval 'sleep 0.2 && "
+            "cat /data/secret.txt >> /data/read.txt &'; done",
+            session_id="s")
+        assert ran.exit_code == 0
+        assert len(asked) == 1
+        assert len(ws.decisions.list("s")) == 1
+        waited = await ws.execute("wait", session_id="s")
+        assert waited.exit_code == 0
+        assert await ws.fs.read("/data/read.txt") == b"s\ns\n"
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mapfile_callback_is_asked_about_at_the_gate():
+    # mapfile runs its callback with the index and the record after it,
+    # so the callback as typed is a spelling the runtime completes, like
+    # the words xargs hands on: the pass leaves its question to the
+    # gate, which asks once about the words that run.
+    seen: list[tuple[str, ...]] = []
+
+    async def host(record):
+        seen.append((record.command, *record.argv))
+        return dataclasses.replace(record,
+                                   outcome=Outcome.ALLOW,
+                                   scope=Scope.ONCE)
+
+    ws = await _inline_workspace(host, ASK_CAT)
+    try:
+        await ws.execute(
+            "touch /data/mark.txt && "
+            "printf 'x\\n' | mapfile -t -c 1 -C 'cat /data/secret.txt'",
+            session_id="s")
+        assert seen == [("cat", "/data/secret.txt", "0", "x")]
+        assert ws.decisions.list("s") == ()
     finally:
         await ws.close()

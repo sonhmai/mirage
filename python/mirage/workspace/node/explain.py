@@ -235,8 +235,8 @@ async def _judge_words(
         if inner.line is not None:
             out.extend(await _judge_line(parse(inner.line), session, registry,
                                          namespace, agent_id,
-                                         line_frame(inner.line,
-                                                    occurrence), stated))
+                                         line_frame(inner.line, occurrence),
+                                         stated and not inner.open))
         else:
             argv = list(inner.argv)
             within = whole_occurrence(

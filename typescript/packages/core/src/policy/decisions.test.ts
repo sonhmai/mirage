@@ -393,10 +393,10 @@ describe('decisions', () => {
   })
 
   it("hands a job's claims to a run of its own", async () => {
-    // A background job takes the claims made inside its span onto a
-    // hand-off of its own, so the line's end, a release for a question
-    // left waiting included, lets go of the line's claims alone, and the
-    // job's stay reserved until the job ends.
+    // A background job takes a copy of the claims made inside its span
+    // onto a hand-off of its own, so the line's end, a release for a
+    // question left waiting included, lets go of the line's claims alone,
+    // and the job's stay reserved until the job ends.
     const ledger = new Decisions()
     const handed: HandOff = fresh()
     for (const index of [0, 1]) {
@@ -406,7 +406,7 @@ describe('decisions', () => {
       expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, index))).toBeNull()
     }
     const job = ledger.split('s', handed, { parent: null, source: 'line', start: 1, end: 2 })
-    expect(handed.claimed.map((c) => c.occurrence.start)).toEqual([0])
+    expect(handed.claimed.map((c) => c.occurrence.start)).toEqual([0, 1])
     expect(job.claimed.map((c) => c.occurrence.start)).toEqual([1])
     ledger.release('s', handed)
     // The line's grant is on offer again; the job's is not.
@@ -523,7 +523,7 @@ describe('decisions', () => {
     expect(ledger.list('s')).toEqual([])
   })
 
-  it('transfers ancestor claims exclusively to the job', async () => {
+  it('shares ancestor claims with the job', async () => {
     const ledger = new Decisions()
     const outer = fresh()
     for (const index of [0, 1]) {
@@ -536,7 +536,7 @@ describe('decisions', () => {
     expect(await ledger.resolve(ctx(), ASK, undefined, at(nested, 1))).toBeNull()
     const inner = fresh(nested)
     const job = ledger.split('s', inner, { parent: null, source: 'line', start: 1, end: 2 })
-    expect(outer.claimed.map((c) => c.occurrence.start)).toEqual([0])
+    expect(outer.claimed.map((c) => c.occurrence.start)).toEqual([0, 1])
     expect(nested.claimed).toEqual([])
     expect(inner.claimed).toEqual([])
     expect(job.claimed.map((c) => c.occurrence.start)).toEqual([1])
@@ -547,6 +547,65 @@ describe('decisions', () => {
     expect(await ledger.resolve(ctx(), ASK, undefined, at(job, 1))).toBeNull()
     await ledger.revoke('s', job)
     expect(ledger.list('s')).toEqual([])
+  })
+
+  it('runs every job launched from one place on its grant', async () => {
+    // A loop launching the same job twice hands each job a copy of the
+    // grant claimed for the one place they share; the grant stays hidden
+    // from every other line while any holder lives and is spent when the
+    // last of them ends.
+    const ledger = new Decisions()
+    const waiting = await ledger.resolve(ctx(), ASK)
+    if (waiting?.kind !== 'pending') throw new Error('unreachable')
+    await ledger.answer(waiting.id, Outcome.ALLOW)
+    const line = fresh()
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(line))).toBeNull()
+    const scope: Occurrence = { parent: null, source: 'line', start: 0, end: 1 }
+    const first = ledger.split('s', line, scope)
+    const second = ledger.split('s', line, scope)
+    expect(first.claimed).toHaveLength(1)
+    expect(second.claimed).toHaveLength(1)
+    await ledger.revoke('s', line)
+    expect(ledger.list('s')).toHaveLength(1)
+    expect((await ledger.held(ctx(), ASK))?.kind).toBe('pending')
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(first))).toBeNull()
+    await ledger.revoke('s', first)
+    expect(ledger.list('s')).toHaveLength(1)
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(second))).toBeNull()
+    await ledger.revoke('s', second)
+    expect(ledger.list('s')).toEqual([])
+  })
+
+  it("hands a nested line's claims to the line it ran from", async () => {
+    // What a nested line's gate claims goes to the outer line when the
+    // nested line ends, so the next evaluation from the same node runs on
+    // it, and the typed line's end spends it; a typed line's own hand-off
+    // is spent, never handed up.
+    let asked = 0
+    const allow = (r: Decision): Promise<Decision> => {
+      asked += 1
+      return Promise.resolve({ ...r, outcome: Outcome.ALLOW, scope: Scope.ONCE })
+    }
+    const ledger = new Decisions(null, allow)
+    const outer = fresh()
+    const first = fresh(outer)
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(first))).toBeNull()
+    expect(asked).toBe(1)
+    expect(first.claimed).toHaveLength(1)
+    ledger.handUp('s', first)
+    expect(first.claimed).toEqual([])
+    expect(outer.claimed).toHaveLength(1)
+    expect((await ledger.held(ctx(), ASK))?.kind).toBe('pending')
+    const second = fresh(outer)
+    expect(await ledger.resolve(ctx(), ASK, undefined, at(second))).toBeNull()
+    expect(asked).toBe(1)
+    ledger.handUp('s', second)
+    expect(outer.claimed).toHaveLength(1)
+    await ledger.revoke('s', outer)
+    expect(ledger.list('s')).toEqual([])
+    expect(() => {
+      ledger.handUp('s', fresh())
+    }).toThrow()
   })
 
   it("spends a job's unspent grant when the job ends", async () => {

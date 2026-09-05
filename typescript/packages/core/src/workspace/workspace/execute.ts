@@ -615,6 +615,10 @@ async function runParsedLine(
     }
   } finally {
     if (held) env.registry.decisions.release(effectiveSession.sessionId, handed)
+    // A nested evaluation's claims are the outer line's to keep for the
+    // next evaluation from the same node and to spend at its own end.
+    else if (handed.parent !== null)
+      env.registry.decisions.handUp(effectiveSession.sessionId, handed)
     else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
   }
   const [[materialized, io], opRecords] = execResult

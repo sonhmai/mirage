@@ -572,6 +572,7 @@ async function admitWords(
         signal,
         claimant?.line ?? null,
         claimant === null ? null : lineFrame(inner.line, claimant.occurrence),
+        inner.open,
       )
     } else {
       const within: Claimant | null =
@@ -637,7 +638,10 @@ async function admitWords(
  * pass does, where spending them here asked the human again for each on
  * every retry. `handed` is null outside a line (a bare admission with
  * no run behind it). `frame` is the scope the line is read in, for a
- * line a word runs; null reads `root` as the line itself.
+ * line a word runs; null reads `root` as the line itself. `open` says
+ * the runtime appends operands the gate cannot read to the line
+ * (`mapfile -C`'s callback, which runs with the index and the record
+ * after it), as `admitWords` takes it for each of its commands.
  */
 export async function admitLine(
   root: TSNodeLike,
@@ -649,6 +653,7 @@ export async function admitLine(
   signal?: AbortSignal,
   handed: HandOff | null = null,
   frame: Frame | null = null,
+  open = false,
 ): Promise<Refused | null> {
   const rules = session.commands
   const home = homeDir(session)
@@ -662,7 +667,7 @@ export async function admitLine(
     if (words.length === 0) continue
     const refusal = await admitWords(
       words,
-      false,
+      open,
       session,
       registry,
       namespace,

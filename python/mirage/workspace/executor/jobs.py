@@ -75,11 +75,13 @@ async def handle_background(
 
     ``handed`` and ``decisions`` are the line's hand-off and the ledger
     it lives in. The claims the line's pass made for the commands inside
-    the job leave that hand-off for one of the job's own before the job
-    starts (``Decisions.split``): its gates run after the line has
-    returned, and its grants have to stay reserved through the line's
-    end whichever way the line ends, a release for a question left
-    waiting included. The job revokes its own hand-off when it ends.
+    the job are copied onto one of the job's own before the job starts
+    (``Decisions.split``): its gates run after the line has returned,
+    and its grants have to stay reserved through the line's end
+    whichever way the line ends, a release for a question left waiting
+    included, and through the launch of the same job again by a loop.
+    The job revokes its own hand-off when it ends, which spends what no
+    other hand-off still holds.
     """
     bg_session = session.fork()
     job_handed = (decisions.split(session.session_id, handed,

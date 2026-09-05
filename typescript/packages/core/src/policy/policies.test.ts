@@ -806,3 +806,23 @@ describe('Ask in the chain', () => {
     ).toBe(false)
   })
 })
+
+it('removes by identity, refreshes hooks and preserves an admission in progress', async () => {
+  const policies = new Policies()
+  const first: Policy = {
+    preCommand: () => {
+      expect(policies.remove(first)).toBe(true)
+      return null
+    },
+  }
+  const last = new DenyWeird()
+  policies.add(first)
+  policies.add(last)
+  expect(policies.remove(new DenyWeird())).toBe(false)
+  expect(await policies.preCommand(ctx('weird'))).toMatchObject({ kind: 'deny', reason: 'nope' })
+  expect(policies.wants('preCommand')).toBe(true)
+  expect(policies.remove(last)).toBe(true)
+  expect(policies.wants('preCommand')).toBe(false)
+  expect(policies.remove(first)).toBe(false)
+  expect(await policies.preCommand(ctx('weird'))).toBeNull()
+})

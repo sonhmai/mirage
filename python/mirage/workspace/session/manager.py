@@ -428,6 +428,20 @@ class SessionManager:
     def get(self, session_id: str) -> Session:
         return self._sessions[session_id]
 
+    def set_profile(self, session_id: str,
+                    compiled: CompiledProfile) -> Session:
+        """Replace restrictions without resetting the session's scratch state.
+
+        Args:
+            session_id (str): an existing, hydrated session.
+            compiled (CompiledProfile): its replacement profile.
+        """
+        session = self.get(session_id)
+        narrow(session, compiled)
+        if session_id == self._default_id:
+            self._default_profile = compiled
+        return session
+
     def list(self) -> list[Session]:
         return list(self._sessions.values())
 

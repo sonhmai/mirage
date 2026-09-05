@@ -142,6 +142,14 @@ export class SessionManager {
     if (compiled !== null) applyProfile(this.defaultSession(), compiled)
   }
 
+  /** Replace an existing, hydrated session's restrictions, preserving its scratch state. */
+  setProfile(sessionId: string, compiled: CompiledProfile): Session {
+    const session = this.get(sessionId)
+    narrow(session, compiled)
+    if (sessionId === this.defaultId) this.defaultProfileInternal = compiled
+    return session
+  }
+
   /**
    * The admission rules one session runs under (SessionCommandsQuery).
    * The default profile's rules for an id this manager does not know, the

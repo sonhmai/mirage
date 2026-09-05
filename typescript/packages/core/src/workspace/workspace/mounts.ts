@@ -62,9 +62,10 @@ export interface UnmountDeps {
 
 /**
  * Remove one mount, closing its resource if the workspace had opened it
- * and no other mount still references it. The virtual root, the device
- * mount, and the history view are permanent. Mirrors the Python
- * `unmount` in `workspace/mounts.py`.
+ * and no other mount still references it. Operations are shared by kind,
+ * so they remain registered while any mount uses that kind. The virtual
+ * root, the device mount, and the history view are permanent. Mirrors the
+ * Python `unmount` in `workspace/mounts.py`.
  */
 export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<void> {
   const stripped = stripSlash(prefix)
@@ -80,9 +81,11 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
   }
   const removed = deps.registry.unmount(prefix)
   const resource = removed.resource
-  const stillMounted = deps.registry.allMounts().some((m) => m.resource === resource)
+  const remaining = deps.registry.allMounts()
+  const stillMounted = remaining.some((m) => m.resource === resource)
+  const kindStillMounted = remaining.some((m) => m.resource.kind === resource.kind)
+  if (!kindStillMounted) deps.opsRegistry.unregisterResource(resource.kind)
   if (!stillMounted) {
-    deps.opsRegistry.unregisterResource(resource.kind)
     const idx = deps.openOrder.indexOf(resource)
     if (idx !== -1) deps.openOrder.splice(idx, 1)
     if (deps.opened.has(resource)) {

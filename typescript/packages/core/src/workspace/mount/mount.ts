@@ -87,7 +87,7 @@ export interface MountInit {
 export class MountEntry {
   readonly prefix: string
   readonly resource: Resource
-  readonly mode: MountMode
+  mode: MountMode
   readonly consistency: ConsistencyPolicy
 
   /**

@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import type { CacheConfig } from '../cache/file/config.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import { OpsRegistry } from '../ops/registry.ts'
-import { MountMode, ResourceName, type PathSpec } from '../types.ts'
+import { FileType, MountMode, ResourceName, type PathSpec } from '../types.ts'
 import { BaseResource, type Resource } from '../resource/base.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
@@ -180,6 +180,72 @@ describe('Workspace.execute AbortSignal', () => {
 })
 
 describe('Workspace.unmount', () => {
+  it.each([false, true])(
+    'preserves root operations after removing every user RAM mount (explicit root: %s)',
+    async (explicitRoot) => {
+      const resources: Record<string, RAMResource> = { '/data': new RAMResource() }
+      if (explicitRoot) resources['/'] = new RAMResource()
+      const ws = new Workspace(resources, { shellParser: await getTestParser() })
+      try {
+        await ws.unmount('/data')
+        await expect(ws.fs.readdir('/')).resolves.toContain('/dev')
+        await expect(ws.fs.stat('/')).resolves.toMatchObject({ type: FileType.DIRECTORY })
+        const result = await ws.execute('ls /')
+        expect(result.exitCode).toBe(0)
+        expect(result.stdoutText).toBe('dev\n')
+        expect(result.stderrText).toBe('')
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('keeps a different RAM instance readable after unmounting its peer', async () => {
+    const a = new RAMResource()
+    const b = new RAMResource()
+    const content = new TextEncoder().encode('surviving mount\n')
+    b.store.files.set('/file.txt', content)
+    const ws = new Workspace({ '/a': a, '/b': b })
+    try {
+      await ws.unmount('/a')
+      await expect(ws.fs.readFile('/b/file.txt')).resolves.toEqual(content)
+      await ws.unmount('/b')
+      await expect(ws.fs.readdir('/')).resolves.toContain('/dev')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('closes each resource separately and unregisters operations after the last of its kind', async () => {
+    const a = new MockResource()
+    const b = new MockResource()
+    const content = new TextEncoder().encode('mock data\n')
+    const ops = new OpsRegistry()
+    ops.register({
+      name: 'read',
+      resource: 'mock',
+      filetype: null,
+      write: false,
+      fn: () => content,
+    })
+    const ws = new Workspace({ '/a': a, '/b': b }, { ops })
+    try {
+      await ws.fs.readFile('/a/file.txt')
+      await ws.fs.readFile('/b/file.txt')
+      await ws.unmount('/a')
+      expect(a.closes).toBe(1)
+      expect(b.closes).toBe(0)
+      await expect(ws.fs.readFile('/b/file.txt')).resolves.toEqual(content)
+      await ws.unmount('/b')
+      expect(b.closes).toBe(1)
+      expect(ops.find('read', 'mock')).toBeNull()
+    } finally {
+      await ws.close()
+    }
+    expect(a.closes).toBe(1)
+    expect(b.closes).toBe(1)
+  })
+
   it('removes a mount from mounts(); the path falls through to the root anchor', async () => {
     const a = new RAMResource()
     const b = new RAMResource()
@@ -531,4 +597,42 @@ describe('runtime-visible mounts', () => {
     expect(probe.resolver?.prefixes() ?? []).toContain('/')
     await ws.close()
   })
+})
+
+it('changes mount modes without remounting and refuses invalid modes atomically', async () => {
+  const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.WRITE })
+  try {
+    const fs = ws.fs
+    const mount = ws.mount('/data')
+    await fs.writeFile('/data/file', new TextEncoder().encode('kept'))
+    for (const mode of [MountMode.READ, MountMode.EXEC, MountMode.WRITE]) {
+      ws.setMountMode('data/', mode)
+      expect(ws.fs).toBe(fs)
+      expect(ws.mount('/data')).toBe(mount)
+      expect(mount.mode).toBe(mode)
+      expect(new TextDecoder().decode(await fs.readFile('/data/file'))).toBe('kept')
+    }
+    expect(() => {
+      ws.setMountMode('/data', 'invalid' as MountMode)
+    }).toThrow()
+    expect(mount.mode).toBe(MountMode.WRITE)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('updates default-profile policy for unbound ops without replacing the session', async () => {
+  const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.WRITE })
+  try {
+    const session = ws.getSession(ws.defaultSessionId)
+    await ws.fs.writeFile('/data/file', new TextEncoder().encode('kept'))
+    const profile = { commands: { deny: [{ paths: ['/data/file'], reason: 'sealed' }] } }
+    expect(await ws.setSessionProfile(ws.defaultSessionId, profile)).toBe(session)
+    await expect(ws.fs.readFile('/data/file')).rejects.toThrow()
+    await ws.setSessionProfile(ws.defaultSessionId, {})
+    expect(ws.getSession(ws.defaultSessionId)).toBe(session)
+    expect(new TextDecoder().decode(await ws.fs.readFile('/data/file'))).toBe('kept')
+  } finally {
+    await ws.close()
+  }
 })

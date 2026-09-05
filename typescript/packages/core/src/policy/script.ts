@@ -403,12 +403,12 @@ export class ScriptPolicy implements Policy, SessionScoped {
 
   /**
    * The hooks one profile's program defines, probed on its first
-   * judgment and remembered by program text and language: the probe
-   * asks in the program's own spelling, so one text read as two
-   * languages is two programs.
+   * judgment and remembered by runtime, program text and language.
+   * A runtime change must probe again, including its validation;
+   * a cached absent hook must never bypass a broken new engine.
    */
   private async hooksOf(entry: ProfileScript): Promise<ReadonlySet<ScriptHook>> {
-    const key = `${entry.script.language}\n${entry.script.source}`
+    const key = JSON.stringify([entry.runtime, entry.script.language, entry.script.source])
     let defined = this.defined.get(key)
     if (defined === undefined) {
       defined = definedHooks(entry.script, await this.evaluate(entry, hookProbe(entry.script), {}))

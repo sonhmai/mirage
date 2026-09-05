@@ -141,8 +141,8 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str) -> None:
 
     The virtual root, the device mount, and the history view are
     permanent. The resource is closed only when no remaining mount
-    holds the same instance; its command registration is dropped only
-    when no remaining mount holds the same kind.
+    holds the same instance. Commands and operations belong to each
+    mount, so removing one leaves other mounts of the same kind intact.
 
     Args:
         registry (MountRegistry): the workspace's mount table.

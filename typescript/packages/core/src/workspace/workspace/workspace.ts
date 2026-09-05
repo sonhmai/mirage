@@ -48,7 +48,7 @@ import {
 import { readSnapshotTar } from '../snapshot/tar_io.ts'
 import type { WorkspaceStateDict, MountSnapshot } from '../snapshot/types.ts'
 import type { FileEvent } from '../../types.ts'
-import { ConsistencyPolicy, DriftPolicy, MountMode, PathSpec } from '../../types.ts'
+import { ConsistencyPolicy, DriftPolicy, MountMode, PathSpec, parseMountMode } from '../../types.ts'
 import type { Explanation, Policies } from '../../policy/index.ts'
 import type { RoutePolicy } from '../../runtime/routing/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -429,6 +429,7 @@ export class Workspace {
 
   /** Append a runtime entry to the workspace's ordered world (last, first capturer still wins). */
   addRuntime(runtime: RuntimeEntry): Runtime {
+    if (this.shuttingDown) throw new Error('Workspace is closed')
     return this.runtimes.add(runtime)
   }
 
@@ -448,11 +449,13 @@ export class Workspace {
     spec: CLISpec,
     config: Record<string, unknown> | null = null,
   ): CLIInstall {
+    if (this.shuttingDown) throw new Error('Workspace is closed')
     return this.registry.clis.install(name, spec, config)
   }
 
   /** Remove an installed CLI; its head word stops resolving (127). */
   unregisterCli(name: string): void {
+    if (this.shuttingDown) throw new Error('Workspace is closed')
     this.registry.clis.uninstall(name)
   }
 
@@ -704,6 +707,26 @@ export class Workspace {
     return this.sessionManager.get(sessionId)
   }
 
+  /**
+   * Replace a live session's permissions, including its policy runtime.
+   * Compilation succeeds before anything changes. Cwd/env presets apply only
+   * at creation; cwd, variables, functions and history survive this change.
+   * Null selects the workspace default; an empty document clears restrictions.
+   * This is a host-side operation, like creating a session.
+   */
+  async setSessionProfile(
+    sessionId: string,
+    profile: string | SessionProfile | null,
+  ): Promise<Session> {
+    if (this.shuttingDown) throw new Error('Workspace is closed')
+    const compiled = compileProfile(this.baseProfile(profile), this.profileName(profile))
+    checkCliVerbs(compiled.commands, this.cliVerbs())
+    await this.ensureSessionsLoaded()
+    const session = this.sessionManager.setProfile(sessionId, compiled)
+    await this.sessionManager.flush()
+    return session
+  }
+
   listSessions(): Session[] {
     return this.sessionManager.list()
   }
@@ -818,6 +841,13 @@ export class Workspace {
       for (const op of resourceOps) this.opsRegistry.register(op)
     }
     return m
+  }
+
+  /** Change an exact mount's ceiling, retaining its data and every session's cap. */
+  setMountMode(prefix: string, mode: MountMode): void {
+    if (this.shuttingDown) throw new Error('Workspace is closed')
+    const parsed = parseMountMode(mode)
+    this.registry.mountForPrefix(prefix).mode = parsed
   }
 
   /**

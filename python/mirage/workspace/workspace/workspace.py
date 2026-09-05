@@ -34,6 +34,7 @@ from mirage.policy import (AskHandler, Decisions, Explanation, HandOff,
                            PermissionsPolicy, Policies, Policy, PolicyError,
                            ScriptPolicy, SessionProfile)
 from mirage.provision import ProvisionResult
+from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.resolver import PrefixResolver
@@ -46,7 +47,8 @@ from mirage.secrets.types import ResolvedSource
 from mirage.shell import parse
 from mirage.shell.job_table import ConsoleFactory, JobTable
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
-                          JsonValue, MountBackend, MountMode, PathSpec)
+                          JsonValue, MountBackend, MountMode, PathSpec,
+                          parse_mount_mode)
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher import Dispatcher
@@ -80,8 +82,10 @@ from mirage.workspace.workspace.lifecycle import (close_async, patch_process,
                                                   stop_vfs_loop,
                                                   unpatch_process)
 from mirage.workspace.workspace.meta import WorkspaceMeta
-from mirage.workspace.workspace.mounts import (install_mounts, kernel_targets,
-                                               normalize_resources)
+from mirage.workspace.workspace.mounts import (check_resource, install_mounts,
+                                               kernel_targets,
+                                               normalize_resources,
+                                               prepare_added_mount)
 from mirage.workspace.workspace.mounts import unmount as unmount_prefix
 from mirage.workspace.workspace.types import ResourceMount
 from mirage.workspace.workspace.watch import WatchDelegate, WatchManager
@@ -156,7 +160,9 @@ class Workspace:
         self._owns_state_store = stores.owned
         self._state_store = stores.state_store
         self._cache: FileCacheMixin = build_file_cache(cache, cache_limit)
+        self._index_config = index
         self._closed = False
+        self._closing = False
         self._async_closed = False
         self._close_lock = asyncio.Lock()
         # Resources reused from another live workspace (copy() / load
@@ -473,10 +479,59 @@ class Workspace:
     def mount(self, prefix: str):
         return self._registry.mount_for(prefix)
 
-    async def unmount(self, prefix: str) -> None:
-        if self._closed:
+    @property
+    def _shutting_down(self) -> bool:
+        """Reject lifecycle changes while runtimes drain into open mounts."""
+        return self._closing or self._closed
+
+    def add_mount(self,
+                  prefix: str,
+                  resource: BaseResource,
+                  mode: MountMode = MountMode.READ) -> MountEntry:
+        """Add a resource to a running workspace, mirroring TS ``addMount``.
+
+        Args:
+            prefix (str): virtual mount point; duplicates are refused.
+            resource (BaseResource): resource providing commands and ops.
+            mode (MountMode): access mode, read-only unless explicitly raised.
+
+        Returns:
+            MountEntry: the installed mount, with its normalized prefix.
+        """
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
-        await unmount_prefix(self._registry, self._ops, prefix)
+        check_resource(prefix, resource)
+        self._registry.check_resource_available(resource)
+        previous = self._registry.mounts()
+        # Configure before mount() captures the index in its CacheManager.
+        # An alias must retain the index used by the resource's other mounts.
+        if (self._registry.try_mount_for_prefix(prefix) is None
+                and not any(m.resource is resource
+                            for m in self._registry.mounts())):
+            resource.set_index(self._index_config)
+        entry = self._registry.mount(prefix, resource, mode)
+        prepare_added_mount(self._registry, entry, previous)
+        self._ops.set_mounts(self._registry.ops_mounts())
+        return entry
+
+    async def unmount(self, prefix: str) -> None:
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
+        await unmount_prefix(self._registry, self._ops, prefix,
+                             lambda: self._shutting_down)
+
+    def set_mount_mode(self, prefix: str, mode: MountMode) -> None:
+        """Change an exact mount's ceiling, retaining data and session caps.
+
+        Args:
+            prefix (str): mount prefix, not a path inside a mount.
+            mode (MountMode): the replacement read, write or exec mode.
+        """
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
+        mode = parse_mount_mode(mode)
+        self._registry.mount_for_prefix(prefix).mode = mode
+        self._ops.set_mounts(self._registry.ops_mounts())
 
     def add_fuse_mount(self,
                        prefix: str,
@@ -525,6 +580,8 @@ class Workspace:
                 validated through the spec's ``config_model`` (fail
                 loud at install time).
         """
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
         return self._registry.clis.install(name, spec, config)
 
     def unregister_cli(self, name: str) -> None:
@@ -533,6 +590,8 @@ class Workspace:
         Args:
             name (str): installed head word.
         """
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
         self._registry.clis.uninstall(name)
 
     def clis(self) -> dict[str, CLIInstall]:
@@ -572,6 +631,8 @@ class Workspace:
         Raises:
             ValueError: unknown name or duplicate entry.
         """
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
         return self._runtimes.add(runtime)
 
     @property
@@ -626,7 +687,7 @@ class Workspace:
             RuntimeError: The workspace is closed, or a runtime is
                 already attached.
         """
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         self._watch.attach(runtime)
 
@@ -662,7 +723,7 @@ class Workspace:
             p if isinstance(p, PathSpec) else PathSpec.from_str_path(p)
             for p in raw
         ]
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         return self._watch.watch(specs)
 
@@ -678,7 +739,7 @@ class Workspace:
         Args:
             change (FileEvent): Observed change.
         """
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         await self._watch.notify(change)
 
@@ -969,6 +1030,38 @@ class Workspace:
     def get_session(self, session_id: str) -> Session:
         return self._session_mgr.get(session_id)
 
+    async def set_session_profile(
+        self,
+        session_id: str,
+        profile: str | SessionProfile | Mapping[str, Any] | None,
+    ) -> Session:
+        """Replace a live session's permissions, including its policy runtime.
+
+        Compilation succeeds before anything changes. This replaces modes,
+        hides, shows and policy rules; cwd/env presets apply only at creation.
+        Existing cwd, variables, functions and history survive. This is a
+        host-side operation, like creating a session.
+
+        Args:
+            session_id (str): the session to update.
+            profile: named profile or complete document; None selects the
+                workspace default, and an empty document clears restrictions.
+        """
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
+        if isinstance(profile, Mapping):
+            profile = SessionProfile.model_validate(profile)
+        compiled = compile_profile(self._base_profile(profile),
+                                   self._profile_name(profile))
+        check_cli_verbs(compiled.commands, self._cli_verbs())
+        was_default = session_id == self.default_session_id
+        await self.ensure_sessions_loaded()
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
+        if was_default:
+            session_id = self.default_session_id
+        return await self._session_mgr.set_profile(session_id, compiled)
+
     def list_sessions(self) -> list[Session]:
         return self._session_mgr.list()
 
@@ -1033,10 +1126,14 @@ class Workspace:
 
     # ── execution ────────────────────────────────────────────────────────────
 
-    async def apply_io(self,
-                       io: IOResult,
-                       records: list[OpRecord] | None = None) -> None:
-        await self._dispatcher.apply_io(io, records=records)
+    async def apply_io(
+            self,
+            io: IOResult,
+            records: list[OpRecord] | None = None,
+            is_cacheable: Callable[[str], bool] | None = None) -> None:
+        await self._dispatcher.apply_io(io,
+                                        records=records,
+                                        is_cacheable=is_cacheable)
 
     @overload
     async def execute(self,

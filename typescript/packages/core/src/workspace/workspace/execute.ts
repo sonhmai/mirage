@@ -373,6 +373,7 @@ async function runParsedLine(
   nested: NestedRefusal,
   handed: HandOff,
 ): Promise<ExecuteResult> {
+  const cacheable = env.dispatcher.captureCacheablePaths()
   const callAgentId = options.agentId ?? env.agentId ?? ''
   // The line-reader decision (GNU: history is appended where the typed
   // line is read, never inside the evaluator). Internal evaluations run
@@ -621,7 +622,7 @@ async function runParsedLine(
   targetSession.lastExitCode = io.exitCode
   let stdoutBytes: Uint8Array
   try {
-    await env.dispatcher.applyIo(io, opRecords)
+    await env.dispatcher.applyIo(io, opRecords, cacheable)
     stdoutBytes = materialized === null ? new Uint8Array() : await materialize(materialized)
   } catch (err) {
     // Lazy reads can fail while draining (e.g. head/tail that open the

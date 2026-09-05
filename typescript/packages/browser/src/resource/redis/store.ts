@@ -307,6 +307,8 @@ export class UpstashRedisStore implements RedisStoreLike {
     size: number | null,
   ): Promise<Uint8Array | null> {
     const key = this.fk(path)
+    // GETRANGE 0 -1 means the whole value, not an empty window.
+    if (size === 0) return (await this.integer(['EXISTS', key])) === 0 ? null : new Uint8Array(0)
     const end = size === null ? -1 : offset + size - 1
     const [exists, raw] = await this.pipeline(
       [

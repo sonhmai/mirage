@@ -193,6 +193,7 @@ async def execute_line(
     """
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
+    cacheable = ws._dispatcher.capture_cacheable_paths()
     await ws._namespace.ensure_loaded()
     await ws._meta.ensure()
     await ws._session_mgr.ensure_loaded()
@@ -435,7 +436,7 @@ async def execute_line(
                 await ws._registry.decisions.revoke(
                     effective_session.session_id, handed)
         session.last_exit_code = io.exit_code
-        await ws.apply_io(io, records=scope.records)
+        await ws.apply_io(io, records=scope.records, is_cacheable=cacheable)
         return io
     except CommandTimeoutError as exc:
         logger.debug("command %r timed out after %ss", exc.command,

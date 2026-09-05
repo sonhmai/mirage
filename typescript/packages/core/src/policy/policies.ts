@@ -247,7 +247,7 @@ export class Policies {
    * every session's.
    */
   async wantsFor(hook: Hook, sessionId: string): Promise<boolean> {
-    for (const policy of this.policies) {
+    for (const policy of [...this.policies]) {
       if (policy[hook] === undefined) continue
       if (!isSessionScoped(policy)) return true
       if (await policy.wantsFor(hook, sessionId)) return true
@@ -273,6 +273,15 @@ export class Policies {
     this.rescan()
   }
 
+  /** Remove one registration by identity, preserving the other policies' order. Host-side only. */
+  remove(entry: Policy): boolean {
+    const index = this.policies.indexOf(entry)
+    if (index === -1) return false
+    this.policies.splice(index, 1)
+    this.rescan()
+    return true
+  }
+
   /**
    * One loop for every hook: the first Deny wins (limits are moot once
    * the result is suppressed), Limit actions accumulate and merge
@@ -287,7 +296,9 @@ export class Policies {
   ): Promise<[Deny | Ask | null, Limit | null]> {
     const limits: Limit[] = []
     let asked: Ask | null = null
-    for (const policy of this.policies) {
+    // Keep this gate's order stable if the host edits registrations
+    // while a hook awaits. Changes take effect at the next gate.
+    for (const policy of [...this.policies]) {
       const fn = policy[hook]
       if (fn === undefined) continue
       const name = policy.constructor.name || 'policy'

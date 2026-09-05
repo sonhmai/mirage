@@ -203,6 +203,11 @@ class BaseResource:
     def load_state(self, state: dict[str, Any]) -> None:
         pass
 
+    @property
+    def is_closed(self) -> bool:
+        """Whether this instance has completed its resource lifecycle."""
+        return self._closed
+
     async def close(self) -> None:
         if self._closed:
             return

@@ -323,7 +323,7 @@ async function conditionLoop(
   }
 }
 
-export type CforEval = (expr: TSNodeLike | null, dflt: number) => Promise<number>
+export type CforEval = (exprs: readonly TSNodeLike[], dflt: number) => Promise<number>
 
 /**
  * Run bash's C-style for: ((init; cond; update)) around a body.
@@ -337,7 +337,7 @@ export type CforEval = (expr: TSNodeLike | null, dflt: number) => Promise<number
  */
 export async function handleCfor(
   executeNode: ExecuteNodeFn,
-  exprs: readonly (TSNodeLike | null)[],
+  exprs: readonly (readonly TSNodeLike[])[],
   body: readonly TSNodeLike[],
   evalExpr: CforEval,
   session: Session,
@@ -352,13 +352,13 @@ export async function handleCfor(
 
   try {
     try {
-      await evalExpr(exprs[0] ?? null, 0)
+      await evalExpr(exprs[0] ?? [], 0)
       for (let i = 0; i < MAX_WHILE; i++) {
         if (session.shellOptions.noexec === true) {
           hitLimit = false
           break
         }
-        if ((await evalExpr(exprs[1] ?? null, 1)) === 0) {
+        if ((await evalExpr(exprs[1] ?? [], 1)) === 0) {
           hitLimit = false
           break
         }
@@ -382,12 +382,12 @@ export async function handleCfor(
             if (sig.levels > 1) {
               throw new ContinueSignal(chainNonNull(allStdout), mergedIo, sig.levels - 1)
             }
-            await evalExpr(exprs[2] ?? null, 0)
+            await evalExpr(exprs[2] ?? [], 0)
             continue
           }
           throw sig
         }
-        await evalExpr(exprs[2] ?? null, 0)
+        await evalExpr(exprs[2] ?? [], 0)
       }
     } catch (err) {
       // PolicyDenied is a header expression assigning a hidden name,

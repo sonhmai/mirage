@@ -22,7 +22,7 @@ import type { ElementOps } from '../../shell/types.ts'
 import { varHidden } from '../../utils/hidden.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { ReadonlyVariableError } from './errors.ts'
-import { initialSeed, stepState, valueOf } from './rng.ts'
+import { draw, initialSeed } from './rng.ts'
 import { ownRecord, sessionEntry, setSessionEntry } from './session.ts'
 import type { ShellValue } from '../../shell/variable.ts'
 import { coerceValue, detach, makeVar, VarAttr, withAttr, withValue } from '../../shell/variable.ts'
@@ -372,11 +372,8 @@ export function nextRandom(session: Session, stored: string | undefined): number
     state = session.randomState
     last = session.randomLast
   }
-  let value: number
-  do {
-    state = stepState(state)
-    value = valueOf(state)
-  } while (value === last)
+  const [nextState, value] = draw(state, last)
+  state = nextState
   session.randomState = state
   session.randomLast = value
   const word = String(value)
@@ -386,16 +383,84 @@ export function nextRandom(session: Session, stored: string | undefined): number
   return value
 }
 
-/** Bind lazy arithmetic RANDOM reads to a session. Lives beside the
- * door rather than with the generator because the door needs it too:
- * `RANDOM=RANDOM` draws once while the seed is evaluated, then seeds
- * with the draw, as bash's `assign_random` does through `evalexp`. */
-export function randomReader(session: Session): (name: string) => string | null {
-  return (name) => {
-    if (name !== RANDOM || varHidden(session.hiddenVars, name)) return null
-    const value = nextRandom(session, visibleEnv(session)[name])
-    return value === null ? null : String(value)
+/**
+ * Arithmetic's reads of `$RANDOM`, bound to one session.
+ *
+ * A read before the expression assigns `RANDOM` draws from the session
+ * generator. bash seeds at the instant of an assignment and every later
+ * read draws from the new seed (`$((RANDOM=42, RANDOM))` is the first
+ * draw after seeding with 42). Here the assignment is still pending at
+ * the session door, which lands it gated after evaluation, so the
+ * evaluator tells the reader of each assignment as it is made (`wrote`),
+ * the reader seeds a scratch generator the way the door will and draws
+ * from that, and `settle` replays the draws on the session once the
+ * door has seeded it: the session ends where bash's does, seeded and
+ * advanced by every read since the last assignment, and the write still
+ * reaches the gate as the assignment it is. Each assignment restarts
+ * the scratch generator and the count, since the door lands only the
+ * last value written, and the draws are replayed only if the door did
+ * land it: an assignment the caller never applied leaves the session as
+ * it was.
+ *
+ * Lives beside the door rather than with the generator because the
+ * door needs it too: `RANDOM=RANDOM` draws once while the seed is
+ * evaluated, then seeds with the draw, as bash's `assign_random` does
+ * through `evalexp`.
+ */
+export class RandomReader {
+  private seeded: string | null = null
+  private state = 0
+  private last = 0
+  private draws = 0
+
+  constructor(private readonly session: Session) {}
+
+  private special(name: string): boolean {
+    const session = this.session
+    return (
+      name === RANDOM && !varHidden(session.hiddenVars, name) && session.randomSeed !== RANDOM_UNSET
+    )
   }
+
+  /** The dynamic value of a name, null for a name that has none. */
+  readonly read = (name: string): string | null => {
+    if (!this.special(name)) return null
+    if (this.seeded === null) {
+      const value = nextRandom(this.session, visibleEnv(this.session)[name])
+      return value === null ? null : String(value)
+    }
+    const [state, value] = draw(this.state, this.last)
+    this.state = state
+    this.last = value
+    this.draws += 1
+    return String(value)
+  }
+
+  /** Note an assignment the expression made: the name and its value, an
+   * integer's text. */
+  readonly wrote = (name: string, value: string): void => {
+    if (!this.special(name)) return
+    this.seeded = value
+    const modulus = BigInt(RANDOM_MODULUS)
+    this.state = Number(((BigInt(value) % modulus) + modulus) % modulus)
+    this.last = 0
+    this.draws = 0
+  }
+
+  /** Replay the scratch draws on the session generator, once the door
+   * has seeded it with the value the expression assigned. */
+  settle(): void {
+    if (this.seeded === null || this.session.randomSeed !== this.seeded) return
+    for (let i = 0; i < this.draws; i++) {
+      nextRandom(this.session, visibleEnv(this.session)[RANDOM])
+    }
+    this.draws = 0
+  }
+}
+
+/** Bind arithmetic `$RANDOM` reads to a session. */
+export function randomReader(session: Session): RandomReader {
+  return new RandomReader(session)
 }
 
 /** The `-i` coercion: evaluate the incoming text as arithmetic against
@@ -409,7 +474,7 @@ function integerText(session: Session, text: string): string {
       visibleEnv(session),
       0,
       sessionElements(session),
-      randomReader(session),
+      randomReader(session).read,
     ).value.toString()
   } catch (err) {
     if (err instanceof ArithError) throw new ArithError(`${text}: ${err.message}`)

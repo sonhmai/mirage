@@ -226,8 +226,16 @@ export function getForParts(node: TSNodeLike): [string, TSNodeLike[], TSNodeLike
  * separated by `;` tokens, and any of them may be empty (null):
  * `for ((;;))`.
  */
-export function getCforParts(node: TSNodeLike): [(TSNodeLike | null)[], TSNodeLike[]] {
-  const exprs: (TSNodeLike | null)[] = [null, null, null]
+/**
+ * ([init, cond, update], body) from a C-style for. The expression slots
+ * are positional between the (( )) delimiters, separated by `;` tokens,
+ * and any of them may be empty: `for ((;;))`. A slot holds every
+ * comma-separated expression the parser found in it, in order, since
+ * bash evaluates `for ((a=1, i=0; ...))` as one comma expression;
+ * keeping only the last child dropped `a=1`.
+ */
+export function getCforParts(node: TSNodeLike): [TSNodeLike[][], TSNodeLike[]] {
+  const exprs: TSNodeLike[][] = [[], [], []]
   let slot = 0
   let inside = false
   let body: TSNodeLike[] = []
@@ -242,7 +250,7 @@ export function getCforParts(node: TSNodeLike): [(TSNodeLike | null)[], TSNodeLi
     }
     if (inside) {
       if (child.type === NT.SEMI) slot += 1
-      else if (child.isNamed === true && slot < 3) exprs[slot] = child
+      else if (child.isNamed === true && slot < 3) exprs[slot]?.push(child)
       continue
     }
     if (child.type === NT.DO_GROUP) body = [...child.namedChildren]

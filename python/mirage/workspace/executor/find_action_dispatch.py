@@ -17,6 +17,8 @@ import shlex
 from mirage.commands.builtin.find_parse import (EXEC_PLACEHOLDER, ExecAction,
                                                 FindExpr, RowAction,
                                                 parse_find_expression)
+from mirage.commands.builtin.utils.formatting import format_find_ls
+from mirage.commands.builtin.utils.identity import Identity
 from mirage.commands.config import ExecContext
 from mirage.context import (get_current_session, reset_op_policies,
                             suspend_op_policies)
@@ -199,53 +201,52 @@ async def _delete(ps: PathSpec, registry: MountRegistry, cwd: str,
     return True
 
 
-async def _ls_row(ps: PathSpec, registry: MountRegistry, cwd: str,
-                  ns: NamespaceView | None, stat_path: StatPath | None,
+async def _ls_row(ps: PathSpec, ns: NamespaceView | None,
+                  stat_path: StatPath | None, identity: Identity | None,
                   errors: list[bytes]) -> bytes | None:
-    """Render one accepted row the way ``ls -ld`` would.
+    """Render one accepted row in ``find -ls``'s own layout.
 
-    A row that cannot be listed (an earlier ``-delete`` removed it, or
-    the backend refuses it) is GNU's ``find: 'path': <reason>``, with
-    the reason taken from ls's own last field the way ``_delete`` reads
-    rm's; None with a line appended is the caller's signal to end the
-    row's chain.
+    The row's facts come from the two doors the command boundary has: a
+    symlink is namespace state no backend can see, so the link view
+    answers for one (lstat, as GNU's ``-ls`` reports the link itself),
+    and every other row is statted through the op dispatcher, which
+    answers for a mount point and a namespace-only ancestor as well as
+    a backend entry. A row that cannot be statted (an earlier
+    ``-delete`` removed it, or the backend refuses it) is GNU's
+    ``find: 'path': <reason>``; None with a line appended is the
+    caller's signal to end the row's chain.
 
     Args:
         ps (PathSpec): the selected row, with its display spelling.
-        registry (MountRegistry): used to route the listing.
-        cwd (str): the session's working directory.
         ns (NamespaceView | None): the name plane's facts, so a symlink
-            or mount-point row renders.
-        stat_path (StatPath | None): dispatcher stat, threaded with it.
+            row renders as the link.
+        stat_path (StatPath | None): dispatcher stat; None outside a
+            workspace, where no row can be rendered.
+        identity (Identity | None): who the session is, for the owner
+            and group columns.
         errors (list[bytes]): where a failure's line is appended.
     """
     path = ps.raw_path or ps.virtual
-    mount = registry.try_mount_for(ps.virtual)
-    if mount is None:
-        errors.append(f"find: '{path}': no mount\n".encode())
+    if stat_path is None:
+        errors.append(f"find: '{path}': no stat door\n".encode())
         return None
+    link = (ns.links.stat_at(ps.virtual)
+            if ns is not None and ns.links is not None else None)
     try:
-        ls_out, ls_io = await mount.execute_cmd(
-            "ls", [ps], [], {
-                "args_l": True,
-                "d": True
-            }, ExecContext(cwd=cwd, ns=ns, stat_path=stat_path))
-    except (FileNotFoundError, NotADirectoryError, PermissionError,
-            ValueError) as exc:
-        why = fs_strerror(exc) if isinstance(exc, OSError) else None
-        errors.append(f"find: '{path}': {why or exc}\n".encode())
+        st = link if link is not None else await stat_path(ps.virtual)
+    except (NotADirectoryError, PermissionError, ValueError) as exc:
+        # GNU words it with the errno text; a policy refusal carries its
+        # reason there.
+        why = (exc.strerror or str(exc)) if isinstance(exc,
+                                                       OSError) else str(exc)
+        errors.append(f"find: '{path}': {why}\n".encode())
         return None
-    if ls_io.exit_code != 0:
-        err = await materialize(ls_io.stderr) if ls_io.stderr else b""
-        why = err.decode("utf-8", errors="replace").strip().rsplit(": ", 1)[-1]
-        errors.append(f"find: '{path}'"
-                      f"{': ' + why if why else ''}\n".encode())
+    if st is None:
+        errors.append(
+            f"find: '{path}': {fs_strerror(FileNotFoundError())}\n".encode())
         return None
-    if ls_out is None:
-        return None
-    line = (await materialize(ls_out)).decode("utf-8",
-                                              errors="replace").rstrip("\n")
-    return (line + "\n").encode() if line else None
+    row = format_find_ls(st.model_copy(update={"name": path}), identity)
+    return (row + "\n").encode()
 
 
 def _has_actions(expr: FindExpr) -> bool:
@@ -267,13 +268,64 @@ def depth_first_key(path: str) -> tuple[tuple[str, int], ...]:
 
     A directory's contents, each sorted, then the directory: the final
     component is flagged so a path sorts after its descendants, whose
-    entry at that depth carries the same name unflagged.
+    entry at that depth carries the same name unflagged. A start point
+    spelled with a trailing slash prints as ``d/`` while its descendants
+    print as ``d/a``, so the slash is dropped before splitting: kept, it
+    would leave an empty final component that sorts the directory ahead
+    of everything under it, which is the one order ``-delete`` cannot
+    remove a tree in.
 
     Args:
         path (str): a row as find printed it.
     """
-    parts = path.split("/")
+    parts = path.rstrip("/").split("/")
     return (*((part, 0) for part in parts[:-1]), (parts[-1], 1))
+
+
+def _under(path: str, start: str) -> bool:
+    """Whether a printed row belongs to a start point's walk.
+
+    Args:
+        path (str): a row as find printed it.
+        start (str): the start point as it was typed.
+    """
+    base = start.rstrip("/")
+    if base == "":
+        return path.startswith("/")
+    return path == start or path == base or path.startswith(base + "/")
+
+
+def start_runs(matches: list[PathSpec],
+               starts: list[PathSpec] | None) -> list[list[PathSpec]]:
+    """Split the rows into one run per start point, in operand order.
+
+    GNU walks each start point to completion before the next, so
+    ``-depth`` (and the actions that follow its order, ``-delete`` and
+    ``-exec`` among them) is a property of one walk, never of the whole
+    line: ``find b a -depth`` prints ``b/x b a/y a``, and one sort over
+    every row would put ``a``'s tree first. The rows arrive in
+    start-point order, so a run ends at the first row that is not under
+    its start point. Start points that nest or repeat share a run,
+    since a row under both cannot say which walk produced it; ordering
+    their shared rows children-first is the one answer that never
+    deletes a directory before its contents. With no start points on
+    hand (a caller outside a workspace) every row is one run.
+
+    Args:
+        matches (list[PathSpec]): the rows, in start-point order.
+        starts (list[PathSpec] | None): the start points as typed.
+    """
+    if not starts:
+        return [matches]
+    runs: list[list[PathSpec]] = [[] for _ in starts]
+    position = 0
+    for match in matches:
+        path = match.raw_path or match.virtual
+        while (position + 1 < len(starts) and not _under(
+                path, starts[position].raw_path or starts[position].virtual)):
+            position += 1
+        runs[position].append(match)
+    return runs
 
 
 def _structural(path: PathSpec, registry: MountRegistry) -> bool:
@@ -303,6 +355,8 @@ async def _apply_find_actions(
     ns: NamespaceView | None = None,
     stat_path: StatPath | None = None,
     dispatch: DispatchFn | None = None,
+    identity: Identity | None = None,
+    starts: list[PathSpec] | None = None,
 ) -> tuple[ByteSource | None, bytes, int]:
     """Apply find's actions (-exec / -delete / -print0 / -ls) to its rows.
 
@@ -325,7 +379,8 @@ async def _apply_find_actions(
     gone, and a row it cannot delete ends the chain with GNU's line and
     find's exit 1. It also turns on ``-depth``, which orders every
     directory after its contents, the only order a tree can be removed
-    in; ``-depth`` alone reorders the implicit print the same way.
+    in; ``-depth`` alone reorders the implicit print the same way, and
+    both order one start point's walk at a time (``start_runs``).
 
     Args:
         stdout (ByteSource | None): display output from find.
@@ -345,6 +400,10 @@ async def _apply_find_actions(
         dispatch (DispatchFn | None): the op dispatcher a ``-delete``
             unlinks a symlink row through, since the row is namespace
             state no mount's ``rm`` can reach.
+        identity (Identity | None): who the session is, for the owner
+            and group columns of ``-ls``.
+        starts (list[PathSpec] | None): the start points as typed, in
+            operand order, so ``-depth`` orders each walk on its own.
 
     Returns:
         The rows to print, the stderr to append, and the exit status the
@@ -360,7 +419,10 @@ async def _apply_find_actions(
         return None, b"find: actions require structured matches\n", 1
     matches = list(matched_paths)
     if reorders:
-        matches.sort(key=lambda p: depth_first_key(p.raw_path or p.virtual))
+        matches = [
+            match for run in start_runs(matches, starts) for match in sorted(
+                run, key=lambda p: depth_first_key(p.raw_path or p.virtual))
+        ]
     # An expression with no action of its own prints, which is the one
     # implicit action -depth reorders.
     actions = expr.actions or [RowAction("print")]
@@ -381,8 +443,7 @@ async def _apply_find_actions(
                     break
             elif action.kind == "ls":
                 before = len(errors)
-                row = await _ls_row(match, registry, cwd, ns, stat_path,
-                                    errors)
+                row = await _ls_row(match, ns, stat_path, identity, errors)
                 if row is not None:
                     out.append(row)
                 elif len(errors) > before:

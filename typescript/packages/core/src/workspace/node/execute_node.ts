@@ -134,16 +134,21 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
  * expression assigns to a readonly variable.
  */
 async function evalCforExpr(
-  expr: TSNodeLike | null,
+  exprs: readonly TSNodeLike[],
   dflt: number,
   session: Session,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
 ): Promise<number> {
-  if (expr === null) return dflt
-  const text = await expandArith(expr, session, executeFn, callStack, view)
+  if (exprs.length === 0) return dflt
+  // One comma expression, evaluated once, so an assignment early in the
+  // slot is seen by the expressions after it.
+  const parts: string[] = []
+  for (const expr of exprs) parts.push(await expandArith(expr, session, executeFn, callStack, view))
+  const text = parts.join(', ')
   let result: ArithResult
+  const reader = randomReader(session)
   try {
     // Reads resolve against the visible env so a hidden name counts as
     // unset; a hidden write refuses through the session door
@@ -153,7 +158,8 @@ async function evalCforExpr(
       visibleEnv(session),
       0,
       sessionElements(session),
-      randomReader(session),
+      reader.read,
+      reader.wrote,
     )
   } catch (err) {
     if (!(err instanceof ArithError)) throw err
@@ -169,6 +175,7 @@ async function evalCforExpr(
   for (const write of result.writes) {
     await assignElement(session, view ?? null, write.name, write.key, write.value)
   }
+  reader.settle()
   return Number(result.value)
 }
 
@@ -593,6 +600,7 @@ async function executeNodeBody(
       sessionView(session, registry.policies),
     )
     let result: ArithResult
+    const reader = randomReader(session)
     try {
       // Reads resolve against the visible env so a hidden name counts
       // as unset; a hidden write refuses below, in this command's own
@@ -602,7 +610,8 @@ async function executeNodeBody(
         visibleEnv(session),
         0,
         sessionElements(session),
-        randomReader(session),
+        reader.read,
+        reader.wrote,
       )
     } catch (err) {
       if (!(err instanceof ArithError)) throw err
@@ -645,6 +654,7 @@ async function executeNodeBody(
           write.value,
         )
       }
+      reader.settle()
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
       const errBytes = new TextEncoder().encode(`bash: ${err.message}\n`)

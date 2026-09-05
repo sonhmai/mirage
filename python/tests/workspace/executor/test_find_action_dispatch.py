@@ -19,12 +19,15 @@ reads the parsed action flags and applies the corresponding side
 effect or output reformat.
 """
 import asyncio
+import re
 
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
+from mirage.workspace.executor.find_action_dispatch import (depth_first_key,
+                                                            start_runs)
 
 
 def _ws() -> Workspace:
@@ -150,18 +153,24 @@ def test_print0_separates_with_nul() -> None:
 # ── -ls ────────────────────────────────────────────────────────
 
 
-def test_ls_emits_long_format_per_match() -> None:
-
+def test_ls_renders_finds_own_layout_per_match() -> None:
+    # GNU findutils 4.10 `-ls` is not `ls -l`: inode and 1K blocks lead,
+    # and every column has a fixed width (inode 9, blocks 6, links 3,
+    # owner and group 8 left-aligned, size 8). A VFS has neither an
+    # inode nor a block allocation, so those two columns carry `?`, the
+    # answer `stat %i` and `%b` already give.
     async def _go():
         ws = _ws()
         await _setup_html_files(ws)
         r = await ws.execute("find / -name '*.html' -ls", session_id="s")
         out = await r.stdout_str()
-        # ls -ld output per match: starts with permission bits.
         lines = [ln for ln in out.split("\n") if ln]
         assert len(lines) >= 2
         for line in lines:
-            assert line.startswith(("-", "d", "l"))
+            assert re.fullmatch(
+                r"        \?      \? -rw-r--r--   1 -        -        "
+                r" {7}\d [A-Z][a-z]{2} [ \d]\d \d\d:\d\d /.*\.html",
+                line), line
 
     _run(_go())
 
@@ -332,6 +341,62 @@ async def test_depth_reorders_the_implicit_print():
     assert await _run_line(ws, "find d -depth -print") == (post, "", 0)
     assert await _run_line(
         ws, "find d") == ("d\nd/a.txt\nd/b.txt\nd/sub\nd/sub/c.txt\n", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_depth_orders_each_start_point_on_its_own():
+    # GNU findutils 4.10 walks each start point to completion, so
+    # `find b a -depth` is b's tree post-order, then a's: one sort over
+    # every row put a's tree first, and -delete removed in that order.
+    ws = await _exec_ws()
+    await ws.execute("mkdir -p b a; printf x > b/x; printf y > a/y",
+                     session_id="s")
+    assert await _run_line(ws,
+                           "find b a -depth") == ("b/x\nb\na/y\na\n", "", 0)
+    assert await _run_line(
+        ws, "find b a -depth -print -delete") == ("b/x\nb\na/y\na\n", "", 0)
+    assert await _run_line(ws, "test -e a -o -e b") == ("", "", 1)
+
+
+@pytest.mark.asyncio
+async def test_depth_orders_a_trailing_slash_start_point_after_its_tree():
+    # `find d/` prints its root as `d/` and the rest as `d/a`; the slash
+    # left an empty final component that sorted the directory first, so
+    # `find d/ -delete` refused the non-empty directory and exited 1.
+    ws = await _exec_ws()
+    assert await _run_line(
+        ws, "find d/ -depth") == ("d/a.txt\nd/b.txt\nd/sub/c.txt\nd/sub\nd/\n",
+                                  "", 0)
+    assert await _run_line(ws, "find d/ -delete") == ("", "", 0)
+    assert await _run_line(ws, "test -e d") == ("", "", 1)
+
+
+def test_depth_first_key_drops_a_trailing_slash():
+    assert depth_first_key("d/") == depth_first_key("d")
+    assert depth_first_key("d/a") < depth_first_key("d/")
+    assert depth_first_key("/a") < depth_first_key("/")
+
+
+def test_start_runs_split_rows_by_start_point_in_operand_order():
+    rows = [_spec("b"), _spec("b/x"), _spec("a"), _spec("a/y")]
+    runs = start_runs(rows, [_spec("b"), _spec("a")])
+    assert [[r.raw_path for r in run] for run in runs] == [["b", "b/x"],
+                                                           ["a", "a/y"]]
+    # A trailing-slash start point owns its `d/` root row and `d/a`.
+    runs = start_runs([_spec("d/"), _spec("d/a")], [_spec("d/")])
+    assert [[r.raw_path for r in run] for run in runs] == [["d/", "d/a"]]
+    # Nested start points share a run, and no start points is one run.
+    runs = start_runs(rows[:2] + [_spec("b/x")], [_spec("b"), _spec("b/x")])
+    assert [len(run) for run in runs] == [3, 0]
+    assert start_runs(rows, None) == [rows]
+
+
+def _spec(raw: str) -> PathSpec:
+    virtual = "/w/" + raw.strip("/") if raw.strip("/") else "/w"
+    return PathSpec(virtual=virtual,
+                    directory=virtual.rsplit("/", 1)[0] or "/",
+                    resource_path="",
+                    raw_path=raw)
 
 
 @pytest.mark.asyncio

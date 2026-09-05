@@ -356,6 +356,7 @@ export async function expandNodeMarked(
         const parenExpr = await substituteDollarRefs(only, session, executeFn, callStack, view)
         const expr = parenExpr.slice(1, -1)
         let arith: ArithResult
+        const reader = randomReader(session)
         try {
           // Reads resolve against the visible env, so a hidden name
           // counts as unset; the write-back below lands on the raw env
@@ -366,7 +367,8 @@ export async function expandNodeMarked(
             visibleEnv(session),
             0,
             sessionElements(session),
-            randomReader(session),
+            reader.read,
+            reader.wrote,
           )
         } catch (err) {
           if (!(err instanceof ArithError)) throw err
@@ -375,6 +377,9 @@ export async function expandNodeMarked(
         for (const write of arith.writes) {
           await expansionWrite(session, view, write.name, write.key, write.value)
         }
+        // A RANDOM the expression seeded and then read: the door has
+        // seeded the session; the reads now advance it.
+        reader.settle()
         return prefix + arith.value.toString()
       }
     }
@@ -399,13 +404,15 @@ export async function expandNodeMarked(
     const prefix = foldedWhitespace(tsNode)
     const expr = await expandArith(tsNode, session, executeFn, callStack, view)
     let result: ArithResult
+    const reader = randomReader(session)
     try {
       result = evaluateArith(
         expr,
         visibleEnv(session),
         0,
         sessionElements(session),
-        randomReader(session),
+        reader.read,
+        reader.wrote,
       )
     } catch (err) {
       if (err instanceof ArithError) throw arithExit(expr, err)
@@ -414,6 +421,7 @@ export async function expandNodeMarked(
     for (const write of result.writes) {
       await expansionWrite(session, view, write.name, write.key, write.value)
     }
+    reader.settle()
     return prefix + result.value.toString()
   }
 

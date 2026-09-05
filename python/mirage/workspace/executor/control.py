@@ -313,7 +313,7 @@ async def _condition_loop(
 
 async def handle_cfor(
     execute_node: Callable[..., Any],
-    exprs: list[tree_sitter.Node | None],
+    exprs: list[list[tree_sitter.Node]],
     body: list[tree_sitter.Node],
     eval_expr: Callable[..., Any],
     session: Session,
@@ -324,8 +324,9 @@ async def handle_cfor(
 
     Args:
         execute_node (Callable): recursive node executor.
-        exprs (list[tree_sitter.Node | None]): init, condition and
-            update expression slots; any may be None (`for ((;;))`).
+        exprs (list[list[tree_sitter.Node]]): init, condition and
+            update expression slots, each the comma-separated
+            expressions it holds; any may be empty (`for ((;;))`).
         body (list[tree_sitter.Node]): do_group statements.
         eval_expr (Callable): async evaluator taking (expr, default)
             and returning the expression's integer value, or the

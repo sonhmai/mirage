@@ -15,7 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { MountMode } from '../types.ts'
+import { MountMode, PathSpec } from '../types.ts'
+import { compareDepthFirst, startRuns } from './executor/find_action_dispatch.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
@@ -131,15 +132,93 @@ describe('find action layer', () => {
   })
 
   describe('-ls', () => {
-    it('emits long-format listing per match', async () => {
+    it("renders find's own layout per match", async () => {
+      // GNU findutils 4.10 `-ls` is not `ls -l`: inode and 1K blocks
+      // lead, and every column has a fixed width (inode 9, blocks 6,
+      // links 3, owner and group 8 left-aligned, size 8). A VFS has
+      // neither an inode nor a block allocation, so those two columns
+      // carry `?`, the answer `stat %i` and `%b` already give.
       const ws = await singleMountWs()
       await setupHtmlFiles(ws)
       const r = await ws.execute("find / -name '*.html' -ls", { sessionId: 's' })
       const lines = r.stdoutText.split('\n').filter((l) => l !== '')
       expect(lines.length).toBeGreaterThanOrEqual(2)
       for (const line of lines) {
-        expect(line[0]).toMatch(/[-dl]/)
+        expect(line).toMatch(
+          /^ {8}\? {6}\? -rw-r--r-- {3}1 - {8}- {8} {7}\d [A-Z][a-z]{2} [ \d]\d \d\d:\d\d \/.*\.html$/,
+        )
       }
+    })
+  })
+
+  describe('-depth across start points', () => {
+    it('orders each start point on its own', async () => {
+      // GNU findutils 4.10 walks each start point to completion, so
+      // `find b a -depth` is b's tree post-order, then a's: one sort
+      // over every row put a's tree first, and -delete removed in that
+      // order.
+      const ws = await singleMountWs()
+      try {
+        await ws.execute('mkdir -p /w/b /w/a; printf x > /w/b/x; printf y > /w/a/y; cd /w')
+        const out = async (line: string) => {
+          const io = await ws.execute(line)
+          return [io.stdoutText, io.stderrText, io.exitCode]
+        }
+        expect(await out('find b a -depth')).toEqual(['b/x\nb\na/y\na\n', '', 0])
+        expect(await out('find b a -depth -print -delete')).toEqual(['b/x\nb\na/y\na\n', '', 0])
+        expect(await out('test -e a -o -e b')).toEqual(['', '', 1])
+      } finally {
+        await ws.close()
+      }
+    })
+
+    it('orders a trailing-slash start point after its tree', async () => {
+      // `find d/` prints its root as `d/` and the rest as `d/a`; the
+      // slash left an empty final component that sorted the directory
+      // first, so `find d/ -delete` refused the non-empty directory.
+      const ws = await singleMountWs()
+      try {
+        await ws.execute(
+          'mkdir -p /w/d/sub; printf a > /w/d/a.txt; printf x > /w/d/sub/c.txt; cd /w',
+        )
+        const out = async (line: string) => {
+          const io = await ws.execute(line)
+          return [io.stdoutText, io.stderrText, io.exitCode]
+        }
+        expect(await out('find d/ -depth')).toEqual(['d/a.txt\nd/sub/c.txt\nd/sub\nd/\n', '', 0])
+        expect(await out('find d/ -delete')).toEqual(['', '', 0])
+        expect(await out('test -e d')).toEqual(['', '', 1])
+      } finally {
+        await ws.close()
+      }
+    })
+
+    it('splits rows by start point in operand order', () => {
+      const spec = (raw: string): PathSpec =>
+        new PathSpec({
+          virtual: raw.replace(/\/+$/, '') === '' ? '/w' : `/w/${raw.replace(/^\/+|\/+$/g, '')}`,
+          directory: '/w',
+          resourcePath: '',
+          rawPath: raw,
+        })
+      const rows = [spec('b'), spec('b/x'), spec('a'), spec('a/y')]
+      const names = (runs: PathSpec[][]) => runs.map((run) => run.map((r) => r.rawPath))
+      expect(names(startRuns(rows, [spec('b'), spec('a')]))).toEqual([
+        ['b', 'b/x'],
+        ['a', 'a/y'],
+      ])
+      // A trailing-slash start point owns its `d/` root row and `d/a`.
+      expect(names(startRuns([spec('d/'), spec('d/a')], [spec('d/')]))).toEqual([['d/', 'd/a']])
+      // Nested start points share a run, and no start points is one run.
+      expect(
+        startRuns([...rows.slice(0, 2), spec('b/x')], [spec('b'), spec('b/x')]).map(
+          (r) => r.length,
+        ),
+      ).toEqual([3, 0])
+      expect(startRuns(rows, null)).toEqual([rows])
+      expect(compareDepthFirst('d/a', 'd/')).toBeLessThan(0)
+      expect(compareDepthFirst('/a', '/')).toBeLessThan(0)
+      expect(compareDepthFirst('d/', 'd')).toBe(0)
     })
   })
 

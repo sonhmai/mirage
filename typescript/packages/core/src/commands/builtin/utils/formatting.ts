@@ -16,6 +16,10 @@ import { DEVICE_NUMBERS_KEY, FileType, LINK_TARGET_KEY, type FileStat } from '..
 import { DEFAULT_MODES, EPOCH_LS_TIME, MONTHS, NUMERIC_PREFIX, TYPE_CHARS } from './constants.ts'
 import { UNKNOWN_NAME, groupName, ownerName, type Identity } from './identity.ts'
 
+// What a stat field a VFS cannot know renders as, in `stat -c` and in
+// the inode and block columns of `find -ls`.
+export const UNKNOWN_STAT_FIELD = '?'
+
 /**
  * GNU's `human_readable` rounding, shared by `-h` and `-H`.
  *
@@ -157,6 +161,30 @@ export function formatLsLong(stats: readonly FileStat[], opts: LsLongOptions = {
     const grp = groupName(s.gid, identity)
     return `${mode} 1 ${who} ${grp} ${size} ${time} ${lsName(s)}`
   })
+}
+
+/**
+ * One `find -ls` row in findutils' own layout. GNU's `list_file` is not
+ * `ls -l`: it leads with the inode and the allocated 1K blocks, then
+ * fixes every column's width (inode 9, blocks 6, links 3, owner and
+ * group 8 left-aligned, size 8) instead of fitting them to the listing,
+ * so a consumer can count fields. The inode and block columns carry
+ * `?`, the answer `stat %i` and `%b` already give: a VFS has no inode
+ * and no block allocation, and a number invented for either would read
+ * as a fact. The remaining columns are the `ls -l` ones, from the same
+ * helpers, so the two listings cannot disagree about a row. `s` is the
+ * row named as find printed it; `identity` is null outside a workspace,
+ * where both name columns fall back to `-`.
+ */
+export function formatFindLs(s: FileStat, identity: Identity | null): string {
+  const [size, time] = lsSizeAndTime(s, false)
+  const who = ownerName(s.uid, identity)
+  const grp = groupName(s.gid, identity)
+  return (
+    `${padLeft(UNKNOWN_STAT_FIELD, 9)} ${padLeft(UNKNOWN_STAT_FIELD, 6)} ` +
+    `${lsModeString(s)} ${padLeft('1', 3)} ${who.padEnd(8)} ${grp.padEnd(8)} ` +
+    `${padLeft(size, 8)} ${time} ${lsName(s)}`
+  )
 }
 
 export function toNumber(val: string): number {

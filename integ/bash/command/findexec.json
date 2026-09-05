@@ -1752,6 +1752,108 @@
         "stdout": "rc=1\n1\n",
         "stderr": "find: I cannot figure out how to interpret '2026-01-01T00:00+99:99' as a date or time\n"
       }
+    },
+    {
+      "id": "find_depth_orders_each_start_point_on_its_own",
+      "seq": 981530,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fs/b /data/fs/a && printf x > /data/fs/b/x && printf y > /data/fs/a/y && cd /data/fs && find b a -depth; find b a -depth -print -delete; echo rc=$?; find . -mindepth 1 | wc -l; cd / && rm -r /data/fs",
+      "expect": {
+        "exit": 0,
+        "stdout": "b/x\nb\na/y\na\nb/x\nb\na/y\na\nrc=0\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_depth_orders_a_trailing_slash_start_point_last",
+      "seq": 981531,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ft/d/sub && printf A > /data/ft/d/a.txt && printf B > /data/ft/d/sub/b.txt && printf K > /data/ft/keep && cd /data/ft && find d/ -depth; find d/ -delete; echo rc=$?; find . -mindepth 1; cd / && rm -r /data/ft",
+      "expect": {
+        "exit": 0,
+        "stdout": "d/a.txt\nd/sub/b.txt\nd/sub\nd/\nrc=0\n./keep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_ls_renders_finds_own_layout",
+      "seq": 981532,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fy/d && printf AB > /data/fy/d/a.txt && cd /data/fy && find d -name a.txt -ls | cut -c1-31; find d -name a.txt -ls | awk '{print NF, $7, $NF}'; cd / && rm -r /data/fy",
+      "expect": {
+        "exit": 0,
+        "stdout": "        ?      ? -rw-r--r--   1\n11 2 d/a.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }

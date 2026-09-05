@@ -101,6 +101,40 @@
         "stdout": "9401 2815 17772 26794\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "arith_random_assignment_seeds_within_the_expression",
+      "seq": 444,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "RANDOM=1; echo $((RANDOM=42, RANDOM)) $RANDOM; RANDOM=1; echo $((RANDOM=42)) $RANDOM; RANDOM=1; echo $((RANDOM=42, RANDOM=7, RANDOM)) $RANDOM; RANDOM=1; echo $((RANDOM+=1, RANDOM)) $RANDOM; RANDOM=1; echo $((RANDOM=42, RANDOM=RANDOM+1)) $RANDOM; x=RANDOM; RANDOM=1; echo $((RANDOM=42, x)) $RANDOM; RANDOM=1; (( RANDOM=42, y=RANDOM )); echo $y $RANDOM",
+      "expect": {
+        "exit": 0,
+        "stdout": "17772 26794\n42 17772\n19344 26956\n27726 5703\n17773 26326\n17772 26794\n17772 26794\n",
+        "stderr": ""
+      }
     }
   ]
 }

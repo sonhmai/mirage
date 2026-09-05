@@ -38,3 +38,19 @@ def value_of(state: int) -> int:
         state (int): the generator state after a step.
     """
     return ((state >> 16) ^ (state & 0xFFFF)) & RANDOM_MAX
+
+
+def draw(state: int, last: int) -> tuple[int, int]:
+    """One ``$RANDOM`` draw: step until the value differs from the last
+    one, as bash's ``get_random`` does, and return the new state with it.
+
+    Args:
+        state (int): the generator state before the draw.
+        last (int): the value the previous draw rendered as, 0 after a
+            seed.
+    """
+    while True:
+        state = step_state(state)
+        value = value_of(state)
+        if value != last:
+            return state, value

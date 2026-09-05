@@ -343,11 +343,15 @@ class ArithEvaluator:
     expression made them.
     """
 
-    def __init__(self, env: Mapping[str, str], updates: dict[str, str],
+    def __init__(self,
+                 env: Mapping[str, str],
+                 updates: dict[str, str],
                  elem_updates: dict[tuple[str, str], str],
-                 writes: dict[tuple[str, str | None],
-                              str], depth: int, elements: ElementOps | None,
-                 read_var: Callable[[str], str | None] | None) -> None:
+                 writes: dict[tuple[str, str | None], str],
+                 depth: int,
+                 elements: ElementOps | None,
+                 read_var: Callable[[str], str | None] | None,
+                 wrote_var: Callable[[str, str], None] | None = None) -> None:
         self.env = env
         self.updates = updates
         self.elem_updates = elem_updates
@@ -355,6 +359,7 @@ class ArithEvaluator:
         self.depth = depth
         self.elements = elements
         self.read_var = read_var
+        self.wrote_var = wrote_var
 
     def _merged_env(self) -> dict[str, str]:
         merged = {
@@ -379,15 +384,22 @@ class ArithEvaluator:
                                     self._merged_env(),
                                     depth=self.depth + 1,
                                     elements=self.elements,
-                                    read_var=self.read_var)
+                                    read_var=self.read_var,
+                                    wrote_var=self.wrote_var)
             return result.value
 
     def lookup(self, name: str) -> int:
+        # A dynamic name is asked first: the reader has been told of every
+        # assignment this expression made (`wrote_var`), so
+        # `RANDOM=42, RANDOM` draws from the new seed rather than reading
+        # the seed back out of the pending update.
+        if self.read_var is not None:
+            dynamic = self.read_var(name)
+            if dynamic is not None:
+                return self._coerce(dynamic)
         raw = self.updates.get(name)
         if raw is None:
-            value = self.read_var(name) if self.read_var is not None else None
-            if value is None:
-                value = self.env.get(name)
+            value = self.env.get(name)
             if value is None and self.elements is not None:
                 # A bare array name reads as element 0 (`a=(4 5)` then
                 # `$((a))` is 4); the env holds scalars only, so the
@@ -417,6 +429,8 @@ class ArithEvaluator:
         if target[0] == "var":
             self.updates[target[1]] = text
             self._record(target[1], None, text)
+            if self.wrote_var is not None:
+                self.wrote_var(target[1], text)
             return
         key = self.elem_key(target[1], target[2])
         self.elem_updates[(target[1], key)] = text
@@ -523,7 +537,8 @@ def evaluate_arith(
         env: Mapping[str, str],
         depth: int = 0,
         elements: ElementOps | None = None,
-        read_var: Callable[[str], str | None] | None = None) -> ArithResult:
+        read_var: Callable[[str], str | None] | None = None,
+        wrote_var: Callable[[str, str], None] | None = None) -> ArithResult:
     """Evaluate a bash arithmetic expression.
 
     Implements bash's arithmetic grammar over 64-bit wrapping integers:
@@ -546,9 +561,15 @@ def evaluate_arith(
         depth (int): recursion depth for variable re-evaluation.
         elements (ElementOps | None): array-element callbacks; None
             outside a session.
-        read_var (Callable[[str], str | None] | None): dynamic scalar reads;
-            None results fall back to the environment. Called only for
-            evaluated nodes, including recursive variable expressions.
+        read_var (Callable[[str], str | None] | None): dynamic scalar
+            reads, asked before the pending assignments and the
+            environment; a None answer falls back to them. Called only
+            for evaluated nodes, including recursive variable expressions.
+        wrote_var (Callable[[str, str], None] | None): told of every
+            scalar assignment as it is made, name and value, so a dynamic
+            name's reader can act on it at once (bash seeds ``RANDOM`` at
+            the assignment, and the reads after it draw from the seed)
+            where the caller lands the assignments only afterwards.
 
     Returns:
         ArithResult: the value plus the assignments made, in order, for
@@ -566,7 +587,7 @@ def evaluate_arith(
     elem_updates: dict[tuple[str, str], str] = {}
     writes: dict[tuple[str, str | None], str] = {}
     value = ArithEvaluator(env, updates, elem_updates, writes, depth, elements,
-                           read_var).run(node)
+                           read_var, wrote_var).run(node)
     return ArithResult(
         value,
         tuple(

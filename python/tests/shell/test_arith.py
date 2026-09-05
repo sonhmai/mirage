@@ -177,3 +177,24 @@ def test_element_nested_brackets_tokenize():
     ops = _fake_elements()
     result = evaluate_arith("arr[arr[1] - 19]", {}, elements=ops)
     assert result.value == 20
+
+
+def test_dynamic_reader_is_asked_first_and_told_of_every_write():
+    # A dynamic name's reader answers before the pending assignments and
+    # the environment, and hears each scalar assignment as it is made,
+    # nested evaluations included, so it can act on it at once.
+    events: list[tuple[str, str]] = []
+
+    def read(name: str) -> str | None:
+        return "7" if name == "D" else None
+
+    def wrote(name: str, value: str) -> None:
+        events.append((name, value))
+
+    result = evaluate_arith("D=42, x=D, y", {"y": "D+1"},
+                            read_var=read,
+                            wrote_var=wrote)
+    assert result.value == 8
+    assert events == [("D", "42"), ("x", "7")]
+    assert [(w.name, w.value) for w in result.writes] == [("D", "42"),
+                                                          ("x", "7")]

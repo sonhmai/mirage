@@ -201,3 +201,31 @@ describe('evaluateArith elements', () => {
     expect(evaluateArith('arr[arr[1] - 19]', {}, 0, ops).value).toBe(20n)
   })
 })
+
+describe('dynamic reads', () => {
+  it('asks the reader first and tells it of every write', () => {
+    // A dynamic name's reader answers before the pending assignments
+    // and the environment, and hears each scalar assignment as it is
+    // made, nested evaluations included, so it can act on it at once.
+    const events: [string, string][] = []
+    const result = evaluateArith(
+      'D=42, x=D, y',
+      { y: 'D+1' },
+      0,
+      null,
+      (name) => (name === 'D' ? '7' : null),
+      (name, value) => {
+        events.push([name, value])
+      },
+    )
+    expect(result.value).toBe(8n)
+    expect(events).toEqual([
+      ['D', '42'],
+      ['x', '7'],
+    ])
+    expect(result.writes.map((w) => [w.name, w.value])).toEqual([
+      ['D', '42'],
+      ['x', '7'],
+    ])
+  })
+})

@@ -366,6 +366,7 @@ class ArithEvaluator {
     private readonly depth: number,
     private readonly elements: ElementOps | null,
     private readonly readVar: ((name: string) => string | null) | null,
+    private readonly wroteVar: ((name: string, value: string) => void) | null = null,
   ) {}
 
   private coerce(raw: string | null): bigint {
@@ -382,13 +383,20 @@ class ArithEvaluator {
         this.depth + 1,
         this.elements,
         this.readVar,
+        this.wroteVar,
       )
       return value
     }
   }
 
   private lookup(name: string): bigint {
-    const pending = this.updates[name] ?? this.readVar?.(name) ?? this.env[name]
+    // A dynamic name is asked first: the reader has been told of every
+    // assignment this expression made (`wroteVar`), so `RANDOM=42, RANDOM`
+    // draws from the new seed rather than reading the seed back out of
+    // the pending update.
+    const dynamic = this.readVar?.(name) ?? null
+    if (dynamic !== null) return this.coerce(dynamic)
+    const pending = this.updates[name] ?? this.env[name]
     if (pending !== undefined) return this.coerce(pending)
     // A bare array name reads as element 0 (`a=(4 5)` then `$((a))` is
     // 4); the env holds scalars only, so the element resolver answers
@@ -416,6 +424,7 @@ class ArithEvaluator {
     if (target.kind === 'var') {
       this.updates[target.name] = text
       this.record(target.name, null, text)
+      this.wroteVar?.(target.name, text)
       return
     }
     const key = this.elemKey(target.name, target.sub)
@@ -548,6 +557,7 @@ export function evaluateArith(
   depth = 0,
   elements: ElementOps | null = null,
   readVar: ((name: string) => string | null) | null = null,
+  wroteVar: ((name: string, value: string) => void) | null = null,
 ): ArithResult {
   const tokens = tokenize(expr)
   if (tokens.length === 0) return { value: 0n, writes: [] }
@@ -555,8 +565,15 @@ export function evaluateArith(
   const updates: Record<string, string> = {}
   const elemUpdates = new Map<string, string>()
   const writes = new Map<string, ArithWrite>()
-  const value = new ArithEvaluator(env, updates, elemUpdates, writes, depth, elements, readVar).run(
-    node,
-  )
+  const value = new ArithEvaluator(
+    env,
+    updates,
+    elemUpdates,
+    writes,
+    depth,
+    elements,
+    readVar,
+    wroteVar,
+  ).run(node)
   return { value, writes: [...writes.values()] }
 }

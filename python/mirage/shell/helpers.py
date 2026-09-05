@@ -257,17 +257,20 @@ def get_for_parts(
 
 def get_cfor_parts(
     node: tree_sitter.Node,
-) -> tuple[list[tree_sitter.Node | None], list[tree_sitter.Node]]:
+) -> tuple[list[list[tree_sitter.Node]], list[tree_sitter.Node]]:
     """Get ([init, cond, update], body_commands) from a C-style for.
 
     The expression slots are positional between the (( )) delimiters,
-    separated by `;` tokens, and any of them may be empty (None):
-    `for ((;;))`.
+    separated by `;` tokens, and any of them may be empty (an empty
+    list): `for ((;;))`. A slot holds every comma-separated expression
+    the parser found in it, in order, since bash evaluates
+    `for ((a=1, i=0; ...))` as one comma expression; keeping only the
+    last child dropped `a=1`.
 
     Args:
         node (tree_sitter.Node): the c_style_for_statement node.
     """
-    exprs: list[tree_sitter.Node | None] = [None, None, None]
+    exprs: list[list[tree_sitter.Node]] = [[], [], []]
     slot = 0
     inside = False
     body: list[tree_sitter.Node] = []
@@ -282,7 +285,7 @@ def get_cfor_parts(
             if child.type == NT.SEMI:
                 slot += 1
             elif child.is_named and slot < 3:
-                exprs[slot] = child
+                exprs[slot].append(child)
             continue
         if child.type == NT.DO_GROUP:
             body = list(child.named_children)

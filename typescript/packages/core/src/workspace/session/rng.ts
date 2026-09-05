@@ -45,3 +45,14 @@ export function stepState(state: number): number {
 export function valueOf(state: number): number {
   return ((state >>> 16) ^ (state & 0xffff)) & RANDOM_MAX
 }
+
+/** One `$RANDOM` draw: step until the value differs from the last one,
+ * as bash's `get_random` does, and return the new state with it. `last`
+ * is 0 after a seed. */
+export function draw(state: number, last: number): [number, number] {
+  for (;;) {
+    state = stepState(state)
+    const value = valueOf(state)
+    if (value !== last) return [state, value]
+  }
+}

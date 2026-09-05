@@ -73,7 +73,7 @@ from mirage.shell.helpers import (  # isort: skip
 
 
 async def _eval_cfor_expr(
-    expr: Any,
+    exprs: list[Any],
     default: int,
     session: Session,
     execute_fn: Callable[..., Any],
@@ -83,8 +83,8 @@ async def _eval_cfor_expr(
     """Evaluate one C-style for expression slot.
 
     Args:
-        expr (Any): the slot's tree-sitter expression node, or None
-            for an empty slot.
+        exprs (list[Any]): the slot's tree-sitter expression nodes, one
+            per comma-separated expression; empty for an empty slot.
         default (int): value an empty slot yields (1 for the condition
             so `for ((;;))` loops, 0 for init/update).
         session (Session): shell session; arithmetic assignments land
@@ -102,9 +102,15 @@ async def _eval_cfor_expr(
             does.
         PolicyDenied: a pre_session rule refused one of the writes.
     """
-    if expr is None:
+    if not exprs:
         return default
-    text = await expand_arith(expr, session, execute_fn, call_stack, view=view)
+    # One comma expression, evaluated once, so an assignment early in
+    # the slot is seen by the expressions after it.
+    text = ", ".join([
+        await expand_arith(expr, session, execute_fn, call_stack, view=view)
+        for expr in exprs
+    ])
+    reader = random_reader(session)
     try:
         # Reads resolve against the visible env so a hidden name counts
         # as unset; a hidden write refuses through the session door
@@ -112,7 +118,8 @@ async def _eval_cfor_expr(
         result = evaluate_arith(text,
                                 visible_env(session),
                                 elements=session_elements(session),
-                                read_var=random_reader(session))
+                                read_var=reader.read,
+                                wrote_var=reader.wrote)
     except ArithError as exc:
         raise ArithError(f"{text}: {exc}") from exc
     for write in result.writes:
@@ -124,6 +131,7 @@ async def _eval_cfor_expr(
     # a bare name and its element 0 land as the expression wrote them.
     for write in result.writes:
         await assign_element(session, view, write.name, write.key, write.value)
+    reader.settle()
     return int(result.value)
 
 
@@ -517,6 +525,7 @@ async def _execute_node(
             and node.children[0].type == NT.ARITH_OPEN):
         text = get_text(node)
         expr = await expand_arith(node, session, execute_fn, cs, view=view)
+        reader = random_reader(session)
         try:
             # Reads resolve against the visible env so a hidden name
             # counts as unset; a hidden write refuses below, in this
@@ -524,7 +533,8 @@ async def _execute_node(
             arith = evaluate_arith(expr,
                                    visible_env(session),
                                    elements=session_elements(session),
-                                   read_var=random_reader(session))
+                                   read_var=reader.read,
+                                   wrote_var=reader.wrote)
         except ArithError as exc:
             err = f"bash: ((: {expr}: {exc}\n".encode()
             return None, IOResult(exit_code=1,
@@ -551,6 +561,7 @@ async def _execute_node(
             for write in arith.writes:
                 await assign_element(session, view, write.name, write.key,
                                      write.value)
+            reader.settle()
         except PolicyDenied as exc:
             err = f"bash: {exc.strerror}\n".encode()
             return None, IOResult(exit_code=1,

@@ -15,7 +15,7 @@
 import errno
 import functools
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import replace
 
 from mirage.ops.types import SessionView
@@ -32,7 +32,7 @@ from mirage.shell.variable import (ShellValue, ShellVar, VarAttr, coerce_value,
                                    detach, with_attr, with_value)
 from mirage.utils.hidden import var_hidden
 from mirage.workspace.session.errors import ReadonlyVariableError
-from mirage.workspace.session.rng import step_state, value_of
+from mirage.workspace.session.rng import draw
 from mirage.workspace.session.session import Session
 
 
@@ -453,11 +453,7 @@ def next_random(session: Session, stored: str | None) -> int | None:
     else:
         state = session._random_state
         last = session._random_last
-    while True:
-        state = step_state(state)
-        value = value_of(state)
-        if value != last:
-            break
+    state, value = draw(state, last)
     session._random_state = state
     session._random_last = value
     word = str(value)
@@ -468,8 +464,24 @@ def next_random(session: Session, stored: str | None) -> int | None:
     return value
 
 
-def random_reader(session: Session) -> Callable[[str], str | None]:
-    """Bind lazy arithmetic RANDOM reads to a session.
+class RandomReader:
+    """Arithmetic's reads of ``$RANDOM``, bound to one session.
+
+    A read before the expression assigns ``RANDOM`` draws from the
+    session generator. bash seeds at the instant of an assignment and
+    every later read draws from the new seed (``$((RANDOM=42, RANDOM))``
+    is the first draw after seeding with 42). Here the assignment is
+    still pending at the session door, which lands it gated after
+    evaluation, so the evaluator tells the reader of each assignment as
+    it is made (``wrote``), the reader seeds a scratch generator the way
+    the door will and draws from that, and ``settle`` replays the draws
+    on the session once the door has seeded it: the session ends where
+    bash's does, seeded and advanced by every read since the last
+    assignment, and the write still reaches the gate as the assignment
+    it is. Each assignment restarts the scratch generator and the count,
+    since the door lands only the last value written, and the draws are
+    replayed only if the door did land it: an assignment the caller
+    never applied leaves the session as it was.
 
     Lives beside the door rather than with the generator because the
     door needs it too: ``RANDOM=RANDOM`` draws once while the seed is
@@ -480,13 +492,66 @@ def random_reader(session: Session) -> Callable[[str], str | None]:
         session (Session): generator and visibility state.
     """
 
-    def read(name: str) -> str | None:
-        if name != RANDOM or var_hidden(session.hidden_vars, name):
-            return None
-        value = next_random(session, visible_env(session).get(name))
-        return None if value is None else str(value)
+    def __init__(self, session: Session) -> None:
+        self.session = session
+        self.seeded: str | None = None
+        self.state = 0
+        self.last = 0
+        self.draws = 0
 
-    return read
+    def _special(self, name: str) -> bool:
+        session = self.session
+        return (name == RANDOM and not var_hidden(session.hidden_vars, name)
+                and session._random_seed != RANDOM_UNSET)
+
+    def read(self, name: str) -> str | None:
+        """The dynamic value of a name, None for a name that has none.
+
+        Args:
+            name (str): the variable the expression reads.
+        """
+        if not self._special(name):
+            return None
+        if self.seeded is None:
+            value = next_random(self.session,
+                                visible_env(self.session).get(name))
+            return None if value is None else str(value)
+        self.state, value = draw(self.state, self.last)
+        self.last = value
+        self.draws += 1
+        return str(value)
+
+    def wrote(self, name: str, value: str) -> None:
+        """Note an assignment the expression made.
+
+        Args:
+            name (str): the variable assigned.
+            value (str): the value, an integer's text.
+        """
+        if not self._special(name):
+            return
+        self.seeded = value
+        self.state = int(value) % RANDOM_MODULUS
+        self.last = 0
+        self.draws = 0
+
+    def settle(self) -> None:
+        """Replay the scratch draws on the session generator, once the
+        door has seeded it with the value the expression assigned."""
+        if self.seeded is None or self.session._random_seed != self.seeded:
+            return
+        for _ in range(self.draws):
+            next_random(self.session, visible_env(self.session).get(RANDOM))
+        self.draws = 0
+
+
+def random_reader(session: Session) -> RandomReader:
+    """Bind arithmetic ``$RANDOM`` reads to a session.
+
+    Args:
+        session (Session): generator and visibility state.
+    """
+    return RandomReader(session)
 
 
 def _integer_text(session: Session, text: str) -> str:
@@ -511,7 +576,7 @@ def _integer_text(session: Session, text: str) -> str:
             evaluate_arith(text,
                            visible_env(session),
                            elements=session_elements(session),
-                           read_var=random_reader(session)).value)
+                           read_var=random_reader(session).read).value)
     except ArithError as exc:
         # The offending text leads, which is how every caller voices it
         # (`bash: 1+: syntax error: operand expected`), so it is spelled

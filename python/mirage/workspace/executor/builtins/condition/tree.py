@@ -94,11 +94,11 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
             li = evaluate_arith(node.left,
                                 visible_env(ctx.session),
                                 elements=elements,
-                                read_var=random_reader(ctx.session)).value
+                                read_var=random_reader(ctx.session).read).value
             ri = evaluate_arith(node.right,
                                 visible_env(ctx.session),
                                 elements=elements,
-                                read_var=random_reader(ctx.session)).value
+                                read_var=random_reader(ctx.session).read).value
         except ArithError:
             raise CondError("mirage: syntax error in conditional expression")
         return compare(li, ri)

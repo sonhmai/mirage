@@ -59,11 +59,13 @@ async def handle_let(
     view = require_view(state)
     value = 0
     for expr in args:
+        reader = random_reader(session)
         try:
             arith = evaluate_arith(expr,
                                    visible_env(session),
                                    elements=session_elements(session),
-                                   read_var=random_reader(session))
+                                   read_var=reader.read,
+                                   wrote_var=reader.wrote)
         except ArithError as exc:
             err = f"bash: let: {expr}: {exc}\n".encode()
             return None, IOResult(exit_code=1,
@@ -81,6 +83,7 @@ async def handle_let(
             for write in arith.writes:
                 await assign_element(session, view, write.name, write.key,
                                      write.value)
+            reader.settle()
         except PolicyDenied as exc:
             return refusal("let", exc)
         value = arith.value

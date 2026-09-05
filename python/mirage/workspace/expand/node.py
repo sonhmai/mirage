@@ -401,15 +401,20 @@ async def expand_node_marked(
             # counts as unset; the write-back below goes through the
             # session plane's door, so a pre_session rule governs
             # `$((X=5))` exactly as it governs `X=5`.
+            reader = random_reader(session)
             result = evaluate_arith(expr,
                                     visible_env(session),
                                     elements=session_elements(session),
-                                    read_var=random_reader(session))
+                                    read_var=reader.read,
+                                    wrote_var=reader.wrote)
         except ArithError as exc:
             raise arith_exit(expr, exc) from exc
         for write in result.writes:
             await expansion_write(session, view, write.name, write.key,
                                   write.value)
+        # A RANDOM the expression seeded and then read: the door has
+        # seeded the session; the reads now advance it.
+        reader.settle()
         return prefix + str(result.value)
 
     if ntype == NT.CONCATENATION:

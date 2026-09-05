@@ -14,12 +14,15 @@
 
 import { compareCodePoints } from '../../utils/sort.ts'
 import { resolvePath } from '../../utils/path.ts'
-import { fsStrerror, isFsError } from '../../utils/errors.ts'
+import { fsStrerror, gnuStrerror, isFsError } from '../../utils/errors.ts'
+import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
+import type { Identity } from '../../commands/builtin/utils/identity.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { type ByteSource, materialize } from '../../io/types.ts'
 import { getCurrentSession, runWithSuspendedOpPolicies } from '../../context/session_context.ts'
 import { preOpsGate } from '../../policy/policies.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
@@ -50,6 +53,11 @@ export interface FindActionDoors {
   // The op dispatcher a `-delete` unlinks a symlink row through, since
   // the row is namespace state no mount's `rm` can reach.
   dispatch?: DispatchFn | null
+  // Who the session is, for the owner and group columns of `-ls`.
+  identity?: Identity | null
+  // The start points as typed, in operand order, so `-depth` orders
+  // each walk on its own.
+  starts?: readonly PathSpec[] | null
 }
 
 const enc = new TextEncoder()
@@ -188,72 +196,77 @@ async function deleteRow(
     }
     return true
   } catch (err) {
-    // GNU words it with the errno text; a policy refusal carries its
-    // reason there.
-    const msg =
-      (isFsError(err) ? fsStrerror(err) : null) ??
-      (err instanceof Error ? err.message : String(err))
-    errors.push(enc.encode(`find: cannot delete '${path}': ${msg}\n`))
+    errors.push(enc.encode(`find: cannot delete '${path}': ${refusalWhy(err)}\n`))
     return false
   }
 }
 
+/**
+ * How a row's failure is worded: GNU uses the errno text, and a policy
+ * refusal carries its reason in that place (`frozen`, not the
+ * `Permission denied` its EACCES code would spell), which is what the
+ * python twin reads off `strerror or str(exc)`.
+ */
+function refusalWhy(err: unknown): string {
+  if (err instanceof PolicyDenied) return err.message
+  return (
+    (isFsError(err) ? fsStrerror(err) : null) ?? (err instanceof Error ? err.message : String(err))
+  )
+}
+
+/**
+ * Render one accepted row in `find -ls`'s own layout.
+ *
+ * The row's facts come from the two doors the command boundary has: a
+ * symlink is namespace state no backend can see, so the link view
+ * answers for one (lstat, as GNU's `-ls` reports the link itself), and
+ * every other row is statted through the op dispatcher, which answers
+ * for a mount point and a namespace-only ancestor as well as a backend
+ * entry. A row that cannot be statted (an earlier `-delete` removed
+ * it, or the backend refuses it) is GNU's `find: 'path': <reason>`;
+ * null with a line appended is the caller's signal to end the row's
+ * chain.
+ */
 async function lsRow(
   ps: PathSpec,
-  registry: MountRegistry,
-  cwd: string,
   ns: NamespaceView | null,
   statPath: StatPath | null,
+  identity: Identity | null,
   errors: Uint8Array[],
 ): Promise<Uint8Array | null> {
   const path = ps.rawPath || ps.virtual
-  const mount = registry.tryMountFor(ps.virtual)
-  if (mount === null) {
-    errors.push(enc.encode(`find: '${path}': no mount\n`))
+  if (statPath === null) {
+    errors.push(enc.encode(`find: '${path}': no stat door\n`))
     return null
   }
+  const link = ns?.links?.statAt(ps.virtual) ?? null
+  let st: FileStat | null
   try {
-    const [lsOut, lsIo] = await mount.executeCmd(
-      'ls',
-      [ps],
-      [],
-      { args_l: true, d: true },
-      {
-        stdin: null,
-        cwd,
-        ...(ns !== null ? { ns } : {}),
-        ...(statPath !== null ? { statPath } : {}),
-      },
-    )
-    if (lsIo.exitCode !== 0) {
-      // ls names the reason last, and find says the same thing about
-      // the row as it was typed, the way a failed -delete re-voices rm.
-      const said = new TextDecoder().decode(await materialize(lsIo.stderr)).trim()
-      const why = said.slice(said.lastIndexOf(': ') + 2)
-      errors.push(enc.encode(`find: '${path}'${why === '' ? '' : `: ${why}`}\n`))
-      return null
-    }
-    if (lsOut === null) return null
-    const line = new TextDecoder().decode(await materialize(lsOut)).replace(/\n+$/, '')
-    return line === '' ? null : enc.encode(`${line}\n`)
+    st = link ?? (await statPath(ps.virtual))
   } catch (err) {
-    const why =
-      (isFsError(err) ? fsStrerror(err) : null) ??
-      (err instanceof Error ? err.message : String(err))
-    errors.push(enc.encode(`find: '${path}': ${why}\n`))
+    errors.push(enc.encode(`find: '${path}': ${refusalWhy(err)}\n`))
     return null
   }
+  if (st === null) {
+    errors.push(enc.encode(`find: '${path}': ${gnuStrerror('ENOENT') ?? 'ENOENT'}\n`))
+    return null
+  }
+  return enc.encode(`${formatFindLs(st.with({ name: path }), identity)}\n`)
 }
 
 /**
  * GNU's `-depth` order over sorted siblings: a directory's contents, each
  * sorted, then the directory. The final component is flagged so a path
  * sorts after its descendants, whose entry at that depth carries the same
- * name unflagged.
+ * name unflagged. A start point spelled with a trailing slash prints as
+ * `d/` while its descendants print as `d/a`, so the slash is dropped
+ * before splitting: kept, it would leave an empty final component that
+ * sorts the directory ahead of everything under it, which is the one
+ * order `-delete` cannot remove a tree in.
  */
 export function compareDepthFirst(a: string, b: string): number {
-  const pa = a.split('/')
-  const pb = b.split('/')
+  const pa = a.replace(/\/+$/, '').split('/')
+  const pb = b.replace(/\/+$/, '').split('/')
   const n = Math.min(pa.length, pb.length)
   for (let i = 0; i < n; i++) {
     const byName = compareCodePoints(pa[i] ?? '', pb[i] ?? '')
@@ -263,6 +276,47 @@ export function compareDepthFirst(a: string, b: string): number {
     if (fa !== fb) return fa - fb
   }
   return pa.length - pb.length
+}
+
+/** Whether a printed row belongs to a start point's walk. */
+function under(path: string, start: string): boolean {
+  const base = start.replace(/\/+$/, '')
+  if (base === '') return path.startsWith('/')
+  return path === start || path === base || path.startsWith(`${base}/`)
+}
+
+/**
+ * Split the rows into one run per start point, in operand order.
+ *
+ * GNU walks each start point to completion before the next, so `-depth`
+ * (and the actions that follow its order, `-delete` and `-exec` among
+ * them) is a property of one walk, never of the whole line:
+ * `find b a -depth` prints `b/x b a/y a`, and one sort over every row
+ * would put `a`'s tree first. The rows arrive in start-point order, so
+ * a run ends at the first row that is not under its start point. Start
+ * points that nest or repeat share a run, since a row under both cannot
+ * say which walk produced it; ordering their shared rows children-first
+ * is the one answer that never deletes a directory before its contents.
+ * With no start points on hand (a caller outside a workspace) every row
+ * is one run.
+ */
+export function startRuns(
+  matches: readonly PathSpec[],
+  starts: readonly PathSpec[] | null,
+): PathSpec[][] {
+  if (starts === null || starts.length === 0) return [[...matches]]
+  const runs: PathSpec[][] = starts.map(() => [])
+  let position = 0
+  for (const match of matches) {
+    const path = match.rawPath || match.virtual
+    while (position + 1 < starts.length) {
+      const start = starts[position]
+      if (start === undefined || under(path, start.rawPath || start.virtual)) break
+      position += 1
+    }
+    runs[position]?.push(match)
+  }
+  return runs
 }
 
 /** Whether a row is a mount point or a namespace-only ancestor of one,
@@ -302,7 +356,8 @@ function hasActions(expr: FindExpr): boolean {
  * sees the row gone, and a row it cannot delete ends the chain with GNU's
  * line and find's exit 1. It also turns on `-depth`, which orders every
  * directory after its contents, the only order a tree can be removed in;
- * `-depth` alone reorders the implicit print the same way. Returns the
+ * `-depth` alone reorders the implicit print the same way, and both
+ * order one start point's walk at a time (`startRuns`). Returns the
  * rows to print, the stderr to append, and the exit status the actions
  * impose (0 when they impose none, even with stderr).
  */
@@ -326,11 +381,15 @@ export async function applyFindActions(
   const ns = doors.ns ?? null
   const statPath = doors.statPath ?? null
   const dispatch = doors.dispatch ?? null
+  const identity = doors.identity ?? null
   if (matchedPaths === null)
     return [null, enc.encode('find: actions require structured matches\n'), 1]
-  const matches = [...matchedPaths]
-  if (reorders)
-    matches.sort((a, b) => compareDepthFirst(a.rawPath || a.virtual, b.rawPath || b.virtual))
+  let matches = [...matchedPaths]
+  if (reorders) {
+    matches = startRuns(matches, doors.starts ?? null).flatMap((run) =>
+      run.sort((a, b) => compareDepthFirst(a.rawPath || a.virtual, b.rawPath || b.virtual)),
+    )
+  }
   // An expression with no action of its own prints, which is the one
   // implicit action -depth reorders.
   const actions: FindAction[] = expr.actions.length > 0 ? expr.actions : [{ kind: 'print' }]
@@ -365,7 +424,7 @@ export async function applyFindActions(
           break
       } else if (action.kind === 'ls') {
         const before = errors.length
-        const row = await lsRow(match, registry, cwd, ns, statPath, errors)
+        const row = await lsRow(match, ns, statPath, identity, errors)
         if (row !== null) out.push(row)
         else if (errors.length > before) {
           // A row -ls cannot list is false, so the chain ends for it, as

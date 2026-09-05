@@ -23,6 +23,10 @@ from mirage.commands.builtin.utils.identity import (UNKNOWN_NAME, Identity,
 from mirage.types import (DEVICE_NUMBERS_KEY, LINK_TARGET_KEY, FileStat,
                           FileType)
 
+# What a stat field a VFS cannot know renders as, in `stat -c` and in
+# the inode and block columns of `find -ls`.
+UNKNOWN_STAT_FIELD = "?"
+
 
 def human_scaled(n: int, base: int, units: tuple[str, ...]) -> str:
     """GNU's ``human_readable`` rounding, shared by ``-h`` and ``-H``.
@@ -160,6 +164,32 @@ def format_ls_long(
         grp = group_name(s.gid, identity)
         out.append(f"{mode} 1 {who} {grp} {size} {time} {_ls_name(s)}")
     return out
+
+
+def format_find_ls(s: FileStat, identity: Identity | None) -> str:
+    """Render one ``find -ls`` row in findutils' own layout.
+
+    GNU's ``list_file`` is not ``ls -l``: it leads with the inode and
+    the allocated 1K blocks, then fixes every column's width (inode 9,
+    blocks 6, links 3, owner and group 8 left-aligned, size 8) instead
+    of fitting them to the listing, so a consumer can count fields.
+    The inode and block columns carry ``?``, the answer ``stat %i``
+    and ``%b`` already give: a VFS has no inode and no block
+    allocation, and a number invented for either would read as a fact.
+    The remaining columns are the ``ls -l`` ones, from the same
+    helpers, so the two listings cannot disagree about a row.
+
+    Args:
+        s (FileStat): the row, named as find printed it.
+        identity (Identity | None): who the session is; None outside a
+            workspace, where both name columns fall back to ``-``.
+    """
+    size, time = _ls_size_and_time(s, False)
+    who = owner_name(s.uid, identity)
+    grp = group_name(s.gid, identity)
+    return (f"{UNKNOWN_STAT_FIELD:>9} {UNKNOWN_STAT_FIELD:>6} "
+            f"{ls_mode_string(s)} {1:>3} {who:<8} {grp:<8} {size:>8} {time} "
+            f"{_ls_name(s)}")
 
 
 def to_number(val: str) -> float:

@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic.crossmount import (handle_cross_mount,
 from mirage.commands.builtin.generic.crossmount.detect import strategy_for
 from mirage.commands.builtin.generic.crossmount.types import Strategy
 from mirage.commands.builtin.generic.tar.mode import is_create_mode
+from mirage.commands.builtin.utils.identity import identity_from
 from mirage.commands.builtin.utils.limit import maybe_with_timeout
 from mirage.commands.config import version_request
 from mirage.commands.errors import FindParseError
@@ -77,8 +78,9 @@ JOB_HANDLERS = {
 
 
 async def _finish_find(stdout: ByteSource | None, io: IOResult,
-                       texts: list[str], registry: MountRegistry,
-                       session: Session, execute_fn: ExecuteLine | None,
+                       texts: list[str], starts: list[PathSpec],
+                       registry: MountRegistry, session: Session,
+                       execute_fn: ExecuteLine | None,
                        ns: NamespaceView | None, stat_path: StatPath | None,
                        dispatch: DispatchFn) -> ByteSource | None:
     """Apply find's actions once, at the command boundary.
@@ -94,6 +96,8 @@ async def _finish_find(stdout: ByteSource | None, io: IOResult,
         stdout (ByteSource | None): the rendered rows.
         io (IOResult): the selection's result, amended in place.
         texts (list[str]): the expression tokens.
+        starts (list[PathSpec]): the start points as typed, in operand
+            order, so ``-depth`` orders each walk on its own.
         registry (MountRegistry): used to route per-match dispatch.
         session (Session): the session the line runs under.
         execute_fn (ExecuteLine | None): runs an ``-exec`` line.
@@ -112,7 +116,9 @@ async def _finish_find(stdout: ByteSource | None, io: IOResult,
         session_id=session.session_id,
         ns=ns,
         stat_path=stat_path,
-        dispatch=dispatch)
+        dispatch=dispatch,
+        identity=identity_from(ns, session_view(session, registry.policies)),
+        starts=starts)
     if action_err:
         existing = await materialize(io.stderr) if io.stderr else b""
         io.stderr = existing + action_err
@@ -325,9 +331,14 @@ async def handle_command(
             ns=cross_ns,
             session_view=session_view(session, registry.policies))
         if cmd_name == "find":
-            stdout = await _finish_find(stdout, io, cross_texts, registry,
-                                        session, execute_fn, cross_ns,
-                                        cross_stat, dispatch)
+            # The start points are the path words before the expression,
+            # read the way the single-mount path reads them.
+            cross_starts = (find_start_points(parts[1:], find_expr_tokens,
+                                              SPECS.get(cmd_name), session.cwd)
+                            if find_expr_tokens is not None else cross_scopes)
+            stdout = await _finish_find(stdout, io, cross_texts, cross_starts,
+                                        registry, session, execute_fn,
+                                        cross_ns, cross_stat, dispatch)
         if cross_parsed.warnings:
             warn = "".join(f"{cmd_name}: {w}\n"
                            for w in cross_parsed.warnings).encode()
@@ -430,9 +441,9 @@ async def handle_command(
                                                     ns=single_ns,
                                                     stat_path=single_stat)
         if cmd_name == "find":
-            stdout = await _finish_find(stdout, io, texts, registry, session,
-                                        execute_fn, single_ns, single_stat,
-                                        dispatch)
+            stdout = await _finish_find(stdout, io, texts, paths, registry,
+                                        session, execute_fn, single_ns,
+                                        single_stat, dispatch)
             node.exit_code = io.exit_code
             node.stderr = await materialize(io.stderr) if io.stderr else b""
         if warn_bytes:
@@ -453,9 +464,9 @@ async def handle_command(
                                     mount=mount,
                                     routing_decision=routing_decision)
     if cmd_name == "find":
-        stdout = await _finish_find(stdout, io, texts, registry, session,
-                                    execute_fn, single_ns, single_stat,
-                                    dispatch)
+        stdout = await _finish_find(stdout, io, texts, paths, registry,
+                                    session, execute_fn, single_ns,
+                                    single_stat, dispatch)
 
     if warn_bytes:
         existing = await materialize(io.stderr) if io.stderr else b""

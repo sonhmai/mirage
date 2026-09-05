@@ -20,6 +20,7 @@ import type { Resource } from '../../resource/base.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { PathSpec } from '../../types.ts'
+import { identityFrom } from '../../commands/builtin/utils/identity.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
@@ -102,6 +103,7 @@ async function finishFind(
   stdout: ByteSource | null,
   io: IOResult,
   texts: readonly string[],
+  starts: readonly PathSpec[],
   registry: MountRegistry,
   session: Session,
   executeFn: ExecuteFn | undefined,
@@ -121,6 +123,8 @@ async function finishFind(
       ns: ns ?? null,
       statPath,
       dispatch,
+      identity: identityFrom(ns, sessionView(session, registry.policies)),
+      starts,
     },
   )
   if (actionErr.length > 0) {
@@ -367,10 +371,17 @@ export async function handleCommand(
     )
     let csStdout = csStdout0
     if (cmdName === 'find') {
+      // The start points are the path words before the expression,
+      // read the way the single-mount path reads them.
+      const csStarts =
+        findExprTokens !== null
+          ? findStartPoints(parts.slice(1), findExprTokens, SPECS[cmdName] ?? null, session.cwd)
+          : csScopes
       csStdout = await finishFind(
         csStdout,
         csIo,
         csTexts,
+        csStarts,
         registry,
         session,
         executeFn,
@@ -513,6 +524,7 @@ export async function handleCommand(
         fanOut,
         fanIo,
         texts,
+        paths,
         registry,
         session,
         executeFn,
@@ -552,6 +564,7 @@ export async function handleCommand(
       stdout,
       io,
       texts,
+      paths,
       registry,
       session,
       executeFn,

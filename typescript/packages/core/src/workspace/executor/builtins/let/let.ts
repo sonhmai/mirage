@@ -50,13 +50,15 @@ export async function handleLet(
   let value = 0n
   for (const expr of args) {
     let result: ArithResult
+    const reader = randomReader(session)
     try {
       result = evaluateArith(
         expr,
         visibleEnv(session),
         0,
         sessionElements(session),
-        randomReader(session),
+        reader.read,
+        reader.wrote,
       )
     } catch (err) {
       if (!(err instanceof ArithError)) throw err
@@ -80,6 +82,7 @@ export async function handleLet(
       for (const write of result.writes) {
         await assignElement(session, view, write.name, write.key, write.value)
       }
+      reader.settle()
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal('let', err)
       throw err

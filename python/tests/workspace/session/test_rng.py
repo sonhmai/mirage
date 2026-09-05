@@ -19,8 +19,8 @@ from mirage.shell.constants import RANDOM, RANDOM_MAX
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellVar
 from mirage.workspace.session import Session
-from mirage.workspace.session.state import (next_random, seed_from, seed_var,
-                                            set_var)
+from mirage.workspace.session.state import (next_random, random_reader,
+                                            seed_from, seed_var, set_var)
 
 
 def test_seed_from_evaluates_the_word_as_arithmetic():
@@ -235,3 +235,56 @@ async def test_arithmetic_random_reads_are_lazy(command, stdout):
         assert await io.stderr_str() == ""
     finally:
         await ws.close()
+
+
+# bash 5.2 seeds at the instant of an assignment inside an expression,
+# and every read after it draws from the new seed; the session ends
+# seeded and advanced by those reads, so the next `$RANDOM` continues
+# the sequence rather than restarting it. Pinned in docker.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command,stdout",
+    [('RANDOM=1; echo $((RANDOM=42, RANDOM)) $RANDOM', '17772 26794\n'),
+     ('RANDOM=1; echo $((RANDOM=42)) $RANDOM', '42 17772\n'),
+     ('RANDOM=1; echo $((RANDOM=42, RANDOM=7, RANDOM)) $RANDOM',
+      '19344 26956\n'),
+     ('RANDOM=1; echo $((RANDOM+=1, RANDOM)) $RANDOM', '27726 5703\n'),
+     ('RANDOM=1; echo $((RANDOM=42, RANDOM, RANDOM)) $RANDOM', '26794 1435\n'),
+     ('RANDOM=1; echo $((RANDOM=42, RANDOM=RANDOM+1)) $RANDOM',
+      '17773 26326\n'),
+     ('x=RANDOM; RANDOM=1; echo $((RANDOM=42, x)) $RANDOM', '17772 26794\n'),
+     ('RANDOM=1; (( RANDOM=42, x=RANDOM )); echo $x $RANDOM', '17772 26794\n'),
+     ('RANDOM=1; let "RANDOM=42, x=RANDOM"; echo $x $RANDOM', '17772 26794\n'),
+     ('RANDOM=1; for ((RANDOM=42, i=RANDOM; i>0; i=0)); do echo $i; done; '
+      'echo $RANDOM', '17772\n26794\n'),
+     ('RANDOM=1; [[ $((RANDOM=42, RANDOM)) -eq 17772 ]]; echo $? $RANDOM',
+      '0 26794\n')])
+async def test_arithmetic_random_assignment_seeds_within_the_expression(
+        command, stdout):
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        io = await ws.execute(command)
+        assert io.exit_code == 0
+        assert await io.stdout_str() == stdout
+        assert await io.stderr_str() == ""
+    finally:
+        await ws.close()
+
+
+def test_random_reader_draws_from_the_pending_seed_and_settles():
+    # The reader is told of the assignment, draws from a scratch
+    # generator seeded with it, and replays those draws on the session
+    # only once the door has landed the same seed.
+    session = Session(session_id="s")
+    session.vars[RANDOM] = ShellVar("1")
+    reader = random_reader(session)
+    assert reader.read("X") is None
+    reader.wrote("RANDOM", "42")
+    assert [reader.read(RANDOM) for _ in range(2)] == ["17772", "26794"]
+    # The door never seeded 42: nothing to replay.
+    reader.settle()
+    assert session._random_state is None
+    session._random_state, session._random_seed = 42, "42"
+    session.vars[RANDOM] = ShellVar("42")
+    reader.settle()
+    assert next_random(session, session.vars[RANDOM].value) == 1435

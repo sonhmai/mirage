@@ -332,6 +332,10 @@ describe('workspace: $? for negation, background, assignments', () => {
 describe('workspace: C-style for', () => {
   const cases: [string, string][] = [
     ['for ((i=0;i<3;i++)); do echo $i; done', '0\n1\n2\n'],
+    // Each slot is one comma expression: bash 5.2 keeps every part
+    // (only the last child of a slot used to survive).
+    ['for ((a=5, i=1; i>0; i=0)); do echo $a$i; done', '51\n'],
+    ['for ((i=0; i<1, i<2; i++, i++)); do echo $i; done; echo $i', '0\n2\n'],
     ['for ((i=0;i<3;i++)); do false; done; echo code=$?', 'code=1\n'],
     ['for ((i=5;i<3;i++)); do echo x; done; echo code=$?', 'code=0\n'],
     ['x=0; for ((i=0;i<4;i++)); do x=$((x+i)); done; echo $x', '6\n'],

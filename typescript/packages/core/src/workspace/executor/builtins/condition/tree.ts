@@ -89,14 +89,14 @@ async function evalCondBinary(
         visibleEnv(ctx.session),
         0,
         elements,
-        randomReader(ctx.session),
+        randomReader(ctx.session).read,
       ).value
       ri = evaluateArith(
         node.right,
         visibleEnv(ctx.session),
         0,
         elements,
-        randomReader(ctx.session),
+        randomReader(ctx.session).read,
       ).value
     } catch (exc) {
       if (!(exc instanceof ArithError)) throw exc

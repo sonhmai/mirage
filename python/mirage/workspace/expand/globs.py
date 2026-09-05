@@ -14,6 +14,7 @@
 
 import dataclasses
 
+from mirage.cache.file.io import mutation_lock
 from mirage.ops.config import NamespaceLinks
 from mirage.ops.namespace_view import child_mount_names, namespace_names
 from mirage.shell.constants import SHOPT_DEFAULTS
@@ -31,6 +32,18 @@ from mirage.workspace.session import Session
 # listing per directory, so an accidental `**` over a large tree is
 # bounded rather than open-ended.
 GLOBSTAR_MAX_DEPTH = 32
+
+
+async def _backend_glob(registry: MountRegistry, mount: MountEntry,
+                        paths: list[PathSpec], prefix: str) -> list[PathSpec]:
+    """Prepare the mount; drain resource index writes before eviction."""
+    await mount.ensure_ready()
+    cache = registry.file_cache
+    if cache is None:
+        return await mount.resource.resolve_glob(paths, prefix=prefix)
+    async with mutation_lock(cache):
+        await mount.ensure_ready()
+        return await mount.resource.resolve_glob(paths, prefix=prefix)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -231,6 +244,7 @@ async def _level_matches(registry: MountRegistry, mount: MountEntry,
     """
     real = _listing_dir(links, dir_virtual)
     owner = _mount_of(registry, real, mount)
+    await owner.ensure_ready()
     prefix = owner.prefix.rstrip("/")
     spec = PathSpec(virtual=real,
                     directory=real,
@@ -238,7 +252,7 @@ async def _level_matches(registry: MountRegistry, mount: MountEntry,
                     pattern=seg,
                     resolved=False)
     try:
-        matches = await owner.resource.resolve_glob([spec], prefix=prefix)
+        matches = await _backend_glob(registry, owner, [spec], prefix)
     except OSError:
         # This parent is not a listable directory; bash skips it during
         # descent. A nested mount root or a link under it is still real.
@@ -506,6 +520,7 @@ async def resolve_globs(
             item = dataclasses.replace(item,
                                        resource_path=mount_key(
                                            item.virtual, prefix))
+            await mount.ensure_ready()
             try:
                 # The parent directory is a real directory to list, so a
                 # glob character quoted inside it is part of its name.
@@ -534,8 +549,8 @@ async def resolve_globs(
                     # spec has no literal to reinstate, so an empty list
                     # means no match and every spec returned is one.
                     resolved = _merge_namespace(
-                        list(await mount.resource.resolve_glob([item.dir],
-                                                               prefix=prefix)),
+                        list(await _backend_glob(registry, mount, [item.dir],
+                                                 prefix)),
                         _namespace_children(registry, links, directory,
                                             pattern), directory, prefix,
                         registry, mount)

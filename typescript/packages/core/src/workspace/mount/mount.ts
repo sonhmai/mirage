@@ -42,7 +42,7 @@ import { runWithMountPrefix, runWithRevisions, withMountPrefix } from '../../obs
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { type Limit, ConsistencyPolicy, FileType, MountMode, PathSpec } from '../../types.ts'
-import { enotsup, erofsReadOnly } from '../../utils/errors.ts'
+import { ebusy, enotsup, erofsReadOnly } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import {
   effectiveMountMode,
@@ -143,6 +143,7 @@ export class MountEntry {
 
   /** Finish deferred mount preparation before any backend or cache read. */
   async ensureReady(): Promise<void> {
+    this.checkActive()
     if (this.beforeUse === null) return
     await this.readyLock.withLock('', async () => {
       if (this.beforeUse !== null) {
@@ -150,6 +151,11 @@ export class MountEntry {
         this.beforeUse = null
       }
     })
+    this.checkActive()
+  }
+
+  private checkActive(): void {
+    if (this.retiring) throw ebusy(this.prefix)
   }
 
   /**

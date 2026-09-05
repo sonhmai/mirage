@@ -98,6 +98,10 @@ def enoent(path: str | PathSpec) -> FileNotFoundError:
     return FileNotFoundError(_virtual_of(path))
 
 
+def ebusy(path: str | PathSpec) -> OSError:
+    return OSError(errno.EBUSY, "Device or resource busy", _virtual_of(path))
+
+
 def enotdir(path: str | PathSpec) -> NotADirectoryError:
     return NotADirectoryError(_virtual_of(path))
 

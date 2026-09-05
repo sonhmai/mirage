@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.ram.readdir import readdir as ram_readdir
@@ -29,6 +29,7 @@ from mirage.workspace.expand.globs import resolve_globs
 def _mock_registry(resolve_result=None):
     mount = MagicMock()
     mount.prefix = "/data/"
+    mount.ensure_ready = AsyncMock()
 
     async def _resolve_glob(scopes, prefix=""):
         if callable(resolve_result):
@@ -44,6 +45,7 @@ def _mock_registry(resolve_result=None):
     mount.resource.resolve_glob = _resolve_glob
 
     reg = MagicMock()
+    reg.file_cache = None
     reg.clis = CLIRegistry()
     reg.try_mount_for = MagicMock(return_value=mount)
     reg.mounts = MagicMock(return_value=[mount])

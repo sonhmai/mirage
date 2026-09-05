@@ -458,6 +458,7 @@ export class MountRegistry {
       mount = this.mountForCommand(cmdName)
     }
     if (mount === null) return null
+    await mount.ensureReady()
     // Warm reads are served in place by withReadCache, so a read-only command
     // stays on its real mount. Single-mount reads do not go through the
     // dispatcher, so this is where they reconcile against backend truth: the

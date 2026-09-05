@@ -22,6 +22,7 @@ import type { AdmissionRules, Decision, HideReason, ProfileScript } from '../../
 import type { EnvEntries } from '../../secrets/config.ts'
 import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
+import { KeyLock } from '../../cache/lock.ts'
 
 type StoredSession = Parameters<typeof Session.fromJSON>[0]
 
@@ -59,6 +60,7 @@ function mergeSeedVars(session: Session, seedVars: Record<string, ShellVar>): vo
  */
 export class SessionManager {
   private readonly sessions = new Map<string, Session>()
+  private readonly persistLock = new KeyLock()
   private readonly sessionStore: SessionStore
   private defaultIdInternal: string
   private loaded = false
@@ -143,11 +145,17 @@ export class SessionManager {
   }
 
   /** Replace an existing, hydrated session's restrictions, preserving its scratch state. */
-  setProfile(sessionId: string, compiled: CompiledProfile): Session {
-    const session = this.get(sessionId)
-    narrow(session, compiled)
-    if (sessionId === this.defaultId) this.defaultProfileInternal = compiled
-    return session
+  async setProfile(sessionId: string, compiled: CompiledProfile): Promise<Session> {
+    return this.persistLock.withLock(sessionId, async () => {
+      const session = this.get(sessionId)
+      const candidate = Session.fromJSON(session.toJSON() as StoredSession)
+      narrow(candidate, compiled)
+      await this.flushOne(candidate)
+      narrow(session, compiled)
+      session.generation = candidate.generation
+      if (sessionId === this.defaultId) this.defaultProfileInternal = compiled
+      return session
+    })
   }
 
   /**
@@ -320,7 +328,7 @@ export class SessionManager {
   /** Write dirty sessions through the store's generation gate. */
   async flush(): Promise<void> {
     for (const session of [...this.sessions.values()]) {
-      await this.flushOne(session)
+      await this.persistLock.withLock(session.sessionId, () => this.flushOne(session))
     }
   }
 

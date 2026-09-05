@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { seedVar } from './state.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AdmissionRules, Decision } from '../../policy/types.ts'
+import type { CompiledProfile } from '../../policy/profile.ts'
 import { Outcome, Scope } from '../../policy/types.ts'
 import { ScriptSource } from '../../runtime/routing/types.ts'
 import { MountMode } from '../../types.ts'
@@ -606,3 +607,81 @@ describe('seed merge on hydration', () => {
     expect(record.managed?.TOKEN?.ref).toBe('p')
   })
 })
+
+it.each([false, true])(
+  'publishes profile changes only after persistence (failure=%s)',
+  async (failure) => {
+    const store = new RAMSessionStore()
+    const manager = new SessionManager('default', store)
+    const original: CompiledProfile = {
+      mountModes: new Map([['/data', MountMode.READ]]),
+      hiddenPaths: { paths: ['/data/secret'], patterns: [] },
+      hiddenVars: { names: ['TOKEN'], patterns: [] },
+      env: null,
+      cwd: null,
+      commands: { allow: ['cat'], ask: [], deny: [] },
+      script: { profile: 'judge', script: new ScriptSource('null', 'js'), runtime: 'quickjs' },
+    }
+    manager.defaultProfile = original
+    await manager.flush()
+    const session = manager.get('default')
+    const before = session.toJSON()
+    const persisted = await store.load()
+    let enter = (): void => undefined
+    let resume = (): void => undefined
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    const release = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    const casSet = store.casSet.bind(store)
+    const spy = vi.spyOn(store, 'casSet').mockImplementation(async (...args) => {
+      enter()
+      await release
+      if (failure) throw new Error('store unavailable')
+      return casSet(...args)
+    })
+    const cleared: CompiledProfile = {
+      mountModes: null,
+      hiddenPaths: null,
+      hiddenVars: null,
+      env: null,
+      cwd: null,
+      commands: null,
+    }
+    const updating = manager.setProfile('default', cleared).then(
+      (value) => value,
+      (error: unknown) => error,
+    )
+    try {
+      await entered
+      expect(session.toJSON()).toEqual(before)
+      expect(manager.commandsOf('')).toEqual(original.commands)
+      expect(manager.scriptOf('')).toEqual(original.script)
+      session.cwd = '/changed-during-write'
+      resume()
+      if (failure) {
+        expect(await updating).toEqual(new Error('store unavailable'))
+        expect(session.toJSON()).toEqual({ ...before, cwd: session.cwd })
+        expect(await store.load()).toEqual(persisted)
+        expect(manager.commandsOf('')).toEqual(original.commands)
+        expect(manager.scriptOf('')).toEqual(original.script)
+      } else {
+        expect(await updating).toBe(session)
+        expect(session.mountModes).toBeNull()
+        expect(session.hiddenPaths).toBeNull()
+        expect(manager.commandsOf('')).toBeNull()
+        expect(manager.scriptOf('')).toBeNull()
+      }
+      expect(session.cwd).toBe('/changed-during-write')
+      spy.mockRestore()
+      await manager.flush()
+      expect((await store.load()).get('default')).toEqual(session.toJSON())
+    } finally {
+      resume()
+      await updating
+      spy.mockRestore()
+    }
+  },
+)

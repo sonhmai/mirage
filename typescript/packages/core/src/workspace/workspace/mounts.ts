@@ -137,7 +137,12 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
   const remaining = deps.registry.allMounts()
   const stillMounted = remaining.some((m) => m.resource === resource)
   const kindStillMounted = remaining.some((m) => m.resource.kind === resource.kind)
-  if (!kindStillMounted) deps.opsRegistry.unregisterResource(resource.kind)
+  deps.opsRegistry.unregisterResource(kindStillMounted ? resource : resource.kind)
+  for (const survivor of remaining) {
+    if (survivor.resource.kind === resource.kind) {
+      deps.opsRegistry.registerResource(survivor.resource, false)
+    }
+  }
   if (!stillMounted) {
     const idx = deps.openOrder.indexOf(resource)
     if (idx !== -1) deps.openOrder.splice(idx, 1)

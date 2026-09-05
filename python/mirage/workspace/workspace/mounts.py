@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import inspect
 from collections.abc import Callable
 from functools import partial
@@ -218,12 +219,25 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
     # The mount owns its op table, so dropping the mount drops the ops
     # with it; the facade keeps no second registry to clean up.
     if not still_instance:
-        registry.retiring_resources.add(id(removed.resource))
-        try:
-            close = getattr(removed.resource, "close", None)
-            if callable(close):
-                result = close()
-                if inspect.isawaitable(result):
-                    await result
-        finally:
-            registry.retiring_resources.discard(id(removed.resource))
+        identity = id(removed.resource)
+        closing = asyncio.create_task(_close_resource(removed.resource))
+        registry.retiring_resources[identity] = closing
+        closing.add_done_callback(
+            partial(_release_resource, registry, identity))
+        await asyncio.shield(closing)
+
+
+async def _close_resource(resource: BaseResource) -> None:
+    close = getattr(resource, "close", None)
+    if callable(close):
+        result = close()
+        if inspect.isawaitable(result):
+            await result
+
+
+def _release_resource(registry: MountRegistry, identity: int,
+                      closing: asyncio.Task[None]) -> None:
+    registry.retiring_resources.pop(identity, None)
+    # The caller may have been cancelled while shield kept cleanup alive.
+    if not closing.cancelled():
+        closing.exception()

@@ -360,7 +360,7 @@ export class Dispatcher {
         return [served, new IOResult({ reads: { [p.virtual]: served } })]
       }
     }
-    if (this.opsRegistry.find(opName, resource.kind)?.write === true) {
+    if (this.opsRegistry.find(opName, resource)?.write === true) {
       if (effectivePathMode(p.virtual, mountPrefix, mode) === MountMode.READ) {
         throw erofsReadOnly(`mount at '${p.virtual}' is read-only`, p)
       }
@@ -415,7 +415,7 @@ export class Dispatcher {
                 ? this.applySetattr(resource, scope, p, fullKwargs)
                 : this.opsRegistry.call(
                     opName,
-                    resource.kind,
+                    resource,
                     resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
                     scope,
                     fullArgs,
@@ -527,7 +527,7 @@ export class Dispatcher {
     issuer?: symbol,
   ): Promise<unknown> {
     const mount = this.namespace.mountFor(spec.virtual)
-    const write = this.opsRegistry.find(opName, resource.kind)?.write === true
+    const write = this.opsRegistry.find(opName, resource)?.write === true
     if (write) {
       // The same pre-ops admission a dispatched op answers, with the
       // walk's own child path: the gate that admitted the rmdir judged
@@ -552,7 +552,7 @@ export class Dispatcher {
         runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
           this.opsRegistry.call(
             opName,
-            resource.kind,
+            resource,
             resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
             spec,
             [],
@@ -906,7 +906,7 @@ export class Dispatcher {
     try {
       return await this.opsRegistry.call(
         opName,
-        resource.kind,
+        resource,
         resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
         scope,
         [],
@@ -941,15 +941,12 @@ export class Dispatcher {
     p: PathSpec,
     kwargs: OpKwargs,
   ): Promise<Record<string, number | string>> {
-    if (
-      this.namespace.isLink(p.virtual) ||
-      this.opsRegistry.find('setattr', resource.kind) === null
-    ) {
+    if (this.namespace.isLink(p.virtual) || this.opsRegistry.find('setattr', resource) === null) {
       return this.overlaySetattr(p, kwargs)
     }
     const raw = await this.opsRegistry.call(
       'setattr',
-      resource.kind,
+      resource,
       resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
       scope,
       [],

@@ -23,9 +23,11 @@ import {
   type RedisIndexConfig,
 } from '../cache/index/config.ts'
 import { RedisIndexCacheStore } from '../cache/index/redis.ts'
+import type { IndexCacheStore } from '../cache/index/store.ts'
+import { mountKey } from '../utils/key_prefix.ts'
 import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
-import { OpsRegistry } from '../ops/registry.ts'
+import { op, OpsRegistry } from '../ops/registry.ts'
 import { FileType, MountMode, ResourceName, PathSpec } from '../types.ts'
 import { BaseResource, type Resource } from '../resource/base.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
@@ -50,6 +52,59 @@ class MockResource extends BaseResource implements Resource {
 }
 
 describe('Workspace lifecycle', () => {
+  it.each(['glob', 'midpath', 'provision'])(
+    'prepares the first %s access to a dynamic mount',
+    async (action) => {
+      class IndexedRAM extends RAMResource {
+        constructor(index: IndexCacheStore) {
+          super()
+          this._index = index
+        }
+        override async glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+          const parent = paths[0]?.directory.replace(/\/$/, '') ?? ''
+          const directory = parent === '' ? '/' : parent
+          const listing = await this.index.listDir(directory)
+          if (listing.entries != null)
+            return listing.entries.map((key) => PathSpec.fromStrPath(key, mountKey(key, prefix)))
+          return super.glob(paths, prefix)
+        }
+      }
+      const ancestor = new RAMResource()
+      const ws = new Workspace({ '/': ancestor }, { shellParser: await getTestParser() })
+      const replacement = new IndexedRAM(ancestor.index)
+      const bytes = new TextEncoder()
+      replacement.loadState({
+        type: 'ram',
+        dirs: ['/', '/dir'],
+        files: {
+          '/fresh.txt': bytes.encode('new'),
+          '/dir/fresh.txt': bytes.encode('new'),
+          '/file': bytes.encode('new'),
+        },
+      })
+      const directory = action === 'midpath' ? '/data/dir' : '/data'
+      await ancestor.index.setDir(directory, [
+        ['stale.txt', new IndexEntry({ id: 'old', name: 'stale.txt', resourceType: 'file' })],
+      ])
+      await ws.cache.set('/data/file', bytes.encode('old'))
+      ws.addMount('/data', replacement)
+      try {
+        if (action === 'provision') {
+          const result = await ws.provision('cat /data/file')
+          expect(result.cacheHits).toBe(0)
+          expect((await ws.execute('cat /data/file')).stdout).toEqual(bytes.encode('new'))
+        } else {
+          const pattern = action === 'midpath' ? '/data/*/*.txt' : '/data/*.txt'
+          expect((await ws.execute('echo ' + pattern)).stdout).toEqual(
+            bytes.encode(`${directory}/fresh.txt\n`),
+          )
+        }
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
   it('waits for an inflight cache write before releasing a mount', async () => {
     class CachedRAM extends RAMResource {
       override readonly cachesReads = true
@@ -432,6 +487,56 @@ describe('Workspace.execute AbortSignal', () => {
 })
 
 describe('Workspace.unmount', () => {
+  it('keeps decorated operations bound to each surviving resource', async () => {
+    class LabeledRAM extends RAMResource {
+      closes = 0
+      override async close(): Promise<void> {
+        this.closes++
+        await super.close()
+      }
+      constructor(readonly label: string) {
+        super()
+      }
+      @op('identity', { resource: 'ram' })
+      identity(): Uint8Array {
+        if (this.closes > 0) throw new Error('resource closed')
+        return new TextEncoder().encode(this.label)
+      }
+    }
+    class SpecializedRAM extends LabeledRAM {
+      @op('unique', { resource: 'ram' })
+      unique(): Uint8Array {
+        return this.identity()
+      }
+    }
+    const ws = new Workspace({})
+    const first = new LabeledRAM('first')
+    const second = new SpecializedRAM('second')
+    const third = new LabeledRAM('third')
+    const identity = async (path: string, name = 'identity'): Promise<string> => {
+      const result = await ws.dispatch(name, path)
+      return new TextDecoder().decode(result as Uint8Array)
+    }
+    try {
+      ws.addMount('/first', first)
+      ws.addMount('/second', second)
+      ws.addMount('/third', third)
+      expect(await identity('/first/file')).toBe('first')
+      expect(await identity('/second/file')).toBe('second')
+      expect(await identity('/third/file')).toBe('third')
+      await ws.unmount('/second')
+      expect(second.closes).toBe(1)
+      expect(await identity('/first/file')).toBe('first')
+      expect(await identity('/third/file')).toBe('third')
+      await expect(identity('/first/file', 'unique')).rejects.toMatchObject({ code: 'ENOTSUP' })
+      await ws.unmount('/third')
+      expect(await identity('/first/file')).toBe('first')
+      expect((await ws.fs.readdir('/')).length).toBeGreaterThan(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it.each([
     [false, 'file'],
     [true, 'file'],
@@ -441,8 +546,14 @@ describe('Workspace.unmount', () => {
     'retains a prefix until cache cleanup succeeds (failure=%s, store=%s)',
     async (fails, store) => {
       const resource = new RAMResource()
-      const ws = new Workspace({ '/data': resource })
+      resource.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('old') } })
+      const ws = new Workspace(
+        { '/data': resource },
+        { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      )
       const cache = ws.cache
+      ws.addMount('/alias', resource)
+      const aliasEntries = await ws.fs.readdir('/alias')
       let enter = (): void => undefined
       let resume = (): void => undefined
       const entered = new Promise<void>((resolve) => {
@@ -475,7 +586,16 @@ describe('Workspace.unmount', () => {
       )
       try {
         await entered
+        expect((await ws.resolve('/alias'))[0]).toBe(resource)
         expect(() => ws.addMount('/data', new RAMResource())).toThrow('duplicate mount prefix')
+        await expect(ws.fs.readdir('/data')).rejects.toMatchObject({ code: 'EBUSY' })
+        await expect(ws.fs.writeFile('/data/file', bytes.encode('changed'))).rejects.toMatchObject({
+          code: 'EBUSY',
+        })
+        for (const line of ['cat /data/file', 'echo changed > /data/file']) {
+          expect((await ws.execute(line)).exitCode).not.toBe(0)
+        }
+        expect(resource.getState().files?.['/file']).toEqual(bytes.encode('old'))
         resume()
         const result = await removing
         if (fails) {
@@ -488,6 +608,7 @@ describe('Workspace.unmount', () => {
         expect(await cache.get('/data')).toBeNull()
         expect(await cache.get('/data/file')).toBeNull()
         expect(await cache.get('/database/file')).toEqual(bytes.encode('peer'))
+        expect(await ws.fs.readdir('/alias')).toEqual(aliasEntries)
         ws.addMount('/data', new RAMResource())
       } finally {
         resume()

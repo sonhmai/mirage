@@ -1060,9 +1060,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         if was_default:
             session_id = self.default_session_id
-        session = self._session_mgr.set_profile(session_id, compiled)
-        await self._session_mgr.flush()
-        return session
+        return await self._session_mgr.set_profile(session_id, compiled)
 
     def list_sessions(self) -> list[Session]:
         return self._session_mgr.list()

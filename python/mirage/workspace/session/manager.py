@@ -356,7 +356,8 @@ class SessionManager:
     async def flush(self) -> None:
         """Write dirty sessions through the store's generation gate."""
         for session in list(self._sessions.values()):
-            await self._flush_one(session)
+            async with self._locks[session.session_id]:
+                await self._flush_one(session)
 
     async def _flush_one(self, session: Session) -> None:
         """Persist one session, retrying when another writer races us."""
@@ -428,19 +429,24 @@ class SessionManager:
     def get(self, session_id: str) -> Session:
         return self._sessions[session_id]
 
-    def set_profile(self, session_id: str,
-                    compiled: CompiledProfile) -> Session:
+    async def set_profile(self, session_id: str,
+                          compiled: CompiledProfile) -> Session:
         """Replace restrictions without resetting the session's scratch state.
 
         Args:
             session_id (str): an existing, hydrated session.
             compiled (CompiledProfile): its replacement profile.
         """
-        session = self.get(session_id)
-        narrow(session, compiled)
-        if session_id == self._default_id:
-            self._default_profile = compiled
-        return session
+        async with self._locks[session_id]:
+            session = self.get(session_id)
+            candidate = copy.copy(session)
+            narrow(candidate, compiled)
+            await self._flush_one(candidate)
+            narrow(session, compiled)
+            session.generation = candidate.generation
+            if session_id == self._default_id:
+                self._default_profile = compiled
+            return session
 
     def list(self) -> list[Session]:
         return list(self._sessions.values())

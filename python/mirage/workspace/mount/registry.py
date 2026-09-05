@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from typing import Protocol
 
 from mirage.cache.file.mixin import FileCacheMixin
@@ -70,7 +71,7 @@ class MountRegistry:
 
     def __init__(self) -> None:
         self._mounts: list[MountEntry] = []
-        self.retiring_resources: set[int] = set()
+        self.retiring_resources: dict[int, asyncio.Task[None]] = {}
         self._root: MountEntry | None = None
         # Workspace-level command -> runtime bindings (first listed
         # capturer wins), set by Workspace after construction (same
@@ -413,6 +414,7 @@ class MountRegistry:
         if mount is None:
             return None
 
+        await mount.ensure_ready()
         resolved = mount.resolve_command(cmd_name)
         # Warm reads are served in place by with_read_cache, so a read-only
         # command stays on its real mount. Single-mount reads do not go

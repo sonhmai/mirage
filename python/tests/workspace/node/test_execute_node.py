@@ -79,6 +79,7 @@ async def _no_match_resolve_glob(scopes, prefix=""):
 def _mock_registry():
     mount = MagicMock()
     mount.prefix = "/data/"
+    mount.ensure_ready = AsyncMock()
     mount.mode = MountMode.EXEC
     mount.execute_cmd = AsyncMock(return_value=(b"ok\n", IOResult()))
     mount.resource = MagicMock()
@@ -86,6 +87,7 @@ def _mock_registry():
     mount.spec_for = MagicMock(return_value=None)
 
     reg = MagicMock()
+    reg.file_cache = None
     reg.mount_for = MagicMock(return_value=mount)
     reg.try_mount_for = MagicMock(return_value=mount)
     reg.resolve_mount = AsyncMock(return_value=mount)

@@ -356,11 +356,7 @@ export class Workspace {
     this.sessionManager.defaultProfile =
       defaultBase === null ? null : compileProfile(defaultBase, this.profileName(null))
     for (const resource of [...this.registry.allMounts().map((m) => m.resource), this.cache]) {
-      const resourceOps = resource.ops?.()
-      if (resourceOps === undefined) continue
-      for (const op of resourceOps) {
-        this.opsRegistry.register(op)
-      }
+      this.opsRegistry.registerResource(resource)
     }
     for (const mount of this.registry.allMounts()) {
       const cmds = mount.resource.commands?.()
@@ -729,9 +725,7 @@ export class Workspace {
     await this.ensureSessionsLoaded()
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     if (wasDefault) sessionId = this.defaultSessionId
-    const session = this.sessionManager.setProfile(sessionId, compiled)
-    await this.sessionManager.flush()
-    return session
+    return this.sessionManager.setProfile(sessionId, compiled)
   }
 
   listSessions(): Session[] {
@@ -855,10 +849,6 @@ export class Workspace {
     const m = this.registry.mount(prefix, resource, mode)
     prepareAddedMount(this.registry, m, previous)
     this.opsRegistry.registerResource(resource)
-    const resourceOps = resource.ops?.()
-    if (resourceOps !== undefined) {
-      for (const op of resourceOps) this.opsRegistry.register(op)
-    }
     return m
   }
 
@@ -1015,14 +1005,12 @@ export class Workspace {
     }
     const result = this.registry.resolve(path)
     const [resource] = result
+    await this.registry.mountFor(path).ensureReady()
     await this.ensureOpen(resource)
     return result
   }
 
   private async ensureOpen(resource: Resource): Promise<void> {
-    for (const mount of this.registry.allMounts()) {
-      if (mount.resource === resource) await mount.ensureReady()
-    }
     if (this.opened.has(resource)) return
     await resource.open()
     this.opened.add(resource)

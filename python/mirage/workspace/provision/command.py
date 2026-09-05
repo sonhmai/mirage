@@ -144,6 +144,7 @@ async def handle_command_provision(
                                    precision=Precision.UNKNOWN)
         mount = mounts[0]
 
+    await mount.ensure_ready()
     extension = get_extension(first_scope.virtual) if first_scope else None
     cmd = mount.resolve_command(cmd_name, extension)
     if cmd is None or cmd.provision_fn is None:
@@ -184,7 +185,7 @@ async def handle_command_provision(
         mount_prefix=mount_prefix,
         command=cmd_str,
         spec=spec,
-        index=mount.resource.index,
+        index=mount.index,
     )
     result = await cmd.provision_fn(mount.resource.accessor, resource_scopes,
                                     text_args, opts)

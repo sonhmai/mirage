@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import os
 from uuid import uuid4
 
@@ -22,15 +23,65 @@ from mirage.cache.index.config import (IndexConfig, IndexEntry, LookupStatus,
                                        RedisIndexConfig)
 from mirage.commands.cli.types import CLISpec
 from mirage.io import IOResult
+from mirage.ops.registry import op
 from mirage.resource.ram import RAMResource
 from mirage.runtime.base import Runtime
 from mirage.shell.console import Channel
 from mirage.shell.job_table import JobStatus
 from mirage.types import MountMode, PathSpec
+from mirage.utils.key_prefix import mount_key
 from mirage.workspace import Workspace
 from mirage.workspace.types import ExecutionNode
 
 _RELEASE: list[asyncio.Event] = []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["glob", "midpath", "provision"])
+async def test_first_mount_access_prepares_expansion_and_provision(action):
+
+    class IndexedRAM(RAMResource):
+
+        async def resolve_glob(self, paths, prefix=""):
+            listing = await self.index.list_dir(paths[0].directory.rstrip("/")
+                                                or "/")
+            if listing.entries is not None:
+                return [
+                    PathSpec.from_str_path(key, mount_key(key, prefix))
+                    for key in listing.entries
+                ]
+            return await super().resolve_glob(paths, prefix)
+
+    ancestor = RAMResource()
+    ws = Workspace({"/": ancestor})
+    replacement = IndexedRAM()
+    replacement._index = ancestor.index
+    replacement.load_state({
+        "dirs": ["/", "/dir"],
+        "files": {
+            "/fresh.txt": b"new",
+            "/dir/fresh.txt": b"new",
+            "/file": b"new"
+        }
+    })
+    directory = "/data/dir" if action == "midpath" else "/data"
+    await ancestor.index.set_dir(
+        directory,
+        [("stale.txt",
+          IndexEntry(id="old", name="stale.txt", resource_type="file"))])
+    await ws.cache.set("/data/file", b"old")
+    ws.add_mount("/data", replacement)
+    try:
+        if action == "provision":
+            result = await ws.execute("cat /data/file", provision=True)
+            assert result.cache_hits == 0
+            assert (await ws.execute("cat /data/file")).stdout == b"new"
+        else:
+            pattern = "/data/*/*.txt" if action == "midpath" else "/data/*.txt"
+            result = await ws.execute("echo " + pattern)
+            assert result.stdout == f"{directory}/fresh.txt\n".encode()
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -77,29 +128,39 @@ async def test_unmount_waits_for_an_inflight_cache_write(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cancel", [False, True])
 async def test_resource_cannot_be_remounted_while_close_is_pending(
-        monkeypatch):
+        monkeypatch, cancel):
     resource = RAMResource()
     ws = Workspace({"/data": resource})
     entered = asyncio.Event()
     release = asyncio.Event()
+    closed = asyncio.Event()
     close = resource.close
 
     async def blocked_close():
         entered.set()
         await release.wait()
         await close()
+        closed.set()
 
     monkeypatch.setattr(resource, "close", blocked_close)
     removing = asyncio.create_task(ws.unmount("/data"))
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
+        if cancel:
+            removing.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await removing
         for prefix in ("/data", "/alias"):
             with pytest.raises(ValueError,
                                match="resource is being unmounted"):
                 ws.add_mount(prefix, resource)
         release.set()
-        await removing
+        await asyncio.wait_for(closed.wait(), timeout=5)
+        await asyncio.sleep(0)
+        if not cancel:
+            await removing
         ws.add_mount("/data", resource)
     finally:
         release.set()
@@ -160,8 +221,11 @@ async def test_retired_command_cannot_cache_bytes_for_replacement_mount(
 async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
         monkeypatch, fail_eviction, cache_kind):
     resource = RAMResource()
-    ws = Workspace({"/data": resource})
+    resource.load_state({"files": {"/file": b"old"}})
+    ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
     cache = ws.cache
+    ws.add_mount("/alias", resource)
+    alias_entries = await ws.fs.readdir("/alias")
     entered = asyncio.Event()
     release = asyncio.Event()
     store = cache if cache_kind == "file" else resource.index
@@ -182,8 +246,18 @@ async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
     removing = asyncio.create_task(ws.unmount("data/"))
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
+        await ws.mount("/alias").ensure_ready()
         with pytest.raises(ValueError, match="duplicate mount prefix"):
             ws.add_mount("/data", RAMResource())
+        with pytest.raises(OSError) as reading:
+            await ws.fs.readdir("/data")
+        assert reading.value.errno == errno.EBUSY
+        with pytest.raises(OSError) as writing:
+            await ws.fs.write("/data/file", b"changed")
+        assert writing.value.errno == errno.EBUSY
+        for line in ("cat /data/file", "echo changed > /data/file"):
+            assert (await ws.execute(line)).exit_code != 0
+        assert resource.get_state()["files"]["/file"] == b"old"
         release.set()
         if fail_eviction:
             with pytest.raises(RuntimeError, match="cache unavailable"):
@@ -196,6 +270,7 @@ async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
         assert await cache.get("/data") is None
         assert await cache.get("/data/file") is None
         assert await cache.get("/database/file") == b"peer"
+        assert await ws.fs.readdir("/alias") == alias_entries
         ws.add_mount("/data", RAMResource())
     finally:
         release.set()
@@ -390,3 +465,61 @@ async def test_close_refuses_lifecycle_changes_but_allows_runtime_drain(
 
     assert closes == ["runtime", "resource"]
     assert drained == [b"drained"]
+
+
+@pytest.mark.asyncio
+async def test_unmount_preserves_operations_of_each_surviving_resource():
+
+    class LabeledRAM(RAMResource):
+
+        def __init__(self, label, specialized=False):
+            super().__init__()
+            self.closes = 0
+
+            @op("identity", resource="ram")
+            async def identity(accessor, path, **kwargs):
+                if self.closes:
+                    raise RuntimeError("resource closed")
+                return label.encode()
+
+            self.register_op(identity)
+            if specialized:
+
+                @op("unique", resource="ram")
+                async def unique(accessor, path, **kwargs):
+                    return label.encode()
+
+                self.register_op(unique)
+
+        async def close(self):
+            self.closes += 1
+            await super().close()
+
+    first = LabeledRAM("first")
+    second = LabeledRAM("second", specialized=True)
+    third = LabeledRAM("third")
+    ws = Workspace({})
+
+    async def identity(path, name="identity"):
+        result, _ = await ws.dispatch(name, PathSpec.from_str_path(path))
+        return result.decode()
+
+    try:
+        ws.add_mount("/first", first)
+        ws.add_mount("/second", second)
+        ws.add_mount("/third", third)
+        assert await identity("/first/file") == "first"
+        assert await identity("/second/file") == "second"
+        assert await identity("/third/file") == "third"
+        await ws.unmount("/second")
+        assert second.closes == 1
+        assert await identity("/first/file") == "first"
+        assert await identity("/third/file") == "third"
+        with pytest.raises(OSError) as missing:
+            await identity("/first/file", "unique")
+        assert missing.value.errno == errno.ENOTSUP
+        await ws.unmount("/third")
+        assert await identity("/first/file") == "first"
+        assert await ws.fs.readdir("/")
+    finally:
+        await ws.close()

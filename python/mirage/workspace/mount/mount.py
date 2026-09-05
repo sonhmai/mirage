@@ -41,7 +41,7 @@ from mirage.policy import resolve_limit
 from mirage.resource.base import BaseResource
 from mirage.types import (ConsistencyPolicy, FileType, Limit, MountMode,
                           PathSpec, Producer)
-from mirage.utils.errors import ReadOnlyError, enotsup
+from mirage.utils.errors import ReadOnlyError, ebusy, enotsup
 from mirage.utils.key_prefix import mount_key
 
 # Ops that mutate everything under their endpoints in one backend call
@@ -183,12 +183,16 @@ class MountEntry:
 
     async def ensure_ready(self) -> None:
         """Finish mount preparation before any backend or cache read."""
+        if self.retiring:
+            raise ebusy(self.prefix)
         if self.before_use is None:
             return
         async with self._ready_lock:
             if self.before_use is not None:
                 await self.before_use()
                 self.before_use = None
+        if self.retiring:
+            raise ebusy(self.prefix)
 
     def effective_mode(self) -> MountMode:
         """This mount's mode narrowed by the current session's cap.

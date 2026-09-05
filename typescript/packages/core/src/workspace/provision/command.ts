@@ -15,7 +15,6 @@
 import { isCrossMount } from '../../commands/builtin/generic/crossmount/index.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
-import type { IndexCacheStore } from '../../cache/index/index.ts'
 import { parseCommand, parseToKwargs } from '../../commands/spec/parser.ts'
 import { getExtension } from '../../commands/resolve.ts'
 import { Precision, ProvisionResult, combineSum } from '../../provision/types.ts'
@@ -150,6 +149,7 @@ export async function handleCommandProvision(
     return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
   }
 
+  await mount.ensureReady()
   const extension = firstScope !== null ? getExtension(firstScope.virtual) : null
   const cmd = mount.resolveCommand(cmdName, extension)
   if (cmd?.provisionFn == null) {
@@ -194,7 +194,7 @@ export async function handleCommandProvision(
     return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
   }
 
-  const rawIndex = (resource as { index?: IndexCacheStore | null }).index ?? null
+  const rawIndex = mount.index ?? null
   const opts: CommandOpts = {
     flags: flagKwargs,
     stdin: null,

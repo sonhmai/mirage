@@ -72,7 +72,10 @@ describe.skipIf(skip)('RedisResource against a live Upstash database', () => {
       await resource.store.setFile('/a.bin', ALL_BYTES)
       expect(await resource.store.getFileRange('/a.bin', 10, 5)).toEqual(ALL_BYTES.slice(10, 15))
       expect(await resource.store.getFileRange('/a.bin', 250, null)).toEqual(ALL_BYTES.slice(250))
+      expect(await resource.store.getFileRange('/a.bin', 0, 0)).toEqual(new Uint8Array(0))
+      expect(await resource.store.getFileRange('/a.bin', 10, 0)).toEqual(new Uint8Array(0))
       expect(await resource.store.getFileRange('/missing', 0, 5)).toBeNull()
+      expect(await resource.store.getFileRange('/missing', 0, 0)).toBeNull()
     },
     LIVE,
   )

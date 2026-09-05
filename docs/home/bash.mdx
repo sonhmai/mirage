@@ -219,6 +219,10 @@ Predicates must precede actions: `find d -name '*.txt' -exec echo {} \;`
 works, while a test following `-exec`, `-print`, `-delete`, or another action
 is refused because backend filtering cannot preserve that evaluation order.
 `-exec` also refuses placement under `-o`, negation, or parentheses.
+`-delete` runs where it is written, so a later `-exec` sees the row gone, and
+it turns on `-depth`, which lists a directory after its contents. `-newer FILE`
+reads a symlink reference itself under the default `-P` and its target under
+`-H` or `-L`, as GNU find does.
 `-newermt` accepts GNU date expressions such as `yesterday`, `24 hours ago`,
 and `@1700000000`, with unzoned dates interpreted as UTC.
 

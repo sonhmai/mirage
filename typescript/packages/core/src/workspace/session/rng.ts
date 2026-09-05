@@ -23,16 +23,29 @@ import {
   RANDOM_UNSET,
   RANDOM_ZERO_SEED,
 } from '../../shell/constants.ts'
+import { evaluateArith } from '../../shell/arith.ts'
+import { ArithError } from '../../shell/errors.ts'
 import { makeVar, withValue } from '../../shell/variable.ts'
 import type { Session } from './session.ts'
+import { sessionElements, visibleEnv } from './state.ts'
 
-/** The generator seed an assignment `RANDOM=word` sets: bash reads the
- * word as an integer and a word that is not one as 0. */
-export function seedFrom(word: string): number {
-  const body = word.startsWith('-') || word.startsWith('+') ? word.slice(1) : word
-  if (!/^[0-9]+$/.test(body)) return 0
+/** The generator seed an assignment `RANDOM=word` sets, or null. bash
+ * evaluates the word as arithmetic (`assign_random` calls `evalexp`), so
+ * `RANDOM=1+2` seeds 3, `RANDOM=0x10` seeds 16, `RANDOM=x` reads `x`, and
+ * an unset name is 0. A word that does not evaluate (`RANDOM=1.5`) is
+ * bash's arithmetic error: the message prints and the generator is left
+ * alone, which is the null here. The seed truncates to 32 bits, as
+ * `sbrand` does. */
+export function seedFrom(word: string, session: Session): number | null {
+  let value: bigint
+  try {
+    value = evaluateArith(word, visibleEnv(session), 0, sessionElements(session)).value
+  } catch (err) {
+    if (err instanceof ArithError) return null
+    throw err
+  }
   const modulus = BigInt(RANDOM_MODULUS)
-  return Number(((BigInt(word) % modulus) + modulus) % modulus)
+  return Number(((value % modulus) + modulus) % modulus)
 }
 
 /** A first seed for a session that was never assigned one: the clock,
@@ -81,7 +94,10 @@ function lastValue(seed: string | null): number {
  *
  * A draw never returns the value before it (bash's `get_random_number`
  * redraws on a repeat), and a reseed or a fresh generator starts that
- * comparison from 0, as `sbrand` does.
+ * comparison from 0, as `sbrand` does. A stored word that does not
+ * evaluate is the assignment bash refused: the sequence continues as if
+ * it had not happened. The refusal's message is bash's at assignment
+ * time, which a reseed decided at the read cannot voice.
  */
 export function nextRandom(session: Session, stored: string | undefined): number | null {
   if (
@@ -92,8 +108,10 @@ export function nextRandom(session: Session, stored: string | undefined): number
   }
   let state: number
   let last: number
-  if (stored !== undefined && stored !== session.randomSeed) {
-    state = seedFrom(stored)
+  const seed =
+    stored !== undefined && stored !== session.randomSeed ? seedFrom(stored, session) : null
+  if (seed !== null) {
+    state = seed
     last = 0
   } else if (session.randomState === null) {
     state = initialSeed(session.sessionId)

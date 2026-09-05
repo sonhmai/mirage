@@ -86,3 +86,32 @@ async def test_newer_and_newermt_in_the_shell():
                                                                         "", 0)
     assert await _out(ws, "find -newer d/a.txt | sort") == (
         ".\n./d\n./d/b.txt\n./d/sub\n./d/sub/c.txt\n", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_link_reference_is_read_by_the_link_policy():
+    # GNU find 4.9: -P (the default) compares against a symlink's own
+    # mtime, -H and -L against its target's; a dangling reference is its
+    # own row under every policy; a loop is an ordinary reference under
+    # -P and a refusal when followed.
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws.create_session("s")
+    await ws.execute(
+        "mkdir -p /w/d; printf t > /w/target; printf c > /w/d/cand; cd /w; "
+        "touch -d '2020-01-01 00:00:00' target; "
+        "touch -d '2021-01-01 00:00:00' d/cand; "
+        "touch -d '2019-01-01 00:00:00' d; "
+        "ln -s target link; touch -h -d '2022-01-01 00:00:00' link; "
+        "ln -s nowhere dangling; touch -h -d '2020-06-01 00:00:00' dangling; "
+        "ln -s loop1 loop2; ln -s loop2 loop1; "
+        "touch -h -d '2022-01-01 00:00:00' loop1",
+        session_id="s")
+    assert await _out(ws, "find d -newer link") == ("", "", 0)
+    assert await _out(ws, "find -L d -newer link") == ("d/cand\n", "", 0)
+    assert await _out(ws, "find -H d -newer link") == ("d/cand\n", "", 0)
+    assert await _out(ws, "find -L -P d -newer link") == ("", "", 0)
+    assert await _out(ws, "find d -newer dangling") == ("d/cand\n", "", 0)
+    assert await _out(ws, "find -L d -newer dangling") == ("d/cand\n", "", 0)
+    assert await _out(ws, "find d -newer loop1") == ("", "", 0)
+    assert await _out(ws, "find -L d -newer loop1") == (
+        "", "find: 'loop1': Too many levels of symbolic links\n", 1)

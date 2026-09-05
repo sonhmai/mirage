@@ -81,6 +81,12 @@ describe('parseFindExpression', () => {
     expect(evalPredicate(e.tree, { key: '/y', name: 'y', kind: 'f', depth: 1 })).toBe(false)
   })
 
+  it('depthFirst is -depth or -delete', () => {
+    expect(parseFindExpression(['-depth']).depthFirst).toBe(true)
+    expect(parseFindExpression(['-delete']).depthFirst).toBe(true)
+    expect(parseFindExpression(['-print']).depthFirst).toBe(false)
+  })
+
   it('size extracted as global', () => {
     const e = parseFindExpression(['-size', '+50c'])
     expect(e.minSize).toBe(51)

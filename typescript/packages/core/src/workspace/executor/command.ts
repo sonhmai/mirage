@@ -24,7 +24,7 @@ import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { makeStorageKey } from '../mount/storage.ts'
-import { Consumer, JOB_BUILTINS, lookup } from '../lookup/index.ts'
+import { Consumer, JOB_BUILTINS, dereferences, lookup } from '../lookup/index.ts'
 import { type Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import type { Session } from '../session/session.ts'
@@ -238,6 +238,7 @@ export async function handleCommand(
         session.cwd,
         (path: string) => pathStat(dispatch, path, null),
         namespace ?? null,
+        dereferences(cmdName, parts),
       )
       if (refErr !== null) {
         return [

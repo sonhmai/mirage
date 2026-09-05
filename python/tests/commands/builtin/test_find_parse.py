@@ -62,6 +62,12 @@ def test_globals_extracted_as_truenode():
     assert eval_predicate(expr.tree, _ent(name="x")) is True
 
 
+def test_depth_first_is_depth_or_delete():
+    assert parse_find_expression(["-depth"]).depth_first is True
+    assert parse_find_expression(["-delete"]).depth_first is True
+    assert parse_find_expression(["-print"]).depth_first is False
+
+
 def test_size_extracted_global():
     expr = parse_find_expression(["-size", "+50c"])
     assert expr.min_size == 51

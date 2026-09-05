@@ -138,8 +138,8 @@ async def _delete(path: str, registry: MountRegistry, cwd: str,
         # redirect clear), by the session the line runs under, and a
         # refusal reports in find's voice. The delegated rm's own slots
         # are suspended for the call, so the deletion admits exactly
-        # once. -d so directories emptied by the deepest-first pass are
-        # removable, matching GNU -delete's rmdir behavior.
+        # once. -d so a directory emptied by the rows before it in -depth
+        # order is removable, matching GNU -delete's rmdir behavior.
         sess = get_current_session()
         await pre_ops_gate(registry.policies, "unlink", ps, True, mount.prefix,
                            sess.session_id if sess is not None else "")
@@ -159,7 +159,12 @@ async def _delete(path: str, registry: MountRegistry, cwd: str,
         return False
     if rm_io.exit_code != 0:
         err = await materialize(rm_io.stderr) if rm_io.stderr else b""
-        errors.append(err or f"find: cannot delete '{path}'\n".encode())
+        # rm names the reason last (`rm: cannot remove '/w/d': Directory
+        # not empty`), and find says the same thing about the row as it
+        # was typed.
+        why = err.decode("utf-8", errors="replace").strip().rsplit(": ", 1)[-1]
+        errors.append(f"find: cannot delete '{path}'"
+                      f"{': ' + why if why else ''}\n".encode())
         return False
     return True
 
@@ -197,6 +202,36 @@ def _has_actions(expr: FindExpr) -> bool:
                for a in expr.actions)
 
 
+def depth_first_key(path: str) -> tuple[tuple[str, int], ...]:
+    """The sort key for GNU's ``-depth`` order over sorted siblings.
+
+    A directory's contents, each sorted, then the directory: the final
+    component is flagged so a path sorts after its descendants, whose
+    entry at that depth carries the same name unflagged.
+
+    Args:
+        path (str): a row as find printed it.
+    """
+    parts = path.split("/")
+    return (*((part, 0) for part in parts[:-1]), (parts[-1], 1))
+
+
+def _structural(path: str, registry: MountRegistry, cwd: str) -> bool:
+    """Whether a row is a mount point or a namespace-only ancestor of
+    one, which are not unlinkable entries. Ancestors use the raw mount
+    table like ``is_mount_root``: an ungranted mount still pins its
+    ancestors in the namespace.
+
+    Args:
+        path (str): the row as find printed it.
+        registry (MountRegistry): the mount table.
+        cwd (str): the session's working directory.
+    """
+    virtual = resolve_path(path, cwd)
+    return (registry.is_mount_root(virtual)
+            or bool(registry.descendant_mounts(virtual)))
+
+
 async def _apply_find_actions(
     stdout: ByteSource | None,
     texts: list[str],
@@ -223,9 +258,12 @@ async def _apply_find_actions(
     find's exit 1, as is a row it could not delete or list; a failing
     per-match run is not, and neither is a command that cannot be
     found, which GNU reports per match and carries on from with exit 0.
-    An action other than ``-print`` suppresses the implicit print, and
-    ``-delete`` is applied after the walk, deepest first, to the rows
-    that reached it.
+    An action other than ``-print`` suppresses the implicit print.
+    ``-delete`` runs at its position, so a later ``-exec`` sees the row
+    gone, and a row it cannot delete ends the chain with GNU's line and
+    find's exit 1. It also turns on ``-depth``, which orders every
+    directory after its contents, the only order a tree can be removed
+    in; ``-depth`` alone reorders the implicit print the same way.
 
     Args:
         stdout (ByteSource | None): newline-joined match list from find.
@@ -245,19 +283,24 @@ async def _apply_find_actions(
         actions impose (0 when they impose none, even with stderr).
     """
     expr = parse_find_expression(list(texts))
-    if not _has_actions(expr) or stdout is None:
+    reorders = expr.depth_first and expr.printf is None
+    if stdout is None or not (_has_actions(expr) or reorders):
         return stdout, b"", 0
     if expr.execs and execute_fn is None:
         return None, b"find: -exec: no shell to run the command\n", 1
     text = (await materialize(stdout)).decode("utf-8", errors="replace")
     matches = [p for p in text.split("\n") if p]
+    if reorders:
+        matches.sort(key=depth_first_key)
+    # An expression with no action of its own prints, which is the one
+    # implicit action -depth reorders.
+    actions = expr.actions or [RowAction("print")]
     errors: list[bytes] = []
     out: list[bytes] = []
     batches: dict[int, list[str]] = {}
-    to_delete: list[str] = []
     exit_code = 0
     for path in matches:
-        for position, action in enumerate(expr.actions):
+        for position, action in enumerate(actions):
             if isinstance(action, ExecAction):
                 if action.batch:
                     batches.setdefault(position, []).append(path)
@@ -275,12 +318,18 @@ async def _apply_find_actions(
                 elif len(errors) > before:
                     exit_code = 1
             elif action.kind == "delete":
-                to_delete.append(path)
+                # A structural row is skipped, not refused, the way Unix
+                # leaves a mount point in place.
+                if _structural(path, registry, cwd):
+                    continue
+                if not await _delete(path, registry, cwd, errors):
+                    exit_code = 1
+                    break
             else:
                 out.append(
                     path.encode("utf-8") +
                     (b"\x00" if action.kind == "print0" else b"\n"))
-    for position, action in enumerate(expr.actions):
+    for position, action in enumerate(actions):
         paths = batches.get(position)
         if not isinstance(action, ExecAction) or not paths:
             continue
@@ -288,21 +337,5 @@ async def _apply_find_actions(
         if not await _run_exec(execute_fn, session_id, registry, action, paths,
                                out, errors):
             exit_code = 1
-    if to_delete:
-        # Deepest-first so children are removed before parents. Skip
-        # structural rows: mount points, and the namespace-only ancestors
-        # above a nested mount, are not unlinkable entries; refusing
-        # matches Unix semantics. Ancestors use the raw mount table like
-        # is_mount_root: an ungranted mount still pins its ancestors in
-        # the namespace.
-        deletable = [
-            p for p in to_delete
-            if not registry.is_mount_root(resolve_path(p, cwd))
-            and not registry.descendant_mounts(resolve_path(p, cwd))
-        ]
-        for path in sorted(deletable, key=lambda p: p.count("/"),
-                           reverse=True):
-            if not await _delete(path, registry, cwd, errors):
-                exit_code = 1
     body = b"".join(out)
     return (body if body else None), b"".join(errors), exit_code

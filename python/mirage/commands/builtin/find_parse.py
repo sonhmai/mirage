@@ -209,6 +209,10 @@ class FindExpr:
     # three per match.
     actions: list[FindAction] = field(default_factory=list)
     newer: list[str] = field(default_factory=list)
+    # GNU's -depth: every directory's contents come before the directory
+    # itself. -delete turns it on, since a directory can only be removed
+    # once what it holds is gone.
+    depth_first: bool = False
 
     @property
     def execs(self) -> list[ExecAction]:
@@ -445,6 +449,11 @@ def _parse_primary(state: _State) -> PredNode:
         return Empty()
     if tok in _ROW_ACTIONS:
         state.expr.actions.append(RowAction(_ROW_ACTIONS[tok]))
+        if tok == "-delete":
+            state.expr.depth_first = True
+        return TrueNode()
+    if tok == "-depth":
+        state.expr.depth_first = True
         return TrueNode()
     if tok in _BARE_PREDICATES:
         return TrueNode()

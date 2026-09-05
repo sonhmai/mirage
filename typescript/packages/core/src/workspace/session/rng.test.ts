@@ -25,10 +25,30 @@ function stored(s: Session): string | undefined {
 }
 
 describe('RANDOM generator', () => {
-  it('reads the seed word as an integer', () => {
-    expect(seedFrom('42')).toBe(42)
-    expect(seedFrom('-1')).toBe(2 ** 32 - 1)
-    expect(seedFrom('abc')).toBe(0)
+  it('evaluates the seed word as arithmetic', () => {
+    const s = new Session({ sessionId: 's' })
+    s.vars.x = makeVar('42')
+    expect(seedFrom('42', s)).toBe(42)
+    expect(seedFrom('-1', s)).toBe(2 ** 32 - 1)
+    expect(seedFrom('abc', s)).toBe(0)
+    expect(seedFrom('', s)).toBe(0)
+    expect(seedFrom('1+2', s)).toBe(3)
+    expect(seedFrom('0x10', s)).toBe(16)
+    expect(seedFrom('010', s)).toBe(8)
+    expect(seedFrom('x', s)).toBe(42)
+    expect(seedFrom('x*2', s)).toBe(84)
+    expect(seedFrom('1.5', s)).toBeNull()
+    expect(seedFrom('1+', s)).toBeNull()
+    expect(seedFrom('08', s)).toBeNull()
+  })
+
+  it('leaves the generator alone on a word that does not evaluate', () => {
+    // bash 5.2.37: `RANDOM=0; echo $RANDOM; RANDOM=1.5; echo $RANDOM`
+    // prints the error for 1.5 and then 24386, the second draw of seed 0.
+    const s = new Session({ sessionId: 's' })
+    expect(nextRandom(s, '0')).toBe(20814)
+    expect(nextRandom(s, '1.5')).toBe(24386)
+    expect(nextRandom(s, stored(s))).toBe(149)
   })
 
   it.each([
@@ -37,10 +57,14 @@ describe('RANDOM generator', () => {
     ['-1', [16807, 10791, 19566]],
     ['4294967338', [17772, 26794, 1435]],
     ['32768', [8403, 3502, 14043]],
+    ['1+2', [17653, 593, 9386]],
+    ['0x10', [6772, 8817, 18150]],
+    ['abc', [20814, 24386, 149]],
   ] as const)('seed %s draws bash 5.2 sequence', (seed, expected) => {
     // Pinned against bash 5.2.37 on debian:stable-slim. -1 truncates to
-    // 32 bits, 4294967338 is 42 past 2**32, and seed 32768 renders 0 on
-    // its first step, which the no-repeat rule redraws.
+    // 32 bits, 4294967338 is 42 past 2**32, seed 32768 renders 0 on its
+    // first step, which the no-repeat rule redraws, and the last three
+    // are arithmetic words: 3, 16, and an unset name.
     const s = new Session({ sessionId: 's' })
     const drawn: (number | null)[] = []
     for (let i = 0; i < 3; i++) drawn.push(nextRandom(s, i === 0 ? seed : stored(s)))

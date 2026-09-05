@@ -50,7 +50,8 @@ from mirage.workspace.executor.jobs import (handle_disown, handle_fg,
                                             handle_jobs, handle_kill,
                                             handle_ps, handle_wait)
 from mirage.workspace.expand.globs import glob_options, resolve_globs
-from mirage.workspace.lookup import JOB_BUILTINS, Consumer, lookup
+from mirage.workspace.lookup import (JOB_BUILTINS, Consumer, dereferences,
+                                     lookup)
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.storage import make_storage_key
@@ -204,7 +205,8 @@ async def handle_command(
             # here, once, before any backend parses the expression.
             find_expr_tokens, ref_err = await resolve_newer_refs(
                 find_expr_tokens, find_expr.newer, registry, session.cwd,
-                functools.partial(path_stat, dispatch), namespace)
+                functools.partial(path_stat, dispatch), namespace,
+                dereferences(cmd_name, parts))
             if ref_err is not None:
                 return None, IOResult(exit_code=1,
                                       stderr=ref_err), ExecutionNode(

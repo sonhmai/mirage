@@ -116,6 +116,10 @@ export interface FindExpr {
   // three per match.
   actions: FindAction[]
   newer: string[]
+  // GNU's -depth: every directory's contents come before the directory
+  // itself. -delete turns it on, since a directory can only be removed
+  // once what it holds is gone.
+  depthFirst: boolean
 }
 
 /**
@@ -256,6 +260,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
     printf: null as string | null,
     actions: [] as FindAction[],
     newer: [] as string[],
+    depthFirst: false,
   }
   let pos = 0
   let depth = 0
@@ -405,6 +410,11 @@ export function parseFindExpression(tokens: string[]): FindExpr {
     const rowKind = ROW_ACTIONS.get(tok)
     if (rowKind !== undefined) {
       g.actions.push({ kind: rowKind })
+      if (rowKind === 'delete') g.depthFirst = true
+      return { op: 'true' }
+    }
+    if (tok === '-depth') {
+      g.depthFirst = true
       return { op: 'true' }
     }
     if (BARE_PREDICATES.has(tok)) return { op: 'true' }

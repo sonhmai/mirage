@@ -298,6 +298,58 @@ async def test_exec_then_delete_removes_accepted_rows():
 
 
 @pytest.mark.asyncio
+async def test_delete_runs_at_its_position():
+    # GNU: the row is gone before the next action sees it, so cat fails,
+    # its failure ends the chain, and -print never fires.
+    ws = await _exec_ws()
+    out, err, code = await _run_line(
+        ws, r'find d -type f -delete -exec cat {} \; -print')
+    assert (out, err,
+            code) == ("", "cat: d/a.txt: No such file or directory\n"
+                      "cat: d/b.txt: No such file or directory\n"
+                      "cat: d/sub/c.txt: No such file or directory\n", 0)
+    listing, _, _ = await _run_line(ws, "find d -type f")
+    assert listing == ""
+
+
+@pytest.mark.asyncio
+async def test_delete_orders_a_directory_after_its_contents():
+    # -delete implies -depth, so every action runs in that order.
+    ws = await _exec_ws()
+    out, err, code = await _run_line(
+        ws, r'find d -exec echo saw {} \; -delete -print')
+    assert (out, err, code) == (
+        "saw d/a.txt\nd/a.txt\nsaw d/b.txt\nd/b.txt\nsaw d/sub/c.txt\n"
+        "d/sub/c.txt\nsaw d/sub\nd/sub\nsaw d\nd\n", "", 0)
+    assert await _run_line(ws, "test -e d") == ("", "", 1)
+
+
+@pytest.mark.asyncio
+async def test_depth_reorders_the_implicit_print():
+    ws = await _exec_ws()
+    post = "d/a.txt\nd/b.txt\nd/sub/c.txt\nd/sub\nd\n"
+    assert await _run_line(ws, "find d -depth") == (post, "", 0)
+    assert await _run_line(ws, "find d -depth -print") == (post, "", 0)
+    assert await _run_line(
+        ws, "find d") == ("d\nd/a.txt\nd/b.txt\nd/sub\nd/sub/c.txt\n", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_delete_failure_ends_the_chain_in_gnus_words():
+    ws = await _exec_ws()
+    out, err, code = await _run_line(ws, "find d ! -name c.txt -delete -print")
+    assert (out, err,
+            code) == ("d/a.txt\nd/b.txt\n",
+                      "find: cannot delete 'd/sub': Directory not empty\n"
+                      "find: cannot delete 'd': Directory not empty\n", 1)
+    out, err, code = await _run_line(
+        ws, "find d -name c.txt -delete -delete -print")
+    assert (out, err, code) == (
+        "", "find: cannot delete 'd/sub/c.txt': No such file or directory\n",
+        1)
+
+
+@pytest.mark.asyncio
 async def test_exec_line_substitution():
     from mirage.commands.builtin.find_parse import ExecAction
     from mirage.workspace.executor.find_action_dispatch import exec_line

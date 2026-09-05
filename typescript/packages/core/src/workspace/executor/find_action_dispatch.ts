@@ -14,6 +14,7 @@
 
 import { stripSlash } from '../../utils/slash.ts'
 import { resolvePath } from '../../utils/path.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { type ByteSource, materialize } from '../../io/types.ts'
 import { getCurrentSession, runWithSuspendedOpPolicies } from '../../context/session_context.ts'
@@ -27,6 +28,7 @@ import {
   EXEC_PLACEHOLDER,
   execActions,
   type ExecAction,
+  type FindAction,
   type FindExpr,
   parseFindExpression,
 } from '../../commands/builtin/find_parse.ts'
@@ -127,9 +129,9 @@ async function deleteRow(
     // path rule guards (the same gate `ws.fs`, FUSE and a redirect
     // clear), by the session the line runs under, and a refusal reports
     // in find's voice. The delegated rm's own slots are suspended for the
-    // call, so the deletion admits exactly once. -d so directories
-    // emptied by the deepest-first pass are removable, matching GNU
-    // -delete's rmdir behavior.
+    // call, so the deletion admits exactly once. -d so a directory
+    // emptied by the rows before it in -depth order is removable,
+    // matching GNU -delete's rmdir behavior.
     await preOpsGate(
       registry.policies,
       'unlink',
@@ -142,8 +144,12 @@ async function deleteRow(
       mount.executeCmd('rm', [ps], [], { d: true }, { stdin: null, cwd }),
     )
     if (rmIo.exitCode !== 0) {
-      const errBytes = await materialize(rmIo.stderr)
-      errors.push(errBytes.length > 0 ? errBytes : enc.encode(`find: cannot delete '${path}'\n`))
+      // rm names the reason last (`rm: cannot remove '/w/d': Directory
+      // not empty`), and find says the same thing about the row as it
+      // was typed.
+      const line = new TextDecoder().decode(await materialize(rmIo.stderr)).trim()
+      const why = line.slice(line.lastIndexOf(': ') + 2)
+      errors.push(enc.encode(`find: cannot delete '${path}'${why ? `: ${why}` : ''}\n`))
       return false
     }
     return true
@@ -191,6 +197,35 @@ async function lsRow(
   }
 }
 
+/**
+ * GNU's `-depth` order over sorted siblings: a directory's contents, each
+ * sorted, then the directory. The final component is flagged so a path
+ * sorts after its descendants, whose entry at that depth carries the same
+ * name unflagged.
+ */
+export function compareDepthFirst(a: string, b: string): number {
+  const pa = a.split('/')
+  const pb = b.split('/')
+  const n = Math.min(pa.length, pb.length)
+  for (let i = 0; i < n; i++) {
+    const byName = compareCodePoints(pa[i] ?? '', pb[i] ?? '')
+    if (byName !== 0) return byName
+    const fa = i === pa.length - 1 ? 1 : 0
+    const fb = i === pb.length - 1 ? 1 : 0
+    if (fa !== fb) return fa - fb
+  }
+  return pa.length - pb.length
+}
+
+/** Whether a row is a mount point or a namespace-only ancestor of one,
+ * which are not unlinkable entries. Ancestors use the raw mount table
+ * like isMountRoot: an ungranted mount still pins its ancestors in the
+ * namespace. */
+function structural(path: string, registry: MountRegistry, cwd: string): boolean {
+  const virtual = resolvePath(path, cwd)
+  return registry.isMountRoot(virtual) || registry.descendantMounts(virtual).length > 0
+}
+
 function hasActions(expr: FindExpr): boolean {
   return expr.actions.some((a) => a.kind !== 'print')
 }
@@ -211,10 +246,13 @@ function hasActions(expr: FindExpr): boolean {
  * could not delete or list; a failing per-match run is not, and neither
  * is a command that cannot be found, which GNU reports per match and
  * carries on from with exit 0. An action other than `-print` suppresses
- * the implicit print, and `-delete` is applied after the walk, deepest
- * first, to the rows that reached it. Returns the rows to print, the
- * stderr to append, and the exit status the actions impose (0 when they
- * impose none, even with stderr).
+ * the implicit print. `-delete` runs at its position, so a later `-exec`
+ * sees the row gone, and a row it cannot delete ends the chain with GNU's
+ * line and find's exit 1. It also turns on `-depth`, which orders every
+ * directory after its contents, the only order a tree can be removed in;
+ * `-depth` alone reorders the implicit print the same way. Returns the
+ * rows to print, the stderr to append, and the exit status the actions
+ * impose (0 when they impose none, even with stderr).
  */
 export async function applyFindActions(
   stdout: ByteSource | null,
@@ -224,7 +262,8 @@ export async function applyFindActions(
   doors: FindActionDoors = {},
 ): Promise<[ByteSource | null, Uint8Array, number]> {
   const expr = parseFindExpression([...texts])
-  if (!hasActions(expr) || stdout === null) return [stdout, new Uint8Array(), 0]
+  const reorders = expr.depthFirst && expr.printf === null
+  if (stdout === null || !(hasActions(expr) || reorders)) return [stdout, new Uint8Array(), 0]
   const executeFn = doors.executeFn
   const execs = execActions(expr.actions)
   if (execs.length > 0 && executeFn === undefined) {
@@ -235,13 +274,16 @@ export async function applyFindActions(
   const statPath = doors.statPath ?? null
   const text = new TextDecoder().decode(await materialize(stdout))
   const matches = text.split('\n').filter((p) => p !== '')
+  if (reorders) matches.sort(compareDepthFirst)
+  // An expression with no action of its own prints, which is the one
+  // implicit action -depth reorders.
+  const actions: FindAction[] = expr.actions.length > 0 ? expr.actions : [{ kind: 'print' }]
   const errors: Uint8Array[] = []
   const out: Uint8Array[] = []
   const batches = new Map<number, string[]>()
-  const toDelete: string[] = []
   let exitCode = 0
   for (const path of matches) {
-    for (const [position, action] of expr.actions.entries()) {
+    for (const [position, action] of actions.entries()) {
       if (action.kind === 'exec') {
         if (action.batch) {
           const bucket = batches.get(position) ?? []
@@ -257,33 +299,22 @@ export async function applyFindActions(
         if (row !== null) out.push(row)
         else if (errors.length > before) exitCode = 1
       } else if (action.kind === 'delete') {
-        toDelete.push(path)
+        // A structural row is skipped, not refused, the way Unix leaves
+        // a mount point in place.
+        if (structural(path, registry, cwd)) continue
+        if (!(await deleteRow(path, registry, cwd, errors))) {
+          exitCode = 1
+          break
+        }
       } else {
         out.push(enc.encode(path + (action.kind === 'print0' ? '\0' : '\n')))
       }
     }
   }
-  for (const [position, action] of expr.actions.entries()) {
+  for (const [position, action] of actions.entries()) {
     const paths = batches.get(position)
     if (action.kind !== 'exec' || paths === undefined || executeFn === undefined) continue
     if (!(await runExec(executeFn, sessionId, registry, action, paths, out, errors))) exitCode = 1
-  }
-  if (toDelete.length > 0) {
-    // Deepest-first so children are removed before parents. Skip
-    // structural rows: mount points, and the namespace-only ancestors
-    // above a nested mount, are not unlinkable entries; refusing matches
-    // Unix semantics. Ancestors use the raw mount table like isMountRoot:
-    // an ungranted mount still pins its ancestors in the namespace.
-    const deletable = toDelete.filter((p) => {
-      const virtual = resolvePath(p, cwd)
-      return !registry.isMountRoot(virtual) && registry.descendantMounts(virtual).length === 0
-    })
-    const ordered = [...deletable].sort(
-      (a, b) => (b.match(/\//g) ?? []).length - (a.match(/\//g) ?? []).length,
-    )
-    for (const path of ordered) {
-      if (!(await deleteRow(path, registry, cwd, errors))) exitCode = 1
-    }
   }
   const body = concat(out)
   return [body.byteLength > 0 ? body : null, concat(errors), exitCode]

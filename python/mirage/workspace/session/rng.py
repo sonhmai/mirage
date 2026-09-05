@@ -15,25 +15,37 @@
 import time
 from dataclasses import replace
 
+from mirage.shell.arith import evaluate_arith
 from mirage.shell.constants import (RANDOM, RANDOM_A, RANDOM_M, RANDOM_MAX,
                                     RANDOM_MODULUS, RANDOM_Q, RANDOM_R,
                                     RANDOM_UNSET, RANDOM_ZERO_SEED)
+from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellVar
 from mirage.workspace.session.session import Session
+from mirage.workspace.session.state import session_elements, visible_env
 
 
-def seed_from(word: str) -> int:
-    """The generator seed an assignment `RANDOM=word` sets.
+def seed_from(word: str, session: Session) -> int | None:
+    """The generator seed an assignment `RANDOM=word` sets, or None.
 
-    bash reads the word as an integer and a word that is not one as 0.
+    bash evaluates the word as arithmetic (``assign_random`` calls
+    ``evalexp``), so ``RANDOM=1+2`` seeds 3, ``RANDOM=0x10`` seeds 16,
+    ``RANDOM=x`` reads ``x``, and an unset name is 0. A word that does
+    not evaluate (``RANDOM=1.5``) is bash's arithmetic error: the
+    message prints and the generator is left alone, which is the None
+    here. The seed truncates to 32 bits, as ``sbrand`` does.
 
     Args:
         word (str): the assigned value.
+        session (Session): the session the word's names resolve in.
     """
-    body = word[1:] if word[:1] in ("-", "+") else word
-    if not body.isdigit():
-        return 0
-    return int(word) % RANDOM_MODULUS
+    try:
+        value = evaluate_arith(word,
+                               visible_env(session),
+                               elements=session_elements(session)).value
+    except ArithError:
+        return None
+    return value % RANDOM_MODULUS
 
 
 def step_state(state: int) -> int:
@@ -82,7 +94,10 @@ def next_random(session: Session, stored: str | None) -> int | None:
 
     A draw never returns the value before it (bash's ``get_random_number``
     redraws on a repeat), and a reseed or a fresh generator starts that
-    comparison from 0, as ``sbrand`` does.
+    comparison from 0, as ``sbrand`` does. A stored word that does not
+    evaluate is the assignment bash refused: the sequence continues as
+    if it had not happened. The refusal's message is bash's at
+    assignment time, which a reseed decided at the read cannot voice.
 
     Args:
         session (Session): the session holding the generator state.
@@ -92,8 +107,10 @@ def next_random(session: Session, stored: str | None) -> int | None:
     if session._random_seed == RANDOM_UNSET or (
             stored is None and session._random_seed is not None):
         return None
-    if stored is not None and stored != session._random_seed:
-        state = seed_from(stored)
+    seed = (seed_from(stored, session)
+            if stored is not None and stored != session._random_seed else None)
+    if seed is not None:
+        state = seed
         last = 0
     elif session._random_state is None:
         state = time.time_ns() % RANDOM_MODULUS

@@ -13,8 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.ops.types import StatPath
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.dates import iso_timestamp, timestamp_iso
+from mirage.utils.path import CycleError
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -33,6 +34,60 @@ def missing_reference_line(ref: str) -> bytes:
     return f"find: '{ref}': No such file or directory\n".encode()
 
 
+def loop_reference_line(ref: str) -> bytes:
+    """GNU's line for a ``-newer`` reference that is a symlink loop,
+    under a policy that follows it.
+
+    Args:
+        ref (str): the reference as typed.
+    """
+    return f"find: '{ref}': Too many levels of symbolic links\n".encode()
+
+
+async def reference_stat(
+    virtual: str,
+    stat_path: StatPath,
+    namespace: Namespace | None,
+    follow: bool,
+) -> FileStat | None:
+    """The stat a ``-newer`` reference compares by, or None when absent.
+
+    GNU reads the reference with the link policy the leading option
+    set: ``-P`` (the default) takes a symlink's own mtime, ``-H`` and
+    ``-L`` take its target's. A link lives in the namespace, so its own
+    row comes from there and never touches a backend, which is also
+    what makes a loop under ``-P`` an ordinary reference. Under a
+    following policy the target is resolved through the namespace,
+    which raises on a loop, and a dangling one falls back to the link's
+    own row, as GNU's stat-then-lstat does.
+
+    Args:
+        virtual (str): the reference's absolute virtual path.
+        stat_path (StatPath): the dispatcher's stat probe.
+        namespace (Namespace | None): the name plane, whose node table
+            holds the links and whose attr overlay may hold the mtime.
+        follow (bool): whether the leading option follows links.
+
+    Raises:
+        CycleError: the reference is a loop and ``follow`` is set.
+    """
+    if namespace is None:
+        return await stat_path(virtual)
+    own = namespace.link_stat_at(virtual)
+    if own is None:
+        stat = await stat_path(virtual)
+        if stat is None:
+            return None
+        return merge_overlay_stat(namespace.meta_for(virtual), stat)
+    if not follow:
+        return own
+    target = namespace.follow(virtual)
+    stat = await stat_path(target)
+    if stat is None:
+        return own
+    return merge_overlay_stat(namespace.meta_for(target), stat)
+
+
 async def resolve_newer_refs(
     tokens: list[str],
     refs: list[str],
@@ -40,6 +95,7 @@ async def resolve_newer_refs(
     cwd: str,
     stat_path: StatPath,
     namespace: Namespace | None = None,
+    follow: bool = False,
 ) -> tuple[list[str], bytes | None]:
     """Rewrite every ``-newer FILE`` in an expression into ``-newermt``.
 
@@ -50,7 +106,8 @@ async def resolve_newer_refs(
     through the dispatcher once, before any backend parses the
     expression, and hands down a timestamp that needs no further I/O.
     A reference that does not exist is GNU's error, exit 1, and no walk
-    runs.
+    runs; so is a symlink loop under ``-H`` or ``-L``, in GNU's other
+    words.
 
     Args:
         tokens (list[str]): the expression tokens as typed.
@@ -58,8 +115,12 @@ async def resolve_newer_refs(
         registry (MountRegistry): mount registry, for classification.
         cwd (str): the session's working directory.
         stat_path (StatPath): the dispatcher's stat probe.
-        namespace (Namespace | None): the name plane, whose attr
-            overlay may hold the reference's mtime.
+        namespace (Namespace | None): the name plane, whose node table
+            holds the links and whose attr overlay may hold the
+            reference's mtime.
+        follow (bool): whether the leading ``-H``/``-L`` follows a
+            reference that is a symlink; ``-P``, the default, reads the
+            link itself.
 
     Returns:
         The rewritten tokens and None, or the tokens untouched and the
@@ -69,11 +130,12 @@ async def resolve_newer_refs(
     for ref in refs:
         scope = classify_bare_path(ref, registry, cwd)
         virtual = scope.virtual if isinstance(scope, PathSpec) else ref
-        stat = await stat_path(virtual)
+        try:
+            stat = await reference_stat(virtual, stat_path, namespace, follow)
+        except CycleError:
+            return tokens, loop_reference_line(ref)
         if stat is None:
             return tokens, missing_reference_line(ref)
-        if namespace is not None:
-            stat = merge_overlay_stat(namespace.meta_for(virtual), stat)
         # A reference with no reported mtime is never "older" than
         # anything: the epoch bound admits every dated entry, which is
         # the most a backend without times can honestly say.

@@ -16,15 +16,36 @@ import pytest
 
 from mirage import MountMode, RAMResource, Workspace
 from mirage.shell.constants import RANDOM, RANDOM_MAX
+from mirage.shell.variable import ShellVar
 from mirage.workspace.session import Session
 from mirage.workspace.session.rng import next_random, seed_from
 from mirage.workspace.session.state import seed_var
 
 
-def test_seed_from_reads_the_word_as_an_integer():
-    assert seed_from("42") == 42
-    assert seed_from("-1") == (1 << 32) - 1
-    assert seed_from("abc") == 0
+def test_seed_from_evaluates_the_word_as_arithmetic():
+    s = Session(session_id="s")
+    s.vars["x"] = ShellVar("42")
+    assert seed_from("42", s) == 42
+    assert seed_from("-1", s) == (1 << 32) - 1
+    assert seed_from("abc", s) == 0
+    assert seed_from("", s) == 0
+    assert seed_from("1+2", s) == 3
+    assert seed_from("0x10", s) == 16
+    assert seed_from("010", s) == 8
+    assert seed_from("x", s) == 42
+    assert seed_from("x*2", s) == 84
+    assert seed_from("1.5", s) is None
+    assert seed_from("1+", s) is None
+    assert seed_from("08", s) is None
+
+
+def test_an_unevaluable_word_leaves_the_generator_alone():
+    # bash 5.2.37: `RANDOM=0; echo $RANDOM; RANDOM=1.5; echo $RANDOM`
+    # prints the error for 1.5 and then 24386, the second draw of seed 0.
+    s = Session(session_id="s")
+    assert next_random(s, "0") == 20814
+    assert next_random(s, "1.5") == 24386
+    assert next_random(s, s.vars[RANDOM].value) == 149
 
 
 @pytest.mark.parametrize("seed,expected", [
@@ -33,11 +54,15 @@ def test_seed_from_reads_the_word_as_an_integer():
     ("-1", [16807, 10791, 19566]),
     ("4294967338", [17772, 26794, 1435]),
     ("32768", [8403, 3502, 14043]),
+    ("1+2", [17653, 593, 9386]),
+    ("0x10", [6772, 8817, 18150]),
+    ("abc", [20814, 24386, 149]),
 ])
 def test_seeded_sequences_are_bash_5_2s(seed, expected):
     # Pinned against bash 5.2.37 on debian:stable-slim. -1 truncates to
-    # 32 bits, 4294967338 is 42 past 2**32, and seed 32768 renders 0 on
-    # its first step, which the no-repeat rule redraws.
+    # 32 bits, 4294967338 is 42 past 2**32, seed 32768 renders 0 on its
+    # first step, which the no-repeat rule redraws, and the last three
+    # are arithmetic words: 3, 16, and an unset name.
     s = Session(session_id="s")
     drawn = [
         next_random(s, seed if i == 0 else s.vars[RANDOM].value)
@@ -113,6 +138,11 @@ async def test_random_expands_in_the_shell():
     io = await ws.execute(
         'RANDOM=42; a=$RANDOM; RANDOM=42; (: $RANDOM); b=$RANDOM; echo $a $b')
     assert await io.stdout_str() == "17772 17772\n"
+    io = await ws.execute(
+        "RANDOM='1+2'; a=$RANDOM; RANDOM=0x10; b=$RANDOM; x=42; RANDOM=x; "
+        "c=$RANDOM; RANDOM=0; d=$RANDOM; RANDOM=1.5; e=$RANDOM; "
+        "echo $a $b $c $d $e")
+    assert await io.stdout_str() == "17653 6772 17772 20814 24386\n"
     io = await ws.execute('unset RANDOM; echo "[$RANDOM]"')
     assert await io.stdout_str() == "[]\n"
 

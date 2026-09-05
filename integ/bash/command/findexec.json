@@ -640,6 +640,108 @@
         "stdout": "rc=0\n",
         "stderr": "ownerr\n"
       }
+    },
+    {
+      "id": "find_delete_runs_at_its_position",
+      "seq": 980104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fe/d/sub && printf A > /data/fe/d/a.txt && printf B > /data/fe/d/sub/b.txt && printf k > /data/fe/d/keep.md && cd /data/fe && find d -type f -name '*.txt' -delete -exec cat {} \\; -print; echo rc=$?; find d -type f | wc -l; cd / && rm -r /data/fe",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n1\n",
+        "stderr": "cat: d/a.txt: No such file or directory\ncat: d/sub/b.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "find_depth_orders_a_directory_after_its_contents",
+      "seq": 980105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fe/d/sub && printf A > /data/fe/d/a.txt && printf B > /data/fe/d/sub/b.txt && printf k > /data/fe/d/keep.md && cd /data/fe && find d -depth -exec echo saw {} \\; ; find d -depth; cd / && rm -r /data/fe",
+      "expect": {
+        "exit": 0,
+        "stdout": "saw d/a.txt\nsaw d/keep.md\nsaw d/sub/b.txt\nsaw d/sub\nsaw d\nd/a.txt\nd/keep.md\nd/sub/b.txt\nd/sub\nd\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_newer_link_reference_by_link_policy",
+      "seq": 980106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fe/d && printf c > /data/fe/d/cand && cd /data/fe && ln -s nowhere dangling && touch -h -d '2099-01-01 00:00:00' dangling && ln -s loop1 loop2 && ln -s loop2 loop1 && touch -h -d '2099-01-01 00:00:00' loop1; find d -newer dangling; echo rc=$?; find -L d -newer dangling; echo rc=$?; find d -newer loop1; echo rc=$?; find -L d -newer loop1; echo rc=$?; rm dangling loop1 loop2; cd / && rm -r /data/fe",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=0\nrc=0\nrc=1\n",
+        "stderr": "find: 'loop1': Too many levels of symbolic links\n"
+      }
     }
   ]
 }

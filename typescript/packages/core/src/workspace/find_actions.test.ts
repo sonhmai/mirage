@@ -227,6 +227,57 @@ describe('find -exec isolation', () => {
     }
   })
 
+  it('runs -delete at its position, in -depth order, and ends the chain on a failure', async () => {
+    const ws = await singleMountWs()
+    const seed =
+      "mkdir -p /w/d/sub; printf 'a\\n' > /w/d/a.txt; printf 'bb\\n' > /w/d/b.txt; " +
+      'printf x > /w/d/sub/c.txt; cd /w'
+    const out = async (line: string): Promise<[string, string, number]> => {
+      const r = await ws.execute(line)
+      return [r.stdoutText, r.stderrText, r.exitCode]
+    }
+    try {
+      // GNU: the row is gone before the next action sees it, so cat
+      // fails, its failure ends the chain, and -print never fires.
+      await ws.execute(seed)
+      expect(await out('find d -type f -delete -exec cat {} \\; -print')).toEqual([
+        '',
+        'cat: d/a.txt: No such file or directory\n' +
+          'cat: d/b.txt: No such file or directory\n' +
+          'cat: d/sub/c.txt: No such file or directory\n',
+        0,
+      ])
+      expect(await out('find d -type f')).toEqual(['', '', 0])
+      // -delete implies -depth, so every action runs in that order.
+      await ws.execute(seed)
+      expect(await out('find d -exec echo saw {} \\; -delete -print')).toEqual([
+        'saw d/a.txt\nd/a.txt\nsaw d/b.txt\nd/b.txt\nsaw d/sub/c.txt\nd/sub/c.txt\n' +
+          'saw d/sub\nd/sub\nsaw d\nd\n',
+        '',
+        0,
+      ])
+      expect(await out('test -e d')).toEqual(['', '', 1])
+      await ws.execute(seed)
+      const post = 'd/a.txt\nd/b.txt\nd/sub/c.txt\nd/sub\nd\n'
+      expect(await out('find d -depth')).toEqual([post, '', 0])
+      expect(await out('find d -depth -print')).toEqual([post, '', 0])
+      expect(await out('find d')).toEqual(['d\nd/a.txt\nd/b.txt\nd/sub\nd/sub/c.txt\n', '', 0])
+      expect(await out('find d ! -name c.txt -delete -print')).toEqual([
+        'd/a.txt\nd/b.txt\n',
+        "find: cannot delete 'd/sub': Directory not empty\n" +
+          "find: cannot delete 'd': Directory not empty\n",
+        1,
+      ])
+      expect(await out('find d -name c.txt -delete -delete -print')).toEqual([
+        '',
+        "find: cannot delete 'd/sub/c.txt': No such file or directory\n",
+        1,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it.each(['-exec touch marker \\;', '-print', '-delete'])(
     'refuses a later test before %s has side effects',
     async (action) => {

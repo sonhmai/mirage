@@ -1049,7 +1049,12 @@ class Workspace:
         compiled = compile_profile(self._base_profile(profile),
                                    self._profile_name(profile))
         check_cli_verbs(compiled.commands, self._cli_verbs())
+        was_default = session_id == self.default_session_id
         await self.ensure_sessions_loaded()
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
+        if was_default:
+            session_id = self.default_session_id
         session = self._session_mgr.set_profile(session_id, compiled)
         await self._session_mgr.flush()
         return session

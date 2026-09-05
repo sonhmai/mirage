@@ -138,9 +138,10 @@ export class Workspace {
    * runtime can still replay its journal, and that window would otherwise let
    * a caller start a job after `killAll`, or add a mount after the close list
    * was taken. Internal dispatch and recursive execution stay open until
-   * teardown finishes; their public doors do not.
+   * teardown finishes; their public doors do not. A method keeps TypeScript
+   * from treating a pre-await check as proof that the state is still open.
    */
-  private get shuttingDown(): boolean {
+  private isShuttingDown(): boolean {
     return this.closing !== null || this.closed
   }
   private readonly watchManager: WatchManager
@@ -392,7 +393,7 @@ export class Workspace {
     // ledger, which is its own; the sink is only the observer's copy.
     this.fs = new Ops(
       (op, path, args, kwargs, report) => {
-        if (this.shuttingDown) throw new Error('Workspace is closed')
+        if (this.isShuttingDown()) throw new Error('Workspace is closed')
         return this.dispatcher.dispatch(op, path, args, kwargs, report)
       },
       async (rec) => {
@@ -432,7 +433,7 @@ export class Workspace {
 
   /** Append a runtime entry to the workspace's ordered world (last, first capturer still wins). */
   addRuntime(runtime: RuntimeEntry): Runtime {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.runtimes.add(runtime)
   }
 
@@ -452,13 +453,13 @@ export class Workspace {
     spec: CLISpec,
     config: Record<string, unknown> | null = null,
   ): CLIInstall {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.registry.clis.install(name, spec, config)
   }
 
   /** Remove an installed CLI; its head word stops resolving (127). */
   unregisterCli(name: string): void {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     this.registry.clis.uninstall(name)
   }
 
@@ -721,10 +722,13 @@ export class Workspace {
     sessionId: string,
     profile: string | SessionProfile | null,
   ): Promise<Session> {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const compiled = compileProfile(this.baseProfile(profile), this.profileName(profile))
     checkCliVerbs(compiled.commands, this.cliVerbs())
+    const wasDefault = sessionId === this.defaultSessionId
     await this.ensureSessionsLoaded()
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    if (wasDefault) sessionId = this.defaultSessionId
     const session = this.sessionManager.setProfile(sessionId, compiled)
     await this.sessionManager.flush()
     return session
@@ -813,7 +817,7 @@ export class Workspace {
   }
 
   attachWatchRuntime(runtime: WatchRuntime): void {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     this.watchManager.attach(runtime)
   }
 
@@ -822,12 +826,12 @@ export class Workspace {
   }
 
   watch(path: string | PathSpec | readonly (string | PathSpec)[]): AsyncIterable<FileEvent> {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.watchManager.watch(path)
   }
 
   async notify(change: FileEvent): Promise<void> {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     await this.watchManager.notify(change)
   }
 
@@ -836,7 +840,7 @@ export class Workspace {
    * on this workspace's OpsRegistry so dispatch can find them.
    */
   addMount(prefix: string, resource: Resource, mode: MountMode = MountMode.READ): MountEntry {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     // Configure before mount() captures the index in its CacheManager.
     // An alias must retain the index used by the resource's other mounts.
     if (
@@ -857,7 +861,7 @@ export class Workspace {
 
   /** Change an exact mount's ceiling, retaining its data and every session's cap. */
   setMountMode(prefix: string, mode: MountMode): void {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const parsed = parseMountMode(mode)
     this.registry.mountForPrefix(prefix).mode = parsed
   }
@@ -869,7 +873,7 @@ export class Workspace {
    * In-flight ops that already resolved their Mount are not interrupted.
    */
   async unmount(prefix: string): Promise<void> {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     await unmountPrefix(
       {
         registry: this.registry,
@@ -970,7 +974,7 @@ export class Workspace {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.dispatchInternal(opName, path, args, kwargs)
   }
 
@@ -997,7 +1001,7 @@ export class Workspace {
   }
 
   async resolve(path: string): Promise<[Resource, PathSpec, MountMode]> {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.resolveInternal(path)
   }
 
@@ -1168,7 +1172,7 @@ export class Workspace {
     // teardown then never stops, and resources would close under it. The
     // internal dispatch path stays open, which is what the journal replay
     // uses.
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.executeInternal(command, options)
   }
 
@@ -1197,7 +1201,7 @@ export class Workspace {
    * runtime throws.
    */
   async executePythonRepl(code: string, options: { sessionId?: string } = {}): Promise<EvalResult> {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const sessionId = options.sessionId ?? this.sessionManager.defaultId
     const bound = this.runtimes.bindings.python3
     if (bound === undefined || !isEvaluator(bound)) {

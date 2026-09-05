@@ -417,15 +417,17 @@ export class SessionManager {
   }
 
   async close(sessionId: string): Promise<void> {
-    if (sessionId === this.defaultId) {
-      throw new Error('Cannot close the default session')
-    }
-    if (!this.sessions.has(sessionId)) {
-      throw new Error(`unknown session: ${sessionId}`)
-    }
-    this.sessions.delete(sessionId)
-    this.persisted.delete(sessionId)
-    await this.sessionStore.delete([sessionId])
+    await this.persistLock.withLock(sessionId, async () => {
+      if (sessionId === this.defaultId) {
+        throw new Error('Cannot close the default session')
+      }
+      if (!this.sessions.has(sessionId)) {
+        throw new Error(`unknown session: ${sessionId}`)
+      }
+      this.sessions.delete(sessionId)
+      this.persisted.delete(sessionId)
+      await this.sessionStore.delete([sessionId])
+    })
   }
 
   async closeAll(): Promise<void> {

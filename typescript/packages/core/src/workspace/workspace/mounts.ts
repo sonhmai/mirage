@@ -144,16 +144,23 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
     }
   }
   if (!stillMounted) {
-    const idx = deps.openOrder.indexOf(resource)
-    if (idx !== -1) deps.openOrder.splice(idx, 1)
-    if (deps.opened.has(resource)) {
-      deps.opened.delete(resource)
-      deps.registry.retiringResources.add(resource)
-      try {
-        await resource.close()
-      } finally {
-        deps.registry.retiringResources.delete(resource)
-      }
+    const closing = closeResource(deps, entry)
+    deps.registry.retiringResources.set(resource, closing)
+    try {
+      await closing
+    } finally {
+      deps.registry.retiringResources.delete(resource)
     }
+  }
+}
+
+async function closeResource(deps: UnmountDeps, entry: MountEntry): Promise<void> {
+  await entry.activity.wait()
+  const resource = entry.resource
+  const idx = deps.openOrder.indexOf(resource)
+  if (idx !== -1) deps.openOrder.splice(idx, 1)
+  if (deps.opened.delete(resource)) {
+    deps.registry.retiredResources.add(resource)
+    await resource.close()
   }
 }

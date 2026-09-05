@@ -764,3 +764,47 @@ async def test_profile_changes_publish_only_after_persistence(
     finally:
         release.set()
         await asyncio.gather(updating, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [False, True])
+async def test_session_close_waits_for_profile_persistence(
+        monkeypatch, failure):
+    store = RAMSessionStore()
+    mgr = SessionManager("default", store=store)
+    mgr.create("agent")
+    entered, release = asyncio.Event(), asyncio.Event()
+    cas_set = store.cas_set
+
+    async def delayed_write(*args):
+        entered.set()
+        await release.wait()
+        if failure:
+            raise RuntimeError("store unavailable")
+        return await cas_set(*args)
+
+    monkeypatch.setattr(store, "cas_set", delayed_write)
+    cleared = CompiledProfile(mount_modes=None,
+                              hidden_paths=None,
+                              hidden_vars=None,
+                              env=None,
+                              cwd=None,
+                              commands=None)
+    updating = asyncio.create_task(mgr.set_profile("agent", cleared))
+    closing = None
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        closing = asyncio.create_task(mgr.close("agent"))
+        await asyncio.sleep(0.02)
+        assert not closing.done()
+        release.set()
+        await asyncio.gather(updating, return_exceptions=True)
+        await closing
+        with pytest.raises(KeyError):
+            mgr.get("agent")
+        assert "agent" not in await store.load()
+    finally:
+        release.set()
+        await asyncio.gather(updating, return_exceptions=True)
+        if closing is not None:
+            await closing

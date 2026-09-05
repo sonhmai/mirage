@@ -863,7 +863,8 @@ export class Workspace {
    * Remove a mount by prefix. Closes the resource if the workspace had opened
    * it and no other mount still references it. Drops cache entries under the
    * unmounted prefix. Forbidden prefixes: cache root, history view, /dev/.
-   * In-flight ops that already resolved their Mount are not interrupted.
+   * Waits for admitted calls and returned streams before closing the resource.
+   * Callers must consume or close streams; closed instances cannot be remounted.
    */
   async unmount(prefix: string): Promise<void> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
@@ -1012,9 +1013,13 @@ export class Workspace {
 
   private async ensureOpen(resource: Resource): Promise<void> {
     if (this.opened.has(resource)) return
-    await resource.open()
-    this.opened.add(resource)
-    this.openOrder.push(resource)
+    const mount = this.registry.allMounts().find((m) => m.resource === resource && !m.retiring)
+    if (mount === undefined) throw new Error('resource is no longer mounted')
+    await mount.use(async () => {
+      await resource.open()
+      this.opened.add(resource)
+      this.openOrder.push(resource)
+    })
   }
 
   /**

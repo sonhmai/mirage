@@ -359,13 +359,17 @@ async def test_snapshot_rejects_fingerprint_from_retired_lazy_op():
         stream, _ = await ws.dispatch("read",
                                       PathSpec.from_str_path("/data/file"))
         old_id = ws.mount("/data").mount_id
-        await ws.unmount("/data")
+        removing = asyncio.create_task(ws.unmount("/data"))
+        async with asyncio.timeout(5):
+            while ws._registry.try_mount_for_prefix("/data") is not None:
+                await asyncio.sleep(0)
         replacement = RAMResource()
         replacement.SUPPORTS_SNAPSHOT = True
         ws.add_mount("/data", replacement)
         async for chunk in stream:
             assert chunk == payload
         ws._ops.records.extend(scope.records)
+        await removing
         assert scope.records[0].mount_id == old_id
         assert (await to_state_dict(ws))["fingerprints"] == []
     finally:

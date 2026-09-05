@@ -65,7 +65,8 @@ export interface OpsMountInfo {
 
 export class MountRegistry {
   private readonly mountList: MountEntry[]
-  readonly retiringResources = new Set<Resource>()
+  readonly retiringResources = new Map<Resource, Promise<void>>()
+  readonly retiredResources = new WeakSet<Resource>()
   private rootRef: MountEntry | null = null
   private consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
   private readonly defaultMode: MountMode
@@ -147,9 +148,14 @@ export class MountRegistry {
       if (seen.has(prefix)) {
         throw new Error(`duplicate mount prefix: ${prefix}`)
       }
+      if (resource.isClosed === true)
+        throw new Error('resource is closed; create a new resource instance')
       seen.add(prefix)
       const mode = overrides[prefix] ?? defaultMode
-      mounts.push(new MountEntry({ prefix, resource, mode }))
+      const entry = new MountEntry({ prefix, resource, mode })
+      const alias = mounts.find((existing) => existing.resource === resource)
+      if (alias !== undefined) entry.activity = alias.activity
+      mounts.push(entry)
     }
     mounts.sort((a, b) => b.prefix.length - a.prefix.length)
     this.mountList = mounts
@@ -164,13 +170,16 @@ export class MountRegistry {
     return this.consistency
   }
 
-  /** Refuse reuse until the previous lifecycle has finished closing. */
+  /** A removed resource instance cannot start a second lifecycle. */
   checkResourceAvailable(resource: Resource): void {
     if (
       this.retiringResources.has(resource) ||
       this.mountList.some((m) => m.resource === resource && m.retiring)
     ) {
       throw new Error('resource is being unmounted')
+    }
+    if (resource.isClosed === true || this.retiredResources.has(resource)) {
+      throw new Error('resource is closed; create a new resource instance')
     }
   }
 
@@ -193,6 +202,8 @@ export class MountRegistry {
       }
     }
     const m = new MountEntry({ prefix: norm, resource, mode, consistency })
+    const alias = this.mountList.find((existing) => existing.resource === resource)
+    if (alias !== undefined) m.activity = alias.activity
     const cmds = resource.commands?.()
     if (cmds !== undefined) {
       for (const cmd of cmds) {

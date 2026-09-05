@@ -37,13 +37,13 @@ GLOBSTAR_MAX_DEPTH = 32
 async def _backend_glob(registry: MountRegistry, mount: MountEntry,
                         paths: list[PathSpec], prefix: str) -> list[PathSpec]:
     """Prepare the mount; drain resource index writes before eviction."""
-    await mount.ensure_ready()
-    cache = registry.file_cache
-    if cache is None:
-        return await mount.resource.resolve_glob(paths, prefix=prefix)
-    async with mutation_lock(cache):
-        await mount.ensure_ready()
-        return await mount.resource.resolve_glob(paths, prefix=prefix)
+    async with mount.use():
+        cache = registry.file_cache
+        if cache is None:
+            return await mount.resource.resolve_glob(paths, prefix=prefix)
+        async with mutation_lock(cache):
+            await mount.ensure_ready()
+            return await mount.resource.resolve_glob(paths, prefix=prefix)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

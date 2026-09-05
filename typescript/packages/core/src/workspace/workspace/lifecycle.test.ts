@@ -14,6 +14,8 @@
 
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
+import { command } from '../../commands/config.ts'
+import { CommandSpec, Operand } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { type JobRunner, JobStatus } from '../../shell/job_table/index.ts'
@@ -177,3 +179,179 @@ it.each([
     }
   },
 )
+
+it.each(
+  [null, 'initial', 'dynamic'].flatMap((alias) =>
+    [false, true].flatMap((streaming) =>
+      ['op', 'command'].map((surface) => ({ alias, streaming, surface })),
+    ),
+  ),
+)(
+  'unmount waits for admitted resource use ($surface, streaming=$streaming, alias=$alias)',
+  async ({ surface, streaming, alias }) => {
+    const resource = new RAMResource()
+    let entered = (): void => undefined
+    let resume = (): void => undefined
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const release = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    let closed = false
+    async function* chunks(): AsyncGenerator<Uint8Array> {
+      entered()
+      await release
+      expect(closed).toBe(false)
+      yield new TextEncoder().encode('value')
+    }
+    const read = async (): Promise<Uint8Array | AsyncIterable<Uint8Array>> => {
+      if (streaming) return chunks()
+      entered()
+      await release
+      expect(closed).toBe(false)
+      return new TextEncoder().encode('value')
+    }
+    const resources: Record<string, RAMResource> = { '/data': resource }
+    if (alias === 'initial') resources['/alias'] = resource
+    const ws = new Workspace(resources, { shellParser: parser })
+    if (alias === 'dynamic') ws.addMount('/alias', resource)
+    ws.ops.register({ name: 'read', resource: 'ram', filetype: null, write: false, fn: read })
+    const [registered] = command({
+      name: 'readvalue',
+      resource: 'ram',
+      spec: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
+      fn: async () => [await read(), new IOResult()],
+    })
+    if (registered === undefined) throw new Error('missing command')
+    ws.mount('/data').register(registered)
+    const closeResource = resource.close.bind(resource)
+    vi.spyOn(resource, 'close').mockImplementation(async () => {
+      closed = true
+      await closeResource()
+    })
+    const running = (async () => {
+      if (surface === 'command')
+        return new TextDecoder().decode((await ws.execute('readvalue /data/file')).stdout)
+      const value = (await ws.dispatch('read', '/data/file')) as
+        | Uint8Array
+        | AsyncIterable<Uint8Array>
+      if (value instanceof Uint8Array) return new TextDecoder().decode(value)
+      let result = ''
+      for await (const chunk of value) result += new TextDecoder().decode(chunk)
+      return result
+    })()
+    let removing: Promise<void> | undefined
+    try {
+      await started
+      if (alias) {
+        await ws.unmount('/data')
+        expect(closed).toBe(false)
+      }
+      let removed = false
+      const prefix = alias ? '/alias' : '/data'
+      removing = ws.unmount(prefix).then(() => {
+        removed = true
+      })
+      await vi.waitFor(() => {
+        expect(ws.registry.tryMountForPrefix(prefix)).toBeNull()
+      })
+      expect(removed).toBe(false)
+      expect(closed).toBe(false)
+      resume()
+      expect(await running).toBe('value')
+      await removing
+      expect(closed).toBe(true)
+    } finally {
+      resume()
+      await Promise.allSettled([running, ...(removing === undefined ? [] : [removing])])
+      await ws.close()
+    }
+  },
+)
+
+it('workspace close waits for resource retirements before closing stores', async () => {
+  const resource = new RAMResource()
+  const ws = new Workspace({ '/data': resource }, { shellParser: parser })
+  await ws.dispatch('stat', '/data')
+  let entered = (): void => undefined
+  let resume = (): void => undefined
+  const started = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const release = new Promise<void>((resolve) => {
+    resume = resolve
+  })
+  const events: string[] = []
+  const closeResource = resource.close.bind(resource)
+  vi.spyOn(resource, 'close').mockImplementation(async () => {
+    entered()
+    await release
+    await closeResource()
+    events.push('resource')
+  })
+  const closeStore = ws.stateStore.close.bind(ws.stateStore)
+  vi.spyOn(ws.stateStore, 'close').mockImplementation(async () => {
+    events.push('store')
+    await closeStore()
+  })
+  const removing = ws.unmount('/data')
+  let closing: Promise<void> | undefined
+  try {
+    await started
+    let closed = false
+    closing = ws.close().then(() => {
+      closed = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(closed).toBe(false)
+    expect(events).toEqual([])
+    resume()
+    await closing
+    expect(events).toEqual(['resource', 'store'])
+  } finally {
+    resume()
+    await Promise.allSettled([removing, ...(closing === undefined ? [] : [closing])])
+    await ws.close()
+  }
+})
+
+it('unmount drains an admitted resource open before closing it', async () => {
+  const resource = new RAMResource()
+  const ws = new Workspace({ '/data': resource }, { shellParser: parser })
+  let entered = (): void => undefined
+  let resume = (): void => undefined
+  const started = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const release = new Promise<void>((resolve) => {
+    resume = resolve
+  })
+  let closed = false
+  vi.spyOn(resource, 'open').mockImplementation(async () => {
+    entered()
+    await release
+  })
+  vi.spyOn(resource, 'close').mockImplementation(() => {
+    closed = true
+    return Promise.resolve()
+  })
+  const reading = ws.dispatch('read', '/data/file').catch((error: unknown) => error)
+  let removing: Promise<void> | undefined
+  try {
+    await started
+    removing = ws.unmount('/data')
+    await vi.waitFor(() => {
+      expect(ws.registry.tryMountForPrefix('/data')).toBeNull()
+    })
+    expect(closed).toBe(false)
+    resume()
+    await removing
+    expect(closed).toBe(true)
+    expect(await reading).toMatchObject({ code: 'EBUSY' })
+  } finally {
+    resume()
+    await Promise.allSettled([reading, ...(removing === undefined ? [] : [removing])])
+    await ws.close()
+  }
+})

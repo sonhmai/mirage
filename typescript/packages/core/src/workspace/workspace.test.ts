@@ -177,7 +177,9 @@ describe('Workspace lifecycle', () => {
       }
       resume()
       await removing
-      ws.addMount('/data', resource)
+      expect(() => ws.addMount('/data', resource)).toThrow('resource is closed')
+      expect(() => new Workspace({ '/data': resource })).toThrow('resource is closed')
+      ws.addMount('/data', new RAMResource())
     } finally {
       resume()
       await removing
@@ -185,9 +187,10 @@ describe('Workspace lifecycle', () => {
     }
   })
 
-  it.each([false, true])(
-    'does not cache a retired command result for a replacement mount (shadow=%s)',
-    async (shadow) => {
+  it.each(['replace', 'shadow', 'reveal'])(
+    'does not cache a retired command result for a different owner (%s)',
+    async (change) => {
+      const shadow = change === 'shadow'
       class CachedRAM extends RAMResource {
         override readonly cachesReads = true
       }
@@ -197,7 +200,10 @@ describe('Workspace lifecycle', () => {
         files: { [shadow ? '/data/file' : '/file']: new TextEncoder().encode('old') },
       })
       const replacement = new CachedRAM()
-      replacement.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('new') } })
+      replacement.loadState({
+        type: 'ram',
+        files: { [change === 'reveal' ? '/data/file' : '/file']: new TextEncoder().encode('new') },
+      })
       let enter = (): void => undefined
       let resume = (): void => undefined
       const entered = new Promise<void>((resolve) => {
@@ -207,7 +213,9 @@ describe('Workspace lifecycle', () => {
         resume = resolve
       })
       const prefix = shadow ? '/' : '/data'
-      const ws = new Workspace({ [prefix]: old }, { shellParser: await getTestParser() })
+      const resources: Record<string, Resource> = { [prefix]: old }
+      if (change === 'reveal') resources['/'] = replacement
+      const ws = new Workspace(resources, { shellParser: await getTestParser() })
       ws.registerCli(
         'gate',
         new CLISpec({
@@ -224,7 +232,7 @@ describe('Workspace lifecycle', () => {
       try {
         await entered
         if (!shadow) await ws.unmount('/data')
-        ws.addMount('/data', replacement)
+        if (change !== 'reveal') ws.addMount('/data', replacement)
         resume()
         expect(new TextDecoder().decode((await running).stdout)).toBe('old')
         expect(await ws.cache.get('/data/file')).toBeNull()

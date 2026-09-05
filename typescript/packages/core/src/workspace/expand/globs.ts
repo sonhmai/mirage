@@ -76,8 +76,9 @@ async function backendGlob(
   await mount.ensureReady()
   const resource = mount.resource as Resource & Partial<ResourceWithGlob>
   const glob = async (): Promise<PathSpec[]> => {
-    await mount.ensureReady()
-    return resource.glob === undefined ? [] : resource.glob(paths, prefix)
+    return mount.use(() =>
+      resource.glob === undefined ? Promise.resolve([]) : resource.glob(paths, prefix),
+    )
   }
   // Resource hooks own their index access; drain their writes before eviction.
   return registry.fileCache === null ? glob() : withCacheMutation(registry.fileCache, glob)

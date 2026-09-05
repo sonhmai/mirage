@@ -57,3 +57,16 @@ class OpRecord:
     def is_cache(self) -> bool:
         """Whether this op was served from the in-memory cache."""
         return self.source == "ram"
+
+    def to_dict(self) -> dict[str, str | int | None]:
+        """Public observation fields, excluding in-process mount ownership."""
+        return {
+            "op": self.op,
+            "path": self.path,
+            "source": self.source,
+            "bytes": self.bytes,
+            "timestamp": self.timestamp,
+            "duration_ms": self.duration_ms,
+            "fingerprint": self.fingerprint,
+            "revision": self.revision,
+        }

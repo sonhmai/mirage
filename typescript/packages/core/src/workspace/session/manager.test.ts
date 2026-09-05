@@ -685,3 +685,57 @@ it.each([false, true])(
     }
   },
 )
+
+it.each([false, true])(
+  'session close waits for profile persistence (failure=%s)',
+  async (failure) => {
+    const store = new RAMSessionStore()
+    const manager = new SessionManager('default', store)
+    manager.create('agent')
+    let enter = (): void => undefined
+    let resume = (): void => undefined
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    const release = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    const casSet = store.casSet.bind(store)
+    const spy = vi.spyOn(store, 'casSet').mockImplementation(async (...args) => {
+      enter()
+      await release
+      if (failure) throw new Error('store unavailable')
+      return casSet(...args)
+    })
+    const updating = manager
+      .setProfile('agent', {
+        mountModes: null,
+        hiddenPaths: null,
+        hiddenVars: null,
+        env: null,
+        cwd: null,
+        commands: null,
+      })
+      .catch((error: unknown) => error)
+    let closing: Promise<void> | undefined
+    try {
+      await entered
+      let closed = false
+      closing = manager.close('agent').then(() => {
+        closed = true
+      })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(closed).toBe(false)
+      resume()
+      await updating
+      await closing
+      expect(() => manager.get('agent')).toThrow('unknown session')
+      expect((await store.load()).has('agent')).toBe(false)
+    } finally {
+      resume()
+      await updating
+      await closing
+      spy.mockRestore()
+    }
+  },
+)

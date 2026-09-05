@@ -16,7 +16,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { Accessor } from '../accessor/base.ts'
 import { record, revisionFor, runWithRecording, startOp } from '../observe/context.ts'
 import { type OpKwargs, OpsRegistry, type RegisteredOp } from '../ops/registry.ts'
@@ -463,9 +463,13 @@ it('snapshot rejects fingerprints from a retired lazy op', async () => {
     const id = ws.mount('/remote').mountId
     const [, records] = await runWithRecording(async () => {
       const stream = (await ws.dispatch('read', '/remote/file')) as AsyncIterable<Uint8Array>
-      await ws.unmount('/remote')
+      const removing = ws.unmount('/remote')
+      await vi.waitFor(() => {
+        expect(ws.registry.tryMountForPrefix('/remote')).toBeNull()
+      })
       ws.addMount('/remote', new FakeRemoteResource(new FakeRemoteAccessor()))
       for await (const chunk of stream) expect(chunk).toEqual(new TextEncoder().encode('old'))
+      await removing
     })
     ws.records.push(...records)
     expect(records[0]?.mountId).toBe(id)

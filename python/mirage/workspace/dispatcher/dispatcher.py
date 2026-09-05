@@ -39,7 +39,7 @@ from mirage.types import (ConsistencyPolicy, FileStat, FileType, PathSpec,
 from mirage.utils.errors import MISS_ERRORS, no_mount
 from mirage.utils.hidden import move_reveals
 from mirage.utils.key_prefix import mount_key
-from mirage.utils.path import norm_dir
+from mirage.utils.path import norm_dir, owner_prefix
 from mirage.utils.ranges import slice_window
 from mirage.utils.remnants import remove_remnants, visible_below
 from mirage.workspace.dispatcher.lineage import require_turf_writable
@@ -890,8 +890,10 @@ class Dispatcher:
         mounts = {m.prefix: m for m in self._namespace.registry.mounts()}
 
         def cacheable(path: str) -> bool:
+            prefix = owner_prefix(mounts, path)
+            original = mounts.get(prefix) if prefix is not None else None
             mount = self._namespace.try_mount_for(path)
-            return (mount is not None and mounts.get(mount.prefix) is mount
+            return (mount is not None and original is mount
                     and not mount.retiring and mount.resource.caches_reads)
 
         return cacheable

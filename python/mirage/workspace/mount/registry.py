@@ -14,6 +14,7 @@
 
 import asyncio
 from typing import Protocol
+from weakref import WeakValueDictionary
 
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.manager import CacheManager
@@ -72,6 +73,8 @@ class MountRegistry:
     def __init__(self) -> None:
         self._mounts: list[MountEntry] = []
         self.retiring_resources: dict[int, asyncio.Task[None]] = {}
+        self.retired_resources: WeakValueDictionary[int, BaseResource] = (
+            WeakValueDictionary())
         self._root: MountEntry | None = None
         # Workspace-level command -> runtime bindings (first listed
         # capturer wins), set by Workspace after construction (same
@@ -148,10 +151,14 @@ class MountRegistry:
             lambda path: not m.retiring and self.try_mount_for(path) is m)
 
     def check_resource_available(self, resource: BaseResource) -> None:
-        """Refuse reuse until the previous lifecycle has finished closing."""
+        """A removed resource instance cannot start a second lifecycle."""
         if id(resource) in self.retiring_resources or any(
                 m.resource is resource and m.retiring for m in self._mounts):
             raise ValueError("resource is being unmounted")
+        if (resource.is_closed
+                or self.retired_resources.get(id(resource)) is resource):
+            raise ValueError(
+                "resource is closed; create a new resource instance")
 
     def mount(
         self,
@@ -169,6 +176,10 @@ class MountRegistry:
                 raise ValueError(f"duplicate mount prefix: "
                                  f"{norm_prefix!r}")
         m = MountEntry(norm_prefix, resource, mode, consistency)
+        for existing in self._mounts:
+            if existing.resource is resource:
+                m.activity = existing.activity
+                break
         for cmd in resource.commands():
             m.register(cmd)
         for cmd in GENERAL_COMMANDS:

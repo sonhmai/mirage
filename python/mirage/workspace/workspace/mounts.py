@@ -133,6 +133,7 @@ def install_mounts(registry: MountRegistry, specs: list[MountSpec],
         bool: whether the root mount was synthesized.
     """
     for spec in specs:
+        registry.check_resource_available(spec.resource)
         spec.resource.set_index(index)
         entry = registry.mount(spec.prefix, spec.resource, spec.mode)
         if spec.command_limits:
@@ -176,7 +177,9 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
 
     The virtual root, the device mount, and the history view are
     permanent. The resource is closed only when no remaining mount
-    holds the same instance. Commands and operations belong to each
+    holds the same instance. Admitted calls and streams finish first;
+    callers must consume or close streams. Closed instances cannot be
+    mounted again. Commands and operations belong to each
     mount, so removing one leaves other mounts of the same kind intact.
 
     Args:
@@ -220,15 +223,17 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
     # with it; the facade keeps no second registry to clean up.
     if not still_instance:
         identity = id(removed.resource)
-        closing = asyncio.create_task(_close_resource(removed.resource))
+        registry.retired_resources[identity] = removed.resource
+        closing = asyncio.create_task(_close_resource(removed))
         registry.retiring_resources[identity] = closing
         closing.add_done_callback(
             partial(_release_resource, registry, identity))
         await asyncio.shield(closing)
 
 
-async def _close_resource(resource: BaseResource) -> None:
-    close = getattr(resource, "close", None)
+async def _close_resource(entry: MountEntry) -> None:
+    await entry.activity.wait()
+    close = getattr(entry.resource, "close", None)
     if callable(close):
         result = close()
         if inspect.isawaitable(result):

@@ -18,7 +18,7 @@ import os
 import posixpath
 import threading
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any, Coroutine
 
 from mirage.bridge.sync import run_async_from_sync
@@ -263,7 +263,7 @@ class MountCore:
         return entry
 
     def drain_ops(self) -> list[dict[str, Any]]:
-        records = [asdict(r) for r in self._ops.records]
+        records = [r.to_dict() for r in self._ops.records]
         self._ops.records.clear()
         return records
 

@@ -32,7 +32,7 @@ import {
 import { Policies, PolicyDenied, postOpsGate, preOpsGate } from '../../policy/index.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { normDir, rstripSlash } from '../../utils/slash.ts'
+import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { record, runWithMountPrefix, runWithRevisions, startOp } from '../../observe/context.ts'
 import { wrapOpStream } from '../mount/mount.ts'
 import type { OpRecord } from '../../observe/record.ts'
@@ -40,7 +40,7 @@ import type { OpsRegistry } from '../../ops/registry.ts'
 import { type OpKwargs } from '../../ops/registry.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
-import { isMissingPath } from '../../utils/errors.ts'
+import { ebusy, isMissingPath } from '../../utils/errors.ts'
 import { cachesReads, type Resource } from '../../resource/base.ts'
 import {
   ConsistencyPolicy,
@@ -262,6 +262,7 @@ export class Dispatcher {
         if (!pathAllowed(p.virtual)) throw hiddenRefusal(opName, p.virtual)
       }
     }
+    const resolvedOwner = this.namespace.tryMountFor(p.virtual)
     let resolved: [Resource, PathSpec, MountMode]
     try {
       resolved = await this.namespace.resolve(p.virtual, false)
@@ -310,6 +311,7 @@ export class Dispatcher {
     // resolve() above already threw for a path outside every mount, so
     // this lookup cannot miss.
     const mount = this.namespace.mountFor(p.virtual)
+    if (mount !== resolvedOwner) throw ebusy(p.virtual)
     const mountPrefix = mount.prefix
     // Admission policies fire at the door, before the warm-cache early
     // return below: a cached read must be refused exactly like a cold
@@ -408,29 +410,32 @@ export class Dispatcher {
     // prefix has to be active while the op runs or the record loses the
     // mount it belongs to. Mirrors Python's Ops._call.
     try {
-      result = await runWithMountPrefix(
-        rstripSlash(mountPrefix),
-        () =>
-          runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () =>
-            runWithTimeout(
-              Promise.resolve(
-                opName === 'setattr'
-                  ? this.applySetattr(resource, scope, p, fullKwargs)
-                  : this.opsRegistry.call(
-                      opName,
-                      resource,
-                      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-                      scope,
-                      fullArgs,
-                      fullKwargs,
-                    ),
+      result = await mount.use(async () => {
+        const answer = await runWithMountPrefix(
+          rstripSlash(mountPrefix),
+          () =>
+            runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () =>
+              runWithTimeout(
+                Promise.resolve(
+                  opName === 'setattr'
+                    ? this.applySetattr(resource, scope, p, fullKwargs)
+                    : this.opsRegistry.call(
+                        opName,
+                        resource,
+                        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+                        scope,
+                        fullArgs,
+                        fullKwargs,
+                      ),
+                ),
+                opTimeout,
+                opName,
               ),
-              opTimeout,
-              opName,
             ),
-          ),
-        mount.mountId,
-      )
+          mount.mountId,
+        )
+        return wrapOpStream(answer, rstripSlash(mountPrefix), mount.mountId, mount.activity)
+      })
     } catch (err) {
       const code = (err as { code?: string }).code
       if (opName === 'rmdir' && (code === 'ENOTEMPTY' || code === 'EEXIST')) {
@@ -446,7 +451,6 @@ export class Dispatcher {
         memoryAnswered(report)
       }
     }
-    result = wrapOpStream(result, rstripSlash(mountPrefix), mount.mountId)
     // The op ran, whatever invalidation, the post gate, or an output
     // cap do next: stamped here so a failure in any of them cannot
     // erase a transfer the backend already made.
@@ -553,21 +557,24 @@ export class Dispatcher {
     // Python's twin gets both bindings from `Mount.execute_op`.
     await mount.ensureReady()
     try {
-      return await runWithMountPrefix(
-        rstripSlash(mountPrefix),
-        () =>
-          runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
-            this.opsRegistry.call(
-              opName,
-              resource,
-              resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-              spec,
-              [],
-              this.indexKwargs(mount),
+      return await mount.use(async () => {
+        const answer = await runWithMountPrefix(
+          rstripSlash(mountPrefix),
+          () =>
+            runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
+              this.opsRegistry.call(
+                opName,
+                resource,
+                resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+                spec,
+                [],
+                this.indexKwargs(mount),
+              ),
             ),
-          ),
-        mount.mountId,
-      )
+          mount.mountId,
+        )
+        return wrapOpStream(answer, rstripSlash(mountPrefix), mount.mountId, mount.activity)
+      })
     } finally {
       if (write) await this.invalidateAfterWriteByPath(spec.virtual)
     }
@@ -912,17 +919,19 @@ export class Dispatcher {
     await mount?.ensureReady()
     const filetype = getExtension(scope.virtual)
     try {
-      return await this.opsRegistry.call(
-        opName,
-        resource,
-        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-        scope,
-        [],
-        {
-          ...this.indexKwargs(mount),
-          ...(filetype !== null ? { filetype } : {}),
-        },
-      )
+      const call = () =>
+        this.opsRegistry.call(
+          opName,
+          resource,
+          resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+          scope,
+          [],
+          {
+            ...this.indexKwargs(mount),
+            ...(filetype !== null ? { filetype } : {}),
+          },
+        )
+      return await (mount === null ? call() : mount.use(call))
     } catch (err) {
       // The "nothing here" set exactly, plus a backend with no such op:
       // a miss on one channel is not absence on its own, so the caller
@@ -1044,13 +1053,10 @@ export class Dispatcher {
       this.namespace.mountPrefixes().map((p) => [p, this.namespace.mountFor(p)]),
     )
     return (path) => {
+      const prefix = ownerPrefix(mounts.keys(), path)
+      const original = prefix === null ? null : mounts.get(prefix)
       const mount = this.namespace.tryMountFor(path)
-      return (
-        mount !== null &&
-        mounts.get(mount.prefix) === mount &&
-        !mount.retiring &&
-        cachesReads(mount.resource)
-      )
+      return mount !== null && original === mount && !mount.retiring && cachesReads(mount.resource)
     }
   }
 

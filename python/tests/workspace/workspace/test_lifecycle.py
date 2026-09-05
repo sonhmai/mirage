@@ -22,6 +22,8 @@ import pytest
 from mirage.cache.index.config import (IndexConfig, IndexEntry, LookupStatus,
                                        RedisIndexConfig)
 from mirage.commands.cli.types import CLISpec
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.spec import CommandSpec, Operand
 from mirage.io import IOResult
 from mirage.ops.registry import op
 from mirage.resource.ram import RAMResource
@@ -161,7 +163,11 @@ async def test_resource_cannot_be_remounted_while_close_is_pending(
         await asyncio.sleep(0)
         if not cancel:
             await removing
-        ws.add_mount("/data", resource)
+        with pytest.raises(ValueError, match="resource is closed"):
+            ws.add_mount("/data", resource)
+        with pytest.raises(ValueError, match="resource is closed"):
+            Workspace({"/data": resource})
+        ws.add_mount("/data", RAMResource())
     finally:
         release.set()
         await asyncio.gather(removing, return_exceptions=True)
@@ -169,9 +175,10 @@ async def test_resource_cannot_be_remounted_while_close_is_pending(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("shadow", [False, True])
+@pytest.mark.parametrize("change", ["replace", "shadow", "reveal"])
 async def test_retired_command_cannot_cache_bytes_for_replacement_mount(
-        shadow):
+        change):
+    shadow = change == "shadow"
 
     class CachedRAM(RAMResource):
         caches_reads = True
@@ -179,7 +186,10 @@ async def test_retired_command_cannot_cache_bytes_for_replacement_mount(
     old = CachedRAM()
     old.load_state({"files": {"/data/file" if shadow else "/file": b"old"}})
     replacement = CachedRAM()
-    replacement.load_state({"files": {"/file": b"new"}})
+    replacement.load_state(
+        {"files": {
+            "/data/file" if change == "reveal" else "/file": b"new"
+        }})
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -189,7 +199,10 @@ async def test_retired_command_cannot_cache_bytes_for_replacement_mount(
         return None, IOResult()
 
     prefix = "/" if shadow else "/data"
-    ws = Workspace({prefix: old})
+    resources = {prefix: old}
+    if change == "reveal":
+        resources["/"] = replacement
+    ws = Workspace(resources)
     ws.register_cli("gate", CLISpec(name="gate", fn=gate))
     retired = ws.mount(prefix).cache_manager
     running = asyncio.create_task(ws.execute("cat /data/file; gate"))
@@ -197,7 +210,8 @@ async def test_retired_command_cannot_cache_bytes_for_replacement_mount(
         await asyncio.wait_for(entered.wait(), timeout=5)
         if not shadow:
             await ws.unmount("/data")
-        ws.add_mount("/data", replacement)
+        if change != "reveal":
+            ws.add_mount("/data", replacement)
         release.set()
         result = await asyncio.wait_for(running, timeout=5)
         assert result.stdout == b"old"
@@ -587,4 +601,141 @@ async def test_close_settles_pending_profile_persistence(
         await asyncio.gather(updating, return_exceptions=True)
         if closing is not None:
             await closing
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["op", "command"])
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("alias", [None, "initial", "dynamic"])
+async def test_unmount_waits_for_admitted_resource_use(monkeypatch, surface,
+                                                       streaming, alias):
+    resource = RAMResource()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    closed = False
+
+    async def chunks():
+        entered.set()
+        await release.wait()
+        assert not closed
+        yield b"value"
+
+    async def read_body():
+        if streaming:
+            return chunks()
+        entered.set()
+        await release.wait()
+        assert not closed
+        return b"value"
+
+    @op("read", resource="ram")
+    async def read(accessor, scope, **kwargs):
+        return await read_body()
+
+    async def command(accessor, paths, texts, opts):
+        return await read_body(), IOResult()
+
+    resource.register_op(read)
+    resources = {"/data": resource}
+    if alias == "initial":
+        resources["/alias"] = resource
+    ws = Workspace(resources)
+    if alias == "dynamic":
+        ws.add_mount("/alias", resource)
+    ws.mount("/data").register(
+        RegisteredCommand(name="readvalue",
+                          spec=CommandSpec(rest=Operand(type="path")),
+                          resource="ram",
+                          filetype=None,
+                          fn=command))
+    close_resource = resource.close
+
+    async def close():
+        nonlocal closed
+        closed = True
+        await close_resource()
+
+    monkeypatch.setattr(resource, "close", close)
+
+    async def consume():
+        if surface == "command":
+            return (await ws.execute("readvalue /data/file")).stdout
+        value, _ = await ws.dispatch("read",
+                                     PathSpec.from_str_path("/data/file"))
+        if isinstance(value, bytes):
+            return value
+        return b"".join([chunk async for chunk in value])
+
+    running = asyncio.create_task(consume())
+    removing = None
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        if alias:
+            await ws.unmount("/data")
+            assert not closed
+        removing = asyncio.create_task(
+            ws.unmount("/alias" if alias else "/data"))
+        async with asyncio.timeout(5):
+            while ws._registry.try_mount_for_prefix(
+                    "/alias" if alias else "/data") is not None:
+                await asyncio.sleep(0)
+        assert not removing.done()
+        assert not closed
+        release.set()
+        assert await asyncio.wait_for(running, 5) == b"value"
+        await asyncio.wait_for(removing, 5)
+        assert closed
+    finally:
+        release.set()
+        await asyncio.gather(running,
+                             *([removing] if removing else []),
+                             return_exceptions=True)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_unmount", [False, True])
+async def test_workspace_close_waits_for_resource_retirements(
+        monkeypatch, cancel_unmount):
+    resource = RAMResource()
+    ws = Workspace({"/data": resource})
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    events = []
+    close_resource = resource.close
+    close_store = ws.state_store.close
+
+    async def retiring_close():
+        entered.set()
+        await release.wait()
+        await close_resource()
+        events.append("resource")
+
+    async def store_close():
+        events.append("store")
+        await close_store()
+
+    monkeypatch.setattr(resource, "close", retiring_close)
+    monkeypatch.setattr(ws.state_store, "close", store_close)
+    removing = asyncio.create_task(ws.unmount("/data"))
+    closing = None
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        if cancel_unmount:
+            removing.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await removing
+        closing = asyncio.create_task(ws.close())
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(closing), 0.03)
+        assert events == []
+        release.set()
+        await asyncio.wait_for(closing, 5)
+        assert events == ["resource", "store"]
+    finally:
+        release.set()
+        await asyncio.gather(removing,
+                             *([closing] if closing else []),
+                             return_exceptions=True)
         await ws.close()

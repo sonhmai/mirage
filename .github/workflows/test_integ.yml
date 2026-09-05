@@ -212,6 +212,27 @@ jobs:
       - name: Run virtual-root mount switching (ram/disk/yaml)
         run: ./python/.venv/bin/python integ/root.py
 
+      - name: Cache the lifecycle policy engine
+        id: lifecycle-quickjs-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/quickjs
+          key: quickjs-wasi-v0.16.2
+
+      - name: Download the lifecycle policy engine
+        if: steps.lifecycle-quickjs-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/quickjs
+          gh release download v0.16.2 -R quickjs-ng/quickjs \
+            -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
+
+      - name: Run workspace lifecycle JSON scenarios (Python)
+        env:
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
+        run: ./python/.venv/bin/python integ/lifecycle/run.py
+
   integ-ts:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ts == 'true') }}
@@ -330,6 +351,10 @@ jobs:
       - name: Run cross-mount commands (ram -> ram/s3 via MinIO)
         working-directory: integ
         run: pnpm exec tsx cross_commands.ts
+
+      - name: Run workspace lifecycle JSON scenarios (Node and browser wrappers)
+        working-directory: integ
+        run: pnpm exec tsx lifecycle/run.ts
 
       - name: Generate integ Prisma clients
         working-directory: integ

@@ -134,9 +134,13 @@ async def close_async(ws: "Workspace", ) -> None:
     Args:
         ws: the workspace being closed.
     """
+    # Stop lifecycle mutations before teardown yields or captures its close
+    # lists. Keep _closed separate so runtime journals can still dispatch.
+    ws._closing = True
     async with ws._close_lock:
         if ws._async_closed:
             return
+        await ws._session_mgr.settle()
         await ws._watch.detach()
         await ws.job_table.kill_all()
         await ws.job_table.close_consoles()
@@ -144,6 +148,13 @@ async def close_async(ws: "Workspace", ) -> None:
         await ws._script_policy.close()
         for line_runtime in ws._runtimes.entries:
             await line_runtime.close()
+        retirements = await asyncio.gather(
+            *(asyncio.shield(task)
+              for task in list(ws._registry.retiring_resources.values())),
+            return_exceptions=True)
+        for result in retirements:
+            if isinstance(result, BaseException):
+                raise result
         resources = {
             id(mount.resource): mount.resource
             for mount in ws._registry.mounts()

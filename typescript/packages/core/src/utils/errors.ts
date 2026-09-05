@@ -49,6 +49,10 @@ export function enoent(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOENT')
 }
 
+export function ebusy(path: string | { virtual: string }): FsError {
+  return fsError(path, 'EBUSY')
+}
+
 export function enotdir(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOTDIR')
 }

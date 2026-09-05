@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any
 
 from mirage.observe import OpRecord
@@ -59,5 +59,5 @@ class ExecutionNode:
         if self.children:
             d["children"] = [c.to_dict() for c in self.children]
         if self.records:
-            d["records"] = [asdict(r) for r in self.records]
+            d["records"] = [r.to_dict() for r in self.records]
         return d

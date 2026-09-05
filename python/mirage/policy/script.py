@@ -340,7 +340,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         self._dispatch = dispatch
         self._resolver = resolver
         self._engines: dict[str, Runtime] = {}
-        self._defined: dict[tuple[str, str], frozenset[str]] = {}
+        self._defined: dict[tuple[str, str, str], frozenset[str]] = {}
         self._lock = asyncio.Lock()
 
     async def pre_command(self, ctx: CommandContext) -> Action | None:
@@ -431,14 +431,14 @@ class ScriptPolicy(Policy, SessionScopedMixin):
 
     async def _hooks_of(self, entry: ProfileScript) -> frozenset[str]:
         """The hooks one profile's program defines, probed on its first
-        judgment and remembered by program text and language: the probe
-        asks in the program's own spelling, so one text read as two
-        languages is two programs.
+        judgment and remembered by runtime, program text and language.
+        A runtime change must probe again, including its validation;
+        a cached absent hook must never bypass a broken new engine.
 
         Args:
             entry (ProfileScript): the session's policy.
         """
-        key = (entry.script.language, entry.script.source)
+        key = (entry.runtime, entry.script.language, entry.script.source)
         defined = self._defined.get(key)
         if defined is None:
             value = await self._evaluate(entry, hook_probe(entry.script), {})

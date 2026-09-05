@@ -85,6 +85,8 @@ export function resourceRefOf(resource: Resource): string | null {
 }
 
 export interface Resource {
+  /** Closed resource instances cannot be mounted again. */
+  readonly isClosed?: boolean
   readonly kind: string
   readonly prompt?: string
   readonly writePrompt?: string
@@ -254,6 +256,10 @@ export abstract class BaseResource {
    */
   loadState(_state: ResourceStateBase): void | Promise<void> {
     // Nothing to take back.
+  }
+
+  get isClosed(): boolean {
+    return this.#closed
   }
 
   /**

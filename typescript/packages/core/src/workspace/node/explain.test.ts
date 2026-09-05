@@ -39,7 +39,7 @@ const PROFILE = parseSessionProfile({
       { reason: 'pushes need sign-off', commands: ['git push'] },
       {
         reason: 'secrets need sign-off',
-        commands: { cat: ['/data/secret.txt', '/data/secret file'] },
+        commands: { cat: ['/data/secret.txt', '/data/secret file', '/data/secrét'] },
       },
     ],
   },
@@ -812,6 +812,30 @@ describe('prejudge scope', () => {
     expect(ran.exitCode).toBe(0)
     expect(DEC.decode(ran.stdout)).toBe('s s\n')
     expect(asked).toHaveLength(2)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('asks once for an operand holding a multibyte character', async () => {
+    // The nested gate places the cat where the parser does; the pass's
+    // claim has to end at the same count or the grant is hidden from the
+    // gate and the cat asks again after the echo has run.
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    await w.execute('echo s > /data/secrét')
+    const ran = await w.execute('echo x && command cat /data/secrét', { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('x\ns\n')
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('runs a pair after a multibyte character on its own nod', async () => {
+    const asked: string[] = []
+    const w = await inlineWs(answering(asked, Outcome.ALLOW))
+    const ran = await w.execute('echo `echo é` `cat /data/secret.txt`', { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('é s\n')
+    expect(asked).toHaveLength(1)
     expect(w.decisions.list('s')).toEqual([])
   })
 })

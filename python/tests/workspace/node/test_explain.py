@@ -60,7 +60,8 @@ PROFILE = {
         }, {
             "reason": "secrets need sign-off",
             "commands": {
-                "cat": ["/data/secret.txt", "/data/secret file"]
+                "cat":
+                ["/data/secret.txt", "/data/secret file", "/data/secrét"]
             }
         }],
     },
@@ -885,6 +886,41 @@ async def test_two_backtick_pairs_of_one_node_are_two_occurrences():
         assert ran.exit_code == 0
         assert ran.stdout == b"s s\n"
         assert len(asked) == 2
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_operand_holding_a_multibyte_character_is_one_question():
+    # The nested gate places the cat by the parser's byte offsets, and
+    # the occurrence the pass claimed for it ended in code points, one
+    # short per multibyte character: the grant was hidden from the gate
+    # and the cat asked a second time after the echo had already run.
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        await ws.fs.write("/data/secrét", b"s\n")
+        ran = await ws.execute("echo x && command cat /data/secrét",
+                               session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout == b"x\ns\n"
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_pair_after_a_multibyte_character_runs_on_its_own_nod():
+    asked: list[str] = []
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    try:
+        ran = await ws.execute("echo `echo é` `cat /data/secret.txt`",
+                               session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout == "é s\n".encode()
+        assert len(asked) == 1
         assert ws.decisions.list("s") == ()
     finally:
         await ws.close()

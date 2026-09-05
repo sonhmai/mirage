@@ -180,4 +180,30 @@ describe('occurrence', () => {
     const root = await parse(frame.text)
     expect(occurrenceIn(command(root, 0), frame)).toEqual(wholeOccurrence(frame))
   })
+
+  it('ends words holding a multibyte character where the parse ends', async () => {
+    // The parser and the string count the same units here; the Python
+    // side has to measure bytes for the same assertion to hold.
+    const parent: Occurrence = {
+      parent: null,
+      source: 'command cat /data/secrét',
+      start: 0,
+      end: 24,
+    }
+    const frame = argvFrame(['cat', '/data/secrét'], parent)
+    const root = await parse(frame.text)
+    expect(occurrenceIn(command(root, 0), frame)).toEqual(wholeOccurrence(frame))
+  })
+
+  it('stands a pair after a multibyte character at its own span', async () => {
+    const line = 'echo `echo é` `cat /data/secret.txt`'
+    const root = await parse(line)
+    const frames = segmentFrames(first(root, NodeType.COMMAND_SUBSTITUTION), rootFrame(root, null))
+    expect(frames.map((f) => f.text)).toEqual(['echo é', 'cat /data/secret.txt'])
+    for (const inner of frames) {
+      const parent = inner.parent
+      if (parent === null) throw new Error('no parent')
+      expect(line.slice(parent.start, parent.end)).toBe(inner.text)
+    }
+  })
 })

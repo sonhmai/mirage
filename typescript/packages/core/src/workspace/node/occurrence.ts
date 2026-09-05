@@ -92,6 +92,11 @@ export function occurrenceIn(node: TSNodeLike, frame: Frame): Occurrence {
 /**
  * The occurrence of a frame's whole text, for words a command runs
  * without a parse of their own (`xargs cat`, `find -exec`).
+ *
+ * The end is the parser's own unit: web-tree-sitter places a node in
+ * UTF-16 code units, which is what a string index counts, so no
+ * measuring is needed here. The Python parser counts bytes, and that
+ * side measures every span it computes from text (`byte_offset`).
  */
 export function wholeOccurrence(frame: Frame): Occurrence {
   return { parent: frame.parent, source: frame.text, start: 0, end: frame.text.length }

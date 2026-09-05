@@ -153,3 +153,29 @@ def test_words_a_command_hands_on_are_spelled_as_it_spells_them():
     assert frame.text == "cat '/data/secret file'"
     node = list(command_nodes(parse(frame.text)))[0]
     assert occurrence_in(node, frame) == whole_occurrence(frame)
+
+
+def test_words_holding_a_multibyte_character_end_where_the_parse_ends():
+    # The nested gate parses the re-spelled line and places the command
+    # by the parser's byte offsets; an end counted in code points fell
+    # short by one per multibyte character, so the pass's claim was for
+    # an occurrence the gate never computed.
+    parent = Occurrence(None, "command cat /data/secrét", 0, 25)
+    frame = argv_frame(["cat", "/data/secrét"], parent)
+    whole = whole_occurrence(frame)
+    assert whole.end == len(frame.text.encode()) > len(frame.text)
+    node = list(command_nodes(parse(frame.text)))[0]
+    assert occurrence_in(node, frame) == whole
+
+
+def test_a_pair_after_a_multibyte_character_stands_at_its_bytes():
+    line = "echo `echo é` `cat /data/secret.txt`"
+    ast = parse(line)
+    frame = root_frame(ast, None)
+    sub = _first(ast, NodeType.COMMAND_SUBSTITUTION)
+    first, second = segment_frames(sub, frame)
+    assert (first.text, second.text) == ("echo é", "cat /data/secret.txt")
+    raw = line.encode()
+    for inner in (first, second):
+        assert inner.parent is not None
+        assert raw[inner.parent.start:inner.parent.end].decode() == inner.text

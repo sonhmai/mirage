@@ -19,7 +19,7 @@ from typing import Any
 
 from mirage.policy import Claimant, HandOff, Occurrence
 from mirage.shell.backticks import split_backtick_region
-from mirage.shell.helpers import get_text
+from mirage.shell.helpers import byte_offset, get_text
 
 # What opens and closes a substitution's body, in the order the
 # openers are tried; the body between them is the text a nested line
@@ -130,10 +130,16 @@ def whole_occurrence(frame: Frame) -> Occurrence:
     """The occurrence of a frame's whole text, for words a command runs
     without a parse of their own (``xargs cat``, ``find -exec``).
 
+    The end is measured as the parser measures it, in bytes: a nested
+    gate that parses the same text places its command by ``end_byte``,
+    and an end counted in code points fell short of it by one per
+    multibyte character, so the grant claimed here was hidden from it.
+
     Args:
         frame (Frame): the scope holding the words.
     """
-    return Occurrence(frame.parent, frame.text, 0, len(frame.text))
+    return Occurrence(frame.parent, frame.text, 0,
+                      byte_offset(frame.text, len(frame.text)))
 
 
 def body_frame(node: Any, frame: Frame) -> Frame | None:
@@ -156,7 +162,7 @@ def body_frame(node: Any, frame: Frame) -> Frame | None:
     for opener, closer in SUBSTITUTION_DELIMITERS:
         if raw.startswith(opener) and raw.endswith(closer):
             body = raw[len(opener):len(raw) - len(closer)]
-            base = node.start_byte + prefix + len(opener)
+            base = node.start_byte + byte_offset(text, prefix) + len(opener)
             return Frame(body, base, occurrence_in(node, frame))
     return None
 
@@ -170,8 +176,9 @@ def part_of(occurrence: Occurrence, start: int, end: int) -> Occurrence:
 
     Args:
         occurrence (Occurrence): the node's place.
-        start (int): where the span starts in the node's text.
-        end (int): the index after its last character.
+        start (int): where the span starts in the node's text, in the
+            parser's offsets.
+        end (int): the offset after its last byte.
     """
     return Occurrence(occurrence.parent, occurrence.source,
                       occurrence.start + start, occurrence.start + end)
@@ -199,7 +206,10 @@ def segment_frames(node: Any, frame: Frame) -> list[Frame]:
         return []
     at = occurrence_in(node, frame)
     return [
-        line_frame(s.text, part_of(at, prefix + s.start, prefix + s.end))
+        line_frame(
+            s.text,
+            part_of(at, byte_offset(text, prefix + s.start),
+                    byte_offset(text, prefix + s.end)))
         for s in split_backtick_region(raw) if s.command
     ]
 

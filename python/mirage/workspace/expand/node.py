@@ -25,7 +25,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError
 from mirage.shell.escapes import (decode_ansi_c, unescape_dquoted,
                                   unescape_unquoted)
-from mirage.shell.helpers import get_text
+from mirage.shell.helpers import byte_offset, get_text
 from mirage.shell.parse import parse
 from mirage.shell.types import NodeType as NT
 from mirage.utils.glob_walk import mark_escaped_globs, mark_globs, unmark_globs
@@ -69,7 +69,8 @@ async def _expand_backtick_region(
         session (Session): the session expanding it.
         execute_fn (Callable[..., Any]): the nested-line door.
         node (tree_sitter.Node): the region's node.
-        offset (int): where ``raw`` starts in the node's text.
+        offset (int): where ``raw`` starts in the node's text, in the
+            parser's offsets.
     """
     parts: list[str] = []
     for segment in split_backtick_region(raw):
@@ -77,12 +78,13 @@ async def _expand_backtick_region(
             parts.append(segment.text)
             continue
         # Each pair is its own place on the line: the node holds every
-        # touching pair, so the span within it says which one runs.
+        # touching pair, so the span within it says which one runs,
+        # measured as the parser measures the node.
         io = await execute_fn(segment.text,
                               session_id=session.session_id,
                               node=node,
-                              span=(offset + segment.start,
-                                    offset + segment.end))
+                              span=(offset + byte_offset(raw, segment.start),
+                                    offset + byte_offset(raw, segment.end)))
         parts.append((await io.stdout_str()).rstrip("\n"))
         session._cmdsub_seq += 1
         session._cmdsub_status = io.exit_code
@@ -308,7 +310,7 @@ async def expand_node_marked(
             # the grammar, which merges adjacent pairs (see
             # split_backtick_region).
             return prefix + await _expand_backtick_region(
-                raw, session, execute_fn, ts_node, len(prefix))
+                raw, session, execute_fn, ts_node, len(prefix.encode()))
         if raw.startswith("$((") and raw.endswith("))"):
             # Inside heredoc bodies tree-sitter parses `$((expr))` as a
             # command substitution wrapping a subshell; reparse in

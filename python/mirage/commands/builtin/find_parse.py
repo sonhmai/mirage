@@ -239,10 +239,14 @@ def _merge_window(state: _State, lo: float | None, hi: float | None) -> None:
     """Fold one mtime window into the expression's single window.
 
     The flat window cannot evaluate a time test per predicate node, so
-    repeated ones flatten to the union of their windows: the tautology
-    `-mtime +0 -o -mtime -1` imposes no bounds instead of last-wins
-    dropping everything. An AND of disjoint windows over-matches
-    (documented divergence from GNU).
+    repeated ones fold by where they sit. In the top-level ``-a`` chain
+    every test must hold, so the windows intersect: ``-newer old -newer
+    new`` keeps only what is newer than both, and ``-mtime +2 -mtime
+    -1`` keeps nothing, as GNU answers. Under ``-o``, ``!`` or
+    parentheses the window cannot be exact, so they widen to the union:
+    the tautology ``-mtime +0 -o -mtime -1`` imposes no bounds instead
+    of last-wins dropping everything (documented divergence from GNU:
+    such a window over-matches).
 
     Args:
         state (_State): parser state carrying the expression.
@@ -252,6 +256,14 @@ def _merge_window(state: _State, lo: float | None, hi: float | None) -> None:
     if not state.mtime_seen:
         state.expr.mtime_min, state.expr.mtime_max = lo, hi
         state.mtime_seen = True
+        return
+    if state.nested == 0 and not state.in_or:
+        state.expr.mtime_min = (lo if state.expr.mtime_min is None else
+                                state.expr.mtime_min if lo is None else max(
+                                    state.expr.mtime_min, lo))
+        state.expr.mtime_max = (hi if state.expr.mtime_max is None else
+                                state.expr.mtime_max if hi is None else min(
+                                    state.expr.mtime_max, hi))
         return
     state.expr.mtime_min = (None if state.expr.mtime_min is None or lo is None
                             else min(state.expr.mtime_min, lo))

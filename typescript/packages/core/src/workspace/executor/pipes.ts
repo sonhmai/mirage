@@ -44,6 +44,14 @@ export async function handlePipe(
   const childNodes: ExecutionNode[] = []
   const ios: IOResult[] = []
   const intermediate: ByteSource[] = []
+  // Every segment is a child shell forked before the pipeline ran, so
+  // each expands `$?` to the status the pipeline started with, not to
+  // what a sibling's inner statements left behind (`false; { true; } |
+  // echo $?` prints 1). The snapshot does not carry it: after a child
+  // shell `$?` is the child's status, which is the one thing it reports
+  // back. Seeded through the status door, which leaves `${PIPESTATUS[@]}`
+  // alone.
+  const before = session.lastExitCode
 
   try {
     for (let i = 0; i < commands.length; i++) {
@@ -53,6 +61,7 @@ export async function handlePipe(
       let io: IOResult
       let childExec: ExecutionNode
       const saved = session.snapshot()
+      recordStatus(session, before, true)
       try {
         ;[stdout, io, childExec] = await executeNode(cmd, session, currentStdin, callStack)
       } catch (err) {

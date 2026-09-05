@@ -598,7 +598,7 @@ async def _fan_out_traversal(
             cwd,
             execute_fn=execute_fn,
             session_id=session_id,
-            child_mounts=ns.child_mounts if ns is not None else None,
+            ns=ns,
             stat_path=stat_path)
         if action_err:
             existing = (await materialize(merged_io.stderr)

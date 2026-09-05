@@ -12,31 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-from collections.abc import Callable
-from dataclasses import replace
-
-from mirage.shell.arith import evaluate_arith
-from mirage.shell.constants import (RANDOM, RANDOM_A, RANDOM_M, RANDOM_MAX,
-                                    RANDOM_MODULUS, RANDOM_Q, RANDOM_R,
-                                    RANDOM_UNSET, RANDOM_ZERO_SEED)
-from mirage.shell.variable import ShellVar
-from mirage.utils.hidden import var_hidden
-from mirage.workspace.session.session import Session
-from mirage.workspace.session.state import session_elements, visible_env
-
-
-def seed_from(word: str, session: Session) -> int:
-    """Evaluate a host-supplied seed; invalid arithmetic propagates.
-
-    Args:
-        word (str): the seed expression.
-        session (Session): the session the expression reads.
-    """
-    value = evaluate_arith(word,
-                           visible_env(session),
-                           elements=session_elements(session)).value
-    return value % RANDOM_MODULUS
+from mirage.shell.constants import (RANDOM_A, RANDOM_M, RANDOM_MAX, RANDOM_Q,
+                                    RANDOM_R, RANDOM_ZERO_SEED)
 
 
 def step_state(state: int) -> int:
@@ -61,59 +38,3 @@ def value_of(state: int) -> int:
         state (int): the generator state after a step.
     """
     return ((state >> 16) ^ (state & 0xFFFF)) & RANDOM_MAX
-
-
-def next_random(session: Session, stored: str | None) -> int | None:
-    """Draw from the session generator, or None after RANDOM is unset.
-
-    Shell assignments validate and seed at the session door. A host-seeded
-    variable is consumed here on its first read. The last draw is separate
-    from the stored word because a reseed resets repeat suppression to zero.
-
-    Args:
-        session (Session): generator and variable state.
-        stored (str | None): the visible RANDOM value.
-    """
-    if session._random_seed == RANDOM_UNSET or (
-            stored is None and session._random_seed is not None):
-        return None
-    seed = (seed_from(stored, session)
-            if stored is not None and stored != session._random_seed else None)
-    if seed is not None:
-        state = seed
-        last = 0
-    elif session._random_state is None:
-        state = time.time_ns() % RANDOM_MODULUS
-        last = 0
-    else:
-        state = session._random_state
-        last = session._random_last
-    while True:
-        state = step_state(state)
-        value = value_of(state)
-        if value != last:
-            break
-    session._random_state = state
-    session._random_last = value
-    word = str(value)
-    existing = session.vars.get(RANDOM)
-    session.vars[RANDOM] = (replace(existing, value=word)
-                            if existing is not None else ShellVar(word))
-    session._random_seed = word
-    return value
-
-
-def random_reader(session: Session) -> Callable[[str], str | None]:
-    """Bind lazy arithmetic RANDOM reads to a session.
-
-    Args:
-        session (Session): generator and visibility state.
-    """
-
-    def read(name: str) -> str | None:
-        if name != RANDOM or var_hidden(session.hidden_vars, name):
-            return None
-        value = next_random(session, visible_env(session).get(name))
-        return None if value is None else str(value)
-
-    return read

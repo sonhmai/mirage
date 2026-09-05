@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compareCodePoints } from '../../utils/sort.ts'
+import { resolvePath } from '../../utils/path.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { type ByteSource, materialize } from '../../io/types.ts'
 import { getCurrentSession, runWithSuspendedOpPolicies } from '../../context/session_context.ts'
@@ -21,7 +22,7 @@ import type { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
-import type { ChildMounts, StatPath } from '../../ops/types.ts'
+import type { NamespaceView, StatPath } from '../../ops/types.ts'
 import {
   EXEC_PLACEHOLDER,
   execActions,
@@ -37,7 +38,12 @@ export interface FindActionDoors {
   // where `-exec` is refused.
   executeFn?: ExecuteFn
   sessionId?: string
-  childMounts?: ChildMounts | null
+  // The name plane's facts, threaded into the -ls sub-dispatch so a
+  // namespace-only row (a mount point, a symlink) renders the way
+  // `ls -l` renders it.
+  ns?: NamespaceView | null
+  // Dispatcher stat, threaded with it and used to find a
+  // slash-carrying `-exec` head.
   statPath?: StatPath | null
 }
 
@@ -62,6 +68,26 @@ export function execLine(action: ExecAction, paths: readonly string[]): string {
 }
 
 /**
+ * Whether `execvp` would fail to find an `-exec` head word. A head
+ * carrying a slash is a file the loader runs, which no builtin, function
+ * or CLI can claim, so it is statted where the line would read it; any
+ * other head is looked up by name across the layers dispatch consults.
+ * Outside a workspace there is no stat and the loader answers for itself.
+ */
+async function headMissing(
+  head: string,
+  registry: MountRegistry,
+  cwd: string,
+  statPath: StatPath | null,
+): Promise<boolean> {
+  if (head.includes('/')) {
+    return statPath !== null && (await statPath(resolvePath(head, cwd))) === null
+  }
+  const sess = getCurrentSession()
+  return sess !== null && lookup(head, sess, registry) === Consumer.UNKNOWN
+}
+
+/**
  * Run one `-exec` invocation, collecting its streams. A command that
  * cannot be found is GNU's `find: 'cmd': No such file or directory` rather
  * than the shell's `command not found`, and counts as a failed run. That
@@ -74,14 +100,15 @@ async function runExec(
   executeFn: ExecuteFn,
   sessionId: string,
   registry: MountRegistry,
+  cwd: string,
+  statPath: StatPath | null,
   action: ExecAction,
   paths: readonly string[],
   out: Uint8Array[],
   errors: Uint8Array[],
 ): Promise<boolean> {
   const head = action.argv[0] ?? ''
-  const sess = getCurrentSession()
-  if (sess !== null && lookup(head, sess, registry) === Consumer.UNKNOWN) {
+  if (await headMissing(head, registry, cwd, statPath)) {
     errors.push(enc.encode(`find: '${head}': No such file or directory\n`))
     return false
   }
@@ -149,7 +176,7 @@ async function lsRow(
   ps: PathSpec,
   registry: MountRegistry,
   cwd: string,
-  childMounts: ChildMounts | null,
+  ns: NamespaceView | null,
   statPath: StatPath | null,
   errors: Uint8Array[],
 ): Promise<Uint8Array | null> {
@@ -168,7 +195,7 @@ async function lsRow(
       {
         stdin: null,
         cwd,
-        ...(childMounts !== null ? { ns: { childMounts } } : {}),
+        ...(ns !== null ? { ns } : {}),
         ...(statPath !== null ? { statPath } : {}),
       },
     )
@@ -211,8 +238,11 @@ function structural(path: PathSpec, registry: MountRegistry): boolean {
   return registry.isMountRoot(virtual) || registry.descendantMounts(virtual).length > 0
 }
 
+/** Whether the actions differ from the implicit print: one explicit
+ * `-print` is exactly what the backend already rendered, two of them
+ * print every row twice, as GNU does. */
 function hasActions(expr: FindExpr): boolean {
-  return expr.actions.some((a) => a.kind !== 'print')
+  return expr.actions.length > 1 || expr.actions.some((a) => a.kind !== 'print')
 }
 
 /**
@@ -256,7 +286,7 @@ export async function applyFindActions(
     return [null, enc.encode('find: -exec: no shell to run the command\n'), 1]
   }
   const sessionId = doors.sessionId ?? ''
-  const childMounts = doors.childMounts ?? null
+  const ns = doors.ns ?? null
   const statPath = doors.statPath ?? null
   if (matchedPaths === null)
     return [null, enc.encode('find: actions require structured matches\n'), 1]
@@ -281,10 +311,23 @@ export async function applyFindActions(
           continue
         }
         if (executeFn === undefined) break
-        if (!(await runExec(executeFn, sessionId, registry, action, [path], out, errors))) break
+        if (
+          !(await runExec(
+            executeFn,
+            sessionId,
+            registry,
+            cwd,
+            statPath,
+            action,
+            [path],
+            out,
+            errors,
+          ))
+        )
+          break
       } else if (action.kind === 'ls') {
         const before = errors.length
-        const row = await lsRow(match, registry, cwd, childMounts, statPath, errors)
+        const row = await lsRow(match, registry, cwd, ns, statPath, errors)
         if (row !== null) out.push(row)
         else if (errors.length > before) exitCode = 1
       } else if (action.kind === 'delete') {
@@ -303,7 +346,8 @@ export async function applyFindActions(
   for (const [position, action] of actions.entries()) {
     const paths = batches.get(position)
     if (action.kind !== 'exec' || paths === undefined || executeFn === undefined) continue
-    if (!(await runExec(executeFn, sessionId, registry, action, paths, out, errors))) exitCode = 1
+    if (!(await runExec(executeFn, sessionId, registry, cwd, statPath, action, paths, out, errors)))
+      exitCode = 1
   }
   const body = concat(out)
   return [body.byteLength > 0 ? body : null, concat(errors), exitCode]

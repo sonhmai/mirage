@@ -279,7 +279,15 @@ export class Decisions {
     for (const [rule, record] of answers) {
       if (record !== null) continue
       const action = await this.raise(ctx, rule, argv, signal)
-      if (action !== null) return action
+      if (action === null) continue
+      // A refusal the host gave while this line waited refused THIS line, so
+      // it is spent by it — unless a later pass on the same line still has to
+      // read it, which is the pass that refuses in place. A question left
+      // waiting, or a killed run, answered nothing and spends nothing.
+      if (action.kind === 'deny' && !handOff) {
+        await this.spend(sessionId, this.onceAnswers(sessionId, rules, argv, ctx.cwd))
+      }
+      return action
     }
     // Every rule is answered and the line may run. Unless another pass on this
     // same line is still to come, the ledger is read again rather than trusting

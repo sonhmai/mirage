@@ -16,3 +16,13 @@
 // writes drop. bash fails them with `Bad file descriptor`; mirage has no
 // descriptor to fail, a documented divergence.
 export const CLOSED = ''
+
+// The session fields an `exec` redirect line binds, put back as one
+// unit when a later redirect on the line fails.
+export const EXEC_STREAM_FIELDS = [
+  'execStdout',
+  'execStdoutAppend',
+  'execStderr',
+  'execStderrAppend',
+  'execStdin',
+] as const

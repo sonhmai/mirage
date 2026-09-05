@@ -115,3 +115,22 @@ async def test_a_link_reference_is_read_by_the_link_policy():
     assert await _out(ws, "find d -newer loop1") == ("", "", 0)
     assert await _out(ws, "find -L d -newer loop1") == (
         "", "find: 'loop1': Too many levels of symbolic links\n", 1)
+
+
+@pytest.mark.asyncio
+async def test_repeated_newer_references_intersect():
+    # GNU find 4.9: `-newer old -newer new` keeps only what is newer
+    # than both references.
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws.create_session("s")
+    await ws.execute(
+        "printf o > /w/old; printf c > /w/cand; printf n > /w/new; cd /w; "
+        "touch -d '2020-01-01 00:00:00' old; "
+        "touch -d '2021-01-01 00:00:00' cand; "
+        "touch -d '2022-01-01 00:00:00' new",
+        session_id="s")
+    assert await _out(ws, "find cand -newer old -newer new") == ("", "", 0)
+    assert await _out(ws, "find cand -newer new -newer old") == ("", "", 0)
+    assert await _out(ws, "find cand -newer old") == ("cand\n", "", 0)
+    assert await _out(
+        ws, "find cand -newermt 2020-06-01 -newermt 2021-06-01") == ("", "", 0)

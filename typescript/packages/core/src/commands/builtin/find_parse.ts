@@ -280,14 +280,23 @@ export function parseFindExpression(tokens: string[]): FindExpr {
   }
   // Fold one mtime window into the expression's single window. The flat
   // window cannot evaluate a time test per predicate node, so repeated
-  // ones flatten to the union of their windows: the tautology `-mtime +0
-  // -o -mtime -1` imposes no bounds instead of last-wins dropping
-  // everything. An AND of disjoint windows over-matches (documented
-  // divergence from GNU).
+  // ones fold by where they sit. In the top-level `-a` chain every test
+  // must hold, so the windows intersect: `-newer old -newer new` keeps
+  // only what is newer than both, and `-mtime +2 -mtime -1` keeps
+  // nothing, as GNU answers. Under `-o`, `!` or parentheses the window
+  // cannot be exact, so they widen to the union: the tautology `-mtime
+  // +0 -o -mtime -1` imposes no bounds instead of last-wins dropping
+  // everything (documented divergence from GNU: such a window
+  // over-matches).
   const mergeWindow = (lo: number | null, hi: number | null): void => {
     if (!mtimeSeen) {
       ;[g.mtimeMin, g.mtimeMax] = [lo, hi]
       mtimeSeen = true
+      return
+    }
+    if (nested === 0 && !inOr) {
+      g.mtimeMin = g.mtimeMin === null ? lo : lo === null ? g.mtimeMin : Math.max(g.mtimeMin, lo)
+      g.mtimeMax = g.mtimeMax === null ? hi : hi === null ? g.mtimeMax : Math.min(g.mtimeMax, hi)
       return
     }
     g.mtimeMin = g.mtimeMin === null || lo === null ? null : Math.min(g.mtimeMin, lo)

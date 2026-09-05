@@ -22,8 +22,8 @@ from mirage.workspace.executor.builtins.condition.constants import (
 from mirage.workspace.executor.builtins.condition.operators import (
     apply_file_pair, apply_unary)
 from mirage.workspace.session import visible_env
-from mirage.workspace.session.rng import random_reader
-from mirage.workspace.session.state import seed_var, session_elements
+from mirage.workspace.session.state import (random_reader, seed_var,
+                                            session_elements)
 
 from mirage.workspace.executor.builtins.condition.types import (  # isort: skip
     CondAnd, CondBinary, CondContext, CondError, CondNode, CondNot, CondOr,

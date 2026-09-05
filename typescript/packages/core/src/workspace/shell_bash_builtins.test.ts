@@ -404,6 +404,24 @@ const CASES: [string, string, string, string, number][] = [
     0,
   ],
   [
+    // bash 5.2 keeps the file each earlier redirect opened but restores
+    // the descriptors, and writes the diagnostic through the descriptors
+    // as they stood at the failure.
+    'exec_failed_later_redirect_puts_earlier_ones_back',
+    '( exec > /data/good < /data/missing; echo visible ); ' +
+      'test -e /data/good && wc -c < /data/good',
+    'visible\n0\n',
+    '/data/missing: No such file or directory\n',
+    0,
+  ],
+  [
+    'exec_failed_redirect_diagnostic_goes_where_stderr_pointed',
+    '( exec 2> /data/e < /data/missing; echo toerr >&2 ); cat /data/e',
+    '/data/missing: No such file or directory\n',
+    'toerr\n',
+    0,
+  ],
+  [
     'exec_opened_targets_take_the_umask_mode',
     'umask 077; ( exec > /data/m.txt; echo z ); echo z > /data/p.txt; ' +
       'stat -c "%a %n" /data/m.txt /data/p.txt',

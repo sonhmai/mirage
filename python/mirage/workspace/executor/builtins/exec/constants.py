@@ -17,3 +17,8 @@
 # descriptor`; mirage has no descriptor to fail, so it drops instead,
 # a documented divergence.
 CLOSED = ""
+
+# The session fields an `exec` redirect line binds, put back as one
+# unit when a later redirect on the line fails.
+EXEC_STREAM_FIELDS = ("exec_stdout", "exec_stdout_append", "exec_stderr",
+                      "exec_stderr_append", "exec_stdin")

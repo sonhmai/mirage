@@ -23,8 +23,7 @@ from mirage.workspace.executor.builtins.shared import (readonly_refusal,
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import Session
 from mirage.workspace.session.elements import assign_element
-from mirage.workspace.session.rng import random_reader
-from mirage.workspace.session.state import (ensure_var_visible,
+from mirage.workspace.session.state import (ensure_var_visible, random_reader,
                                             session_elements, session_view,
                                             visible_env)
 from mirage.workspace.types import ExecutionNode

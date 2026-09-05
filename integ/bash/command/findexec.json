@@ -523,8 +523,10 @@
         "redis",
         "opfs",
         "s3",
+        "databricks",
         "gridfs",
         "s3-prefix",
+        "databricks-prefix",
         "gridfs-prefix",
         "hf",
         "hf-prefix",
@@ -532,6 +534,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
@@ -554,8 +557,10 @@
         "redis",
         "opfs",
         "s3",
+        "databricks",
         "gridfs",
         "s3-prefix",
+        "databricks-prefix",
         "gridfs-prefix",
         "hf",
         "hf-prefix",
@@ -563,6 +568,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
@@ -585,8 +591,10 @@
         "redis",
         "opfs",
         "s3",
+        "databricks",
         "gridfs",
         "s3-prefix",
+        "databricks-prefix",
         "gridfs-prefix",
         "hf",
         "hf-prefix",
@@ -594,6 +602,7 @@
         "dropbox-root",
         "onedrive",
         "sharepoint",
+        "sharepoint-prefix",
         "ssh",
         "nextcloud",
         "gdrive",
@@ -758,14 +767,10 @@
         "disk",
         "redis",
         "opfs",
-        "s3",
         "databricks",
         "gridfs",
-        "s3-prefix",
         "databricks-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -774,9 +779,9 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder",
-        "box"
-      ]
+        "gdrive-folder"
+      ],
+      "note": "box, hf, hf-prefix, s3 and s3-prefix are excused in integ/target_exceptions.json: python cannot create the newline-bearing name there."
     },
     {
       "id": "find_actions_keep_newline_boundaries_1",
@@ -792,14 +797,10 @@
         "disk",
         "redis",
         "opfs",
-        "s3",
         "databricks",
         "gridfs",
-        "s3-prefix",
         "databricks-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -808,9 +809,9 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder",
-        "box"
-      ]
+        "gdrive-folder"
+      ],
+      "note": "box, hf, hf-prefix, s3 and s3-prefix are excused in integ/target_exceptions.json: python cannot create the newline-bearing name there."
     },
     {
       "id": "find_actions_keep_newline_boundaries_2",
@@ -826,14 +827,10 @@
         "disk",
         "redis",
         "opfs",
-        "s3",
         "databricks",
         "gridfs",
-        "s3-prefix",
         "databricks-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -842,9 +839,9 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder",
-        "box"
-      ]
+        "gdrive-folder"
+      ],
+      "note": "box, hf, hf-prefix, s3 and s3-prefix are excused in integ/target_exceptions.json: python cannot create the newline-bearing name there."
     },
     {
       "id": "find_delete_or_refused_before_mutation",
@@ -928,14 +925,10 @@
         "disk",
         "redis",
         "opfs",
-        "s3",
         "databricks",
         "gridfs",
-        "s3-prefix",
         "databricks-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -944,9 +937,9 @@
         "ssh",
         "nextcloud",
         "gdrive",
-        "gdrive-folder",
-        "box"
-      ]
+        "gdrive-folder"
+      ],
+      "note": "box, hf, hf-prefix, s3 and s3-prefix are excused in integ/target_exceptions.json: python cannot create the newline-bearing name there."
     },
     {
       "id": "find_newer_printf_refusal_1",
@@ -1592,6 +1585,74 @@
         "exit": 1,
         "stdout": "",
         "stderr": "find: multiple -printf actions are not supported\n"
+      }
+    },
+    {
+      "id": "find_print_twice_prints_every_row_twice",
+      "seq": 981525,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fp/d && printf A > /data/fp/d/a.txt && cd /data/fp && find d -name a.txt -print -print; find d -name a.txt -print; cd / && rm -r /data/fp",
+      "expect": {
+        "exit": 0,
+        "stdout": "d/a.txt\nd/a.txt\nd/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_exec_slash_head_runs_through_the_loader",
+      "seq": 981526,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fs/d && printf A > /data/fs/d/a.txt && printf '#!/bin/sh\\necho ran $1\\n' > /data/fs/check.sh && cd /data/fs && find d -name a.txt -exec ./check.sh {} \\; -print; find d -name a.txt -exec /data/fs/check.sh {} \\; ; find d -name a.txt -exec ./missing.sh {} \\; -print; echo rc=$?; cd / && rm -r /data/fs",
+      "expect": {
+        "exit": 0,
+        "stdout": "ran d/a.txt\nd/a.txt\nran d/a.txt\nrc=0\n",
+        "stderr": "find: './missing.sh': No such file or directory\n"
       }
     }
   ]

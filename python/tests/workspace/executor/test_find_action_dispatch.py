@@ -476,3 +476,48 @@ async def test_ls_action_receives_the_whole_newline_path():
     assert io.exit_code == 0
     assert await io.stderr_str() == ''
     assert 'a\nb' in await io.stdout_str()
+
+
+@pytest.mark.asyncio
+async def test_a_repeated_print_prints_every_row_twice():
+    # GNU runs both actions; one explicit -print is the implicit one.
+    ws = await _exec_ws()
+    assert await _run_line(
+        ws,
+        "find d -name a.txt -print -print") == ("d/a.txt\nd/a.txt\n", "", 0)
+    assert await _run_line(ws,
+                           "find d -name a.txt -print") == ("d/a.txt\n", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_exec_runs_a_slash_head_through_the_loader():
+    # bash hands a slash-carrying head to the loader, so a workspace
+    # script runs; one that is not there is GNU's execvp line, per
+    # match, with find's exit status untouched.
+    ws = await _exec_ws()
+    await ws.execute("printf '#!/bin/sh\\necho ran $1\\n' > /w/check.sh",
+                     session_id="s")
+    assert await _run_line(
+        ws, r"find d -name a.txt -exec ./check.sh {} \; -print") == (
+            "ran d/a.txt\nd/a.txt\n", "", 0)
+    assert await _run_line(
+        ws, r"find d -name a.txt -exec /w/check.sh {} \;") == ("ran d/a.txt\n",
+                                                               "", 0)
+    assert await _run_line(
+        ws, r"find d -name a.txt -exec ./missing.sh {} \; -print") == (
+            "", "find: './missing.sh': No such file or directory\n", 0)
+
+
+@pytest.mark.asyncio
+async def test_ls_renders_a_symlink_row():
+    # A symlink is namespace state no backend stat can see, so the
+    # delegated ls needs the link view to render the row at all.
+    ws = await _exec_ws()
+    await ws.execute("ln -s a.txt d/link; ln -s nowhere d/dangling",
+                     session_id="s")
+    out, err, code = await _run_line(ws, "find d -type l -ls")
+    assert (err, code) == ("", 0)
+    rows = out.splitlines()
+    assert [r.split()[-3:] for r in rows] == [["d/dangling", "->", "nowhere"],
+                                              ["d/link", "->", "a.txt"]]
+    assert all("lrwxrwxrwx" in r for r in rows)

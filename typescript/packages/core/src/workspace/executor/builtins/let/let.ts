@@ -14,12 +14,11 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
-import { randomReader } from '../../../session/rng.ts'
 import { evaluateArith } from '../../../../shell/arith.ts'
 import type { ArithResult } from '../../../../shell/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { assignElement } from '../../../session/elements.ts'
-import { ensureVarVisible, sessionElements } from '../../../session/state.ts'
+import { ensureVarVisible, randomReader, sessionElements } from '../../../session/state.ts'
 import type { Session } from '../../../session/session.ts'
 import { visibleEnv } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'

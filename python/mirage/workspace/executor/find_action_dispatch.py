@@ -22,9 +22,10 @@ from mirage.context import (get_current_session, reset_op_policies,
                             suspend_op_policies)
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import ChildMounts, NamespaceView, StatPath
+from mirage.ops.types import NamespaceView, StatPath
 from mirage.policy import pre_ops_gate
 from mirage.types import PathSpec
+from mirage.utils.path import resolve_path
 from mirage.workspace.lookup.lookup import lookup
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
@@ -56,8 +57,33 @@ def exec_line(action: ExecAction, paths: list[str]) -> str:
     return shlex.join(words)
 
 
+async def _head_missing(head: str, registry: MountRegistry, cwd: str,
+                        stat_path: StatPath | None) -> bool:
+    """Whether ``execvp`` would fail to find an ``-exec`` head word.
+
+    A head carrying a slash is a file the loader runs, which no
+    builtin, function or CLI can claim, so it is statted where the
+    line would read it; any other head is looked up by name across
+    the layers dispatch consults.
+
+    Args:
+        head (str): the first word of the action.
+        registry (MountRegistry): where a name is looked up.
+        cwd (str): the session's working directory.
+        stat_path (StatPath | None): dispatcher stat, None outside a
+            workspace, where the loader answers for itself.
+    """
+    if "/" in head:
+        return (stat_path is not None
+                and await stat_path(resolve_path(head, cwd)) is None)
+    sess = get_current_session()
+    return sess is not None and lookup(head, sess,
+                                       registry) is Consumer.UNKNOWN
+
+
 async def _run_exec(execute_fn: ExecuteLine, session_id: str,
-                    registry: MountRegistry, action: ExecAction,
+                    registry: MountRegistry, cwd: str,
+                    stat_path: StatPath | None, action: ExecAction,
                     paths: list[str], out: list[bytes],
                     errors: list[bytes]) -> bool:
     """Run one ``-exec`` invocation, collecting its streams.
@@ -74,16 +100,16 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
         execute_fn (ExecuteLine): runs a line in the session.
         session_id (str): the session the line runs under.
         registry (MountRegistry): where the head word is looked up.
+        cwd (str): the session's working directory.
+        stat_path (StatPath | None): dispatcher stat for a slash head.
         action (ExecAction): the action.
         paths (list[str]): the match, or every match for a batched run.
         out (list[bytes]): where the run's stdout is appended.
         errors (list[bytes]): where its stderr is appended.
     """
-    sess = get_current_session()
-    if sess is not None and lookup(action.argv[0], sess,
-                                   registry) is Consumer.UNKNOWN:
-        errors.append(
-            f"find: '{action.argv[0]}': No such file or directory\n".encode())
+    head = action.argv[0]
+    if await _head_missing(head, registry, cwd, stat_path):
+        errors.append(f"find: '{head}': No such file or directory\n".encode())
         return False
     io = await execute_fn(f"( {exec_line(action, paths)} )",
                           session_id=session_id)
@@ -152,7 +178,7 @@ async def _delete(ps: PathSpec, registry: MountRegistry, cwd: str,
 
 
 async def _ls_row(ps: PathSpec, registry: MountRegistry, cwd: str,
-                  child_mounts: ChildMounts | None, stat_path: StatPath | None,
+                  ns: NamespaceView | None, stat_path: StatPath | None,
                   errors: list[bytes]) -> bytes | None:
     path = ps.raw_path or ps.virtual
     mount = registry.try_mount_for(ps.virtual)
@@ -164,10 +190,7 @@ async def _ls_row(ps: PathSpec, registry: MountRegistry, cwd: str,
             "ls", [ps], [], {
                 "args_l": True,
                 "d": True
-            },
-            ExecContext(cwd=cwd,
-                        ns=NamespaceView(child_mounts=child_mounts),
-                        stat_path=stat_path))
+            }, ExecContext(cwd=cwd, ns=ns, stat_path=stat_path))
     except (FileNotFoundError, NotADirectoryError, PermissionError,
             ValueError) as exc:
         errors.append(f"find: cannot ls '{path}': {exc}\n".encode())
@@ -180,8 +203,17 @@ async def _ls_row(ps: PathSpec, registry: MountRegistry, cwd: str,
 
 
 def _has_actions(expr: FindExpr) -> bool:
-    return any(not (isinstance(a, RowAction) and a.kind == "print")
-               for a in expr.actions)
+    """Whether the actions differ from the implicit print.
+
+    One explicit ``-print`` is exactly what the backend already
+    rendered; two of them print every row twice, as GNU does.
+
+    Args:
+        expr (FindExpr): the parsed expression.
+    """
+    return len(expr.actions) > 1 or any(
+        not (isinstance(a, RowAction) and a.kind == "print")
+        for a in expr.actions)
 
 
 def depth_first_key(path: str) -> tuple[tuple[str, int], ...]:
@@ -222,7 +254,7 @@ async def _apply_find_actions(
     *,
     execute_fn: ExecuteLine | None = None,
     session_id: str = "",
-    child_mounts: ChildMounts | None = None,
+    ns: NamespaceView | None = None,
     stat_path: StatPath | None = None,
 ) -> tuple[ByteSource | None, bytes, int]:
     """Apply find's actions (-exec / -delete / -print0 / -ls) to its rows.
@@ -257,9 +289,11 @@ async def _apply_find_actions(
             session; None outside a workspace, where ``-exec`` is
             refused.
         session_id (str): the session the ``-exec`` lines run under.
-        child_mounts (ChildMounts | None): namespace child fact, threaded
-            into the -ls sub-dispatch so a namespace-only row renders.
-        stat_path (StatPath | None): dispatcher stat, threaded with it.
+        ns (NamespaceView | None): the name plane's facts, threaded into
+            the -ls sub-dispatch so a namespace-only row (a mount point,
+            a symlink) renders the way ``ls -l`` renders it.
+        stat_path (StatPath | None): dispatcher stat, threaded with it
+            and used to find a slash-carrying ``-exec`` head.
 
     Returns:
         The rows to print, the stderr to append, and the exit status the
@@ -291,13 +325,13 @@ async def _apply_find_actions(
                     batches.setdefault(position, []).append(path)
                     continue
                 assert execute_fn is not None
-                if not await _run_exec(execute_fn, session_id, registry,
-                                       action, [path], out, errors):
+                if not await _run_exec(execute_fn, session_id, registry, cwd,
+                                       stat_path, action, [path], out, errors):
                     break
             elif action.kind == "ls":
                 before = len(errors)
-                row = await _ls_row(match, registry, cwd, child_mounts,
-                                    stat_path, errors)
+                row = await _ls_row(match, registry, cwd, ns, stat_path,
+                                    errors)
                 if row is not None:
                     out.append(row)
                 elif len(errors) > before:
@@ -319,8 +353,8 @@ async def _apply_find_actions(
         if not isinstance(action, ExecAction) or not paths:
             continue
         assert execute_fn is not None
-        if not await _run_exec(execute_fn, session_id, registry, action, paths,
-                               out, errors):
+        if not await _run_exec(execute_fn, session_id, registry, cwd,
+                               stat_path, action, paths, out, errors):
             exit_code = 1
     body = b"".join(out)
     return (body if body else None), b"".join(errors), exit_code

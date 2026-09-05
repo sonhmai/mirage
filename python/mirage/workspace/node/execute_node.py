@@ -60,8 +60,7 @@ from mirage.workspace.node.test_expr import (expand_double_bracket,
                                              expand_test_expr)
 from mirage.workspace.session import Session
 from mirage.workspace.session.elements import assign_element
-from mirage.workspace.session.rng import random_reader
-from mirage.workspace.session.state import (ensure_var_visible,
+from mirage.workspace.session.state import (ensure_var_visible, random_reader,
                                             session_elements, session_view,
                                             visible_env)
 from mirage.workspace.types import ExecutionNode

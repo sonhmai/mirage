@@ -45,7 +45,6 @@ import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
-import { randomReader } from '../session/rng.ts'
 import { evaluateArith } from '../../shell/arith.ts'
 import { ExitSignal, ArithError, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
@@ -78,7 +77,13 @@ import { executeAssignment } from './assignment.ts'
 import { executeDeclaration } from './declaration.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { SessionView } from '../../ops/types.ts'
-import { ensureVarVisible, sessionElements, sessionView, visibleEnv } from '../session/state.ts'
+import {
+  ensureVarVisible,
+  randomReader,
+  sessionElements,
+  sessionView,
+  visibleEnv,
+} from '../session/state.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { type ExecuteNodeOpts, pump } from '../executor/jobs.ts'
 

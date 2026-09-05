@@ -102,6 +102,28 @@ describe('parseFindExpression', () => {
     expect([e.minSize, e.maxSize]).toEqual([2, 2])
   })
 
+  it('intersects top-level windows and widens them under -o', () => {
+    // GNU: every test in the implicit -a chain must hold, so `-newermt a
+    // -newermt b` keeps what is newer than both and `-mtime +2 -mtime -1`
+    // keeps nothing; under -o the flat window can only widen.
+    const later = parseFindExpression(['-newermt', '2021-06-01']).mtimeMin
+    for (const order of [
+      ['2020-06-01', '2021-06-01'],
+      ['2021-06-01', '2020-06-01'],
+    ]) {
+      const e = parseFindExpression(['-newermt', order[0] ?? '', '-newermt', order[1] ?? ''])
+      expect([e.mtimeMin, e.mtimeMax]).toEqual([later, null])
+    }
+    const empty = parseFindExpression(['-mtime', '+2', '-mtime', '-1'])
+    expect(empty.mtimeMin).not.toBeNull()
+    expect(empty.mtimeMax).not.toBeNull()
+    expect(empty.mtimeMin ?? 0).toBeGreaterThan(empty.mtimeMax ?? 0)
+    const both = parseFindExpression(['-mtime', '-1', '-mtime', '-3'])
+    const either = parseFindExpression(['-mtime', '-1', '-o', '-mtime', '-3'])
+    expect((both.mtimeMin ?? 0) - (either.mtimeMin ?? 0)).toBeCloseTo(2 * 86400, 0)
+    expect([both.mtimeMax, either.mtimeMax]).toEqual([null, null])
+  })
+
   it('repeated -mtime windows merge to their union', () => {
     // `-mtime +0 -o -mtime -1` is a tautology in GNU; the flat window
     // must impose no bounds rather than keep only the last predicate.

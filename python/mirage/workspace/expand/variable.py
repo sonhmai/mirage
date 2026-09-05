@@ -36,10 +36,9 @@ from mirage.workspace.session import (Session, ensure_var_visible,
                                       visible_arrays, visible_env)
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.errors import ReadonlyVariableError
-from mirage.workspace.session.rng import next_random
 from mirage.workspace.session.shell_dirs import home_dir
-from mirage.workspace.session.state import (nameref_target, session_elements,
-                                            visible_assocs)
+from mirage.workspace.session.state import (nameref_target, next_random,
+                                            session_elements, visible_assocs)
 
 ExpandChild = Callable[[tree_sitter.Node], Awaitable[str]]
 

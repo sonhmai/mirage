@@ -541,7 +541,7 @@ export async function fanOutTraversal(
       {
         ...(executeFn !== undefined ? { executeFn } : {}),
         sessionId,
-        childMounts: ns?.childMounts ?? null,
+        ns: ns ?? null,
         statPath,
       },
     )

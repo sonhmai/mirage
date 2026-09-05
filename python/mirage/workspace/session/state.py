@@ -14,7 +14,9 @@
 
 import errno
 import functools
-from collections.abc import Iterator, Mapping
+import time
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import replace
 
 from mirage.ops.types import SessionView
 from mirage.policy import Policies, PolicyDenied, pre_session_gate
@@ -30,6 +32,7 @@ from mirage.shell.variable import (ShellValue, ShellVar, VarAttr, coerce_value,
                                    detach, with_attr, with_value)
 from mirage.utils.hidden import var_hidden
 from mirage.workspace.session.errors import ReadonlyVariableError
+from mirage.workspace.session.rng import step_state, value_of
 from mirage.workspace.session.session import Session
 
 
@@ -409,6 +412,83 @@ def session_elements(session: Session) -> ElementOps:
     return ElementOps(resolve=bound.resolve, read=bound.read)
 
 
+def seed_from(word: str, session: Session) -> int:
+    """Evaluate a host-supplied seed; invalid arithmetic propagates.
+
+    Read without the generator on offer: a host word naming ``RANDOM``
+    would otherwise draw, and the draw reseed, without end.
+
+    Args:
+        word (str): the seed expression.
+        session (Session): the session the expression reads.
+    """
+    value = evaluate_arith(word,
+                           visible_env(session),
+                           elements=session_elements(session)).value
+    return value % RANDOM_MODULUS
+
+
+def next_random(session: Session, stored: str | None) -> int | None:
+    """Draw from the session generator, or None after RANDOM is unset.
+
+    Shell assignments validate and seed at the session door. A host-seeded
+    variable is consumed here on its first read. The last draw is separate
+    from the stored word because a reseed resets repeat suppression to zero.
+
+    Args:
+        session (Session): generator and variable state.
+        stored (str | None): the visible RANDOM value.
+    """
+    if session._random_seed == RANDOM_UNSET or (
+            stored is None and session._random_seed is not None):
+        return None
+    seed = (seed_from(stored, session)
+            if stored is not None and stored != session._random_seed else None)
+    if seed is not None:
+        state = seed
+        last = 0
+    elif session._random_state is None:
+        state = time.time_ns() % RANDOM_MODULUS
+        last = 0
+    else:
+        state = session._random_state
+        last = session._random_last
+    while True:
+        state = step_state(state)
+        value = value_of(state)
+        if value != last:
+            break
+    session._random_state = state
+    session._random_last = value
+    word = str(value)
+    existing = session.vars.get(RANDOM)
+    session.vars[RANDOM] = (replace(existing, value=word)
+                            if existing is not None else ShellVar(word))
+    session._random_seed = word
+    return value
+
+
+def random_reader(session: Session) -> Callable[[str], str | None]:
+    """Bind lazy arithmetic RANDOM reads to a session.
+
+    Lives beside the door rather than with the generator because the
+    door needs it too: ``RANDOM=RANDOM`` draws once while the seed is
+    evaluated, then seeds with the draw, as bash's ``assign_random``
+    does through ``evalexp``.
+
+    Args:
+        session (Session): generator and visibility state.
+    """
+
+    def read(name: str) -> str | None:
+        if name != RANDOM or var_hidden(session.hidden_vars, name):
+            return None
+        value = next_random(session, visible_env(session).get(name))
+        return None if value is None else str(value)
+
+    return read
+
+
 def _integer_text(session: Session, text: str) -> str:
     """The `-i` coercion: evaluate the incoming text as arithmetic.
 
@@ -416,7 +496,9 @@ def _integer_text(session: Session, text: str) -> str:
     element references resolve through the session's resolver, so
     `n=a[1]+1` and `n=m[k]+1` see the element; an unresolvable name is
     0 (`n=abc` stores `0`), which is the arithmetic rule, not a
-    refusal. A malformed expression raises ArithError, and the caller
+    refusal. `RANDOM` draws, as it does in every other arithmetic
+    context, so `n=RANDOM` and a `RANDOM=RANDOM` seed both advance the
+    generator. A malformed expression raises ArithError, and the caller
     decides how to voice it (bash aborts the line with the evaluator's
     own message).
 
@@ -428,7 +510,8 @@ def _integer_text(session: Session, text: str) -> str:
         return str(
             evaluate_arith(text,
                            visible_env(session),
-                           elements=session_elements(session)).value)
+                           elements=session_elements(session),
+                           read_var=random_reader(session)).value)
     except ArithError as exc:
         # The offending text leads, which is how every caller voices it
         # (`bash: 1+: syntax error: operand expected`), so it is spelled

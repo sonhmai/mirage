@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { seedVar, sessionElements } from '../../../session/state.ts'
-import { randomReader } from '../../../session/rng.ts'
+import { randomReader, seedVar, sessionElements } from '../../../session/state.ts'
 import { evaluateArith } from '../../../../shell/arith.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { makeArray } from '../../../../shell/array.ts'

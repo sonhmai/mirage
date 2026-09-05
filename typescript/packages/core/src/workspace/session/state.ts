@@ -22,6 +22,7 @@ import type { ElementOps } from '../../shell/types.ts'
 import { varHidden } from '../../utils/hidden.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { ReadonlyVariableError } from './errors.ts'
+import { initialSeed, stepState, valueOf } from './rng.ts'
 import { ownRecord, sessionEntry, setSessionEntry } from './session.ts'
 import type { ShellValue } from '../../shell/variable.ts'
 import { coerceValue, detach, makeVar, VarAttr, withAttr, withValue } from '../../shell/variable.ts'
@@ -337,9 +338,79 @@ export function sessionElements(session: Session): ElementOps {
  * expected`), so it is spelled once here rather than at each of the
  * sites that catch it.
  */
+/** Evaluate a host-supplied seed; invalid arithmetic propagates. Read
+ * without the generator on offer: a host word naming `RANDOM` would
+ * otherwise draw, and the draw reseed, without end. */
+export function seedFrom(word: string, session: Session): number {
+  const value = evaluateArith(word, visibleEnv(session), 0, sessionElements(session)).value
+  const modulus = BigInt(RANDOM_MODULUS)
+  return Number(((value % modulus) + modulus) % modulus)
+}
+
+/** Draw from the session generator, or null after RANDOM is unset.
+ * Shell assignments validate and seed at the session door. A host-seeded
+ * variable is consumed here on its first read. Reseeding resets repeat
+ * suppression to zero independently of the stored word. */
+export function nextRandom(session: Session, stored: string | undefined): number | null {
+  if (
+    session.randomSeed === RANDOM_UNSET ||
+    (stored === undefined && session.randomSeed !== null)
+  ) {
+    return null
+  }
+  let state: number
+  let last: number
+  const seed =
+    stored !== undefined && stored !== session.randomSeed ? seedFrom(stored, session) : null
+  if (seed !== null) {
+    state = seed
+    last = 0
+  } else if (session.randomState === null) {
+    state = initialSeed(session.sessionId)
+    last = 0
+  } else {
+    state = session.randomState
+    last = session.randomLast
+  }
+  let value: number
+  do {
+    state = stepState(state)
+    value = valueOf(state)
+  } while (value === last)
+  session.randomState = state
+  session.randomLast = value
+  const word = String(value)
+  const existing = session.vars[RANDOM]
+  session.vars[RANDOM] = existing !== undefined ? withValue(existing, word) : makeVar(word)
+  session.randomSeed = word
+  return value
+}
+
+/** Bind lazy arithmetic RANDOM reads to a session. Lives beside the
+ * door rather than with the generator because the door needs it too:
+ * `RANDOM=RANDOM` draws once while the seed is evaluated, then seeds
+ * with the draw, as bash's `assign_random` does through `evalexp`. */
+export function randomReader(session: Session): (name: string) => string | null {
+  return (name) => {
+    if (name !== RANDOM || varHidden(session.hiddenVars, name)) return null
+    const value = nextRandom(session, visibleEnv(session)[name])
+    return value === null ? null : String(value)
+  }
+}
+
+/** The `-i` coercion: evaluate the incoming text as arithmetic against
+ * the visible env and the session's element resolver. `RANDOM` draws,
+ * as in every other arithmetic context, so `n=RANDOM` and a
+ * `RANDOM=RANDOM` seed both advance the generator. */
 function integerText(session: Session, text: string): string {
   try {
-    return evaluateArith(text, visibleEnv(session), 0, sessionElements(session)).value.toString()
+    return evaluateArith(
+      text,
+      visibleEnv(session),
+      0,
+      sessionElements(session),
+      randomReader(session),
+    ).value.toString()
   } catch (err) {
     if (err instanceof ArithError) throw new ArithError(`${text}: ${err.message}`)
     throw err

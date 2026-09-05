@@ -48,10 +48,19 @@ async def handle_pipe(
     child_nodes: list[ExecutionNode] = []
     ios: list[IOResult] = []
     intermediate_streams: list[ByteSource] = []
+    # Every segment is a child shell forked before the pipeline ran, so
+    # each expands `$?` to the status the pipeline started with, not to
+    # what a sibling's inner statements left behind (`false; { true; } |
+    # echo $?` prints 1). The snapshot does not carry it: after a child
+    # shell `$?` is the child's status, which is the one thing it
+    # reports back. Seeded through the status door, which leaves
+    # `${PIPESTATUS[@]}` alone.
+    before = session.last_exit_code
 
     try:
         for i, cmd in enumerate(commands):
             saved = session.snapshot()
+            record_status(session, before, transparent=True)
             try:
                 stdout, io, child_exec = await execute_node(
                     cmd, session, current_stdin, call_stack)

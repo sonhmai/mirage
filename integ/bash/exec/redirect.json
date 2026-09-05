@@ -203,6 +203,40 @@
         "stdout": "old\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "exec_failed_later_redirect_puts_earlier_ones_back",
+      "seq": 940106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( exec > exgood.txt < exmissing.txt; echo visible ); test -e exgood.txt && wc -c < exgood.txt; ( exec 2> exerr.txt < exmissing.txt; echo toerr >&2 ); cat exerr.txt; rm exgood.txt exerr.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "visible\n0\nexmissing.txt: No such file or directory\n",
+        "stderr": "exmissing.txt: No such file or directory\ntoerr\n"
+      }
     }
   ]
 }

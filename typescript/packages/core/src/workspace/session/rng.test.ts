@@ -16,10 +16,9 @@ import { describe, expect, it } from 'vitest'
 import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
 import { RANDOM, RANDOM_MAX } from '../../shell/constants.ts'
 import { makeVar } from '../../shell/variable.ts'
-import { nextRandom, seedFrom } from './rng.ts'
 import { Session } from './session.ts'
 import { ArithError } from '../../shell/errors.ts'
-import { sessionView } from './state.ts'
+import { nextRandom, seedFrom, sessionView } from './state.ts'
 
 function stored(s: Session): string | undefined {
   const v = s.vars[RANDOM]?.value
@@ -160,6 +159,9 @@ it.each([
   ['unset RANDOM; RANDOM=1.5; echo $RANDOM', '1.5\n', ''],
   ['x=42; RANDOM=x; x=0; echo $RANDOM', '17772\n', ''],
   ['RANDOM=42; RANDOM=$RANDOM; echo $RANDOM', '9401\n', ''],
+  ['RANDOM=42; RANDOM=RANDOM; echo $RANDOM', '9401\n', ''],
+  ['RANDOM=42; RANDOM=RANDOM+RANDOM; echo $RANDOM', '2815\n', ''],
+  ['declare -i n; RANDOM=42; n=RANDOM; echo $n $RANDOM', '17772 26794\n', ''],
 ])('reports seed assignment diagnostics: %s', async (command, stdout, prefix) => {
   const { ws } = await makeIntegrationWS()
   try {

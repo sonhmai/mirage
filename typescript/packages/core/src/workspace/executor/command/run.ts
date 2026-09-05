@@ -297,7 +297,6 @@ export async function runOnMount(
   // (tree) reads the subtree under a nested mount through here, because
   // that subtree lives in a resource its own accessor cannot open.
   const readdirPath: ReaddirPath = (path: string) => pathReaddir(dispatch, path)
-  const childMounts = ns.childMounts ?? null
 
   const [lineRuntime, denial] = lineRuntimeFor(
     cmdName,
@@ -335,7 +334,7 @@ export async function runOnMount(
         {
           ...(executeFn !== undefined ? { executeFn } : {}),
           sessionId: session.sessionId,
-          childMounts,
+          ns,
           statPath,
         },
       )

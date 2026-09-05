@@ -446,3 +446,21 @@ def test_newer_placement_and_mixed_printf_refusals(tokens, message):
     with pytest.raises(FindParseError) as exc:
         parse_find_expression(tokens)
     assert str(exc.value) == message
+
+
+def test_top_level_windows_intersect_and_or_windows_widen():
+    # GNU: every test in the implicit -a chain must hold, so `-newermt a
+    # -newermt b` keeps what is newer than both and `-mtime +2 -mtime
+    # -1` keeps nothing; under -o the flat window can only widen.
+    later = parse_find_expression(["-newermt", "2021-06-01"]).mtime_min
+    for order in (["2020-06-01", "2021-06-01"], ["2021-06-01", "2020-06-01"]):
+        expr = parse_find_expression(
+            ["-newermt", order[0], "-newermt", order[1]])
+        assert (expr.mtime_min, expr.mtime_max) == (later, None)
+    expr = parse_find_expression(["-mtime", "+2", "-mtime", "-1"])
+    assert expr.mtime_min is not None and expr.mtime_max is not None
+    assert expr.mtime_min > expr.mtime_max
+    both = parse_find_expression(["-mtime", "-1", "-mtime", "-3"])
+    either = parse_find_expression(["-mtime", "-1", "-o", "-mtime", "-3"])
+    assert both.mtime_min - either.mtime_min == pytest.approx(2 * 86400, abs=2)
+    assert (both.mtime_max, either.mtime_max) == (None, None)

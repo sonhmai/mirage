@@ -468,7 +468,7 @@ async def run_on_mount(
             session.cwd,
             execute_fn=execute_fn,
             session_id=session.session_id,
-            child_mounts=ns.child_mounts,
+            ns=ns,
             stat_path=stat_path)
         if action_err:
             existing = await materialize(io.stderr) if io.stderr else b""

@@ -25,7 +25,8 @@ from mirage.shell.descriptors import (bad_descriptor_line,
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
-from mirage.workspace.executor.builtins.exec.constants import CLOSED
+from mirage.workspace.executor.builtins.exec.constants import (
+    CLOSED, EXEC_STREAM_FIELDS)
 from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.create import create_file
@@ -78,7 +79,8 @@ async def install_exec_redirects(
     appending) now, as bash opens it at `exec` time, so `exec > f`
     leaves an empty `f` even if nothing is written afterwards. A target
     that cannot be opened is bash's shell-attributed error and leaves
-    the redirects unchanged. So is a descriptor above 2 (`exec 3>f`,
+    the redirects unchanged, every earlier one on the line included
+    (`_roll_back`). So is a descriptor above 2 (`exec 3>f`,
     `exec 3>&-`): the shell has no descriptor table, so the line is
     refused with `3: Bad file descriptor` rather than aliased onto
     stdout, which is what `exec 3>&-` used to close.
@@ -91,6 +93,25 @@ async def install_exec_redirects(
     bad_fd = unsupported_descriptor(redirects)
     if bad_fd is not None:
         return _exec_failure(bad_descriptor_line(bad_fd))
+    saved = {name: getattr(session, name) for name in EXEC_STREAM_FIELDS}
+    err = await _install(dispatch, session, redirects)
+    if err is None:
+        return None, IOResult(), ExecutionNode(command="exec", exit_code=0)
+    return await _roll_back(dispatch, session, saved, err)
+
+
+async def _install(dispatch: DispatchFn, session: Session,
+                   redirects: list[Redirect]) -> bytes | None:
+    """Bind the redirects onto the session's streams, in line order.
+
+    Returns the diagnostic of the first redirect that fails, with every
+    earlier one still bound, which is the state bash reports from.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher.
+        session (Session): shell session state.
+        redirects (list[Redirect]): the expanded redirects.
+    """
     for r in redirects:
         if isinstance(r.target, int):
             # Keyed on the descriptor claimed, not the operator's
@@ -112,13 +133,13 @@ async def install_exec_redirects(
                 session.exec_stdout_append = session.exec_stderr_append
             continue
         if ((r.kind == RedirectKind.STDIN) != (r.fd == FD_STDIN)):
-            return _exec_failure(bad_descriptor_line(r.fd))
+            return bad_descriptor_line(r.fd)
         scope = _to_scope(r.target) if isinstance(r.target, str) else r.target
         if r.kind == RedirectKind.STDIN:
             try:
                 data, _ = await dispatch("read", scope)
             except FS_ERRORS as exc:
-                return _exec_error(scope.raw_path, exc)
+                return _error_line(scope.raw_path, exc)
             session.exec_stdin = await materialize(data) or b""
             continue
         path = scope.virtual
@@ -126,13 +147,45 @@ async def install_exec_redirects(
             if await _open_target(dispatch, session, scope, r.append):
                 session._exec_opened.add(path)
         except FS_ERRORS as exc:
-            return _exec_error(scope.raw_path, exc)
+            return _error_line(scope.raw_path, exc)
         streams = ((["stderr"] if r.fd == FD_STDERR else ["stdout"])
                    if r.fd != FD_BOTH else ["stdout", "stderr"])
         for stream in streams:
             setattr(session, f"exec_{stream}", path)
             setattr(session, f"exec_{stream}_append", r.append)
-    return None, IOResult(), ExecutionNode(command="exec", exit_code=0)
+    return None
+
+
+async def _roll_back(
+    dispatch: DispatchFn,
+    session: Session,
+    saved: dict[str, str | bytes | bool | None],
+    err: bytes,
+) -> tuple[None, IOResult, ExecutionNode]:
+    """Undo a redirect list that failed part-way, the way bash does.
+
+    bash keeps the side effect of opening each earlier target (`exec
+    >f </missing` leaves an empty `f`) but puts every descriptor back
+    where it stood before the line, so an `echo` after it still reaches
+    the terminal. The diagnostic itself goes through the descriptors as
+    they stood at the failure, which is why `exec 2>e </missing` writes
+    it into `e` and nothing reaches the terminal; a stderr the line did
+    not move is left to the statement's own diversion.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher.
+        session (Session): shell session state.
+        saved (dict[str, str | bytes | bool | None]): the stream fields
+            as they stood before the line.
+        err (bytes): the diagnostic of the redirect that failed.
+    """
+    partial = session.exec_stderr
+    for name, value in saved.items():
+        setattr(session, name, value)
+    if partial is None or partial == saved["exec_stderr"]:
+        return _exec_failure(err)
+    await _append(dispatch, session, partial, err)
+    return _exec_failure(None)
 
 
 async def _open_target(dispatch: DispatchFn, session: Session, scope: PathSpec,
@@ -162,23 +215,29 @@ async def _open_target(dispatch: DispatchFn, session: Session, scope: PathSpec,
     return True
 
 
-def _exec_error(label: str,
-                exc: OSError) -> tuple[None, IOResult, ExecutionNode]:
+def _error_line(label: str, exc: OSError) -> bytes:
+    """bash's line for a redirect target it could not open.
+
+    Args:
+        label (str): the target as typed.
+        exc (OSError): what the dispatcher raised.
+    """
     strerror = fs_strerror(exc)
-    return _exec_failure(
-        (f"{label}: {strerror}\n" if strerror else f"{label}\n").encode())
+    return (f"{label}: {strerror}\n" if strerror else f"{label}\n").encode()
 
 
-def _exec_failure(err: bytes) -> tuple[None, IOResult, ExecutionNode]:
+def _exec_failure(err: bytes | None) -> tuple[None, IOResult, ExecutionNode]:
     """The shell-attributed refusal of an `exec` redirect line.
 
     Args:
-        err (bytes): the diagnostic, already in the shell's voice.
+        err (bytes | None): the diagnostic, already in the shell's
+            voice, or None once it was written where the line's own
+            stderr redirect pointed.
     """
     return None, IOResult(exit_code=1,
                           stderr=err), ExecutionNode(command="exec",
                                                      exit_code=1,
-                                                     stderr=err)
+                                                     stderr=err or b"")
 
 
 async def divert_statement(

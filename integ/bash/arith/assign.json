@@ -67,6 +67,40 @@
         "stdout": "5\n[5 2 3]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "arith_random_seed_reads_random_as_a_draw",
+      "seq": 443,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "RANDOM=42; RANDOM=RANDOM; a=$RANDOM; RANDOM=42; RANDOM=RANDOM+RANDOM; b=$RANDOM; declare -i n; RANDOM=42; n=RANDOM; echo $a $b $n $RANDOM",
+      "expect": {
+        "exit": 0,
+        "stdout": "9401 2815 17772 26794\n",
+        "stderr": ""
+      }
     }
   ]
 }

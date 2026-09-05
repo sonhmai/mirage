@@ -80,6 +80,31 @@ describe('resolveNewerRefs', () => {
     )
   })
 
+  it('intersects repeated -newer references', async () => {
+    // GNU find 4.9: `-newer old -newer new` keeps only what is newer than
+    // both references.
+    const ws = await shellWs()
+    try {
+      await ws.execute(
+        'printf o > /w/old; printf c > /w/cand; printf n > /w/new; cd /w; ' +
+          "touch -d '2020-01-01 00:00:00' old; " +
+          "touch -d '2021-01-01 00:00:00' cand; " +
+          "touch -d '2022-01-01 00:00:00' new",
+        { sessionId: 's' },
+      )
+      expect(await out(ws, 'find cand -newer old -newer new')).toEqual(['', '', 0])
+      expect(await out(ws, 'find cand -newer new -newer old')).toEqual(['', '', 0])
+      expect(await out(ws, 'find cand -newer old')).toEqual(['cand\n', '', 0])
+      expect(await out(ws, 'find cand -newermt 2020-06-01 -newermt 2021-06-01')).toEqual([
+        '',
+        '',
+        0,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('reads a link reference by the link policy', async () => {
     // GNU find 4.9: -P (the default) compares against a symlink's own
     // mtime, -H and -L against its target's; a dangling reference is its

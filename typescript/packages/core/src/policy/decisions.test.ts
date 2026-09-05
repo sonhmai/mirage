@@ -156,10 +156,10 @@ describe('decisions', () => {
     expect(waiting.pending()).toHaveLength(1)
   })
 
-  it('spends an inline grant on the line that asked, not the next one', async () => {
-    // The host answers while the line waits, so the grant belongs to that
-    // line: allowing once must not let the next identical line through with
-    // nobody asked.
+  it('spends an inline answer on the line that asked, not the next one', async () => {
+    // The host answers while the line waits, so the answer belongs to that
+    // line. Allowing once must not let the next identical line through with
+    // nobody asked, and refusing once must not refuse it either.
     let asked = 0
     const allow = (r: Decision): Promise<Decision> => {
       asked += 1
@@ -170,19 +170,15 @@ describe('decisions', () => {
     expect(await ledger.resolve(ctx(), ASK)).toBeNull()
     expect(asked).toBe(2)
 
-    // A refusal is the other way round, by design: the human who said no is
-    // not asked about the agent's immediate retry. The record stands to
-    // refuse that retry, is spent by it, and the run after is a new question.
     let refusals = 0
     const deny = (r: Decision): Promise<Decision> => {
       refusals += 1
       return Promise.resolve({ ...r, outcome: Outcome.DENY, scope: Scope.ONCE })
     }
     const refused = new Decisions(null, deny)
-    for (const expected of [1, 1, 2]) {
-      expect((await refused.resolve(ctx(), ASK))?.kind).toBe('deny')
-      expect(refusals).toBe(expected)
-    }
+    expect((await refused.resolve(ctx(), ASK))?.kind).toBe('deny')
+    expect((await refused.resolve(ctx(), ASK))?.kind).toBe('deny')
+    expect(refusals).toBe(2)
 
     // A SESSION answer still stands for the rest of the session.
     const forever = new Decisions(null, (r: Decision) =>

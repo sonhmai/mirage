@@ -33,9 +33,8 @@ from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
 from mirage.workspace.expand.variable import (_lookup_var, expand_braces,
                                               expansion_write)
 from mirage.workspace.session import Session, visible_env
-from mirage.workspace.session.rng import random_reader
 from mirage.workspace.session.shell_dirs import home_dir
-from mirage.workspace.session.state import session_elements
+from mirage.workspace.session.state import random_reader, session_elements
 
 
 def _folded_whitespace(node: tree_sitter.Node) -> str:

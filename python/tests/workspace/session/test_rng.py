@@ -19,8 +19,8 @@ from mirage.shell.constants import RANDOM, RANDOM_MAX
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellVar
 from mirage.workspace.session import Session
-from mirage.workspace.session.rng import next_random, seed_from
-from mirage.workspace.session.state import seed_var, set_var
+from mirage.workspace.session.state import (next_random, seed_from, seed_var,
+                                            set_var)
 
 
 def test_seed_from_evaluates_the_word_as_arithmetic():
@@ -193,6 +193,10 @@ async def test_child_random_reads_preserve_the_parent_sequence(
     ('unset RANDOM; RANDOM=1.5; echo $RANDOM', '1.5\n', ''),
     ('x=42; RANDOM=x; x=0; echo $RANDOM', '17772\n', ''),
     ('RANDOM=42; RANDOM=$RANDOM; echo $RANDOM', '9401\n', ''),
+    ('RANDOM=42; RANDOM=RANDOM; echo $RANDOM', '9401\n', ''),
+    ('RANDOM=42; RANDOM=RANDOM+RANDOM; echo $RANDOM', '2815\n', ''),
+    ('declare -i n; RANDOM=42; n=RANDOM; echo $n $RANDOM', '17772 26794\n',
+     ''),
 ])
 async def test_random_seed_diagnostics(command, stdout, prefix):
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)

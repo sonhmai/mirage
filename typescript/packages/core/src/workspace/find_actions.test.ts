@@ -278,6 +278,78 @@ describe('find -exec isolation', () => {
     }
   })
 
+  it('prints every row twice for a repeated -print', async () => {
+    // GNU runs both actions; one explicit -print is the implicit one.
+    const ws = await singleMountWs()
+    try {
+      await ws.execute('mkdir -p /w/d; touch /w/d/a.txt; cd /w')
+      const twice = await ws.execute('find d -name a.txt -print -print')
+      expect([twice.stdoutText, twice.stderrText, twice.exitCode]).toEqual([
+        'd/a.txt\nd/a.txt\n',
+        '',
+        0,
+      ])
+      const once = await ws.execute('find d -name a.txt -print')
+      expect([once.stdoutText, once.stderrText, once.exitCode]).toEqual(['d/a.txt\n', '', 0])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('runs a slash-carrying -exec head through the loader', async () => {
+    // bash hands a slash-carrying head to the loader, so a workspace
+    // script runs; one that is not there is GNU's execvp line, per match,
+    // with find's exit status untouched.
+    const ws = await singleMountWs()
+    const out = async (line: string): Promise<[string, string, number]> => {
+      const r = await ws.execute(line)
+      return [r.stdoutText, r.stderrText, r.exitCode]
+    }
+    try {
+      await ws.execute(
+        "mkdir -p /w/d; touch /w/d/a.txt; printf '#!/bin/sh\\necho ran $1\\n' > /w/check.sh; cd /w",
+      )
+      expect(await out('find d -name a.txt -exec ./check.sh {} \\; -print')).toEqual([
+        'ran d/a.txt\nd/a.txt\n',
+        '',
+        0,
+      ])
+      expect(await out('find d -name a.txt -exec /w/check.sh {} \\;')).toEqual([
+        'ran d/a.txt\n',
+        '',
+        0,
+      ])
+      expect(await out('find d -name a.txt -exec ./missing.sh {} \\; -print')).toEqual([
+        '',
+        "find: './missing.sh': No such file or directory\n",
+        0,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('renders a symlink row under -ls', async () => {
+    // A symlink is namespace state no backend stat can see, so the
+    // delegated ls needs the link view to render the row at all.
+    const ws = await singleMountWs()
+    try {
+      await ws.execute(
+        'mkdir -p /w/d; touch /w/d/a.txt; ln -s a.txt /w/d/link; ln -s nowhere /w/d/dangling; cd /w',
+      )
+      const io = await ws.execute('find d -type l -ls')
+      expect([io.stderrText, io.exitCode]).toEqual(['', 0])
+      const rows = io.stdoutText.split('\n').filter((l) => l !== '')
+      expect(rows.map((r) => r.split(/\s+/).slice(-3))).toEqual([
+        ['d/dangling', '->', 'nowhere'],
+        ['d/link', '->', 'a.txt'],
+      ])
+      for (const row of rows) expect(row).toContain('lrwxrwxrwx')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it.each(['-exec touch marker \\;', '-print', '-delete'])(
     'refuses a later test before %s has side effects',
     async (action) => {

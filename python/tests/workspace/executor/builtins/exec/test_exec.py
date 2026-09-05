@@ -165,3 +165,30 @@ async def test_explicit_stdin_file_redirect_persists():
         assert await io.stdout_str() == "readable\n"
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_later_redirect_puts_every_earlier_one_back():
+    # bash 5.2 keeps the file each earlier redirect opened but restores
+    # the descriptors, and writes the diagnostic through the descriptors
+    # as they stood at the failure.
+    ws = _ws()
+    missing = "/data/missing: No such file or directory\n"
+    try:
+        io = await ws.execute("exec > /data/good < /data/missing; echo visible"
+                              )
+        assert (await io.stdout_str(), await
+                io.stderr_str(), io.exit_code) == ("visible\n", missing, 0)
+        assert await _file(ws, "/data/good") == ""
+        io = await ws.execute("exec 2> /data/e < /data/missing; echo toerr >&2"
+                              )
+        assert (await io.stdout_str(), await
+                io.stderr_str()) == ("", "toerr\n")
+        assert await _file(ws, "/data/e") == missing
+        io = await ws.execute(
+            "exec > /data/g2; exec >> /data/g3 < /data/missing; echo where")
+        assert (await io.stdout_str(), await io.stderr_str()) == ("", missing)
+        assert await _file(ws, "/data/g2") == "where\n"
+        assert await _file(ws, "/data/g3") == ""
+    finally:
+        await ws.close()

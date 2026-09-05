@@ -230,7 +230,11 @@ reads a symlink reference itself under the default `-P` and its target under
 `-newermt` accepts GNU date expressions such as `yesterday`, `24 hours ago`,
 and `@1700000000`, with unzoned dates interpreted as UTC. Invalid calendar
 dates are refused. `-newer` and `-newermt` must be in a top-level AND chain;
-placing them under OR, negation, or parentheses is refused.
+placing them under OR, negation, or parentheses is refused. Repeated time
+tests in that chain intersect, so `-newer old -newer new` keeps only what is
+newer than both; `-mtime` tests under `-o` widen to the union of their
+windows, which can match more than GNU. A repeated `-print` prints each row
+once per occurrence, as in GNU.
 
 ## Supported bash syntax
 

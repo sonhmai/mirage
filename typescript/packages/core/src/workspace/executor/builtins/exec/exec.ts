@@ -24,6 +24,7 @@ import type { Session } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { createFile } from '../../create.ts'
 import { toScope } from '../scope.ts'
+import type { EXEC_STREAM_FIELDS } from './constants.ts'
 import { CLOSED } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 
@@ -43,20 +44,55 @@ export function handleExecCommand(args: string[], _session: Session): Result {
   ]
 }
 
-function execError(label: string, err: unknown): Result {
+/** bash's line for a redirect target it could not open. */
+function errorLine(label: string, err: unknown): Uint8Array {
   const strerror = isFsError(err) ? (fsStrerror(err) ?? '') : ''
-  return execFailure(
-    new TextEncoder().encode(strerror !== '' ? `${label}: ${strerror}\n` : `${label}\n`),
-  )
+  return new TextEncoder().encode(strerror !== '' ? `${label}: ${strerror}\n` : `${label}\n`)
 }
 
-/** The shell-attributed refusal of an `exec` redirect line. */
-function execFailure(line: Uint8Array): Result {
+/** The shell-attributed refusal of an `exec` redirect line; the line is
+ * null once it was written where the line's own stderr redirect pointed. */
+function execFailure(line: Uint8Array | null): Result {
   return [
     null,
     new IOResult({ exitCode: 1, stderr: line }),
-    new ExecutionNode({ command: 'exec', exitCode: 1, stderr: line }),
+    new ExecutionNode({ command: 'exec', exitCode: 1, ...(line !== null ? { stderr: line } : {}) }),
   ]
+}
+
+type StreamBindings = Pick<Session, (typeof EXEC_STREAM_FIELDS)[number]>
+
+function bindingsOf(session: Session): StreamBindings {
+  return {
+    execStdout: session.execStdout,
+    execStdoutAppend: session.execStdoutAppend,
+    execStderr: session.execStderr,
+    execStderrAppend: session.execStderrAppend,
+    execStdin: session.execStdin,
+  }
+}
+
+/**
+ * Undo a redirect list that failed part-way, the way bash does: it keeps
+ * the side effect of opening each earlier target (`exec >f </missing`
+ * leaves an empty `f`) but puts every descriptor back where it stood
+ * before the line, so an `echo` after it still reaches the terminal. The
+ * diagnostic itself goes through the descriptors as they stood at the
+ * failure, which is why `exec 2>e </missing` writes it into `e` and
+ * nothing reaches the terminal; a stderr the line did not move is left
+ * to the statement's own diversion.
+ */
+async function rollBack(
+  dispatch: DispatchFn,
+  session: Session,
+  saved: StreamBindings,
+  err: Uint8Array,
+): Promise<Result> {
+  const partial = session.execStderr
+  Object.assign(session, saved)
+  if (partial === null || partial === saved.execStderr) return execFailure(err)
+  await appendTo(dispatch, session, partial, err)
+  return execFailure(null)
 }
 
 function scopeOf(target: unknown): PathSpec {
@@ -79,6 +115,21 @@ export async function installExecRedirects(
 ): Promise<Result> {
   const badFd = unsupportedDescriptor(redirects)
   if (badFd !== null) return execFailure(badDescriptorLine(badFd))
+  const saved = bindingsOf(session)
+  const err = await install(dispatch, session, redirects)
+  if (err === null)
+    return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
+  return rollBack(dispatch, session, saved, err)
+}
+
+/** Bind the redirects onto the session's streams, in line order. Returns
+ * the diagnostic of the first redirect that fails, with every earlier one
+ * still bound, which is the state bash reports from. */
+async function install(
+  dispatch: DispatchFn,
+  session: Session,
+  redirects: Redirect[],
+): Promise<Uint8Array | null> {
   for (const r of redirects) {
     if (typeof r.target === 'number') {
       // Keyed on the descriptor claimed, not the operator's direction:
@@ -99,7 +150,7 @@ export async function installExecRedirects(
       continue
     }
     if ((r.kind === RedirectKind.STDIN) !== (r.fd === FD_STDIN)) {
-      return execFailure(badDescriptorLine(r.fd))
+      return badDescriptorLine(r.fd)
     }
     const scope = scopeOf(r.target)
     if (r.kind === RedirectKind.STDIN) {
@@ -108,7 +159,7 @@ export async function installExecRedirects(
         session.execStdin = await materialize(data as ByteSource)
       } catch (err) {
         if (!isFsError(err)) throw err
-        return execError(scope.rawPath, err)
+        return errorLine(scope.rawPath, err)
       }
       continue
     }
@@ -117,7 +168,7 @@ export async function installExecRedirects(
       if (await openTarget(dispatch, session, scope, r.append)) session.execOpened.add(path)
     } catch (err) {
       if (!isFsError(err)) throw err
-      return execError(scope.rawPath, err)
+      return errorLine(scope.rawPath, err)
     }
     const streams =
       r.fd === FD_BOTH ? ['stdout', 'stderr'] : r.fd === FD_STDERR ? ['stderr'] : ['stdout']
@@ -131,7 +182,7 @@ export async function installExecRedirects(
       }
     }
   }
-  return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
+  return null
 }
 
 /**

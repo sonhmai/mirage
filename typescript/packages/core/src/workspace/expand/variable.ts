@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { nextRandom } from '../session/state.ts'
 import { evaluateArith } from '../../shell/arith.ts'
 import {
   type ShellArray,
@@ -25,7 +26,6 @@ import {
 import type { CallStack } from '../../shell/call_stack.ts'
 import { RANDOM } from '../../shell/constants.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
-import { nextRandom } from '../session/rng.ts'
 import { NodeType as NT, type ElementOps, type TSNodeLike } from '../../shell/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { SessionView } from '../../ops/types.ts'

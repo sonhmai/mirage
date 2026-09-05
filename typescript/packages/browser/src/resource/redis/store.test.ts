@@ -195,6 +195,18 @@ describe('UpstashRedisStore', () => {
     expect(await store.getFileRange('/nope', 0, 5)).toBeNull()
   })
 
+  it('getFileRange returns empty for zero-length reads and preserves missing', async () => {
+    const { store } = make()
+    await store.setFile('/data', ENC.encode('payload'))
+    await store.setFile('/empty', new Uint8Array(0))
+    expect(await store.getFileRange('/data', 0, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/data', 4, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/empty', 0, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/empty', 4, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/missing', 0, 0)).toBeNull()
+    expect(await store.getFileRange('/missing', 4, 0)).toBeNull()
+  })
+
   it('fileLen counts bytes, not characters', async () => {
     const { store } = make()
     await store.setFile('/u.txt', ENC.encode('é'))

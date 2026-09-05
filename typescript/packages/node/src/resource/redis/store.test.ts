@@ -61,6 +61,17 @@ describe.skipIf(skip)('RedisStore', () => {
     expect(await store.getFile('/nope')).toBeNull()
   })
 
+  it('getFileRange returns empty for zero-length reads and preserves missing', async () => {
+    await store.setFile('/data', new TextEncoder().encode('payload'))
+    await store.setFile('/empty', new Uint8Array(0))
+    expect(await store.getFileRange('/data', 0, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/data', 4, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/empty', 0, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/empty', 4, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/missing', 0, 0)).toBeNull()
+    expect(await store.getFileRange('/missing', 4, 0)).toBeNull()
+  })
+
   it('hasFile / delFile', async () => {
     await store.setFile('/x', new Uint8Array([1]))
     expect(await store.hasFile('/x')).toBe(true)

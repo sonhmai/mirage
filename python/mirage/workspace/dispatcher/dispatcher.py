@@ -920,7 +920,11 @@ class Dispatcher:
         if self._cache is not None:
             await self._cache.clear()
         for mount in self._namespace.registry.mounts():
-            await mount.resource.index.clear()
+            if mount.cache_manager is not None:
+                await mount.cache_manager.clear_index(mount.resource.index)
+            else:
+                async with mount.use():
+                    await mount.resource.index.clear()
 
     async def invalidate_after_write(self,
                                      mount: MountEntry,

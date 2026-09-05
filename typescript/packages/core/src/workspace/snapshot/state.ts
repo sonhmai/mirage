@@ -86,7 +86,7 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
     // the contract carries it, so a resource missing one fails to compile
     // rather than throwing here at save time. What remains narrows the
     // returned state to the snapshot format's union.
-    const state = (await Promise.resolve(m.resource.getState())) as ResourceState
+    const state = (await m.use(() => Promise.resolve(m.resource.getState()))) as ResourceState
     mountSnapshots.push({
       index: i,
       prefix: m.prefix,

@@ -172,7 +172,8 @@ def prepare_added_mount(registry: MountRegistry, entry: MountEntry,
 
 
 async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
-                  is_shutting_down: Callable[[], bool]) -> None:
+                  is_shutting_down: Callable[[], bool],
+                  shared_resources: set[int]) -> None:
     """Remove one mount, closing its resource if nothing else uses it.
 
     The virtual root, the device mount, and the history view are
@@ -187,6 +188,7 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
         ops (Ops): the ops facade to detach the prefix from.
         prefix (str): the mount's virtual prefix.
         is_shutting_down: live admission check after asynchronous cleanup.
+        shared_resources: instances owned by another workspace.
 
     Raises:
         ValueError: the prefix names a permanent mount.
@@ -221,7 +223,7 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
     still_instance = any(m.resource is removed.resource for m in remaining)
     # The mount owns its op table, so dropping the mount drops the ops
     # with it; the facade keeps no second registry to clean up.
-    if not still_instance:
+    if not still_instance and id(removed.resource) not in shared_resources:
         identity = id(removed.resource)
         registry.retired_resources[identity] = removed.resource
         closing = asyncio.create_task(_close_resource(removed))

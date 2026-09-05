@@ -149,6 +149,8 @@ async def to_state_dict(ws) -> dict[str, Any]:
     mounts_state = []
     for idx, m in enumerate(mt for mt in mounted
                             if mt.prefix not in auto_prefixes):
+        async with m.use():
+            resource_state = m.resource.get_state()
         mounts_state.append({
             MountKey.INDEX: idx,
             MountKey.PREFIX: m.prefix,
@@ -157,7 +159,7 @@ async def to_state_dict(ws) -> dict[str, Any]:
             MountKey.RESOURCE_CLASS:
             f"{type(m.resource).__module__}.{type(m.resource).__name__}",
             MountKey.RESOURCE_REF: m.resource.resource_ref,
-            MountKey.RESOURCE_STATE: m.resource.get_state(),
+            MountKey.RESOURCE_STATE: resource_state,
         })
 
     cache = ws._cache

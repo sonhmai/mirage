@@ -518,7 +518,8 @@ class Workspace:
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         await unmount_prefix(self._registry, self._ops, prefix,
-                             lambda: self._shutting_down)
+                             lambda: self._shutting_down,
+                             self._shared_resources)
 
     def set_mount_mode(self, prefix: str, mode: MountMode) -> None:
         """Change an exact mount's ceiling, retaining data and session caps.

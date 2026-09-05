@@ -68,6 +68,12 @@ class CacheManager:
         async with mutation_lock(self._file_cache):
             yield
 
+    async def clear_index(self, index: IndexCacheStore) -> None:
+        """Clear the whole backend index while this mount still owns it."""
+        async with self.mutation():
+            if self._owns_path(self._prefix or "/"):
+                await index.clear()
+
     def scope_index(self, index: IndexCacheStore) -> IndexCacheStore:
         """Bind backend metadata writes to this mount's lifetime."""
         if self._file_cache is None or isinstance(index, IndexView):

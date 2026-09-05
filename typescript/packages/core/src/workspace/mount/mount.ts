@@ -14,6 +14,7 @@
 
 import { mountKey } from '../../utils/key_prefix.ts'
 import { KeyLock } from '../../cache/lock.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { type Accessor, NOOPAccessor } from '../../accessor/base.ts'
 import type {
   CommandFn,
@@ -134,10 +135,12 @@ export class MountEntry {
     this.consistency = init.consistency ?? ConsistencyPolicy.LAZY
   }
 
-  /**
-   * This mount's mode narrowed by the current session's cap. The
-   * configured mode is the ceiling; a session's mode can only weaken it.
-   */
+  /** Metadata access bound to this mount's ownership. */
+  get index(): IndexCacheStore | undefined {
+    const index = this.resource.index
+    return index === undefined ? undefined : (this.cacheManager?.scopeIndex(index) ?? index)
+  }
+
   /** Finish deferred mount preparation before any backend or cache read. */
   async ensureReady(): Promise<void> {
     if (this.beforeUse === null) return
@@ -149,6 +152,10 @@ export class MountEntry {
     })
   }
 
+  /**
+   * This mount's mode narrowed by the current session's cap. The
+   * configured mode is the ceiling; a session's mode can only weaken it.
+   */
   effectiveMode(): MountMode {
     return effectiveMountMode(this.prefix, this.mode)
   }
@@ -475,7 +482,7 @@ export class MountEntry {
       filetypeFns: isFiletypeCmd ? null : filetypeFns,
       mountPrefix,
       cwd: context.cwd ?? ROOT_CWD,
-      ...(this.resource.index !== undefined ? { index: this.resource.index } : {}),
+      ...(this.index !== undefined ? { index: this.index } : {}),
       ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
       ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
       ...(context.env !== undefined ? { env: context.env } : {}),
@@ -643,9 +650,7 @@ export class MountEntry {
     })
     const effectiveKwargs: OpKwargs = {
       ...kwargs,
-      ...(kwargs.index === undefined && this.resource.index !== undefined
-        ? { index: this.resource.index }
-        : {}),
+      ...(kwargs.index === undefined && this.index !== undefined ? { index: this.index } : {}),
       ...(filetype !== null && kwargs.filetype === undefined ? { filetype } : {}),
     }
     const accessor = this.resource.accessor ?? NOOP_ACCESSOR

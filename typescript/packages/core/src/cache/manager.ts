@@ -17,6 +17,7 @@ import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import type { FileCache } from './file/mixin.ts'
 import type { IndexCacheStore } from './index/store.ts'
+import { IndexView } from './index/view.ts'
 
 /**
  * Post-mutation cache coherence for one mount.
@@ -48,6 +49,12 @@ export class CacheManager {
     this.prefix = rstripSlash(prefix)
     this.cachesReads = cachesReads
     this.ownsPath = ownsPath
+  }
+
+  /** Bind backend metadata writes to this mount's lifetime. */
+  scopeIndex(index: IndexCacheStore): IndexCacheStore {
+    if (this.fileCache === null || index instanceof IndexView) return index
+    return new IndexView(index, this.fileCache, this.prefix || '/', this.ownsPath)
   }
 
   /**

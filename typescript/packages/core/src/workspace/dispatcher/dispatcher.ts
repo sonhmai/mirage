@@ -376,9 +376,7 @@ export class Dispatcher {
     const filetype = getExtension(p.virtual)
     const fullKwargs: OpKwargs = {
       ...(kwargs ?? {}),
-      ...(kwargs?.index === undefined && resource.index !== undefined
-        ? { index: resource.index }
-        : {}),
+      ...(kwargs?.index === undefined && mount.index !== undefined ? { index: mount.index } : {}),
       ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
     }
     let fullArgs = args ?? []

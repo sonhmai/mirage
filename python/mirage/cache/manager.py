@@ -16,6 +16,7 @@ from collections.abc import Callable
 
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index.store import IndexCacheStore
+from mirage.cache.index.view import IndexView
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -55,6 +56,13 @@ class CacheManager:
         self._prefix = prefix.rstrip("/")
         self._caches_reads = caches_reads
         self._owns_path = owns_path
+
+    def scope_index(self, index: IndexCacheStore) -> IndexCacheStore:
+        """Bind backend metadata writes to this mount's lifetime."""
+        if self._file_cache is None or isinstance(index, IndexView):
+            return index
+        return IndexView(index, self._file_cache, self._prefix,
+                         self._owns_path)
 
     async def _evict_dir(self, key: str) -> None:
         """Drop one directory's cached listing.

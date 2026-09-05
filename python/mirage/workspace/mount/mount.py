@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Iterable
 from typing import Any, Callable
 
 from mirage.cache.context import push_cache_manager
+from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.config import CommandOpts, ExecContext, RegisteredCommand
@@ -173,6 +174,12 @@ class MountEntry:
         self._general_ops: dict[str, RegisteredOp] = {}
         # key: (cmd_name, target_resource_type)
         self._cross_cmds: dict[tuple[Any, ...], RegisteredCommand] = {}
+
+    @property
+    def index(self) -> IndexCacheStore:
+        index = self.resource.index
+        return self.cache_manager.scope_index(
+            index) if self.cache_manager else index
 
     async def ensure_ready(self) -> None:
         """Finish mount preparation before any backend or cache read."""
@@ -579,7 +586,7 @@ class MountEntry:
             ),
             mount_prefix=mount_prefix,
             filetype_fns=(filetype_fns if not is_filetype_cmd else None),
-            index=self.resource.index,
+            index=self.index,
             dispatch=context.dispatch,
             session_id=context.session_id,
             env=context.env,
@@ -730,7 +737,7 @@ class MountEntry:
             directory=path.rsplit("/", 1)[0] or "/",
             resource_path=mount_key(path, mount_prefix),
         )
-        kwargs.setdefault("index", self.resource.index)
+        kwargs.setdefault("index", self.index)
         # Per-op caps are policy and fire at the op doors (post_ops);
         # only the timeout stays here, bounding the backend call itself.
         op_override = self.command_limits.get(op_name)

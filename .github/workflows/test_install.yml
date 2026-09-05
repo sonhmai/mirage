@@ -148,7 +148,7 @@ jobs:
       - name: Set up Node and pnpm
         uses: ./.github/actions/setup-node-pnpm
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Install TypeScript dependencies
         working-directory: typescript

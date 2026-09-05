@@ -63,7 +63,7 @@ jobs:
       - name: Set up Node and pnpm
         uses: ./.github/actions/setup-node-pnpm
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Install node-gyp
         run: npm install -g node-gyp
@@ -174,9 +174,7 @@ jobs:
         with:
           version: 10.32.1
 
-      # 24 rather than the 22 the test job uses: this step runs no project
-      # code, so it is free to track the newer line the integ workflow is
-      # already on. No `cache: pnpm` here on purpose: the audit step below
+      # No `cache: pnpm` here on purpose: the audit step below
       # resolves straight from the lockfile and never installs, so the pnpm
       # store does not exist and the post-run save fails path validation on
       # every cache miss.

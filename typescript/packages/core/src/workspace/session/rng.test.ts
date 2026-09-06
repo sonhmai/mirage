@@ -230,6 +230,12 @@ it.each([
   ['RANDOM=42; a[17772]=7; echo $((a[RANDOM]+=RANDOM)) ${a[17772]} $RANDOM', '26801 26801 1435\n'],
   ['RANDOM=42; a[17772]=7; echo ${a[RANDOM]} $RANDOM', '7 26794\n'],
   ['RANDOM=42; a[17772]=7; a[RANDOM]=9; echo ${a[17772]} $RANDOM', '9 26794\n'],
+  // An arithmetic error keeps the assignments made before it, the seed
+  // and its draw included (bash binds each at once).
+  ['RANDOM=1; (( RANDOM=42, RANDOM + 1/0 )) 2>/dev/null; echo $? $RANDOM', '1 26794\n'],
+  ['x=1; (( x=5, 1/0 )) 2>/dev/null; echo $? $x', '1 5\n'],
+  ['x=1; let "x=9, 1/0" 2>/dev/null; echo $? $x', '1 9\n'],
+  ['x=1; for ((x=3, 1/0;;)); do :; done 2>/dev/null; echo $x', '3\n'],
 ])('seeds RANDOM within the expression that assigns it: %s', async (command, stdout) => {
   const { ws } = await makeIntegrationWS()
   try {

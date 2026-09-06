@@ -31,7 +31,7 @@ from mirage.utils.glob_walk import mark_escaped_globs, mark_globs, unmark_globs
 from mirage.utils.path import expand_tilde
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
 from mirage.workspace.expand.variable import (_lookup_var, expand_braces,
-                                              expansion_write)
+                                              land_arith_writes)
 from mirage.workspace.session import Session, visible_env
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.session.state import random_reader, session_elements
@@ -408,13 +408,11 @@ async def expand_node_marked(
                                     read_var=reader.read,
                                     wrote_var=reader.wrote)
         except ArithError as exc:
+            # bash bound the assignments made before the error, RANDOM's
+            # seed included; they land before the line dies.
+            await land_arith_writes(session, view, exc.writes, reader)
             raise arith_exit(expr, exc) from exc
-        for write in result.writes:
-            await expansion_write(session, view, write.name, write.key,
-                                  write.value)
-        # A RANDOM the expression seeded and then read: the door has
-        # seeded the session; the reads now advance it.
-        reader.settle()
+        await land_arith_writes(session, view, result.writes, reader)
         return prefix + str(result.value)
 
     if ntype == NT.CONCATENATION:

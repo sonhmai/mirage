@@ -64,6 +64,10 @@ async def _execute_body(
             stdout, io, last_exec = await execute_node(cmd, session, stdin,
                                                        call_stack)
         except BreakSignal as sig:
+            # The control builtin is a statement the loop leaves through
+            # rather than closes, so its own status (0) is recorded here:
+            # bash leaves `${PIPESTATUS[@]}` at `0` after `break`.
+            record_status(session, 0)
             if sig.stdout is not None:
                 all_stdout.append(sig.stdout)
             merged_io = await merged_io.merge(sig.io)
@@ -73,6 +77,7 @@ async def _execute_body(
                                          for s in all_stdout) else None
             raise BreakSignal(stdout=combined, io=merged_io, levels=sig.levels)
         except ContinueSignal as sig:
+            record_status(session, 0)
             if sig.stdout is not None:
                 all_stdout.append(sig.stdout)
             merged_io = await merged_io.merge(sig.io)

@@ -105,12 +105,17 @@ async function executeBody(
       }
     } catch (sig) {
       if (sig instanceof BreakSignal) {
+        // The control builtin is a statement the loop leaves through
+        // rather than closes, so its own status (0) is recorded here:
+        // bash leaves `${PIPESTATUS[@]}` at `0` after `break`.
+        recordStatus(session, 0)
         if (sig.stdout !== null) allStdout.push(sig.stdout)
         mergedIo = await mergedIo.merge(sig.io)
         const combined = chainNonNull(allStdout)
         throw new BreakSignal(combined, mergedIo, sig.levels)
       }
       if (sig instanceof ContinueSignal) {
+        recordStatus(session, 0)
         if (sig.stdout !== null) allStdout.push(sig.stdout)
         mergedIo = await mergedIo.merge(sig.io)
         const combined = chainNonNull(allStdout)

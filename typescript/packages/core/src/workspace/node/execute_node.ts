@@ -20,7 +20,7 @@ import type { Resource } from '../../resource/base.ts'
 import { makeAbortError } from '../abort.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
-import { assignmentStatus, finishStatement } from '../executor/statement.ts'
+import { assignmentStatus, finishStatement, recordStatus } from '../executor/statement.ts'
 import {
   getCaseItems,
   getCaseWord,
@@ -41,11 +41,12 @@ import {
 import { JobTable } from '../../shell/job_table/index.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import { NodeType as NT, Redirect, RedirectKind } from '../../shell/types.ts'
-import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
+import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
 import { evaluateArith } from '../../shell/arith.ts'
+import type { ArithWrite } from '../../shell/types.ts'
 import { ExitSignal, ArithError, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import { assignElement } from '../session/elements.ts'
@@ -147,13 +148,15 @@ async function evalCforExpr(
   const parts: string[] = []
   for (const expr of exprs) parts.push(await expandArith(expr, session, executeFn, callStack, view))
   const text = parts.join(', ')
-  let result: ArithResult
   const reader = randomReader(session)
+  let error: ArithError | null = null
+  let writes: readonly ArithWrite[] = []
+  let value = 0n
   try {
     // Reads resolve against the visible env so a hidden name counts as
     // unset; a hidden write refuses through the session door
     // (ensureVarVisible), caught by the loop beside ReadonlyError.
-    result = evaluateArith(
+    const result: ArithResult = evaluateArith(
       text,
       visibleEnv(session),
       0,
@@ -161,22 +164,28 @@ async function evalCforExpr(
       reader.read,
       reader.wrote,
     )
+    writes = result.writes
+    value = result.value
   } catch (err) {
     if (!(err instanceof ArithError)) throw err
-    throw new ArithError(`${text}: ${err.message}`)
+    // bash bound the assignments made before the error; they land
+    // before the error is reported.
+    error = err
+    writes = err.writes
   }
-  for (const write of result.writes) {
+  for (const write of writes) {
     ensureVarVisible(session, write.name)
     if (session.readonlyVars.has(write.name)) throw new ReadonlyError(write.name)
   }
   // Through the door, so a preSession rule governs an arithmetic assignment
   // exactly as it governs `X=1`; in evaluation order, so a bare name and
   // its element 0 land as the expression wrote them.
-  for (const write of result.writes) {
+  for (const write of writes) {
     await assignElement(session, view ?? null, write.name, write.key, write.value)
   }
   reader.settle()
-  return Number(result.value)
+  if (error !== null) throw new ArithError(`${text}: ${error.message}`)
+  return Number(value)
 }
 
 async function recurseReassociated(
@@ -599,13 +608,15 @@ async function executeNodeBody(
       callStack,
       sessionView(session, registry.policies),
     )
-    let result: ArithResult
     const reader = randomReader(session)
+    let error: ArithError | null = null
+    let writes: readonly ArithWrite[] = []
+    let value = 0n
     try {
       // Reads resolve against the visible env so a hidden name counts
       // as unset; a hidden write refuses below, in this command's own
       // voice like the readonly refusal.
-      result = evaluateArith(
+      const result: ArithResult = evaluateArith(
         expr,
         visibleEnv(session),
         0,
@@ -613,16 +624,16 @@ async function executeNodeBody(
         reader.read,
         reader.wrote,
       )
+      writes = result.writes
+      value = result.value
     } catch (err) {
       if (!(err instanceof ArithError)) throw err
-      const errBytes = new TextEncoder().encode(`bash: ((: ${expr}: ${err.message}\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: errBytes }),
-        new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
-      ]
+      // bash bound the assignments made before the error; they land
+      // before the error is reported.
+      error = err
+      writes = err.writes
     }
-    for (const write of result.writes) {
+    for (const write of writes) {
       const name = write.name
       try {
         ensureVarVisible(session, name)
@@ -645,7 +656,7 @@ async function executeNodeBody(
       }
     }
     try {
-      for (const write of result.writes) {
+      for (const write of writes) {
         await assignElement(
           session,
           sessionView(session, registry.policies),
@@ -664,7 +675,15 @@ async function executeNodeBody(
         new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
       ]
     }
-    const code = result.value !== 0n ? 0 : 1
+    if (error !== null) {
+      const errBytes = new TextEncoder().encode(`bash: ((: ${expr}: ${error.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: errBytes }),
+        new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
+      ]
+    }
+    const code = value !== 0n ? 0 : 1
     return [
       null,
       new IOResult({ exitCode: code }),
@@ -838,6 +857,10 @@ async function executeNodeBody(
     // Lazy exit codes (exitOnEmpty in grep) must be final before
     // inverting, or `! grep miss f` negates the provisional 0.
     const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
+    // bash reports the negated pipeline's own statuses in PIPESTATUS
+    // (`! false` leaves `1`), so what `!` wraps is closed as a statement
+    // of its own before `$?` inverts.
+    recordStatus(session, io.exitCode, pipelineTransparent(inner))
     const flipped = new IOResult({
       exitCode: io.exitCode !== 0 ? 0 : 1,
       stderr: io.stderr,

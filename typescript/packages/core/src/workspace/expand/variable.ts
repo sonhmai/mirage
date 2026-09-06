@@ -14,6 +14,8 @@
 
 import { nextRandom } from '../session/state.ts'
 import { evaluateArith } from '../../shell/arith.ts'
+import type { ArithWrite } from '../../shell/types.ts'
+import type { RandomReader } from '../session/state.ts'
 import {
   type ShellArray,
   arrayExtent,
@@ -765,6 +767,26 @@ function valueOp(op: string, val: string, groups: string[], env: Record<string, 
  * shape `${var:?}` uses); ReadonlyVariableError when the name is
  * readonly, the same refusal a plain assignment raises through the door.
  */
+/**
+ * Land an arithmetic expansion's assignments and settle its draws. Each
+ * write goes through `expansionWrite` in evaluation order; then the
+ * `RANDOM` reader replays the draws the expression made after it seeded
+ * the generator, now that the door holds the seed. One door for a
+ * completed expression and for one that failed partway, since bash
+ * binds each assignment as it is made.
+ */
+export async function landArithWrites(
+  session: Session,
+  view: SessionView | undefined,
+  writes: readonly ArithWrite[],
+  reader: RandomReader,
+): Promise<void> {
+  for (const write of writes) {
+    await expansionWrite(session, view, write.name, write.key, write.value)
+  }
+  reader.settle()
+}
+
 export async function expansionWrite(
   session: Session,
   view: SessionView | undefined,

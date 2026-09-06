@@ -169,6 +169,40 @@
         "stdout": "-9022\n44566 2815\n17772 26794\n26801 26801 1435\n26801 26794\n9 26794\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "arith_error_keeps_the_assignments_made_before_it",
+      "seq": 446,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "RANDOM=1; (( RANDOM=42, RANDOM + 1/0 )); echo $? $RANDOM; zae=1; (( zae=5, 1/0 )); echo $? $zae; let \"zae=9, 1/0\"; echo $? $zae; for ((zae=3, 1/0;;)); do :; done; echo $zae; unset zae",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 26794\n1 5\n1 9\n3\n",
+        "stderr": "bash: ((: RANDOM=42, RANDOM + 1/0: division by 0\nbash: ((: zae=5, 1/0: division by 0\nbash: let: zae=9, 1/0: division by 0\nbash: ((: zae=3, 1/0: division by 0\n"
+      }
     }
   ]
 }

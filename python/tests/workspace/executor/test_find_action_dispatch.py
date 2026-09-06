@@ -439,29 +439,31 @@ async def test_exec_line_substitution():
     assert exec_line(batch, ["a", "b c"]) == "echo a 'b c' tail"
 
 
+MUTATE = "sh -c 'echo \"$KEEP:$PWD\"; KEEP=child; cd /'"
+MUTATE_EXIT = "sh -c 'KEEP=child; cd /; exit 7'"
+BATCH = "sh -c 'KEEP=child; cd /; set -- child; set -u'"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "action,terminator",
     [(action, r"\;")
      for action in ('cd /', 'unset KEEP', 'export KEEP=child', 'set -- child',
-                    'set -u', 'mutate', 'mutate_exit')] +
-    [(action, '{} +') for action in ('batch', 'mutate', 'mutate_exit')])
+                    'set -u', MUTATE, MUTATE_EXIT)] +
+    [(action, '{} +') for action in (BATCH, MUTATE, MUTATE_EXIT)])
 async def test_exec_isolates_each_invocation(action, terminator):
+    # The mutating programs are `sh -c` lines: GNU's -exec sees no shell
+    # function, so a function head would not run at all.
     ws = await _exec_ws()
     try:
-        await ws.execute(
-            'batch() { KEEP=child; cd /; set -- child; set -u; }; '
-            'KEEP=parent; set -- original; '
-            'mutate() { echo "$KEEP:$PWD"; KEEP=child; cd /; }; '
-            'mutate_exit() { KEEP=child; cd /; exit 7; }',
-            session_id='s')
+        await ws.execute('KEEP=parent; set -- original', session_id='s')
         io = await ws.execute(
             f'find d -name "*.txt" -exec {action} {terminator}; '
             'echo "$KEEP:$PWD:$1"; echo "${UNSET_FOR_TEST}"',
             session_id='s')
         out = await io.stdout_str()
         assert out.endswith('parent:/w:original\n\n')
-        if action == 'mutate' and terminator == '\\;':
+        if action == MUTATE and terminator == '\\;':
             assert out == 'parent:/w\n' * 3 + 'parent:/w:original\n\n'
         assert await io.stderr_str() == ''
         assert io.exit_code == 0
@@ -655,3 +657,14 @@ async def test_a_row_ls_cannot_list_ends_its_chain():
         "find: 'd/b.txt': No such file or directory\n"
         "find: 'd/sub/c.txt': No such file or directory\n", 1)
     assert await _run_line(ws, "find d -type f") == ("", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_exec_does_not_see_a_shell_function():
+    # GNU findutils 4.10 execs the head through execvp, which sees no
+    # shell function: `find: 'f': No such file or directory` per match,
+    # exit 0, and the function never runs.
+    ws = await _exec_ws()
+    assert await _run_line(
+        ws, "f() { echo BAD; }; find d -maxdepth 0 -exec f {} \\;; echo rc=$?"
+    ) == ("rc=0\n", "find: 'f': No such file or directory\n", 0)

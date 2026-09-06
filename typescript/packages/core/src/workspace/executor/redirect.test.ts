@@ -604,7 +604,8 @@ describe('descriptor zero duplication', () => {
     ['echo x 1>&0 2>/data/err; cat /data/err', 'echo: write error: Bad file descriptor\n', '', 0],
     ['echo x 0>/data/out 1>&0; cat /data/out', 'x\n', '', 0],
     ['cat </data/a.txt 1<&0 0<&1 1>/data/out; cat /data/out', 'a', '', 0],
-    ['cat </data/a.txt 0<&1', '', '', 0],
+    // bash 5.2: stdout is open for writing only, so the read fails.
+    ['cat </data/a.txt 0<&1', '', 'cat: -: Bad file descriptor\n', 1],
   ])('tracks direction and order: %s', async (line, out, err, code) => {
     const { ws } = await makeIntegrationWS({ 'a.txt': 'a' })
     try {

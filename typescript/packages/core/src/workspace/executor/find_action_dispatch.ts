@@ -94,7 +94,13 @@ async function headMissing(
     return statPath !== null && (await statPath(resolvePath(head, cwd))) === null
   }
   const sess = getCurrentSession()
-  return sess !== null && lookup(head, sess, registry) === Consumer.UNKNOWN
+  // A shell function is not found either: GNU execs the head through
+  // execvp, which sees programs and nothing the shell defined, so
+  // `f(){ :; }; find d -exec f {} \;` reports `find: 'f': No such file
+  // or directory` per match.
+  if (sess === null) return false
+  const consumer = lookup(head, sess, registry)
+  return consumer === Consumer.UNKNOWN || consumer === Consumer.FUNCTION
 }
 
 /**

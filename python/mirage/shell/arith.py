@@ -618,10 +618,22 @@ def evaluate_arith(
     updates: dict[str, str] = {}
     elem_updates: dict[tuple[str, str], str] = {}
     writes: dict[tuple[str, str | None], str] = {}
-    value = ArithEvaluator(env, updates, elem_updates, writes, depth, elements,
-                           read_var, wrote_var).run(node)
-    return ArithResult(
-        value,
-        tuple(
-            ArithWrite(name, key, text)
-            for (name, key), text in writes.items()))
+    try:
+        value = ArithEvaluator(env, updates, elem_updates, writes, depth,
+                               elements, read_var, wrote_var).run(node)
+    except ArithError as exc:
+        exc.writes = _arith_writes(writes)
+        raise
+    return ArithResult(value, _arith_writes(writes))
+
+
+def _arith_writes(
+        writes: dict[tuple[str, str | None], str]) -> tuple[ArithWrite, ...]:
+    """The evaluator's ordered write record as ``ArithWrite`` rows.
+
+    Args:
+        writes (dict[tuple[str, str | None], str]): target to value, in
+            the order of each target's last write.
+    """
+    return tuple(
+        ArithWrite(name, key, text) for (name, key), text in writes.items())

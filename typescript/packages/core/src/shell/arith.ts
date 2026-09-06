@@ -583,15 +583,21 @@ export function evaluateArith(
   const updates: Record<string, string> = {}
   const elemUpdates = new Map<string, string>()
   const writes = new Map<string, ArithWrite>()
-  const value = new ArithEvaluator(
-    env,
-    updates,
-    elemUpdates,
-    writes,
-    depth,
-    elements,
-    readVar,
-    wroteVar,
-  ).run(node)
+  let value: bigint
+  try {
+    value = new ArithEvaluator(
+      env,
+      updates,
+      elemUpdates,
+      writes,
+      depth,
+      elements,
+      readVar,
+      wroteVar,
+    ).run(node)
+  } catch (err) {
+    if (err instanceof ArithError) err.writes = [...writes.values()]
+    throw err
+  }
   return { value, writes: [...writes.values()] }
 }

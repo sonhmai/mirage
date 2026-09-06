@@ -28,7 +28,7 @@ from mirage.shell.constants import RANDOM
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import get_text
-from mirage.shell.types import ElementOps
+from mirage.shell.types import ArithWrite, ElementOps
 from mirage.shell.types import NodeType as NT
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
@@ -37,8 +37,9 @@ from mirage.workspace.session import (Session, ensure_var_visible,
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.shell_dirs import home_dir
-from mirage.workspace.session.state import (nameref_target, next_random,
-                                            subscript_index, visible_assocs)
+from mirage.workspace.session.state import (RandomReader, nameref_target,
+                                            next_random, subscript_index,
+                                            visible_assocs)
 
 ExpandChild = Callable[[tree_sitter.Node], Awaitable[str]]
 
@@ -104,6 +105,30 @@ def guard_expansion_write(session: Session, *names: str) -> None:
             raise ExitSignal(1,
                              stderr=f"bash: {exc.strerror}\n".encode(),
                              contained_code=1) from exc
+
+
+async def land_arith_writes(session: Session, view: SessionView | None,
+                            writes: tuple[ArithWrite,
+                                          ...], reader: RandomReader) -> None:
+    """Land an arithmetic expansion's assignments and settle its draws.
+
+    Each write goes through ``expansion_write`` in evaluation order; then
+    the ``RANDOM`` reader replays the draws the expression made after it
+    seeded the generator, now that the door holds the seed. One door for
+    a completed expression and for one that failed partway, since bash
+    binds each assignment as it is made.
+
+    Args:
+        session (Session): the shell session.
+        view (SessionView | None): the gated door; None outside a
+            workspace.
+        writes (tuple[ArithWrite, ...]): the assignments, in order.
+        reader (RandomReader): the expression's ``RANDOM`` reader.
+    """
+    for write in writes:
+        await expansion_write(session, view, write.name, write.key,
+                              write.value)
+    reader.settle()
 
 
 async def expansion_write(session: Session, view: SessionView | None,

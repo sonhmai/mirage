@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runWithRedirectPaths } from '../../context/session_context.ts'
-import { fsStrerror, isFsError } from '../../utils/errors.ts'
+import { formatFsError, fsStrerror, isFsError } from '../../utils/errors.ts'
+import { readFailExitCode } from '../../commands/spec/usage.ts'
+import { concatBytes } from '../../core/jq/format.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -21,7 +23,11 @@ import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from '../../shell/constants.ts'
-import { badDescriptorLine, unsupportedDescriptor } from '../../shell/descriptors.ts'
+import {
+  badDescriptorLine,
+  unreadableStdin,
+  unsupportedDescriptor,
+} from '../../shell/descriptors.ts'
 import { getText } from '../../shell/helpers.ts'
 import { type Redirect, RedirectKind } from '../../shell/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
@@ -86,6 +92,9 @@ type FdDest = typeof TO_STDOUT | typeof TO_STDERR | typeof CLOSED | string
  * bash fails at open time and never runs it; the write error and exit 1 are
  * reported either way.
  */
+// A descriptor a read cannot use: closed, or open for writing only.
+const UNREADABLE: unique symbol = Symbol('unreadable')
+
 export async function handleRedirect(
   executeNode: ExecuteNodeFn,
   dispatch: DispatchFn,
@@ -97,11 +106,18 @@ export async function handleRedirect(
 ): Promise<Result> {
   const badFd = unsupportedDescriptor(redirects)
   if (badFd !== null) return shellFailure(badDescriptorLine(badFd))
-  const inputs: (ByteSource | null)[] = [stdin, new Uint8Array(), new Uint8Array()]
+  // What each descriptor would yield to a read: stdin as given, and the
+  // two output descriptors nothing, since they are open for writing
+  // only. A dup copies the entry, so `1<&0 0<&1` hands stdin's file back
+  // to stdin while `0<&1` alone leaves stdin unreadable, and a closed
+  // descriptor is unreadable too. The command sees the unreadable entry
+  // as a source that fails on its first read, as in bash (`cat 0<&1`,
+  // `cat <&-`), while one that never reads is untouched (`true 0<&1`).
+  const inputs: (ByteSource | null | typeof UNREADABLE)[] = [stdin, UNREADABLE, UNREADABLE]
 
   for (const r of redirects) {
     if (typeof r.target === 'number') {
-      inputs[r.fd] = r.target === FD_CLOSE ? new Uint8Array() : (inputs[r.target] ?? null)
+      inputs[r.fd] = r.target === FD_CLOSE ? UNREADABLE : (inputs[r.target] ?? null)
       continue
     }
     if (r.kind === RedirectKind.STDIN) {
@@ -165,14 +181,31 @@ export async function handleRedirect(
           typeof r.target !== 'number',
       )
       .map((r) => ensureScope(r.target))
+    const given = inputs[FD_STDIN] ?? null
+    const commandStdin = given === UNREADABLE ? unreadableStdin() : given
     const [stdout, execIo, execNode] = await runWithRedirectPaths(command, targets, () =>
-      executeNode(command, session, inputs[FD_STDIN] ?? null, callStack),
+      executeNode(command, session, commandStdin, callStack),
     )
     io = execIo
     refused = execNode.refused
-    stdoutData =
-      ((await applyBarrier(stdout, io, BarrierPolicy.VALUE)) as Uint8Array | null) ??
-      new Uint8Array()
+    try {
+      stdoutData =
+        ((await applyBarrier(stdout, io, BarrierPolicy.VALUE)) as Uint8Array | null) ??
+        new Uint8Array()
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      // stdin bound to a closed or write-only descriptor fails only once
+      // the command reads it, which is this drain; that is the command's
+      // failure in its own voice (`cat: -: Bad file descriptor`), and the
+      // line goes on.
+      const name = (execNode.command ?? '').split(' ')[0] ?? ''
+      stdoutData = new Uint8Array()
+      io.stderr = concatBytes([
+        await materialize(io.stderr),
+        formatFsError(name, err, execNode.paths),
+      ])
+      io.exitCode = readFailExitCode(name, err)
+    }
     stderrData = await materialize(io.stderr)
   }
 

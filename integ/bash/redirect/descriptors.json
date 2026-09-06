@@ -392,6 +392,35 @@
         "stdout": "x\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "redirect_stdin_from_a_closed_or_write_only_descriptor_is_unreadable",
+      "seq": 980112,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat 0<&1; echo rc=$?; cat <&-; echo rc=$?; true 0<&1; echo rc=$?; echo hi 0<&1; read zrd 0<&1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=0\nhi\nrc=1\n",
+        "stderr": "cat: -: Bad file descriptor\ncat: -: Bad file descriptor\nbash: read: read error: 0: Bad file descriptor\n"
+      }
     }
   ]
 }

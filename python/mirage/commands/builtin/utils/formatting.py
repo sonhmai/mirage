@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import time
 from datetime import datetime, timezone
 
 from mirage.commands.builtin.utils.constants import (DEFAULT_MODES,
@@ -84,7 +85,24 @@ def ls_mode_string(s: FileStat) -> str:
     return f"{type_char}{perms}"
 
 
-def _ls_time_string(modified: str | None) -> str:
+# GNU ls's window of "recent" times: half a Gregorian year of 365.2425
+# days, in seconds (ls.c). findutils draws its own line (listfile.c):
+# old past 180 days, future past an hour.
+_LS_RECENT_SECONDS = 31556952 // 2
+_FIND_OLD_SECONDS = 180 * 24 * 60 * 60
+_FIND_FUTURE_SECONDS = 60 * 60
+
+
+def _ls_time_string(modified: str | None, *, find_rule: bool = False) -> str:
+    """The time column: ``Mon DD HH:MM`` for a recent time, ``Mon DD  YYYY``
+    for an old or future one, as GNU prints it.
+
+    Args:
+        modified (str | None): the ISO timestamp, None when unknown.
+        find_rule (bool): use findutils' window (old past 180 days,
+            future past an hour) rather than ls's (the last half year,
+            never the future).
+    """
     if not modified:
         return EPOCH_LS_TIME
     try:
@@ -94,7 +112,16 @@ def _ls_time_string(modified: str | None) -> str:
         return EPOCH_LS_TIME
     month = MONTHS[dt.month - 1]
     day = f"{dt.day:>2}"
-    return f"{month} {day} {dt.hour:02d}:{dt.minute:02d}"
+    now = time.time()
+    when = dt.timestamp()
+    if find_rule:
+        recent = not (now > when + _FIND_OLD_SECONDS
+                      or when > now + _FIND_FUTURE_SECONDS)
+    else:
+        recent = now - _LS_RECENT_SECONDS < when < now
+    if recent:
+        return f"{month} {day} {dt.hour:02d}:{dt.minute:02d}"
+    return f"{month} {day}  {dt.year}"
 
 
 def _ls_name(s: FileStat) -> str:
@@ -109,7 +136,10 @@ def _ls_name(s: FileStat) -> str:
     return f"{s.name} -> {target}" if target else s.name
 
 
-def _ls_size_and_time(s: FileStat, human: bool) -> tuple[str, str]:
+def _ls_size_and_time(s: FileStat,
+                      human: bool,
+                      *,
+                      find_rule: bool = False) -> tuple[str, str]:
     """The size and time columns of one ``ls -l`` row.
 
     A device row carries its major and minor numbers where GNU puts
@@ -120,16 +150,17 @@ def _ls_size_and_time(s: FileStat, human: bool) -> tuple[str, str]:
     Args:
         s (FileStat): the row's stat.
         human (bool): render the size with ``-h`` units.
+        find_rule (bool): findutils' recent-time window, for ``-ls``.
     """
     dev = s.extra.get(DEVICE_NUMBERS_KEY) if s.extra else None
     if dev:
-        time = (UNKNOWN_NAME
-                if s.modified is None else _ls_time_string(s.modified))
-        return f"{dev[0]}, {dev[1]}", time
+        when = (UNKNOWN_NAME if s.modified is None else _ls_time_string(
+            s.modified, find_rule=find_rule))
+        return f"{dev[0]}, {dev[1]}", when
     if s.size is None and s.modified is None:
         return UNKNOWN_NAME, UNKNOWN_NAME
     size = human_size(s.size or 0) if human else str(s.size or 0)
-    return size, _ls_time_string(s.modified)
+    return size, _ls_time_string(s.modified, find_rule=find_rule)
 
 
 def format_ls_long(
@@ -157,12 +188,12 @@ def format_ls_long(
     width = size_width if size_width is not None else max(
         (len(size) for size, _ in columns), default=1)
     out: list[str] = []
-    for s, (raw_size, time) in zip(stats, columns):
+    for s, (raw_size, when) in zip(stats, columns):
         mode = ls_mode_string(s)
         size = raw_size.rjust(width)
         who = owner_name(s.uid, identity)
         grp = group_name(s.gid, identity)
-        out.append(f"{mode} 1 {who} {grp} {size} {time} {_ls_name(s)}")
+        out.append(f"{mode} 1 {who} {grp} {size} {when} {_ls_name(s)}")
     return out
 
 
@@ -239,11 +270,11 @@ def format_find_ls(s: FileStat, identity: Identity | None) -> str:
         identity (Identity | None): who the session is; None outside a
             workspace, where both name columns fall back to ``-``.
     """
-    size, time = _ls_size_and_time(s, False)
+    size, when = _ls_size_and_time(s, False, find_rule=True)
     who = owner_name(s.uid, identity)
     grp = group_name(s.gid, identity)
     return (f"{UNKNOWN_STAT_FIELD:>9} {UNKNOWN_STAT_FIELD:>6} "
-            f"{ls_mode_string(s)} {1:>3} {who:<8} {grp:<8} {size:>8} {time} "
+            f"{ls_mode_string(s)} {1:>3} {who:<8} {grp:<8} {size:>8} {when} "
             f"{_find_ls_name(s)}")
 
 

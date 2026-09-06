@@ -136,6 +136,17 @@ async def _out(ws: Workspace, line: str) -> str:
         ("true | false && true; echo ${PIPESTATUS[@]}", "0 1"),
         ("false | true || true; echo ${PIPESTATUS[@]}", "1 0"),
         ("true | false || false | true; echo ${PIPESTATUS[@]}", "1 0"),
+        # `!` reports the negated pipeline's own statuses; a loop left
+        # through break or continue reports the builtin's 0.
+        ("false | true; ! false; echo $? ${PIPESTATUS[@]}", "0 1"),
+        ("false | true; ! true; echo $? ${PIPESTATUS[@]}", "1 0"),
+        ("false | true; ! false | true; echo $? ${PIPESTATUS[@]}", "1 1 0"),
+        ("false | true; for i in 1; do break; done; echo $? ${PIPESTATUS[@]}",
+         "0 0"),
+        ("false | true; for i in 1; do continue; done; "
+         "echo $? ${PIPESTATUS[@]}", "0 0"),
+        ("false | true; while true; do break 1; done; "
+         "echo $? ${PIPESTATUS[@]}", "0 0"),
         # A redirected statement is as transparent as what it redirects: a
         # simple command stamps its one-segment status whether or not the
         # redirect opened, a redirected group keeps the stale record.

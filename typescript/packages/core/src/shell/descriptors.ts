@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FD_BOTH, FD_CLOSE, SHELL_FDS } from './constants.ts'
+import { ebadfStdin } from '../utils/errors.ts'
 import type { Redirect } from './types.ts'
 
 /**
@@ -43,4 +44,18 @@ export function unsupportedDescriptor(redirects: readonly Redirect[]): number | 
  */
 export function badDescriptorLine(fd: number): Uint8Array {
   return new TextEncoder().encode(`${String(fd)}: Bad file descriptor\n`)
+}
+
+/**
+ * Standard input that fails on its first read with EBADF. bash opens a
+ * command whose stdin is closed (`<&-`) or duplicated from a write-only
+ * descriptor (`0<&1`) all the same; the descriptor exists, and only a
+ * read of it fails. A command that never reads (`true 0<&1`) succeeds,
+ * and one that does reports `<cmd>: -: Bad file descriptor` and exits 1,
+ * which is what the chokepoint renders from the error this throws.
+ */
+export function unreadableStdin(): AsyncIterable<Uint8Array> {
+  return {
+    [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(ebadfStdin()) }),
+  }
 }

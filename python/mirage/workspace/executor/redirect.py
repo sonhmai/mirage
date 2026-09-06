@@ -17,6 +17,7 @@ from enum import Enum, auto
 
 import tree_sitter
 
+from mirage.commands.spec.usage import read_fail_exit
 from mirage.context import reset_redirect_paths, set_redirect_paths
 from mirage.io import IOResult
 from mirage.io.stream import materialize
@@ -27,12 +28,12 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import (FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN,
                                     FD_STDOUT)
-from mirage.shell.descriptors import (bad_descriptor_line,
+from mirage.shell.descriptors import (bad_descriptor_line, unreadable_stdin,
                                       unsupported_descriptor)
 from mirage.shell.helpers import get_text
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import FS_ERRORS, fs_strerror
+from mirage.utils.errors import FS_ERRORS, format_fs_error, fs_strerror
 from mirage.workspace.executor.builtins import _to_scope
 from mirage.workspace.executor.create import create_file
 from mirage.workspace.session import Session
@@ -58,6 +59,12 @@ class _Fd(Enum):
 _TO_STDOUT = _Fd.TO_STDOUT
 _TO_STDERR = _Fd.TO_STDERR
 _CLOSED = _Fd.CLOSED
+
+
+class _Unreadable(Enum):
+    """A descriptor a read cannot use: closed, or open for writing only."""
+
+    TOKEN = auto()
 
 
 async def handle_redirect(
@@ -118,10 +125,21 @@ async def handle_redirect(
     bad_fd = unsupported_descriptor(redirects)
     if bad_fd is not None:
         return _shell_failure(bad_descriptor_line(bad_fd))
-    inputs: list[ByteSource | None] = [stdin, b"", b""]
+    # What each descriptor would yield to a read: stdin as given, and
+    # the two output descriptors nothing, since they are open for
+    # writing only. A dup copies the entry, so `1<&0 0<&1` hands stdin's
+    # file back to stdin while `0<&1` alone leaves stdin unreadable, and
+    # a closed descriptor is unreadable too. The command sees the
+    # unreadable entry as a source that fails on its first read, as in
+    # bash (`cat 0<&1`, `cat <&-`), while one that never reads is
+    # untouched (`true 0<&1`).
+    inputs: list[ByteSource | None | _Unreadable] = [
+        stdin, _Unreadable.TOKEN, _Unreadable.TOKEN
+    ]
     for r in redirects:
         if isinstance(r.target, int):
-            inputs[r.fd] = b"" if r.target == FD_CLOSE else inputs[r.target]
+            inputs[r.fd] = (_Unreadable.TOKEN
+                            if r.target == FD_CLOSE else inputs[r.target])
             continue
         if r.kind == RedirectKind.STDIN:
             scope = _ensure_scope(r.target)
@@ -175,16 +193,29 @@ async def handle_redirect(
             and not isinstance(r.target, int))
         token = set_redirect_paths(command.id, targets)
         try:
-            stdout, io, exec_node = await execute_node(command, session,
-                                                       inputs[FD_STDIN],
-                                                       call_stack)
+            command_stdin = inputs[FD_STDIN]
+            stdout, io, exec_node = await execute_node(
+                command, session,
+                unreadable_stdin() if isinstance(command_stdin, _Unreadable)
+                else command_stdin, call_stack)
         finally:
             reset_redirect_paths(token)
         refused = exec_node.refused
-        barriered = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-        if isinstance(barriered, memoryview):
-            barriered = bytes(barriered)
-        stdout_data = await materialize(barriered) or b""
+        try:
+            barriered = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+            if isinstance(barriered, memoryview):
+                barriered = bytes(barriered)
+            stdout_data = await materialize(barriered) or b""
+        except FS_ERRORS as exc:
+            # stdin bound to a closed or write-only descriptor fails
+            # only once the command reads it, which is this drain; that
+            # is the command's failure in its own voice (`cat: -: Bad
+            # file descriptor`), and the line goes on.
+            name = exec_node.command.split()[0] if exec_node.command else ""
+            stdout_data = b""
+            io.stderr = ((await materialize(io.stderr) or b"") +
+                         format_fs_error(name, exc, exec_node.paths))
+            io.exit_code = read_fail_exit(name, exc)
         stderr_data = await materialize(io.stderr) or b""
 
     fds: list[_Fd | str] = [_CLOSED, _TO_STDOUT, _TO_STDERR]

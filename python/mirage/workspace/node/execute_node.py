@@ -29,7 +29,7 @@ from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.errors import ArithError, ExitSignal, ReadonlyError
 from mirage.shell.job_table import JobTable
-from mirage.shell.node_kind import NodeKind, node_kind
+from mirage.shell.node_kind import NodeKind, node_kind, pipeline_transparent
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.workspace.abort import MirageAbortError
@@ -44,7 +44,8 @@ from mirage.workspace.executor.pipes import (handle_connection, handle_pipe,
                                              handle_subshell)
 from mirage.workspace.executor.redirect import handle_redirect
 from mirage.workspace.executor.statement import (assignment_status,
-                                                 finish_statement)
+                                                 finish_statement,
+                                                 record_status)
 from mirage.workspace.expand import (expand_and_classify, expand_node,
                                      expand_redirects)
 from mirage.workspace.expand.globs import glob_options, resolve_globs
@@ -111,6 +112,8 @@ async def _eval_cfor_expr(
         for expr in exprs
     ])
     reader = random_reader(session)
+    error: ArithError | None = None
+    value = 0
     try:
         # Reads resolve against the visible env so a hidden name counts
         # as unset; a hidden write refuses through the session door
@@ -120,19 +123,24 @@ async def _eval_cfor_expr(
                                 elements=session_elements(session, reader),
                                 read_var=reader.read,
                                 wrote_var=reader.wrote)
+        writes, value = result.writes, result.value
     except ArithError as exc:
-        raise ArithError(f"{text}: {exc}") from exc
-    for write in result.writes:
+        # bash bound the assignments made before the error; they land
+        # before the error is reported.
+        error, writes = exc, exc.writes
+    for write in writes:
         ensure_var_visible(session, write.name)
         if write.name in session.readonly_vars:
             raise ReadonlyError(write.name)
     # Through the door, so a pre_session rule governs an arithmetic
     # assignment exactly as it governs `X=1`; in evaluation order, so
     # a bare name and its element 0 land as the expression wrote them.
-    for write in result.writes:
+    for write in writes:
         await assign_element(session, view, write.name, write.key, write.value)
     reader.settle()
-    return int(result.value)
+    if error is not None:
+        raise ArithError(f"{text}: {error}") from error
+    return int(value)
 
 
 STREAMING_KINDS = frozenset({
@@ -526,6 +534,8 @@ async def _execute_node(
         text = get_text(node)
         expr = await expand_arith(node, session, execute_fn, cs, view=view)
         reader = random_reader(session)
+        error: ArithError | None = None
+        value = 0
         try:
             # Reads resolve against the visible env so a hidden name
             # counts as unset; a hidden write refuses below, in this
@@ -535,13 +545,12 @@ async def _execute_node(
                                    elements=session_elements(session, reader),
                                    read_var=reader.read,
                                    wrote_var=reader.wrote)
+            writes, value = arith.writes, arith.value
         except ArithError as exc:
-            err = f"bash: ((: {expr}: {exc}\n".encode()
-            return None, IOResult(exit_code=1,
-                                  stderr=err), ExecutionNode(command=text,
-                                                             exit_code=1,
-                                                             stderr=err)
-        for write in arith.writes:
+            # bash bound the assignments made before the error; they
+            # land before the error is reported.
+            error, writes = exc, exc.writes
+        for write in writes:
             name = write.name
             try:
                 ensure_var_visible(session, name)
@@ -558,7 +567,7 @@ async def _execute_node(
                                                                  exit_code=1,
                                                                  stderr=err)
         try:
-            for write in arith.writes:
+            for write in writes:
                 await assign_element(session, view, write.name, write.key,
                                      write.value)
             reader.settle()
@@ -568,7 +577,13 @@ async def _execute_node(
                                   stderr=err), ExecutionNode(command=text,
                                                              exit_code=1,
                                                              stderr=err)
-        code = 0 if arith.value != 0 else 1
+        if error is not None:
+            err = f"bash: ((: {expr}: {error}\n".encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command=text,
+                                                             exit_code=1,
+                                                             stderr=err)
+        code = 0 if value != 0 else 1
         return None, IOResult(exit_code=code), ExecutionNode(command=text,
                                                              exit_code=code)
 
@@ -726,6 +741,12 @@ async def _execute_node(
         # Lazy exit codes (exit_on_empty in grep) must be final before
         # inverting, or `! grep miss f` negates the provisional 0.
         stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+        # bash reports the negated pipeline's own statuses in
+        # PIPESTATUS (`! false` leaves `1`), so what `!` wraps is
+        # closed as a statement of its own before `$?` inverts.
+        record_status(session,
+                      io.exit_code,
+                      transparent=pipeline_transparent(inner))
         io = IOResult(
             exit_code=0 if io.exit_code != 0 else 1,
             stderr=io.stderr,

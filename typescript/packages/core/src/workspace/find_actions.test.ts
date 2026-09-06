@@ -49,6 +49,10 @@ async function setupHtmlFiles(ws: Workspace): Promise<void> {
   await ws.execute('touch /foo.html /bar.htm /a/b/baz.html', { sessionId: 's' })
 }
 
+const MUTATE = 'sh -c \'echo "$KEEP:$PWD"; KEEP=child; cd /\''
+const MUTATE_EXIT = "sh -c 'KEEP=child; cd /; exit 7'"
+const BATCH = "sh -c 'KEEP=child; cd /; set -- child; set -u'"
+
 describe('find action layer', () => {
   describe('-delete', () => {
     it('removes matched files', async () => {
@@ -233,6 +237,26 @@ describe('find action layer', () => {
       }
     })
 
+    it('does not see a shell function under -exec', async () => {
+      // GNU findutils 4.10 execs the head through execvp, which sees no
+      // shell function: `find: 'f': No such file or directory` per match,
+      // exit 0, and the function never runs.
+      const ws = await singleMountWs()
+      try {
+        await ws.execute('mkdir -p /w/d; cd /w')
+        const io = await ws.execute(
+          'f() { echo BAD; }; find d -maxdepth 0 -exec f {} \\;; echo rc=$?',
+        )
+        expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([
+          'rc=0\n',
+          "find: 'f': No such file or directory\n",
+          0,
+        ])
+      } finally {
+        await ws.close()
+      }
+    })
+
     it('escapes an -ls name as findutils does', async () => {
       // GNU findutils 4.10 `-ls` keeps one row on one line: a space, a
       // backslash and a double quote take a backslash, a newline is
@@ -297,30 +321,22 @@ describe('find -exec isolation', () => {
   for (const terminator of ['\\;', '{} +']) {
     const actions =
       terminator === '{} +'
-        ? ['batch', 'mutate', 'mutate_exit']
-        : [
-            'cd /',
-            'unset KEEP',
-            'export KEEP=child',
-            'set -- child',
-            'set -u',
-            'mutate',
-            'mutate_exit',
-          ]
+        ? [BATCH, MUTATE, MUTATE_EXIT]
+        : ['cd /', 'unset KEEP', 'export KEEP=child', 'set -- child', 'set -u', MUTATE, MUTATE_EXIT]
     it.each(actions)(`isolates %s ${terminator}`, async (action) => {
       const ws = await singleMountWs()
       try {
+        // The mutating programs are `sh -c` lines: GNU's -exec sees no
+        // shell function, so a function head would not run at all.
         await ws.execute(
-          'batch() { KEEP=child; cd /; set -- child; set -u; }; mkdir -p /w/d; touch /w/d/a.txt /w/d/b.txt; cd /w; KEEP=parent; set -- original; ' +
-            'mutate() { echo "$KEEP:$PWD"; KEEP=child; cd /; }; ' +
-            'mutate_exit() { KEEP=child; cd /; exit 7; }',
+          'mkdir -p /w/d; touch /w/d/a.txt /w/d/b.txt; cd /w; KEEP=parent; set -- original',
         )
         const io = await ws.execute(
           `find d -name '*.txt' -exec ${action} ${terminator}; ` +
             'echo "$KEEP:$PWD:$1"; echo "${UNSET_FOR_TEST}"',
         )
         expect(io.stdoutText.endsWith('parent:/w:original\n\n')).toBe(true)
-        if (action === 'mutate' && terminator === '\\;') {
+        if (action === MUTATE && terminator === '\\;') {
           expect(io.stdoutText).toBe('parent:/w\n'.repeat(2) + 'parent:/w:original\n\n')
         }
         expect(io.stderrText).toBe('')

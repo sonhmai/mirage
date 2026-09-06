@@ -25,7 +25,7 @@ import { evaluateArith } from '../../shell/arith.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from '../../shell/escapes.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
-import { expandBraces, expansionWrite, lookupVar } from './variable.ts'
+import { expandBraces, landArithWrites, lookupVar } from './variable.ts'
 import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
 
 export type ExecuteFn = (
@@ -372,14 +372,12 @@ export async function expandNodeMarked(
           )
         } catch (err) {
           if (!(err instanceof ArithError)) throw err
+          // bash bound the assignments made before the error, RANDOM's
+          // seed included; they land before the line dies.
+          await landArithWrites(session, view, err.writes, reader)
           throw arithExit(expr, err)
         }
-        for (const write of arith.writes) {
-          await expansionWrite(session, view, write.name, write.key, write.value)
-        }
-        // A RANDOM the expression seeded and then read: the door has
-        // seeded the session; the reads now advance it.
-        reader.settle()
+        await landArithWrites(session, view, arith.writes, reader)
         return prefix + arith.value.toString()
       }
     }
@@ -415,13 +413,11 @@ export async function expandNodeMarked(
         reader.wrote,
       )
     } catch (err) {
-      if (err instanceof ArithError) throw arithExit(expr, err)
-      throw err
+      if (!(err instanceof ArithError)) throw err
+      await landArithWrites(session, view, err.writes, reader)
+      throw arithExit(expr, err)
     }
-    for (const write of result.writes) {
-      await expansionWrite(session, view, write.name, write.key, write.value)
-    }
-    reader.settle()
+    await landArithWrites(session, view, result.writes, reader)
     return prefix + result.value.toString()
   }
 

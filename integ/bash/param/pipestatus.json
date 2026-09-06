@@ -1019,6 +1019,41 @@
         "stdout": "0\n1\n1 0\n0 1\n",
         "stderr": "/data/missing: No such file or directory\n/data/missing: No such file or directory\n/data/missing: No such file or directory\n"
       }
+    },
+    {
+      "id": "pipestatus_negation_and_loop_control_record_their_own",
+      "seq": 981519,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "false | true; ! false; echo \"$? ${PIPESTATUS[*]}\"; false | true; ! false | true; echo \"$? ${PIPESTATUS[*]}\"; false | true; for zpi in 1; do break; done; echo \"$? ${PIPESTATUS[*]}\"; false | true; for zpi in 1; do continue; done; echo \"$? ${PIPESTATUS[*]}\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 1\n1 1 0\n0 0\n0 0\n",
+        "stderr": ""
+      },
+      "note": "`! { false; }` is left out: tree-sitter-bash parses the brace after `!` as a command word, a grammar limit older than this case."
     }
   ]
 }

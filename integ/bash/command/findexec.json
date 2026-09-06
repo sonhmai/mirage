@@ -541,12 +541,13 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d; touch /data/fe/d/a /data/fe/d/b; cd /data/fe; KEEP=parent; mutate() { echo \"$KEEP:$PWD\"; KEEP=child; cd /; }; find d -type f -exec mutate \\; ; echo \"$KEEP:$PWD\"; cd /; rm -r /data/fe",
+      "command": "mkdir -p /data/fe/d; touch /data/fe/d/a /data/fe/d/b; cd /data/fe; KEEP=parent; find d -type f -exec sh -c 'echo \"$KEEP:$PWD\"; KEEP=child; cd /' \\; ; echo \"$KEEP:$PWD\"; cd /; rm -r /data/fe",
       "expect": {
         "exit": 0,
         "stdout": "parent:/data/fe\nparent:/data/fe\nparent:/data/fe\n",
         "stderr": ""
-      }
+      },
+      "note": "The mutating program is an `sh -c` line: GNU's -exec sees no shell function."
     },
     {
       "id": "find_test_after_exec_refused",
@@ -1923,6 +1924,40 @@
         "exit": 0,
         "stdout": "d/a\\ b\nd/c\\\\d\nd/e\\\"f\nd/a b\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "find_exec_does_not_see_a_shell_function",
+      "seq": 981535,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ff/d && cd /data/ff && zff() { echo BAD; }; find d -maxdepth 0 -exec zff {} \\; ; echo rc=$?; unset -f zff; cd / && rm -r /data/ff",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": "find: 'zff': No such file or directory\n"
       }
     }
   ]

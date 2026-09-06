@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterable
+import errno
+from collections.abc import AsyncIterator, Iterable
 
 from mirage.shell.constants import FD_BOTH, FD_CLOSE, SHELL_FDS
 from mirage.shell.types import Redirect
+from mirage.utils.errors import BadDescriptorError
 
 
 def unsupported_descriptor(redirects: Iterable[Redirect]) -> int | None:
@@ -51,3 +53,17 @@ def bad_descriptor_line(fd: int) -> bytes:
         fd (int): the descriptor that was named.
     """
     return f"{fd}: Bad file descriptor\n".encode()
+
+
+async def unreadable_stdin() -> AsyncIterator[bytes]:
+    """Standard input that fails on its first read with EBADF.
+
+    bash opens a command whose stdin is closed (``<&-``) or duplicated
+    from a write-only descriptor (``0<&1``) all the same; the descriptor
+    exists, and only a read of it fails. A command that never reads
+    (``true 0<&1``) succeeds, and one that does reports
+    ``<cmd>: -: Bad file descriptor`` and exits 1, which is what the
+    chokepoint renders from the error this raises.
+    """
+    raise BadDescriptorError(errno.EBADF, "Bad file descriptor", "-")
+    yield b""  # pragma: no cover - makes this an async generator

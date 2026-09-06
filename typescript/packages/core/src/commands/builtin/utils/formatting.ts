@@ -99,7 +99,18 @@ function padLeft(s: string, width: number): string {
   return s.length >= width ? s : ' '.repeat(width - s.length) + s
 }
 
-function lsTimeString(modified: string | null | undefined): string {
+// GNU ls's window of "recent" times: half a Gregorian year of 365.2425
+// days, in seconds (ls.c). findutils draws its own line (listfile.c):
+// old past 180 days, future past an hour.
+const LS_RECENT_SECONDS = Math.floor(31556952 / 2)
+const FIND_OLD_SECONDS = 180 * 24 * 60 * 60
+const FIND_FUTURE_SECONDS = 60 * 60
+
+// The time column: `Mon DD HH:MM` for a recent time, `Mon DD  YYYY` for an
+// old or future one, as GNU prints it. `findRule` uses findutils' window
+// (old past 180 days, future past an hour) rather than ls's (the last
+// half year, never the future).
+function lsTimeString(modified: string | null | undefined, findRule = false): string {
   if (modified === null || modified === undefined || modified === '') {
     return EPOCH_LS_TIME
   }
@@ -108,6 +119,12 @@ function lsTimeString(modified: string | null | undefined): string {
   const d = new Date(t)
   const month = MONTHS[d.getUTCMonth()] ?? 'Jan'
   const day = padLeft(String(d.getUTCDate()), 2)
+  const now = Date.now() / 1000
+  const when = t / 1000
+  const recent = findRule
+    ? !(now > when + FIND_OLD_SECONDS || when > now + FIND_FUTURE_SECONDS)
+    : now - LS_RECENT_SECONDS < when && when < now
+  if (!recent) return `${month} ${day}  ${String(d.getUTCFullYear())}`
   const hh = String(d.getUTCHours()).padStart(2, '0')
   const mm = String(d.getUTCMinutes()).padStart(2, '0')
   return `${month} ${day} ${hh}:${mm}`
@@ -133,15 +150,15 @@ function lsName(s: FileStat): string {
 // size nor a time (a synthetic API-backend directory) shows `-` in both
 // rather than inventing size 0 and the epoch, mirroring the python
 // formatter.
-function lsSizeAndTime(s: FileStat, human: boolean): [string, string] {
+function lsSizeAndTime(s: FileStat, human: boolean, findRule = false): [string, string] {
   const device = s.extra[DEVICE_NUMBERS_KEY]
   if (Array.isArray(device) && device.length === 2) {
-    const time = s.modified == null ? UNKNOWN_NAME : lsTimeString(s.modified)
+    const time = s.modified == null ? UNKNOWN_NAME : lsTimeString(s.modified, findRule)
     return [`${String(device[0])}, ${String(device[1])}`, time]
   }
   if (s.size == null && s.modified == null) return [UNKNOWN_NAME, UNKNOWN_NAME]
   const size = human ? humanSize(s.size ?? 0) : String(s.size ?? 0)
-  return [size, lsTimeString(s.modified)]
+  return [size, lsTimeString(s.modified, findRule)]
 }
 
 // `ls -l` rows: mode, links, owner, group, size, time, name. The owner is
@@ -223,7 +240,7 @@ function findLsName(s: FileStat): string {
 }
 
 export function formatFindLs(s: FileStat, identity: Identity | null): string {
-  const [size, time] = lsSizeAndTime(s, false)
+  const [size, time] = lsSizeAndTime(s, false, true)
   const who = ownerName(s.uid, identity)
   const grp = groupName(s.gid, identity)
   return (

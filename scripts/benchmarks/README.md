@@ -21,14 +21,14 @@ The fingerprint case separately populates a RAM file cache; it is not part of th
 command throughput measurement. The branch explicitly registers its Node native
 fingerprint implementation with the source-loaded core used by this harness.
 
-| Workload | Main baseline | Proposal reconstruction | Branch with native incremental hashing |
-| --- | ---: | ---: | ---: |
-| `grep -c line /big` | 1130 / 1125 | 1415 / 35 | 1995 / 12 |
-| `wc -l /big` | 663 / 658 | 73 / 41 | 38 / 6 |
-| `cat /big \| wc -l` | 665 / 660 | 57 / 41 | 49 / 6 |
-| `sort /big \| uniq -c` | 2910 / 2905 | 2938 / 2933 | 3241 / 1087 |
-| Cache fingerprint, 20 MB | 318 / 313 | 32 / 27 | 36 / 7 |
-| 100 sequential small `wc` commands | 21 / 16 | 20 / 15 | 19 / 14 |
+| Workload                           | Main baseline | Proposal reconstruction | Branch with native incremental hashing |
+| ---------------------------------- | ------------: | ----------------------: | -------------------------------------: |
+| `grep -c line /big`                |   1130 / 1125 |               1415 / 35 |                              1995 / 12 |
+| `wc -l /big`                       |     663 / 658 |                 73 / 41 |                                 38 / 6 |
+| `cat /big \| wc -l`                |     665 / 660 |                 57 / 41 |                                 49 / 6 |
+| `sort /big \| uniq -c`             |   2910 / 2905 |             2938 / 2933 |                            3241 / 1087 |
+| Cache fingerprint, 20 MB           |     318 / 313 |                 32 / 27 |                                 36 / 7 |
+| 100 sequential small `wc` commands |       21 / 16 |                 20 / 15 |                                19 / 14 |
 
 The branch favors responsiveness, but does not win every workload: grep is about
 41% slower than the reconstruction, and native sort still blocks for over a second.

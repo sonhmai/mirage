@@ -1801,6 +1801,40 @@
         "stdout": "inner\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "param_conditional_operator_word_expands_only_when_selected",
+      "seq": 500653,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "RANDOM=42; printf '%s %s\\n' \"${RANDOM:-$RANDOM}\" \"$RANDOM\"; zx=1; echo \"${zx:-$(echo side >&2; echo d)}\"; unset zu; echo \"${zu:-$(echo side2 >&2; echo d)}\"; echo \"${zx:+$(echo side3 >&2; echo p)}\"; unset zu zx",
+      "expect": {
+        "exit": 0,
+        "stdout": "17772 26794\n1\nd\np\n",
+        "stderr": "side2\nside3\n"
+      }
     }
   ]
 }

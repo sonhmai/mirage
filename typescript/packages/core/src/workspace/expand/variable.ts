@@ -782,6 +782,22 @@ async function expandArrayAtIn(
 
 const SUBSCRIPT_LITERAL_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER, NT.ERROR])
 
+// The operators whose word bash expands only once the parameter's state
+// selects it (a default, an alternate, an assignment, a message).
+const LAZY_OPS: ReadonlySet<string> = new Set(['?', ':?', '=', ':=', ':-', '-', ':+', '+'])
+
+/** The word of a conditional operator, expanded now that it is needed. */
+async function operatorWord(
+  p: BraceParse,
+  expandChild: ExpandChild,
+  session: Session,
+  callStack: CallStack | null,
+): Promise<string> {
+  const group = p.groups[0]
+  if (group === undefined) return ''
+  return expandGroup(group, expandChild, false, session, callStack)
+}
+
 /**
  * The associative key one subscript spells.
  *
@@ -978,10 +994,18 @@ async function expandBracesIn(
   const arrays = visibleArrays(session)
   operand.ref = (p.varName ?? '') + (p.subscript === null ? '' : `[${p.subscript}]`)
 
+  // A conditional operator's word expands only if the parameter's state
+  // selects it, as bash's does: `${RANDOM:-$RANDOM}` draws once and
+  // `${x:-$(cmd)}` runs cmd only when x is unset. Every other operator's
+  // words are needed whatever the value, and expand here.
   const groups: string[] = []
-  for (let gi = 0; gi < p.groups.length; gi++) {
-    const patternMode = gi === 0 && p.op !== null && PATTERN_OPS.has(p.op)
-    groups.push(await expandGroup(p.groups[gi] ?? [], expandChild, patternMode, session, callStack))
+  if (p.op === null || !LAZY_OPS.has(p.op)) {
+    for (let gi = 0; gi < p.groups.length; gi++) {
+      const patternMode = gi === 0 && p.op !== null && PATTERN_OPS.has(p.op)
+      groups.push(
+        await expandGroup(p.groups[gi] ?? [], expandChild, patternMode, session, callStack),
+      )
+    }
   }
 
   let val = ''
@@ -1111,12 +1135,9 @@ async function expandBracesIn(
   if (p.op === '?' || p.op === ':?') {
     const triggered = p.op === '?' ? !varInEnv : val === ''
     if (!triggered) return val
+    const word = await operatorWord(p, expandChild, session, callStack)
     const message =
-      groups[0] !== undefined && groups[0] !== ''
-        ? groups[0]
-        : p.op === '?'
-          ? 'parameter not set'
-          : 'parameter null or not set'
+      word !== '' ? word : p.op === '?' ? 'parameter not set' : 'parameter null or not set'
     // GNU: fatal at top level with status 127; a containing
     // subshell/pipeline segment reports 1. A subscripted reference is
     // named whole: `bash: m[zz]: nope`.
@@ -1126,7 +1147,7 @@ async function expandBracesIn(
   if (p.op === '=' || p.op === ':=') {
     const triggered = p.op === '=' ? !varInEnv : val === ''
     if (!triggered) return val
-    const defaultVal = groups[0] ?? ''
+    const defaultVal = await operatorWord(p, expandChild, session, callStack)
     if (p.varName !== null && p.subscript !== null) {
       // The default lands on the element the reference named, never on
       // element 0: `${m[k]:=v}` writes key k and `${a[3]:=v}` writes
@@ -1148,12 +1169,10 @@ async function expandBracesIn(
     }
     return defaultVal
   }
-  if (p.op === ':-') return val !== '' ? val : (groups[0] ?? '')
-  if (p.op === '-') {
-    if (varInEnv) return val
-    return groups[0] ?? ''
-  }
-  if (p.op === ':+') return val !== '' ? (groups[0] ?? '') : ''
-  if (p.op === '+') return varInEnv ? (groups[0] ?? '') : ''
+  if (p.op === ':-')
+    return val !== '' ? val : await operatorWord(p, expandChild, session, callStack)
+  if (p.op === '-') return varInEnv ? val : await operatorWord(p, expandChild, session, callStack)
+  if (p.op === ':+') return val !== '' ? await operatorWord(p, expandChild, session, callStack) : ''
+  if (p.op === '+') return varInEnv ? await operatorWord(p, expandChild, session, callStack) : ''
   return valueOp(p.op, val, groups, operand)
 }

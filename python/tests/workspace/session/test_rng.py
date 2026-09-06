@@ -436,3 +436,31 @@ async def test_operand_env_is_a_view_over_the_visible_env():
         assert await io.stderr_str() == ""
     finally:
         await ws.close()
+
+
+@pytest.mark.parametrize(
+    "command,stdout,stderr",
+    [
+        # A conditional operator's word expands only when the parameter's
+        # state selects it: the draw and the substitution's side effect
+        # happen once, or not at all.
+        ('RANDOM=42; printf "%s %s\\n" "${RANDOM:-$RANDOM}" "$RANDOM"',
+         '17772 26794\n', ''),
+        ('x=1; echo "${x:-$(echo side >&2; echo d)}"', '1\n', ''),
+        ('unset u; echo "${u:-$(echo side >&2; echo d)}"', 'd\n', 'side\n'),
+        ('x=1; echo "${x:+$(echo side >&2; echo p)}"', 'p\n', 'side\n'),
+        ('x=1; echo "${x:?$(echo side >&2; echo m)}"', '1\n', ''),
+        ('unset u; echo "${u:=$(echo side >&2; echo v)}" $u', 'v v\n',
+         'side\n'),
+    ])
+@pytest.mark.asyncio
+async def test_a_conditional_operators_word_expands_only_when_selected(
+        command, stdout, stderr):
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        io = await ws.execute(command)
+        assert io.exit_code == 0
+        assert await io.stdout_str() == stdout
+        assert await io.stderr_str() == stderr
+    finally:
+        await ws.close()

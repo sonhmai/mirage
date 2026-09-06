@@ -779,6 +779,27 @@ def _substring(val: str, groups: list[str], operand: _ArithOperand) -> str:
 
 _SUBSCRIPT_LITERAL_TYPES = frozenset({NT.WORD, NT.NUMBER, NT.ERROR})
 
+# The operators whose word bash expands only once the parameter's state
+# selects it (a default, an alternate, an assignment, a message).
+_LAZY_OPS = frozenset({"?", ":?", "=", ":=", ":-", "-", ":+", "+"})
+
+
+async def _operator_word(p: _BraceParse, expand_child: ExpandChild,
+                         session: Session,
+                         call_stack: CallStack | None) -> str:
+    """The word of a conditional operator, expanded now that it is needed.
+
+    Args:
+        p (_BraceParse): the parsed expansion.
+        expand_child (ExpandChild): nested-node expander.
+        session (Session): shell session.
+        call_stack (CallStack | None): function-call scope, if any.
+    """
+    if not p.groups:
+        return ""
+    return await _expand_group(p.groups[0], expand_child, False, session,
+                               call_stack)
+
 
 async def _expand_subscript_key(p: _BraceParse,
                                 expand_child: ExpandChild) -> str:
@@ -873,11 +894,17 @@ async def _expand_braces(node: tree_sitter.Node, session: Session,
     operand.ref = (p.var_name or "") + (f"[{p.subscript}]"
                                         if p.subscript is not None else "")
 
+    # A conditional operator's word expands only if the parameter's
+    # state selects it, as bash's does: `${RANDOM:-$RANDOM}` draws once
+    # and `${x:-$(cmd)}` runs cmd only when x is unset. Every other
+    # operator's words are needed whatever the value, and expand here.
     groups: list[str] = []
-    for gi, group in enumerate(p.groups):
-        pattern_mode = gi == 0 and p.op in _PATTERN_OPS
-        groups.append(await _expand_group(group, expand_child, pattern_mode,
-                                          session, call_stack))
+    if p.op not in _LAZY_OPS:
+        for gi, group in enumerate(p.groups):
+            pattern_mode = gi == 0 and p.op in _PATTERN_OPS
+            groups.append(await
+                          _expand_group(group, expand_child, pattern_mode,
+                                        session, call_stack))
 
     val = ""
     var_in_env = False
@@ -998,12 +1025,10 @@ async def _expand_braces(node: tree_sitter.Node, session: Session,
         triggered = (not var_in_env) if p.op == "?" else (not val)
         if not triggered:
             return val
-        if groups and groups[0]:
-            message = groups[0]
-        elif p.op == "?":
-            message = "parameter not set"
-        else:
-            message = "parameter null or not set"
+        message = await _operator_word(p, expand_child, session, call_stack)
+        if not message:
+            message = ("parameter not set"
+                       if p.op == "?" else "parameter null or not set")
         # GNU: fatal at top level with status 127; a containing
         # subshell/pipeline segment reports 1. A subscripted reference
         # is named whole: `bash: m[zz]: nope`.
@@ -1016,7 +1041,7 @@ async def _expand_braces(node: tree_sitter.Node, session: Session,
         triggered = (not var_in_env) if p.op == "=" else (not val)
         if not triggered:
             return val
-        default = groups[0] if groups else ""
+        default = await _operator_word(p, expand_child, session, call_stack)
         if p.var_name is not None and p.subscript is not None:
             # The default lands on the element the reference named,
             # never on element 0: `${m[k]:=v}` writes key k and
@@ -1038,15 +1063,21 @@ async def _expand_braces(node: tree_sitter.Node, session: Session,
                 await expansion_write(session, view, p.var_name, None, default)
         return default
     if p.op == ":-":
-        return val if val else (groups[0] if groups else "")
+        if val:
+            return val
+        return await _operator_word(p, expand_child, session, call_stack)
     if p.op == "-":
         if var_in_env:
             return val
-        return groups[0] if groups else ""
+        return await _operator_word(p, expand_child, session, call_stack)
     if p.op == ":+":
-        return (groups[0] if groups else "") if val else ""
+        if not val:
+            return ""
+        return await _operator_word(p, expand_child, session, call_stack)
     if p.op == "+":
-        return (groups[0] if groups else "") if var_in_env else ""
+        if not var_in_env:
+            return ""
+        return await _operator_word(p, expand_child, session, call_stack)
     return _value_op(p.op, val, groups, operand)
 
 

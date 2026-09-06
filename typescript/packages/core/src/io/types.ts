@@ -70,13 +70,16 @@ export interface IOResultInit {
   cache?: string[]
   producer?: Producer | null
   mutated?: boolean | null
-  matchedPaths?: PathSpec[] | null
+  matchedRuns?: PathSpec[][] | null
   refusal?: Refusal | null
 }
 
 export class IOResult {
-  // Structured selection before display rendering, for later actions.
-  matchedPaths: PathSpec[] | null
+  // Structured selection before display rendering, for later actions:
+  // one list of rows per start point, in operand order, so a nested or
+  // repeated start point stays its own traversal (GNU walks each to
+  // completion before the next).
+  matchedRuns: PathSpec[][] | null
   stdout: ByteSource | null
   stderr: ByteSource | null
   private _exitCode: number
@@ -104,7 +107,7 @@ export class IOResult {
   streamSource: IOResult | null
 
   constructor(init: IOResultInit = {}) {
-    this.matchedPaths = init.matchedPaths ?? null
+    this.matchedRuns = init.matchedRuns ?? null
     this.stdout = init.stdout ?? null
     this.stderr = init.stderr ?? null
     this._exitCode = init.exitCode ?? 0
@@ -166,7 +169,7 @@ export class IOResult {
     // firing at drain time) is still visible.
     const result = new IOResult({
       stdout: other.stdout,
-      matchedPaths: other.matchedPaths,
+      matchedRuns: other.matchedRuns,
       stderr: mergedStderr,
       reads: { ...this.reads, ...other.reads },
       writes: { ...this.writes, ...other.writes },

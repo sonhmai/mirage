@@ -49,11 +49,11 @@ class TraversalMount:
         return self.output, IOResult(
             exit_code=self.exit_code,
             stderr=stderr,
-            matched_paths=[
+            matched_runs=[[
                 PathSpec(
                     virtual=row, directory=row, resource_path="", raw_path=row)
                 for row in self.output.decode().splitlines()
-            ] if name == "find" else None)
+            ]] if name == "find" else None)
 
 
 class TraversalRegistry:

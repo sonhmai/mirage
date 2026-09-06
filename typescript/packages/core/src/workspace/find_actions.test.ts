@@ -15,8 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { MountMode, PathSpec } from '../types.ts'
-import { compareDepthFirst, startRuns } from './executor/find_action_dispatch.ts'
+import { MountMode } from '../types.ts'
+import { compareDepthFirst } from './executor/find_action_dispatch.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
@@ -193,32 +193,76 @@ describe('find action layer', () => {
       }
     })
 
-    it('splits rows by start point in operand order', () => {
-      const spec = (raw: string): PathSpec =>
-        new PathSpec({
-          virtual: raw.replace(/\/+$/, '') === '' ? '/w' : `/w/${raw.replace(/^\/+|\/+$/g, '')}`,
-          directory: '/w',
-          resourcePath: '',
-          rawPath: raw,
-        })
-      const rows = [spec('b'), spec('b/x'), spec('a'), spec('a/y')]
-      const names = (runs: PathSpec[][]) => runs.map((run) => run.map((r) => r.rawPath))
-      expect(names(startRuns(rows, [spec('b'), spec('a')]))).toEqual([
-        ['b', 'b/x'],
-        ['a', 'a/y'],
-      ])
-      // A trailing-slash start point owns its `d/` root row and `d/a`.
-      expect(names(startRuns([spec('d/'), spec('d/a')], [spec('d/')]))).toEqual([['d/', 'd/a']])
-      // Nested start points share a run, and no start points is one run.
-      expect(
-        startRuns([...rows.slice(0, 2), spec('b/x')], [spec('b'), spec('b/x')]).map(
-          (r) => r.length,
-        ),
-      ).toEqual([3, 0])
-      expect(startRuns(rows, null)).toEqual([rows])
+    it('drops a trailing slash from the depth key', () => {
       expect(compareDepthFirst('d/a', 'd/')).toBeLessThan(0)
       expect(compareDepthFirst('/a', '/')).toBeLessThan(0)
       expect(compareDepthFirst('d/', 'd')).toBe(0)
+    })
+
+    it('walks a nested or repeated start point on its own', async () => {
+      // GNU findutils 4.10 finishes `d` before it begins `d/sub` again,
+      // and walks a repeated start point twice; the rows arrive as one
+      // run per start point, so no sort can fold the two together.
+      const ws = await singleMountWs()
+      try {
+        await ws.execute(
+          'mkdir -p /w/d/sub; printf a > /w/d/a.txt; printf x > /w/d/sub/c.txt; cd /w',
+        )
+        const out = async (line: string) => {
+          const io = await ws.execute(line)
+          return [io.stdoutText, io.stderrText, io.exitCode]
+        }
+        const post = 'd/a.txt\nd/sub/c.txt\nd/sub\nd\n'
+        expect(await out('find d d/sub -depth -print')).toEqual([
+          post + 'd/sub/c.txt\nd/sub\n',
+          '',
+          0,
+        ])
+        expect(await out('find d d -depth')).toEqual([post + post, '', 0])
+        expect(await out('find d d/sub -depth -exec echo saw {} \\;')).toEqual([
+          (post + 'd/sub/c.txt\nd/sub\n')
+            .split('\n')
+            .filter((r) => r !== '')
+            .map((r) => `saw ${r}\n`)
+            .join(''),
+          '',
+          0,
+        ])
+      } finally {
+        await ws.close()
+      }
+    })
+
+    it('escapes an -ls name as findutils does', async () => {
+      // GNU findutils 4.10 `-ls` keeps one row on one line: a space, a
+      // backslash and a double quote take a backslash, a newline is
+      // `\n`, and a byte outside ASCII is octal; `-print` stays raw.
+      const ws = await singleMountWs()
+      try {
+        await ws.execute(
+          "mkdir -p /w/d; touch 'd/a b' 'd/c\\d' 'd/e\"f' \"d/n\nl\" 'd/ü' 2>/dev/null; cd /w; touch 'd/a b' 'd/c\\d' 'd/e\"f' \"d/n\nl\" 'd/ü'; ln -s 'a b' 'd/li nk'",
+        )
+        const io = await ws.execute('find d -mindepth 1 -ls | sort')
+        expect([io.stderrText, io.exitCode]).toEqual(['', 0])
+        const names = io.stdoutText
+          .split('\n')
+          .filter((r) => r !== '')
+          .map((row) => row.replace(/^.*? \d\d:\d\d /, ''))
+          .sort()
+        expect(names).toEqual(
+          [
+            'd/a\\ b',
+            'd/c\\\\d',
+            'd/e\\"f',
+            'd/li\\ nk -> a\\ b',
+            'd/n\\nl',
+            'd/\\303\\274',
+          ].sort(),
+        )
+        expect((await ws.execute("find d -name 'a b'")).stdoutText).toBe('d/a b\n')
+      } finally {
+        await ws.close()
+      }
     })
   })
 
@@ -583,7 +627,8 @@ it('preserves newline mount names and filenames through print0 and ls', async ()
     const listed = await ws.execute('find /d -type f -ls')
     expect(listed.exitCode).toBe(0)
     expect(listed.stderrText).toBe('')
-    expect(listed.stdoutText).toContain('a\nb')
+    // -ls escapes the newline, as findutils does; the row stays one line.
+    expect(listed.stdoutText).toContain('a\\nb\n')
   } finally {
     await ws.close()
   }

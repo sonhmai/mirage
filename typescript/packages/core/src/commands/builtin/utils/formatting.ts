@@ -172,10 +172,56 @@ export function formatLsLong(stats: readonly FileStat[], opts: LsLongOptions = {
  * `?`, the answer `stat %i` and `%b` already give: a VFS has no inode
  * and no block allocation, and a number invented for either would read
  * as a fact. The remaining columns are the `ls -l` ones, from the same
- * helpers, so the two listings cannot disagree about a row. `s` is the
- * row named as find printed it; `identity` is null outside a workspace,
- * where both name columns fall back to `-`.
+ * helpers, so the two listings cannot disagree about a row; only the
+ * name is spelled differently, escaped (`escapeFindName`) so the row
+ * stays one line of fixed fields. `s` is the row named as find printed
+ * it; `identity` is null outside a workspace, where both name columns
+ * fall back to `-`.
  */
+const FIND_LS_ESCAPES: Readonly<Record<string, string>> = {
+  '\\': '\\\\',
+  ' ': '\\ ',
+  '"': '\\"',
+  '\n': '\\n',
+  '\t': '\\t',
+  '\r': '\\r',
+  '\x07': '\\a',
+  '\b': '\\b',
+  '\f': '\\f',
+  '\v': '\\v',
+}
+
+/**
+ * Spell a name the way `find -ls` prints it. findutils escapes a name so
+ * one row stays one line and its fields stay in place: a backslash, a
+ * space and a double quote take a backslash, the C escapes stand for
+ * their control characters, and every other control character and every
+ * byte outside ASCII is an octal escape (`\303\274` for `ü`, as GNU
+ * prints it in the C locale). `-print` is untouched; only the listing is
+ * a table.
+ */
+export function escapeFindName(text: string): string {
+  let out = ''
+  for (const ch of text) {
+    const escaped = FIND_LS_ESCAPES[ch]
+    if (escaped !== undefined) out += escaped
+    else if (ch > ' ' && ch < '\x7f') out += ch
+    else
+      for (const byte of new TextEncoder().encode(ch))
+        out += `\\${byte.toString(8).padStart(3, '0')}`
+  }
+  return out
+}
+
+// The name column of a `find -ls` row, escaped, with the link target
+// escaped the same way.
+function findLsName(s: FileStat): string {
+  const name = escapeFindName(s.name)
+  if (s.type !== FileType.SYMLINK) return name
+  const target = s.extra[LINK_TARGET_KEY]
+  return typeof target === 'string' && target !== '' ? `${name} -> ${escapeFindName(target)}` : name
+}
+
 export function formatFindLs(s: FileStat, identity: Identity | null): string {
   const [size, time] = lsSizeAndTime(s, false)
   const who = ownerName(s.uid, identity)
@@ -183,7 +229,7 @@ export function formatFindLs(s: FileStat, identity: Identity | null): string {
   return (
     `${padLeft(UNKNOWN_STAT_FIELD, 9)} ${padLeft(UNKNOWN_STAT_FIELD, 6)} ` +
     `${lsModeString(s)} ${padLeft('1', 3)} ${who.padEnd(8)} ${grp.padEnd(8)} ` +
-    `${padLeft(size, 8)} ${time} ${lsName(s)}`
+    `${padLeft(size, 8)} ${time} ${findLsName(s)}`
   )
 }
 

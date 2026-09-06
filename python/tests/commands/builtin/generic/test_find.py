@@ -1050,5 +1050,5 @@ async def test_walk_selection_preserves_newlines_before_rendering():
         CommandOpts(stat_path=_stat_map(stats)),
         readdir=AsyncMock(return_value=["/mnt/a\nb"]),
         stat=AsyncMock(side_effect=lambda path, *_: stats[path.virtual]))
-    assert io.matched_paths is not None
-    assert [p.virtual for p in io.matched_paths] == ["/mnt/a\nb"]
+    assert io.matched_runs is not None
+    assert [p.virtual for run in io.matched_runs for p in run] == ["/mnt/a\nb"]

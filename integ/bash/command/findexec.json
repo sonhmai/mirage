@@ -1856,6 +1856,74 @@
         "stdout": "        ?      ? -rw-r--r--   1\n11 2 d/a.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "find_depth_walks_a_nested_start_point_on_its_own",
+      "seq": 981533,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fn/d/sub && printf A > /data/fn/d/a.txt && printf B > /data/fn/d/sub/b.txt && cd /data/fn && find d d/sub -depth -print; find d d -depth -exec echo saw {} \\; ; cd / && rm -r /data/fn",
+      "expect": {
+        "exit": 0,
+        "stdout": "d/a.txt\nd/sub/b.txt\nd/sub\nd\nd/sub/b.txt\nd/sub\nsaw d/a.txt\nsaw d/sub/b.txt\nsaw d/sub\nsaw d\nsaw d/a.txt\nsaw d/sub/b.txt\nsaw d/sub\nsaw d\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_ls_escapes_the_name",
+      "seq": 981534,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fe/d && printf 1 > '/data/fe/d/a b' && printf 2 > '/data/fe/d/c\\d' && printf 3 > '/data/fe/d/e\"f' && cd /data/fe && find d -type f -ls | sed 's/.* [0-9][0-9]:[0-9][0-9] //' | sort; find d -name 'a b'; cd / && rm -r /data/fe",
+      "expect": {
+        "exit": 0,
+        "stdout": "d/a\\ b\nd/c\\\\d\nd/e\\\"f\nd/a b\n",
+        "stderr": ""
+      }
     }
   ]
 }

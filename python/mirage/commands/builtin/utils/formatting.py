@@ -166,6 +166,59 @@ def format_ls_long(
     return out
 
 
+_FIND_LS_ESCAPES = {
+    "\\": "\\\\",
+    " ": "\\ ",
+    '"': '\\"',
+    "\n": "\\n",
+    "\t": "\\t",
+    "\r": "\\r",
+    "\a": "\\a",
+    "\b": "\\b",
+    "\f": "\\f",
+    "\v": "\\v",
+}
+
+
+def escape_find_name(text: str) -> str:
+    """Spell a name the way ``find -ls`` prints it.
+
+    findutils escapes a name so one row stays one line and its fields
+    stay in place: a backslash, a space and a double quote take a
+    backslash, the C escapes stand for their control characters, and
+    every other control character and every byte outside ASCII is an
+    octal escape (``\\303\\274`` for ``ü``, as GNU prints it in the C
+    locale). ``-print`` is untouched; only the listing is a table.
+
+    Args:
+        text (str): the name or link target as it is.
+    """
+    out: list[str] = []
+    for ch in text:
+        escaped = _FIND_LS_ESCAPES.get(ch)
+        if escaped is not None:
+            out.append(escaped)
+        elif " " < ch < "\x7f":
+            out.append(ch)
+        else:
+            out.append("".join(f"\\{byte:03o}" for byte in ch.encode()))
+    return "".join(out)
+
+
+def _find_ls_name(s: FileStat) -> str:
+    """The name column of a ``find -ls`` row, escaped, with the link
+    target escaped the same way.
+
+    Args:
+        s (FileStat): the row, named as find printed it.
+    """
+    name = escape_find_name(s.name)
+    if s.type != FileType.SYMLINK:
+        return name
+    target = s.extra.get(LINK_TARGET_KEY)
+    return f"{name} -> {escape_find_name(target)}" if target else name
+
+
 def format_find_ls(s: FileStat, identity: Identity | None) -> str:
     """Render one ``find -ls`` row in findutils' own layout.
 
@@ -177,7 +230,9 @@ def format_find_ls(s: FileStat, identity: Identity | None) -> str:
     and ``%b`` already give: a VFS has no inode and no block
     allocation, and a number invented for either would read as a fact.
     The remaining columns are the ``ls -l`` ones, from the same
-    helpers, so the two listings cannot disagree about a row.
+    helpers, so the two listings cannot disagree about a row; only the
+    name is spelled differently, escaped (``escape_find_name``) so the
+    row stays one line of fixed fields.
 
     Args:
         s (FileStat): the row, named as find printed it.
@@ -189,7 +244,7 @@ def format_find_ls(s: FileStat, identity: Identity | None) -> str:
     grp = group_name(s.gid, identity)
     return (f"{UNKNOWN_STAT_FIELD:>9} {UNKNOWN_STAT_FIELD:>6} "
             f"{ls_mode_string(s)} {1:>3} {who:<8} {grp:<8} {size:>8} {time} "
-            f"{_ls_name(s)}")
+            f"{_find_ls_name(s)}")
 
 
 def to_number(val: str) -> float:

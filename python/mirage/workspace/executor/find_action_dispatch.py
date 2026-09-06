@@ -282,52 +282,6 @@ def depth_first_key(path: str) -> tuple[tuple[str, int], ...]:
     return (*((part, 0) for part in parts[:-1]), (parts[-1], 1))
 
 
-def _under(path: str, start: str) -> bool:
-    """Whether a printed row belongs to a start point's walk.
-
-    Args:
-        path (str): a row as find printed it.
-        start (str): the start point as it was typed.
-    """
-    base = start.rstrip("/")
-    if base == "":
-        return path.startswith("/")
-    return path == start or path == base or path.startswith(base + "/")
-
-
-def start_runs(matches: list[PathSpec],
-               starts: list[PathSpec] | None) -> list[list[PathSpec]]:
-    """Split the rows into one run per start point, in operand order.
-
-    GNU walks each start point to completion before the next, so
-    ``-depth`` (and the actions that follow its order, ``-delete`` and
-    ``-exec`` among them) is a property of one walk, never of the whole
-    line: ``find b a -depth`` prints ``b/x b a/y a``, and one sort over
-    every row would put ``a``'s tree first. The rows arrive in
-    start-point order, so a run ends at the first row that is not under
-    its start point. Start points that nest or repeat share a run,
-    since a row under both cannot say which walk produced it; ordering
-    their shared rows children-first is the one answer that never
-    deletes a directory before its contents. With no start points on
-    hand (a caller outside a workspace) every row is one run.
-
-    Args:
-        matches (list[PathSpec]): the rows, in start-point order.
-        starts (list[PathSpec] | None): the start points as typed.
-    """
-    if not starts:
-        return [matches]
-    runs: list[list[PathSpec]] = [[] for _ in starts]
-    position = 0
-    for match in matches:
-        path = match.raw_path or match.virtual
-        while (position + 1 < len(starts) and not _under(
-                path, starts[position].raw_path or starts[position].virtual)):
-            position += 1
-        runs[position].append(match)
-    return runs
-
-
 def _structural(path: PathSpec, registry: MountRegistry) -> bool:
     """Whether a row is a mount point or a namespace-only ancestor of
     one, which are not unlinkable entries. Ancestors use the raw mount
@@ -345,7 +299,7 @@ def _structural(path: PathSpec, registry: MountRegistry) -> bool:
 
 async def _apply_find_actions(
     stdout: ByteSource | None,
-    matched_paths: list[PathSpec] | None,
+    matched_runs: list[list[PathSpec]] | None,
     texts: list[str],
     registry: MountRegistry,
     cwd: str,
@@ -356,7 +310,6 @@ async def _apply_find_actions(
     stat_path: StatPath | None = None,
     dispatch: DispatchFn | None = None,
     identity: Identity | None = None,
-    starts: list[PathSpec] | None = None,
 ) -> tuple[ByteSource | None, bytes, int]:
     """Apply find's actions (-exec / -delete / -print0 / -ls) to its rows.
 
@@ -380,11 +333,16 @@ async def _apply_find_actions(
     find's exit 1. It also turns on ``-depth``, which orders every
     directory after its contents, the only order a tree can be removed
     in; ``-depth`` alone reorders the implicit print the same way, and
-    both order one start point's walk at a time (``start_runs``).
+    both order one start point's walk at a time: GNU walks each start
+    point to completion before the next, so ``find b a -depth`` prints
+    ``b/x b a/y a`` and ``find d d/sub -depth`` finishes ``d`` before
+    it begins ``d/sub`` again, which is why the rows arrive as one run
+    per start point rather than one list.
 
     Args:
         stdout (ByteSource | None): display output from find.
-        matched_paths (list[PathSpec] | None): matches before rendering.
+        matched_runs (list[list[PathSpec]] | None): matches before
+            rendering, one run per start point in operand order.
         texts (list[str]): the expression tokens, already validated.
         registry (MountRegistry): used to route per-match dispatch.
         cwd (str): cwd forwarded to per-match sub-dispatch.
@@ -402,8 +360,6 @@ async def _apply_find_actions(
             state no mount's ``rm`` can reach.
         identity (Identity | None): who the session is, for the owner
             and group columns of ``-ls``.
-        starts (list[PathSpec] | None): the start points as typed, in
-            operand order, so ``-depth`` orders each walk on its own.
 
     Returns:
         The rows to print, the stderr to append, and the exit status the
@@ -415,14 +371,13 @@ async def _apply_find_actions(
         return stdout, b"", 0
     if expr.execs and execute_fn is None:
         return None, b"find: -exec: no shell to run the command\n", 1
-    if matched_paths is None:
+    if matched_runs is None:
         return None, b"find: actions require structured matches\n", 1
-    matches = list(matched_paths)
-    if reorders:
-        matches = [
-            match for run in start_runs(matches, starts) for match in sorted(
-                run, key=lambda p: depth_first_key(p.raw_path or p.virtual))
-        ]
+    matches = [
+        match for run in matched_runs for match in (
+            sorted(run, key=lambda p: depth_first_key(p.raw_path or p.virtual)
+                   ) if reorders else run)
+    ]
     # An expression with no action of its own prints, which is the one
     # implicit action -depth reorders.
     actions = expr.actions or [RowAction("print")]

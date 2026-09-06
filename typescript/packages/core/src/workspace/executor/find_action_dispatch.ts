@@ -55,9 +55,6 @@ export interface FindActionDoors {
   dispatch?: DispatchFn | null
   // Who the session is, for the owner and group columns of `-ls`.
   identity?: Identity | null
-  // The start points as typed, in operand order, so `-depth` orders
-  // each walk on its own.
-  starts?: readonly PathSpec[] | null
 }
 
 const enc = new TextEncoder()
@@ -278,47 +275,6 @@ export function compareDepthFirst(a: string, b: string): number {
   return pa.length - pb.length
 }
 
-/** Whether a printed row belongs to a start point's walk. */
-function under(path: string, start: string): boolean {
-  const base = start.replace(/\/+$/, '')
-  if (base === '') return path.startsWith('/')
-  return path === start || path === base || path.startsWith(`${base}/`)
-}
-
-/**
- * Split the rows into one run per start point, in operand order.
- *
- * GNU walks each start point to completion before the next, so `-depth`
- * (and the actions that follow its order, `-delete` and `-exec` among
- * them) is a property of one walk, never of the whole line:
- * `find b a -depth` prints `b/x b a/y a`, and one sort over every row
- * would put `a`'s tree first. The rows arrive in start-point order, so
- * a run ends at the first row that is not under its start point. Start
- * points that nest or repeat share a run, since a row under both cannot
- * say which walk produced it; ordering their shared rows children-first
- * is the one answer that never deletes a directory before its contents.
- * With no start points on hand (a caller outside a workspace) every row
- * is one run.
- */
-export function startRuns(
-  matches: readonly PathSpec[],
-  starts: readonly PathSpec[] | null,
-): PathSpec[][] {
-  if (starts === null || starts.length === 0) return [[...matches]]
-  const runs: PathSpec[][] = starts.map(() => [])
-  let position = 0
-  for (const match of matches) {
-    const path = match.rawPath || match.virtual
-    while (position + 1 < starts.length) {
-      const start = starts[position]
-      if (start === undefined || under(path, start.rawPath || start.virtual)) break
-      position += 1
-    }
-    runs[position]?.push(match)
-  }
-  return runs
-}
-
 /** Whether a row is a mount point or a namespace-only ancestor of one,
  * which are not unlinkable entries. Ancestors use the raw mount table
  * like isMountRoot: an ungranted mount still pins its ancestors in the
@@ -357,13 +313,17 @@ function hasActions(expr: FindExpr): boolean {
  * line and find's exit 1. It also turns on `-depth`, which orders every
  * directory after its contents, the only order a tree can be removed in;
  * `-depth` alone reorders the implicit print the same way, and both
- * order one start point's walk at a time (`startRuns`). Returns the
- * rows to print, the stderr to append, and the exit status the actions
- * impose (0 when they impose none, even with stderr).
+ * order one start point's walk at a time: GNU walks each start point to
+ * completion before the next, so `find b a -depth` prints `b/x b a/y a`
+ * and `find d d/sub -depth` finishes `d` before it begins `d/sub` again,
+ * which is why the rows arrive as one run per start point rather than
+ * one list. Returns the rows to print, the stderr to append, and the
+ * exit status the actions impose (0 when they impose none, even with
+ * stderr).
  */
 export async function applyFindActions(
   stdout: ByteSource | null,
-  matchedPaths: readonly PathSpec[] | null,
+  matchedRuns: readonly (readonly PathSpec[])[] | null,
   texts: readonly string[],
   registry: MountRegistry,
   cwd: string,
@@ -382,14 +342,13 @@ export async function applyFindActions(
   const statPath = doors.statPath ?? null
   const dispatch = doors.dispatch ?? null
   const identity = doors.identity ?? null
-  if (matchedPaths === null)
+  if (matchedRuns === null)
     return [null, enc.encode('find: actions require structured matches\n'), 1]
-  let matches = [...matchedPaths]
-  if (reorders) {
-    matches = startRuns(matches, doors.starts ?? null).flatMap((run) =>
-      run.sort((a, b) => compareDepthFirst(a.rawPath || a.virtual, b.rawPath || b.virtual)),
-    )
-  }
+  const matches = matchedRuns.flatMap((run) =>
+    reorders
+      ? [...run].sort((a, b) => compareDepthFirst(a.rawPath || a.virtual, b.rawPath || b.virtual))
+      : [...run],
+  )
   // An expression with no action of its own prints, which is the one
   // implicit action -depth reorders.
   const actions: FindAction[] = expr.actions.length > 0 ? expr.actions : [{ kind: 'print' }]

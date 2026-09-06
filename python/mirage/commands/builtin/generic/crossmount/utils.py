@@ -96,10 +96,10 @@ async def merge_operand_ios(results: list[OperandRun],
     # them at the command boundary (`-exec {} +` is one batch across
     # start points, as in GNU). One run without them means the whole
     # selection is unstructured.
-    rows = [run.io.matched_paths for run in results]
-    known = [run_rows for run_rows in rows if run_rows is not None]
-    io.matched_paths = ([p for run_rows in known for p in run_rows]
-                        if len(known) == len(rows) else None)
+    runs = [run.io.matched_runs for run in results]
+    known = [run_rows for run_rows in runs if run_rows is not None]
+    io.matched_runs = ([r for run_rows in known for r in run_rows]
+                       if len(known) == len(runs) else None)
     return io
 
 

@@ -95,7 +95,7 @@ const JOB_HANDLERS: Record<
  * Apply find's actions once, at the command boundary. Every runner below
  * this point (one mount, a fan-out over nested mounts, one native run per
  * cross-mount operand) only selects rows and hands them back as
- * `io.matchedPaths`; the actions run here over all of them together, so
+ * `io.matchedRuns`; the actions run here over all of them together, so
  * a batched `-exec {} +` is one invocation across every start point, as
  * GNU's is, and a per-match action runs in start-point order.
  */
@@ -103,7 +103,6 @@ async function finishFind(
   stdout: ByteSource | null,
   io: IOResult,
   texts: readonly string[],
-  starts: readonly PathSpec[],
   registry: MountRegistry,
   session: Session,
   executeFn: ExecuteFn | undefined,
@@ -113,7 +112,7 @@ async function finishFind(
 ): Promise<ByteSource | null> {
   const [newStdout, actionErr, actionExit] = await applyFindActions(
     stdout,
-    io.matchedPaths,
+    io.matchedRuns,
     texts,
     registry,
     session.cwd,
@@ -124,7 +123,6 @@ async function finishFind(
       statPath,
       dispatch,
       identity: identityFrom(ns, sessionView(session, registry.policies)),
-      starts,
     },
   )
   if (actionErr.length > 0) {
@@ -371,17 +369,10 @@ export async function handleCommand(
     )
     let csStdout = csStdout0
     if (cmdName === 'find') {
-      // The start points are the path words before the expression,
-      // read the way the single-mount path reads them.
-      const csStarts =
-        findExprTokens !== null
-          ? findStartPoints(parts.slice(1), findExprTokens, SPECS[cmdName] ?? null, session.cwd)
-          : csScopes
       csStdout = await finishFind(
         csStdout,
         csIo,
         csTexts,
-        csStarts,
         registry,
         session,
         executeFn,
@@ -524,7 +515,6 @@ export async function handleCommand(
         fanOut,
         fanIo,
         texts,
-        paths,
         registry,
         session,
         executeFn,
@@ -564,7 +554,6 @@ export async function handleCommand(
       stdout,
       io,
       texts,
-      paths,
       registry,
       session,
       executeFn,

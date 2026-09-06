@@ -463,7 +463,7 @@ async def _fan_out_traversal(
         flag_kwargs.pop("max_depth", None)
 
     all_stdout: list[bytes] = []
-    find_matches: list[PathSpec] = []
+    find_matches: list[list[PathSpec]] = []
     find_matches_complete = True
     merged_io = IOResult()
     final_exit = 0
@@ -513,19 +513,26 @@ async def _fan_out_traversal(
             # nothing to the aggregate walk instead of failing it (du
             # across a tree holding a view mount without a du op).
             continue
-        if cmd_name == "find" and io.matched_paths is not None:
-            rows = io.matched_paths
+        if cmd_name == "find" and io.matched_runs is not None:
             if mount is primary_mount:
-                rows = [
-                    p for p in rows if not any(
+                # One run per operand, minus the rows a descendant
+                # mount answers for.
+                find_matches.extend([
+                    p for p in run if not any(
                         p.virtual == pre or p.virtual.startswith(pre + "/")
                         for pre in descendant_prefixes)
-                ]
+                ] for run in io.matched_runs)
             else:
+                # A descendant walks under the first operand, so its
+                # rows join that operand's run.
                 rows = [
-                    p for p in rows if p.virtual != mount.prefix.rstrip("/")
+                    p for run in io.matched_runs for p in run
+                    if p.virtual != mount.prefix.rstrip("/")
                 ]
-            find_matches.extend(rows)
+                if find_matches:
+                    find_matches[0].extend(rows)
+                else:
+                    find_matches.append(rows)
             stdout = None
         elif mount is primary_mount and descendant_prefixes and stdout:
             stdout = await _filter_under_prefixes(stdout, descendant_prefixes,
@@ -543,14 +550,21 @@ async def _fan_out_traversal(
             final_exit = io.exit_code
         merged_io = await merged_io.merge(io)
 
+    all_rows: list[PathSpec] = []
     if cmd_name == "find":
         synthetic = _synthesize_find_mount_entries(target_path, descendants,
                                                    texts, paths[0].raw_path)
-        find_matches.extend(synthetic)
-        if not find_matches_complete and find_matches:
-            all_stdout.append(
-                ("\n".join(p.raw_path or p.virtual
-                           for p in find_matches) + "\n").encode())
+        # The mount points a walk cannot see belong to the first
+        # operand's run, the one that holds them.
+        if synthetic:
+            if find_matches:
+                find_matches[0].extend(synthetic)
+            else:
+                find_matches.append(synthetic)
+        all_rows = [p for run in find_matches for p in run]
+        if not find_matches_complete and all_rows:
+            all_stdout.append(("\n".join(p.raw_path or p.virtual
+                                         for p in all_rows) + "\n").encode())
 
     combined: ByteSource | None
     if du_merge and all_stdout:
@@ -565,12 +579,13 @@ async def _fan_out_traversal(
                                    separate_dirs=du_flags.separate_dirs,
                                    mount_roots=await
                                    _mount_dirs(descendants, stat_path))
-    elif cmd_name == "find" and find_matches and find_matches_complete:
+    elif cmd_name == "find" and all_rows and find_matches_complete:
         if len(paths) == 1:
-            unique = {p.virtual: p for p in find_matches}
-            find_matches = sorted(unique.values(), key=lambda p: p.raw_path)
+            unique = {p.virtual: p for p in all_rows}
+            find_matches = [sorted(unique.values(), key=lambda p: p.raw_path)]
+            all_rows = find_matches[0]
         combined = ("\n".join(p.raw_path or p.virtual
-                              for p in find_matches) + "\n").encode("utf-8")
+                              for p in all_rows) + "\n").encode("utf-8")
     elif all_stdout:
         # `ls -R` separates directory groups with a blank line, and a
         # per-mount block is one more group; every other format is a
@@ -589,8 +604,8 @@ async def _fan_out_traversal(
     if cmd_name == "find":
         # The structured rows ride out for the command boundary, which
         # applies find's actions once over every operand's matches.
-        merged_io.matched_paths = (find_matches
-                                   if find_matches_complete else None)
+        merged_io.matched_runs = (find_matches
+                                  if find_matches_complete else None)
 
     merged_io.exit_code = final_io_exit
     merged_io.producer = Producer(

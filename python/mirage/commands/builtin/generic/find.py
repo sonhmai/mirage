@@ -507,7 +507,7 @@ async def find(
     # all — names each one it cannot stat, keeps going with the rest, and
     # exits 1; the rows already found still print.
     results: list[str] = []
-    matched_paths: list[PathSpec] = []
+    matched_runs: list[list[PathSpec]] = []
     missing: list[str] = []
     printf_pairs: list[tuple[str, PathSpec]] = []
     for search_path in searches:
@@ -523,18 +523,18 @@ async def find(
             missing.append(missing_start_line(search_path, detail))
             continue
         results.extend(rows)
-        matched_paths.extend(_matched_path(row, search_path) for row in rows)
+        matched_runs.append([_matched_path(row, search_path) for row in rows])
         if args.printf is not None:
             printf_pairs.extend((row, search_path) for row in rows)
     if args.printf is not None:
         return await render_printf_rows(printf_pairs, args.printf, stat,
                                         stat_path, links, missing, identity)
     if missing:
-        return format_records(results), IOResult(matched_paths=matched_paths,
+        return format_records(results), IOResult(matched_runs=matched_runs,
                                                  stderr=("\n".join(missing) +
                                                          "\n").encode(),
                                                  exit_code=1)
-    return format_records(results), IOResult(matched_paths=matched_paths)
+    return format_records(results), IOResult(matched_runs=matched_runs)
 
 
 async def _find_root(
@@ -1065,7 +1065,7 @@ async def find_walk_generic(
                            mindepth=parsed.mindepth,
                            empty=parsed.empty)
     results: list[str] = []
-    matched_paths: list[PathSpec] = []
+    matched_runs: list[list[PathSpec]] = []
     missing: list[str] = []
     printf_pairs: list[tuple[str, PathSpec]] = []
     for search in searches:
@@ -1099,7 +1099,7 @@ async def find_walk_generic(
                            for shown in respell_raw(unreadable, search.virtual,
                                                     search.raw_path))
         results.extend(rows)
-        matched_paths.extend(_matched_path(row, search) for row in rows)
+        matched_runs.append([_matched_path(row, search) for row in rows])
         if args.printf is not None:
             printf_pairs.extend((row, search) for row in rows)
     if args.printf is not None:
@@ -1108,8 +1108,8 @@ async def find_walk_generic(
             partial(_stat_with_index, stat, opts.index), stat_path, links,
             missing, identity_of(opts))
     if missing:
-        return format_records(results), IOResult(matched_paths=matched_paths,
+        return format_records(results), IOResult(matched_runs=matched_runs,
                                                  stderr=("\n".join(missing) +
                                                          "\n").encode(),
                                                  exit_code=1)
-    return format_records(results), IOResult(matched_paths=matched_paths)
+    return format_records(results), IOResult(matched_runs=matched_runs)

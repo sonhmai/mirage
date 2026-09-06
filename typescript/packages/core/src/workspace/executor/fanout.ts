@@ -376,7 +376,7 @@ export async function fanOutTraversal(
   }
 
   const allStdout: Uint8Array[] = []
-  let findMatches: PathSpec[] = []
+  let findMatches: PathSpec[][] = []
   let findMatchesComplete = true
   let mergedIo = new IOResult()
   let finalExit = 0
@@ -458,13 +458,28 @@ export async function fanOutTraversal(
       // a tree holding a view mount without a du op).
       continue
     }
-    if (cmdName === 'find' && io.matchedPaths !== null) {
-      const rows = io.matchedPaths.filter((p) =>
-        mount === primaryMount
-          ? !descendantPrefixes.some((pre) => p.virtual === pre || p.virtual.startsWith(pre + '/'))
-          : p.virtual !== rstripSlash(mount.prefix),
-      )
-      findMatches.push(...rows)
+    if (cmdName === 'find' && io.matchedRuns !== null) {
+      if (mount === primaryMount) {
+        // One run per operand, minus the rows a descendant mount
+        // answers for.
+        for (const run of io.matchedRuns) {
+          findMatches.push(
+            run.filter(
+              (p) =>
+                !descendantPrefixes.some(
+                  (pre) => p.virtual === pre || p.virtual.startsWith(pre + '/'),
+                ),
+            ),
+          )
+        }
+      } else {
+        // A descendant walks under the first operand, so its rows join
+        // that operand's run.
+        const rows = io.matchedRuns.flat().filter((p) => p.virtual !== rstripSlash(mount.prefix))
+        const first = findMatches[0]
+        if (first === undefined) findMatches.push(rows)
+        else first.push(...rows)
+      }
       stdout = null
     } else if (mount === primaryMount && descendantPrefixes.length > 0 && stdout !== null) {
       stdout = await filterUnderPrefixes(stdout, descendantPrefixes, cmdName)
@@ -484,6 +499,7 @@ export async function fanOutTraversal(
     mergedIo = await mergedIo.merge(io)
   }
 
+  let rows: PathSpec[] = []
   if (cmdName === 'find') {
     const synthetic = synthesizeFindMountEntries(
       targetPath,
@@ -491,10 +507,17 @@ export async function fanOutTraversal(
       texts,
       paths[0]?.rawPath ?? targetPath,
     )
-    findMatches.push(...synthetic)
-    if (!findMatchesComplete && findMatches.length > 0) {
+    // The mount points a walk cannot see belong to the first operand's
+    // run, the one that holds them.
+    if (synthetic.length > 0) {
+      const first = findMatches[0]
+      if (first === undefined) findMatches.push(synthetic)
+      else first.push(...synthetic)
+    }
+    rows = findMatches.flat()
+    if (!findMatchesComplete && rows.length > 0) {
       allStdout.push(
-        new TextEncoder().encode(findMatches.map((p) => p.rawPath || p.virtual).join('\n') + '\n'),
+        new TextEncoder().encode(rows.map((p) => p.rawPath || p.virtual).join('\n') + '\n'),
       )
     }
   }
@@ -506,15 +529,14 @@ export async function fanOutTraversal(
       ...duOpts,
       mountRoots: await mountDirs(descendants, statPath),
     })
-  } else if (cmdName === 'find' && findMatches.length > 0 && findMatchesComplete) {
+  } else if (cmdName === 'find' && rows.length > 0 && findMatchesComplete) {
     if (paths.length === 1) {
-      findMatches = [...new Map(findMatches.map((p) => [p.virtual, p])).values()].sort((a, b) =>
+      rows = [...new Map(rows.map((p) => [p.virtual, p])).values()].sort((a, b) =>
         compareCodePoints(a.rawPath, b.rawPath),
       )
+      findMatches = [rows]
     }
-    combined = new TextEncoder().encode(
-      findMatches.map((p) => p.rawPath || p.virtual).join('\n') + '\n',
-    )
+    combined = new TextEncoder().encode(rows.map((p) => p.rawPath || p.virtual).join('\n') + '\n')
   } else if (allStdout.length > 0) {
     const parts = allStdout.map((d) => {
       const s = new TextDecoder().decode(d).replace(/\n+$/, '')
@@ -530,7 +552,7 @@ export async function fanOutTraversal(
   if (cmdName === 'find') {
     // The structured rows ride out for the command boundary, which
     // applies find's actions once over every operand's matches.
-    mergedIo.matchedPaths = findMatchesComplete ? findMatches : null
+    mergedIo.matchedRuns = findMatchesComplete ? findMatches : null
   }
 
   mergedIo.exitCode = finalIoExit

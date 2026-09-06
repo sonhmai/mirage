@@ -24,10 +24,9 @@ import re
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode, PathSpec
+from mirage.types import MountMode
 from mirage.workspace import Workspace
-from mirage.workspace.executor.find_action_dispatch import (depth_first_key,
-                                                            start_runs)
+from mirage.workspace.executor.find_action_dispatch import depth_first_key
 
 
 def _ws() -> Workspace:
@@ -359,6 +358,44 @@ async def test_depth_orders_each_start_point_on_its_own():
 
 
 @pytest.mark.asyncio
+async def test_depth_walks_a_nested_or_repeated_start_point_on_its_own():
+    # GNU findutils 4.10 finishes `d` before it begins `d/sub` again, and
+    # walks a repeated start point twice; the rows arrive as one run per
+    # start point, so no sort can fold the two traversals together.
+    ws = await _exec_ws()
+    post = "d/a.txt\nd/b.txt\nd/sub/c.txt\nd/sub\nd\n"
+    assert await _run_line(
+        ws,
+        "find d d/sub -depth -print") == (post + "d/sub/c.txt\nd/sub\n", "", 0)
+    assert await _run_line(ws, "find d d -depth") == (post + post, "", 0)
+    assert await _run_line(
+        ws, "find d d/sub -depth -exec echo saw {} \\;") == ("".join(
+            f"saw {r}\n"
+            for r in (post + "d/sub/c.txt\nd/sub\n").split()), "", 0)
+
+
+@pytest.mark.asyncio
+async def test_ls_escapes_the_name_as_findutils_does():
+    # GNU findutils 4.10 `-ls` keeps one row on one line: a space, a
+    # backslash and a double quote take a backslash, a newline is `\n`,
+    # and a byte outside ASCII is octal; `-print` stays raw.
+    ws = await _exec_ws()
+    await ws.execute(
+        "touch 'd/a b' 'd/c\\d' 'd/e\"f' \"d/n\nl\" 'd/ü'; "
+        "ln -s 'a b' 'd/li nk'",
+        session_id="s")
+    out, err, code = await _run_line(ws, "find d -mindepth 1 -ls | sort")
+    assert (err, code) == ("", 0)
+    names = sorted(
+        re.sub(r"^.*? \d\d:\d\d ", "", row) for row in out.splitlines())
+    assert names == sorted([
+        "d/a.txt", "d/a\\ b", "d/b.txt", "d/c\\\\d", 'd/e\\"f',
+        "d/li\\ nk -> a\\ b", "d/n\\nl", "d/sub", "d/sub/c.txt", "d/\\303\\274"
+    ])
+    assert await _run_line(ws, "find d -name 'a b'") == ("d/a b\n", "", 0)
+
+
+@pytest.mark.asyncio
 async def test_depth_orders_a_trailing_slash_start_point_after_its_tree():
     # `find d/` prints its root as `d/` and the rest as `d/a`; the slash
     # left an empty final component that sorted the directory first, so
@@ -375,28 +412,6 @@ def test_depth_first_key_drops_a_trailing_slash():
     assert depth_first_key("d/") == depth_first_key("d")
     assert depth_first_key("d/a") < depth_first_key("d/")
     assert depth_first_key("/a") < depth_first_key("/")
-
-
-def test_start_runs_split_rows_by_start_point_in_operand_order():
-    rows = [_spec("b"), _spec("b/x"), _spec("a"), _spec("a/y")]
-    runs = start_runs(rows, [_spec("b"), _spec("a")])
-    assert [[r.raw_path for r in run] for run in runs] == [["b", "b/x"],
-                                                           ["a", "a/y"]]
-    # A trailing-slash start point owns its `d/` root row and `d/a`.
-    runs = start_runs([_spec("d/"), _spec("d/a")], [_spec("d/")])
-    assert [[r.raw_path for r in run] for run in runs] == [["d/", "d/a"]]
-    # Nested start points share a run, and no start points is one run.
-    runs = start_runs(rows[:2] + [_spec("b/x")], [_spec("b"), _spec("b/x")])
-    assert [len(run) for run in runs] == [3, 0]
-    assert start_runs(rows, None) == [rows]
-
-
-def _spec(raw: str) -> PathSpec:
-    virtual = "/w/" + raw.strip("/") if raw.strip("/") else "/w"
-    return PathSpec(virtual=virtual,
-                    directory=virtual.rsplit("/", 1)[0] or "/",
-                    resource_path="",
-                    raw_path=raw)
 
 
 @pytest.mark.asyncio
@@ -540,7 +555,8 @@ async def test_ls_action_receives_the_whole_newline_path():
     io = await ws.execute('find d -type f -ls')
     assert io.exit_code == 0
     assert await io.stderr_str() == ''
-    assert 'a\nb' in await io.stdout_str()
+    # -ls escapes the newline, as findutils does; the row stays one line.
+    assert 'd/a\\nb\n' in await io.stdout_str()
 
 
 @pytest.mark.asyncio

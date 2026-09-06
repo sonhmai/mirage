@@ -78,9 +78,9 @@ export async function mergeOperandIos(results: OperandRun[], exitCode: number): 
   // them at the command boundary (`-exec {} +` is one batch across start
   // points, as in GNU). One run without them means the whole selection
   // is unstructured.
-  const rows = results.map((run) => run.io.matchedPaths)
-  const known = rows.filter((r): r is PathSpec[] => r !== null)
-  io.matchedPaths = known.length === rows.length ? known.flat() : null
+  const runs = results.map((run) => run.io.matchedRuns)
+  const known = runs.filter((r): r is PathSpec[][] => r !== null)
+  io.matchedRuns = known.length === runs.length ? known.flat() : null
   return io
 }
 

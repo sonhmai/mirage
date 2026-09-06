@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
+import { ArithError, ExitSignal } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { arrayExtent, arrayUnset } from '../../../../shell/array.ts'
 import { varHidden } from '../../../../utils/hidden.ts'
@@ -64,6 +65,21 @@ function unsetVariable(session: Session, name: string): void {
  * is exactly the gate, and for a scalar's element 0 it is the whole
  * unset itself. Validation errors write nothing and so never ask.
  */
+/**
+ * `subscriptIndex` whose failure ends the line, in bash's words: `unset
+ * 'a[1/0]'` aborts with `1/0: division by 0`.
+ */
+async function fatalIndex(session: Session, subscript: string, view: SessionView): Promise<number> {
+  try {
+    return await subscriptIndex(session, subscript, view)
+  } catch (err) {
+    if (err instanceof ArithError) {
+      throw new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+    }
+    throw err
+  }
+}
+
 async function unsetElement(
   session: Session,
   view: SessionView,
@@ -89,11 +105,11 @@ async function unsetElement(
     // branch's silent no-op instead of a denial that would leak the
     // name's existence.
     if (envGet(session, base) === null) return 'ok'
-    if ((await subscriptIndex(session, subscript, view)) !== 0) return 'notarray'
+    if ((await fatalIndex(session, subscript, view)) !== 0) return 'notarray'
     await view.unset(base)
     return 'ok'
   }
-  let idx = await subscriptIndex(session, subscript, view)
+  let idx = await fatalIndex(session, subscript, view)
   if (idx < 0) {
     idx += arrayExtent(arr)
     if (idx < 0) return 'subscript'

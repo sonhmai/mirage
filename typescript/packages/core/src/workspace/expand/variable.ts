@@ -575,6 +575,9 @@ function caseMod(op: string, val: string, pattern: string): string {
 class ArithOperand {
   readonly reader: RandomReader
   readonly writes: ArithWrite[] = []
+  // The reference the operands belong to (`v`, `a[@]`), which bash names
+  // ahead of a failing operand.
+  ref = ''
   private readonly pending: Record<string, string> = {}
   private readonly pendingElems = new Map<string, string>()
 
@@ -597,8 +600,12 @@ class ArithOperand {
     }
   }
 
-  /** The operand's value, null for one that does not evaluate. */
-  value(text: string): number | null {
+  /**
+   * The operand's value. An operand that does not evaluate ends the line,
+   * as bash's does (`${v:1/0}` is `v: 1/0: division by 0`), once what it
+   * assigned before failing is recorded for the door.
+   */
+  value(text: string): number {
     if (/^\s*-?\d+\s*$/.test(text)) return Number.parseInt(text.trim(), 10)
     const env = { ...visibleEnv(this.session), ...this.pending }
     try {
@@ -615,7 +622,12 @@ class ArithOperand {
     } catch (err) {
       if (!(err instanceof ArithError)) throw err
       this.record(err.writes)
-      return null
+      throw new ExitSignal(
+        1,
+        new TextEncoder().encode(`bash: ${this.ref}: ${text.trim()}: ${err.message}\n`),
+        null,
+        1,
+      )
     }
   }
 
@@ -632,13 +644,8 @@ function substring(val: string, groups: string[], operand: ArithOperand): string
   const offsetRaw = groups[0]
   if (offsetRaw === undefined) return val
   let offset = operand.value(offsetRaw)
-  if (offset === null) return val
-  let length: number | null = null
   const lengthRaw = groups[1]
-  if (lengthRaw !== undefined) {
-    length = operand.value(lengthRaw)
-    if (length === null) return val
-  }
+  const length = lengthRaw === undefined ? null : operand.value(lengthRaw)
   if (offset < 0) offset = Math.max(0, val.length + offset)
   if (length === null) return val.slice(offset)
   if (length < 0) return val.slice(offset, Math.max(offset, val.length + length))
@@ -650,13 +657,8 @@ function sliceArray(arr: ShellArray, groups: string[], operand: ArithOperand): s
   const offsetRaw = groups[0]
   if (offsetRaw === undefined) return arrayValues(arr)
   const offset = operand.value(offsetRaw)
-  if (offset === null) return arrayValues(arr)
-  let length: number | null = null
   const lengthRaw = groups[1]
-  if (lengthRaw !== undefined) {
-    length = operand.value(lengthRaw)
-    if (length === null) return arrayValues(arr)
-  }
+  const length = lengthRaw === undefined ? null : operand.value(lengthRaw)
   return arraySlice(arr, offset, length)
 }
 
@@ -710,7 +712,14 @@ export async function expandArrayAt(
   view?: SessionView,
 ): Promise<string[]> {
   const operand = new ArithOperand(session)
-  const words = await expandArrayAtIn(node, session, callStack, expandChild, operand)
+  let words: string[]
+  try {
+    words = await expandArrayAtIn(node, session, callStack, expandChild, operand)
+  } catch (err) {
+    if (err instanceof ExitSignal)
+      await landArithWrites(session, view, operand.writes, operand.reader)
+    throw err
+  }
   await landArithWrites(session, view, operand.writes, operand.reader)
   return words
 }
@@ -724,6 +733,7 @@ async function expandArrayAtIn(
 ): Promise<string[]> {
   if (node.type === NT.SIMPLE_EXPANSION) return positionalArgs(session, callStack)
   const p = parseBraces(node)
+  operand.ref = (p.varName ?? '') + (p.subscript === null ? '' : `[${p.subscript}]`)
   const env = visibleEnv(session)
   let arr: ShellArray | undefined
   if (p.subscript === null && p.varName === '@') {
@@ -927,7 +937,16 @@ export async function expandBraces(
   view?: SessionView,
 ): Promise<string> {
   const operand = new ArithOperand(session)
-  const value = await expandBracesIn(node, session, callStack, expandChild, view, operand)
+  let value: string
+  try {
+    value = await expandBracesIn(node, session, callStack, expandChild, view, operand)
+  } catch (err) {
+    // bash bound what an operand assigned before the one that failed;
+    // they land before the line dies.
+    if (err instanceof ExitSignal)
+      await landArithWrites(session, view, operand.writes, operand.reader)
+    throw err
+  }
   await landArithWrites(session, view, operand.writes, operand.reader)
   return value
 }
@@ -957,6 +976,7 @@ async function expandBracesIn(
   }
   const env = visibleEnv(session)
   const arrays = visibleArrays(session)
+  operand.ref = (p.varName ?? '') + (p.subscript === null ? '' : `[${p.subscript}]`)
 
   const groups: string[] = []
   for (let gi = 0; gi < p.groups.length; gi++) {

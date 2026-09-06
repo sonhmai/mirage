@@ -317,9 +317,9 @@ describe('subscriptIndex', () => {
     // The subscript's assignment lands, bash's `a[x=3]`.
     expect(await subscriptIndex(s, 'x=3')).toBe(3)
     expect(s.vars.x?.value).toBe('3')
-    // One that fails indexes 0 and still lands what it assigned before
-    // failing.
-    expect(await subscriptIndex(s, 'y=4, 1/0')).toBe(0)
+    // One that fails lands what it assigned before failing, then throws
+    // in bash's words rather than reading element 0.
+    await expect(subscriptIndex(s, 'y=4, 1/0')).rejects.toThrow(/^y=4, 1\/0: /)
     expect(s.vars.y?.value).toBe('4')
     // A seed reaches the generator, and the draw after it advances the
     // session past it.

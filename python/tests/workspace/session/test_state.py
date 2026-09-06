@@ -337,9 +337,10 @@ def test_subscript_index_lands_its_assignments_and_seeds_random():
         # The subscript's assignment lands, bash's `a[x=3]`.
         assert await subscript_index(session, "x=3") == 3
         assert session.vars["x"].value == "3"
-        # One that fails indexes 0 and still lands what it assigned
-        # before failing.
-        assert await subscript_index(session, "y=4, 1/0") == 0
+        # One that fails lands what it assigned before failing, then
+        # raises in bash's words rather than reading element 0.
+        with pytest.raises(ArithError, match=r"^y=4, 1/0: "):
+            await subscript_index(session, "y=4, 1/0")
         assert session.vars["y"].value == "4"
         # A seed reaches the generator, and the draw after it advances
         # the session past it.

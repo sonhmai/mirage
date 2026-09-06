@@ -17,6 +17,7 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import array_extent, array_unset
+from mirage.shell.errors import ArithError, ExitSignal
 from mirage.utils.hidden import var_hidden
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.shared import refusal, require_view
@@ -46,6 +47,23 @@ def _unset_variable(session: Session, name: str) -> None:
         session.vars.pop(name, None)
     if name == "OPTIND":
         session._getopts_optind = None
+
+
+async def _fatal_index(session: Session, subscript: str,
+                       view: SessionView) -> int:
+    """``subscript_index`` whose failure ends the line, in bash's words:
+    ``unset 'a[1/0]'`` aborts with ``1/0: division by 0``.
+
+    Args:
+        session (Session): the session the subscript reads.
+        subscript (str): the raw subscript text.
+        view (SessionView): the gated door.
+    """
+    try:
+        return await subscript_index(session, subscript, view)
+    except ArithError as exc:
+        raise ExitSignal(1, stderr=f"bash: {exc}\n".encode(),
+                         contained_code=1) from exc
 
 
 async def _unset_element(session: Session, view: SessionView, base: str,
@@ -100,11 +118,11 @@ async def _unset_element(session: Session, view: SessionView, base: str,
         # the name's existence.
         if env_get(session, base) is None:
             return "ok"
-        if await subscript_index(session, subscript, view) != 0:
+        if await _fatal_index(session, subscript, view) != 0:
             return "notarray"
         await view.unset(base)
         return "ok"
-    idx = await subscript_index(session, subscript, view)
+    idx = await _fatal_index(session, subscript, view)
     if idx < 0:
         idx += array_extent(arr)
         if idx < 0:

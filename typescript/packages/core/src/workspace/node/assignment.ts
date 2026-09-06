@@ -51,6 +51,40 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
  * mirrors the readonly case: a fatal variable-assignment error that
  * abandons the rest of the line.
  */
+/**
+ * The line's death for a subscript that does not evaluate: bash aborts
+ * the line on `a[1/0]=v` with `1/0: division by 0`, the way it does for a
+ * bad `-i` value.
+ */
+function arithFatal(err: ArithError): ExitSignal {
+  return new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+}
+
+/** `subscriptIndex` whose failure ends the line, in bash's words. */
+async function fatalIndex(session: Session, subscript: string, view: SessionView): Promise<number> {
+  try {
+    return await subscriptIndex(session, subscript, view)
+  } catch (err) {
+    if (err instanceof ArithError) throw arithFatal(err)
+    throw err
+  }
+}
+
+/** `buildIndexedLiteral` whose subscript failure ends the line. */
+async function fatalIndexLiteral(
+  held: ShellArray | null,
+  items: readonly string[],
+  append: boolean,
+  indexOf: (subscript: string) => Promise<number>,
+): Promise<ShellArray> {
+  try {
+    return await buildIndexedLiteral(held, items, append, indexOf)
+  } catch (err) {
+    if (err instanceof ArithError) throw arithFatal(err)
+    throw err
+  }
+}
+
 async function assignVar(view: SessionView, key: string, value: ShellValue): Promise<void> {
   try {
     await view.set(key, value)
@@ -221,7 +255,7 @@ export async function executeAssignment(
     // trailing `unset arr[last]` left but skips interior ones; a
     // `[i]=v` element places at i and the next plain word continues
     // from there.
-    const base = await buildIndexedLiteral(held, items, append, (sub) =>
+    const base = await fatalIndexLiteral(held, items, append, (sub) =>
       subscriptIndex(session, sub, view),
     )
     await assignVar(view, key, base)
@@ -288,7 +322,7 @@ export async function executeAssignment(
     } else {
       arr = [...existing]
     }
-    let idx = await subscriptIndex(session, subText, view)
+    let idx = await fatalIndex(session, subText, view)
     if (idx < 0) idx += arrayExtent(arr)
     if (idx < 0) {
       // Same fatal shape as the empty subscript above.

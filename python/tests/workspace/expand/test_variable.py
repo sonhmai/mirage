@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.shell.errors import ExitSignal
 from mirage.shell.variable import ShellVar
 from mirage.workspace.expand.variable import (_ArithOperand, _case_mod,
                                               _glob_replace, _glob_strip,
@@ -94,7 +95,6 @@ def test_lookup_var_array_first_element():
     (["1", "2"], ["2", "3"]),
     (["-2"], ["3", "4"]),
     (["1", "-1"], ["2", "3"]),
-    (["notanum;"], ["1", "2", "3", "4"]),
 ])
 def test_slice_array(groups, expected):
     operand = _ArithOperand(Session(session_id="s", cwd="/"))
@@ -111,7 +111,12 @@ def test_arith_operand_resolves_expressions_and_records_writes():
     assert operand.value("1+1") == 2
     assert operand.value("i+1") == 2
     assert operand.value("o") == 2
-    assert operand.value("notanum;") is None
+    # An operand that does not evaluate ends the line in bash's words,
+    # the reference leading.
+    operand.ref = "v"
+    with pytest.raises(ExitSignal) as caught:
+        operand.value("notanum;")
+    assert caught.value.stderr.startswith(b"bash: v: notanum;: ")
     # An assignment is recorded for the door and seen by the operands
     # after it, which is bash binding `${v:x=1:y=x+1}` left to right.
     assert operand.value("x=1") == 1

@@ -214,6 +214,9 @@ async function install(
           session.execStdinIdentity = CLOSED
           continue
         }
+        // A dup onto itself changes nothing, a closed descriptor's
+        // included (`exec 0<&-; exec 0<&0`).
+        if (r.target === FD_STDIN) continue
         const source = identity(session, r.target)[0]
         if (source === CLOSED) return badDescriptorLine(r.target)
         if (source === TO_STDIN) {
@@ -226,6 +229,8 @@ async function install(
         }
       } else if (r.target === FD_CLOSE) {
         bind(session, r.fd, CLOSED, false)
+      } else if (r.target === r.fd) {
+        // `exec 1>&1` on a closed fd 1 is bash's no-op too.
       } else {
         const [id, append] = identity(session, r.target)
         // A dup from a closed descriptor is refused, as bash's `exec 0<&-;
@@ -235,20 +240,26 @@ async function install(
       }
       continue
     }
-    if ((r.kind === RedirectKind.STDIN) !== (r.fd === FD_STDIN)) {
-      return badDescriptorLine(r.fd)
-    }
     const scope = scopeOf(r.target)
     if (r.kind === RedirectKind.STDIN) {
+      let data: unknown
       try {
-        const [data] = await dispatch('read', scope)
-        session.execStdin = await materialize(data as ByteSource)
-        session.execStdinUnreadable = false
-        session.execStdinIdentity = null
+        ;[data] = await dispatch('read', scope)
       } catch (err) {
         if (!isFsError(err)) throw err
         return errorLine(scope.rawPath, err)
       }
+      if (r.fd !== FD_STDIN) {
+        // `exec 1<f`: the stream is open for reading only, so a write to
+        // it fails as one to stdin's end does (`echo: write error: Bad
+        // file descriptor`). Not modelled: reading the file back through
+        // `<&1`.
+        bind(session, r.fd, TO_STDIN, false)
+        continue
+      }
+      session.execStdin = await materialize(data as ByteSource)
+      session.execStdinUnreadable = false
+      session.execStdinIdentity = null
       continue
     }
     const path = scope.virtual
@@ -257,6 +268,15 @@ async function install(
     } catch (err) {
       if (!isFsError(err)) throw err
       return errorLine(scope.rawPath, err)
+    }
+    if (r.fd === FD_STDIN) {
+      // `exec 0>f`: fd 0 holds the file's write end, so a read fails with
+      // EBADF and a later dup from it (`exec 1>&0`) writes there. Not
+      // modelled: a transient `>&0` reaching the file.
+      session.execStdin = null
+      session.execStdinUnreadable = true
+      session.execStdinIdentity = path
+      continue
     }
     const streams =
       r.fd === FD_BOTH ? ['stdout', 'stderr'] : r.fd === FD_STDERR ? ['stderr'] : ['stdout']

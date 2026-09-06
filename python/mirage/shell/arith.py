@@ -497,14 +497,18 @@ class ArithEvaluator:
             return value
         if kind == "assign":
             _, target, op, rhs = node
-            key = self.key_of(target)
             if op == "=":
+                # bash evaluates the right side before it resolves a
+                # plain assignment's subscript: `x=0, a[x++]=x++` stores
+                # 0 at index 1 and leaves x at 2.
                 value = self.run(rhs)
+                key = self.key_of(target)
             else:
-                # bash reads the target before it evaluates the right
-                # side, which a dynamic name makes observable:
-                # `RANDOM=42, RANDOM-=RANDOM` is the first draw minus
-                # the second.
+                # A compound assignment reads its target first, and bash
+                # reads it before the right side, which a dynamic name
+                # makes observable: `RANDOM=42, RANDOM-=RANDOM` is the
+                # first draw minus the second.
+                key = self.key_of(target)
                 current = self.read_target(target, key)
                 value = self.apply_binop(op[:-1], current, self.run(rhs))
             self.write_target(target, value, key)

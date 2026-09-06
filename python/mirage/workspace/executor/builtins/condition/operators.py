@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.io.types import materialize
+from mirage.shell.errors import ArithError, ExitSignal
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.path import CycleError, resolve_path, resolve_symlinks
@@ -83,7 +84,15 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
     if op == "-z":
         return text == ""
     if op == "-v":
-        return await element_is_set(ctx.session, text, ctx.view)
+        try:
+            return await element_is_set(ctx.session, text, ctx.view)
+        except ArithError as exc:
+            # bash aborts the line on `[[ -v a[1/0] ]]` with `1/0:
+            # division by 0`, a test's grammar error being the only
+            # other thing that ends it.
+            raise ExitSignal(1,
+                             stderr=f"bash: {exc}\n".encode(),
+                             contained_code=1) from exc
     if op in ("-L", "-h"):
         resolved = resolve_path(text, ctx.session.cwd)
         return ctx.namespace.is_link(resolved)

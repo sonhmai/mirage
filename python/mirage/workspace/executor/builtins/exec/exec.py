@@ -139,6 +139,10 @@ async def _install(dispatch: DispatchFn, session: Session,
                     session.exec_stdin_unreadable = True
                     session.exec_stdin_identity = CLOSED
                     continue
+                if r.target == FD_STDIN:
+                    # A dup onto itself changes nothing, a closed
+                    # descriptor's included (`exec 0<&-; exec 0<&0`).
+                    continue
                 source = _identity(session, r.target)[0]
                 if source == CLOSED:
                     return bad_descriptor_line(r.target)
@@ -153,6 +157,9 @@ async def _install(dispatch: DispatchFn, session: Session,
             if r.target == FD_CLOSE:
                 _bind(session, r.fd, CLOSED, False)
                 continue
+            if r.target == r.fd:
+                # `exec 1>&1` on a closed fd 1 is bash's no-op too.
+                continue
             identity, append = _identity(session, r.target)
             if identity == CLOSED:
                 # A dup from a closed descriptor is refused, as bash's
@@ -160,14 +167,19 @@ async def _install(dispatch: DispatchFn, session: Session,
                 return bad_descriptor_line(r.target)
             _bind(session, r.fd, identity, append)
             continue
-        if ((r.kind == RedirectKind.STDIN) != (r.fd == FD_STDIN)):
-            return bad_descriptor_line(r.fd)
         scope = _to_scope(r.target) if isinstance(r.target, str) else r.target
         if r.kind == RedirectKind.STDIN:
             try:
                 data, _ = await dispatch("read", scope)
             except FS_ERRORS as exc:
                 return _error_line(scope.raw_path, exc)
+            if r.fd != FD_STDIN:
+                # `exec 1<f`: the stream is open for reading only, so a
+                # write to it fails as one to stdin's end does
+                # (`echo: write error: Bad file descriptor`). Not
+                # modelled: reading the file back through `<&1`.
+                _bind(session, r.fd, TO_STDIN, False)
+                continue
             session.exec_stdin = await materialize(data) or b""
             session.exec_stdin_unreadable = False
             session.exec_stdin_identity = None
@@ -178,6 +190,15 @@ async def _install(dispatch: DispatchFn, session: Session,
                 session._exec_opened.add(path)
         except FS_ERRORS as exc:
             return _error_line(scope.raw_path, exc)
+        if r.fd == FD_STDIN:
+            # `exec 0>f`: fd 0 holds the file's write end, so a read
+            # fails with EBADF and a later dup from it (`exec 1>&0`)
+            # writes there. Not modelled: a transient `>&0` reaching
+            # the file.
+            session.exec_stdin = None
+            session.exec_stdin_unreadable = True
+            session.exec_stdin_identity = path
+            continue
         streams = ((["stderr"] if r.fd == FD_STDERR else ["stdout"])
                    if r.fd != FD_BOTH else ["stdout", "stderr"])
         for stream in streams:

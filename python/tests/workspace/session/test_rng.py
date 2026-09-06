@@ -355,6 +355,10 @@ async def test_arithmetic_random_assignment_seeds_within_the_expression(
         ('RANDOM=42; echo ${RANDOM} ${RANDOM}', '17772 26794\n'),
         ('RANDOM=42; echo "${RANDOM:-x} $RANDOM"; RANDOM=42; '
          'echo "${RANDOM:+y} $RANDOM"', '17772 26794\ny 26794\n'),
+        # A plain `=` evaluates its right side before it resolves the
+        # subscript; a compound one reads the target first.
+        ('x=0; echo $((a[x++]=x++)); echo "${!a[@]} ${a[@]} $x"', '0\n1 0 2\n'
+         ),
     ])
 @pytest.mark.asyncio
 async def test_subscripts_and_offsets_land_their_assignments(command, stdout):
@@ -385,3 +389,50 @@ def test_random_reader_draws_from_the_pending_seed_and_settles():
     session.vars[RANDOM] = ShellVar("42")
     reader.settle()
     assert next_random(session, session.vars[RANDOM].value) == 1435
+
+
+@pytest.mark.parametrize(
+    "command,stderr",
+    [
+        # An operand or subscript that does not evaluate ends the line in
+        # bash's words, after landing what was assigned before it.
+        ('v=abc; echo "${v:1/0}"; echo after', 'bash: v: 1/0: division by 0\n'
+         ),
+        ('a=(1 2 3); echo "${a[@]:1/0}"; echo after',
+         'bash: a[@]: 1/0: division by 0\n'),
+        ('a=(1); echo "${a[1/0]}"; echo after', 'bash: 1/0: division by 0\n'),
+        ('a=(1); a[1/0]=v; echo after', 'bash: 1/0: division by 0\n'),
+        ('a=(1); unset "a[1/0]"; echo after', 'bash: 1/0: division by 0\n'),
+        ('a=(1); [[ -v a[1/0] ]]; echo after', 'bash: 1/0: division by 0\n'),
+        ('a=(1); a[x=3,1/0]=v; echo after', 'bash: x=3,1/0: division by 0\n'),
+    ])
+@pytest.mark.asyncio
+async def test_a_subscript_or_operand_that_fails_ends_the_line(
+        command, stderr):
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        io = await ws.execute(command)
+        assert io.exit_code == 1
+        assert await io.stdout_str() == ""
+        assert await io.stderr_str() == stderr
+        if "x=3" in command:
+            landed = await ws.execute("echo $x")
+            assert await landed.stdout_str() == "3\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_operand_env_is_a_view_over_the_visible_env():
+    # A name reference to an array is a name the visible env cannot
+    # serve as a scalar; the operand's env lays its pending writes over
+    # that env as a view, so the reference neither breaks the operand
+    # nor hides the write.
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        io = await ws.execute("declare -a nrb=(1); declare -n nrc=nrb; "
+                              'v=abcdef; echo "${v:(x=1):2}" $x')
+        assert await io.stdout_str() == "bc 1\n"
+        assert await io.stderr_str() == ""
+    finally:
+        await ws.close()

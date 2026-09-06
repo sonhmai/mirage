@@ -373,12 +373,14 @@ function writtenValue(session: Session, write: ArithWrite): ShellValue {
  * The subscript is arithmetic, so it may assign (`a[x=3]`) and seed
  * (`a[RANDOM=42]`), and bash binds those as it evaluates them. Each
  * lands through the door once the index is known, then the `RANDOM`
- * reader replays the draws made after the seed; a subscript that fails
- * to evaluate indexes element 0 and still lands what it assigned before
- * failing, bash's own order. `view` is the gated door; null lands the
- * writes ungated, outside a workspace. Throws what the door throws: a
- * PolicyDenied, a ReadonlyVariableError, or an ArithError from a `-i`
- * name refusing the value.
+ * reader replays the draws made after the seed. A subscript that fails
+ * to evaluate lands what it assigned before failing and then throws, the
+ * subscript text leading the message, since bash aborts the line on it
+ * (`${a[1/0]}` is `1/0: division by 0`) rather than reading element 0.
+ * `view` is the gated door; null lands the writes ungated, outside a
+ * workspace. Throws what the door throws too: a PolicyDenied, a
+ * ReadonlyVariableError, or an ArithError from a `-i` name refusing the
+ * value.
  */
 export async function subscriptIndex(
   session: Session,
@@ -388,8 +390,9 @@ export async function subscriptIndex(
   const trimmed = subscript.trim()
   if (/^-?\d+$/.test(trimmed)) return Number(trimmed)
   const reader = randomReader(session)
-  let idx: number
+  let idx = 0
   let writes: readonly ArithWrite[]
+  let error: ArithError | null = null
   try {
     const result = evaluateArith(
       subscript,
@@ -403,7 +406,7 @@ export async function subscriptIndex(
     writes = result.writes
   } catch (err) {
     if (!(err instanceof ArithError)) throw err
-    idx = 0
+    error = err
     writes = err.writes
   }
   for (const write of writes) {
@@ -412,6 +415,7 @@ export async function subscriptIndex(
     else await setVar(session, null, write.name, value)
   }
   reader.settle()
+  if (error !== null) throw new ArithError(`${subscript.trim()}: ${error.message}`)
   return idx
 }
 

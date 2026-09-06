@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 
 import tree_sitter
@@ -639,6 +639,41 @@ def _case_mod(op: str, val: str, pattern: str) -> str:
     return "".join(chars)
 
 
+class _PendingEnv(Mapping[str, str]):
+    """The visible env with an expansion's pending scalar writes laid over.
+
+    A view, not a merged dict: the visible env is itself a view whose
+    ``__getitem__`` refuses a name it cannot serve (a name reference to
+    an array), so spreading it into a dict raised where the evaluator's
+    own ``get`` merely skips the name.
+
+    Args:
+        pending (Mapping[str, str]): the writes made so far.
+        base (Mapping[str, str]): the session's visible env.
+    """
+
+    __slots__ = ("_pending", "_base")
+
+    def __init__(self, pending: Mapping[str, str], base: Mapping[str,
+                                                                 str]) -> None:
+        self._pending = pending
+        self._base = base
+
+    def __getitem__(self, name: str) -> str:
+        value = self._pending.get(name)
+        return value if value is not None else self._base[name]
+
+    def __iter__(self) -> Iterator[str]:
+        seen = set(self._pending)
+        yield from self._pending
+        for name in self._base:
+            if name not in seen:
+                yield name
+
+    def __len__(self) -> int:
+        return len(set(self._pending) | set(self._base))
+
+
 class _ArithOperand:
     """The arithmetic operands of one expansion, evaluated in one record.
 
@@ -656,12 +691,16 @@ class _ArithOperand:
         session (Session): the session the operands read.
     """
 
-    __slots__ = ("session", "reader", "writes", "_pending", "_pending_elems")
+    __slots__ = ("session", "reader", "writes", "ref", "_pending",
+                 "_pending_elems")
 
     def __init__(self, session: Session) -> None:
         self.session = session
         self.reader = random_reader(session)
         self.writes: list[ArithWrite] = []
+        # The reference the operands belong to (`v`, `a[@]`), which
+        # bash names ahead of a failing operand.
+        self.ref = ""
         self._pending: dict[str, str] = {}
         self._pending_elems: dict[tuple[str, str], str] = {}
 
@@ -682,17 +721,24 @@ class _ArithOperand:
                           read=read,
                           is_assoc=inner.is_assoc)
 
-    def value(self, text: str) -> int | None:
-        """The operand's value, None for one that does not evaluate.
+    def value(self, text: str) -> int:
+        """The operand's value.
+
+        An operand that does not evaluate ends the line, as bash's does
+        (``${v:1/0}`` is ``v: 1/0: division by 0``), once what it
+        assigned before failing is recorded for the door.
 
         Args:
             text (str): the raw operand text.
+
+        Raises:
+            ExitSignal: the operand does not evaluate.
         """
         try:
             return int(text.strip())
         except ValueError:
             pass
-        env = {**visible_env(self.session), **self._pending}
+        env = _PendingEnv(self._pending, visible_env(self.session))
         try:
             result = evaluate_arith(text,
                                     env,
@@ -701,7 +747,10 @@ class _ArithOperand:
                                     wrote_var=self.reader.wrote)
         except ArithError as exc:
             self._record(exc.writes)
-            return None
+            raise ExitSignal(1,
+                             stderr=(f"bash: {self.ref}: {text.strip()}: "
+                                     f"{exc}\n").encode(),
+                             contained_code=1) from exc
         self._record(result.writes)
         return result.value
 
@@ -718,13 +767,7 @@ def _substring(val: str, groups: list[str], operand: _ArithOperand) -> str:
     if not groups:
         return val
     offset = operand.value(groups[0])
-    if offset is None:
-        return val
-    length = None
-    if len(groups) > 1:
-        length = operand.value(groups[1])
-        if length is None:
-            return val
+    length = operand.value(groups[1]) if len(groups) > 1 else None
     if offset < 0:
         offset = max(0, len(val) + offset)
     if length is None:
@@ -796,8 +839,15 @@ async def expand_braces(node: tree_sitter.Node,
             writes land through; None outside a workspace.
     """
     operand = _ArithOperand(session)
-    value = await _expand_braces(node, session, call_stack, expand_child, view,
-                                 operand)
+    try:
+        value = await _expand_braces(node, session, call_stack, expand_child,
+                                     view, operand)
+    except ExitSignal:
+        # bash bound what an operand assigned before the one that
+        # failed; they land before the line dies.
+        await land_arith_writes(session, view, tuple(operand.writes),
+                                operand.reader)
+        raise
     await land_arith_writes(session, view, tuple(operand.writes),
                             operand.reader)
     return value
@@ -820,6 +870,8 @@ async def _expand_braces(node: tree_sitter.Node, session: Session,
     env = visible_env(session)
     arrays = visible_arrays(session)
     assocs = visible_assocs(session)
+    operand.ref = (p.var_name or "") + (f"[{p.subscript}]"
+                                        if p.subscript is not None else "")
 
     groups: list[str] = []
     for gi, group in enumerate(p.groups):
@@ -1010,13 +1062,7 @@ def _slice_array(arr: ShellArray, groups: list[str],
     if not groups:
         return array_values(arr)
     offset = operand.value(groups[0])
-    if offset is None:
-        return array_values(arr)
-    length = None
-    if len(groups) > 1:
-        length = operand.value(groups[1])
-        if length is None:
-            return array_values(arr)
+    length = operand.value(groups[1]) if len(groups) > 1 else None
     return array_slice(arr, offset, length)
 
 
@@ -1098,8 +1144,13 @@ async def expand_array_at(node: tree_sitter.Node,
             land through; None outside a workspace.
     """
     operand = _ArithOperand(session)
-    words = await _expand_array_at(node, session, call_stack, expand_child,
-                                   operand)
+    try:
+        words = await _expand_array_at(node, session, call_stack, expand_child,
+                                       operand)
+    except ExitSignal:
+        await land_arith_writes(session, view, tuple(operand.writes),
+                                operand.reader)
+        raise
     await land_arith_writes(session, view, tuple(operand.writes),
                             operand.reader)
     return words
@@ -1133,6 +1184,8 @@ async def _expand_array_at(node: tree_sitter.Node, session: Session,
                 # walk of an associative array answers in.
                 return sorted(amap)
             arr = [amap[k] for k in sorted(amap)]
+    operand.ref = (p.var_name or "") + (f"[{p.subscript}]"
+                                        if p.subscript is not None else "")
     env = visible_env(session)
     if arr is None:
         name = p.var_name or ""

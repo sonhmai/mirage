@@ -103,7 +103,7 @@
       }
     },
     {
-      "id": "exec_cross_direction_file_refusal_1",
+      "id": "exec_stdin_opened_for_writing_truncates",
       "seq": 980013,
       "targets": [
         "ram",
@@ -129,15 +129,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo original > /data/execinput; exec 0>/data/execinput; echo code=$?; echo visible; cat /data/execinput",
+      "command": "echo original > /data/execinput; ( exec 0>/data/execinput; echo code=$?; cat; echo code=$? ); echo visible; cat /data/execinput",
       "expect": {
         "exit": 0,
-        "stdout": "code=1\nvisible\noriginal\n",
-        "stderr": "0: Bad file descriptor\n"
-      }
+        "stdout": "code=0\ncode=1\nvisible\n",
+        "stderr": "cat: -: Bad file descriptor\n"
+      },
+      "note": "bash accepts a standard descriptor opened in the other direction (pinned on 5.2): fd 0 for writing is write-only, so a read is EBADF; fd 1 or 2 for reading is read-only, so a write fails. In a subshell so the battery's shared session keeps its streams."
     },
     {
-      "id": "exec_cross_direction_file_refusal_2",
+      "id": "exec_stdin_opened_for_appending_keeps_the_file",
       "seq": 980014,
       "targets": [
         "ram",
@@ -163,15 +164,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo original > /data/execinput; exec 0>>/data/execinput; echo code=$?; echo visible; cat /data/execinput",
+      "command": "echo original > /data/execinput; ( exec 0>>/data/execinput; echo code=$?; cat; echo code=$? ); echo visible; cat /data/execinput",
       "expect": {
         "exit": 0,
-        "stdout": "code=1\nvisible\noriginal\n",
-        "stderr": "0: Bad file descriptor\n"
-      }
+        "stdout": "code=0\ncode=1\nvisible\noriginal\n",
+        "stderr": "cat: -: Bad file descriptor\n"
+      },
+      "note": "bash accepts a standard descriptor opened in the other direction (pinned on 5.2): fd 0 for writing is write-only, so a read is EBADF; fd 1 or 2 for reading is read-only, so a write fails. In a subshell so the battery's shared session keeps its streams."
     },
     {
-      "id": "exec_cross_direction_file_refusal_3",
+      "id": "exec_stdin_opened_for_clobbering_truncates",
       "seq": 980015,
       "targets": [
         "ram",
@@ -197,15 +199,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo original > /data/execinput; exec 0>|/data/execinput; echo code=$?; echo visible; cat /data/execinput",
+      "command": "echo original > /data/execinput; ( exec 0>|/data/execinput; echo code=$?; cat; echo code=$? ); echo visible; cat /data/execinput",
       "expect": {
         "exit": 0,
-        "stdout": "code=1\nvisible\noriginal\n",
-        "stderr": "0: Bad file descriptor\n"
-      }
+        "stdout": "code=0\ncode=1\nvisible\n",
+        "stderr": "cat: -: Bad file descriptor\n"
+      },
+      "note": "bash accepts a standard descriptor opened in the other direction (pinned on 5.2): fd 0 for writing is write-only, so a read is EBADF; fd 1 or 2 for reading is read-only, so a write fails. In a subshell so the battery's shared session keeps its streams."
     },
     {
-      "id": "exec_cross_direction_file_refusal_4",
+      "id": "exec_stdout_opened_for_reading_refuses_writes",
       "seq": 980016,
       "targets": [
         "ram",
@@ -231,15 +234,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo original > /data/execinput; exec 1</data/execinput; echo code=$?; echo visible; cat /data/execinput",
+      "command": "echo original > /data/execinput; ( exec 1</data/execinput; echo code=$? >&2; echo hi; echo code=$? >&2 ); echo visible; cat /data/execinput",
       "expect": {
         "exit": 0,
-        "stdout": "code=1\nvisible\noriginal\n",
-        "stderr": "1: Bad file descriptor\n"
-      }
+        "stdout": "visible\noriginal\n",
+        "stderr": "code=0\necho: write error: Bad file descriptor\ncode=1\n"
+      },
+      "note": "bash accepts a standard descriptor opened in the other direction (pinned on 5.2): fd 0 for writing is write-only, so a read is EBADF; fd 1 or 2 for reading is read-only, so a write fails. In a subshell so the battery's shared session keeps its streams."
     },
     {
-      "id": "exec_cross_direction_file_refusal_5",
+      "id": "exec_stderr_opened_for_reading_refuses_writes",
       "seq": 980017,
       "targets": [
         "ram",
@@ -265,12 +269,13 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo original > /data/execinput; exec 2</data/execinput; echo code=$?; echo visible; cat /data/execinput",
+      "command": "echo original > /data/execinput; ( exec 2</data/execinput; echo code=$?; echo hi >&2; echo code=$? ); echo visible; cat /data/execinput",
       "expect": {
         "exit": 0,
-        "stdout": "code=1\nvisible\noriginal\n",
-        "stderr": "2: Bad file descriptor\n"
-      }
+        "stdout": "code=0\ncode=1\nvisible\noriginal\n",
+        "stderr": ""
+      },
+      "note": "bash accepts a standard descriptor opened in the other direction (pinned on 5.2): fd 0 for writing is write-only, so a read is EBADF; fd 1 or 2 for reading is read-only, so a write fails. In a subshell so the battery's shared session keeps its streams."
     }
   ]
 }

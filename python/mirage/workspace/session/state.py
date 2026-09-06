@@ -382,9 +382,11 @@ async def subscript_index(session: Session,
     The subscript is arithmetic, so it may assign (``a[x=3]``) and seed
     (``a[RANDOM=42]``), and bash binds those as it evaluates them. Each
     lands through the door once the index is known, then the ``RANDOM``
-    reader replays the draws made after the seed; a subscript that
-    fails to evaluate indexes element 0 and still lands what it
-    assigned before failing, bash's own order.
+    reader replays the draws made after the seed. A subscript that
+    fails to evaluate lands what it assigned before failing and then
+    raises, the subscript text leading the message, since bash aborts
+    the line on it (``${a[1/0]}`` is ``1/0: division by 0``) rather
+    than reading element 0.
 
     Args:
         session (Session): the session the subscript reads.
@@ -395,15 +397,16 @@ async def subscript_index(session: Session,
     Raises:
         PolicyDenied: the door refused an assignment.
         ReadonlyVariableError: an assignment named a readonly variable.
-        ArithError: an assigned name carries ``-i`` and the value does
-            not evaluate.
+        ArithError: the subscript does not evaluate, or an assigned name
+            carries ``-i`` and the value does not evaluate.
     """
     try:
         return int(subscript.strip())
     except ValueError:
         pass
     reader = random_reader(session)
-    writes: tuple[ArithWrite, ...]
+    error: ArithError | None = None
+    idx = 0
     try:
         result = evaluate_arith(subscript,
                                 visible_env(session),
@@ -412,7 +415,7 @@ async def subscript_index(session: Session,
                                 wrote_var=reader.wrote)
         idx, writes = result.value, result.writes
     except ArithError as exc:
-        idx, writes = 0, exc.writes
+        error, writes = exc, exc.writes
     for write in writes:
         value = _written_value(session, write)
         if view is not None:
@@ -420,6 +423,8 @@ async def subscript_index(session: Session,
         else:
             await set_var(session, None, write.name, value)
     reader.settle()
+    if error is not None:
+        raise ArithError(f"{subscript.strip()}: {error}") from error
     return idx
 
 

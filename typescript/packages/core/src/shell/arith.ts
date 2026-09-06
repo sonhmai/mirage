@@ -486,14 +486,20 @@ class ArithEvaluator {
         return value
       }
       case 'assign': {
-        const key = this.keyOf(node.target)
+        let key: string | null
         let value: bigint
         if (node.op === '=') {
+          // bash evaluates the right side before it resolves a plain
+          // assignment's subscript: `x=0, a[x++]=x++` stores 0 at index 1
+          // and leaves x at 2.
           value = this.run(node.rhs)
+          key = this.keyOf(node.target)
         } else {
-          // bash reads the target before it evaluates the right side,
-          // which a dynamic name makes observable: `RANDOM=42,
-          // RANDOM-=RANDOM` is the first draw minus the second.
+          // A compound assignment reads its target first, and bash reads
+          // it before the right side, which a dynamic name makes
+          // observable: `RANDOM=42, RANDOM-=RANDOM` is the first draw
+          // minus the second.
+          key = this.keyOf(node.target)
           const current = this.readTarget(node.target, key)
           value = this.applyBinop(node.op.slice(0, -1), current, this.run(node.rhs))
         }

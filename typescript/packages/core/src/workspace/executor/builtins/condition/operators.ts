@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { materialize } from '../../../../io/types.ts'
+import { ArithError, ExitSignal } from '../../../../shell/errors.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { FileStat } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
@@ -68,7 +69,18 @@ export async function applyUnary(
   const text = scopePath(val)
   if (op === '-n') return text !== ''
   if (op === '-z') return text === ''
-  if (op === '-v') return elementIsSet(ctx.session, text, ctx.view ?? null)
+  if (op === '-v') {
+    try {
+      return await elementIsSet(ctx.session, text, ctx.view ?? null)
+    } catch (err) {
+      // bash aborts the line on `[[ -v a[1/0] ]]` with `1/0: division by
+      // 0`, a test's grammar error being the only other thing that ends it.
+      if (err instanceof ArithError) {
+        throw new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+      }
+      throw err
+    }
+  }
   if (op === '-L' || op === '-h') {
     const resolved = resolvePath(text, ctx.session.cwd)
     return ctx.namespace.isLink(resolved)

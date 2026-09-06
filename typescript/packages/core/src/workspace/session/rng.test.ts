@@ -303,6 +303,9 @@ it.each([
     'RANDOM=42; echo "${RANDOM:-x} $RANDOM"; RANDOM=42; echo "${RANDOM:+y} $RANDOM"',
     '17772 26794\ny 26794\n',
   ],
+  // A plain `=` evaluates its right side before it resolves the
+  // subscript; a compound one reads the target first.
+  ['x=0; echo $((a[x++]=x++)); echo "${!a[@]} ${a[@]} $x"', '0\n1 0 2\n'],
 ])('lands the assignments a subscript or offset makes: %s', async (command, stdout) => {
   const { ws } = await makeIntegrationWS()
   try {
@@ -333,4 +336,47 @@ it('draws from the pending seed and settles once the door has landed it', () => 
   s.vars[RANDOM] = makeVar('42')
   reader.settle()
   expect(nextRandom(s, '26794')).toBe(1435)
+})
+
+it.each([
+  // An operand or subscript that does not evaluate ends the line in
+  // bash's words, after landing what was assigned before it.
+  ['v=abc; echo "${v:1/0}"; echo after', 'bash: v: 1/0: division by 0\n'],
+  ['a=(1 2 3); echo "${a[@]:1/0}"; echo after', 'bash: a[@]: 1/0: division by 0\n'],
+  ['a=(1); echo "${a[1/0]}"; echo after', 'bash: 1/0: division by 0\n'],
+  ['a=(1); a[1/0]=v; echo after', 'bash: 1/0: division by 0\n'],
+  ['a=(1); unset "a[1/0]"; echo after', 'bash: 1/0: division by 0\n'],
+  ['a=(1); [[ -v a[1/0] ]]; echo after', 'bash: 1/0: division by 0\n'],
+  ['a=(1); a[x=3,1/0]=v; echo after', 'bash: x=3,1/0: division by 0\n'],
+])('a subscript or operand that fails ends the line: %s', async (command, stderr) => {
+  const { ws } = await makeIntegrationWS()
+  try {
+    const io = await ws.execute(command)
+    expect(io.exitCode).toBe(1)
+    expect(io.stdoutText).toBe('')
+    expect(io.stderrText).toBe(stderr)
+    if (command.includes('x=3')) {
+      const landed = await ws.execute('echo $x')
+      expect(landed.stdoutText).toBe('3\n')
+    }
+  } finally {
+    await ws.close()
+  }
+})
+
+it('lays the pending writes over the visible env as a view', async () => {
+  // A name reference to an array is a name the visible env cannot serve
+  // as a scalar; the operand's env lays its pending writes over that env
+  // as a view, so the reference neither breaks the operand nor hides the
+  // write.
+  const { ws } = await makeIntegrationWS()
+  try {
+    const io = await ws.execute(
+      'declare -a nrb=(1); declare -n nrc=nrb; v=abcdef; echo "${v:(x=1):2}" $x',
+    )
+    expect(io.stdoutText).toBe('bc 1\n')
+    expect(io.stderrText).toBe('')
+  } finally {
+    await ws.close()
+  }
 })

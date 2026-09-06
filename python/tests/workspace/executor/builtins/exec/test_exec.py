@@ -149,22 +149,27 @@ async def test_opened_targets_take_the_umask_mode():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("redirect, fd", [('0>', 0), ('0>>', 0), ('0>|', 0),
-                                          ('1<', 1), ('2<', 2)])
-async def test_cross_direction_file_redirect_is_refused(redirect, fd):
+async def test_standard_descriptors_open_in_the_other_direction():
+    # bash accepts `exec 0>f` (fd 0 write-only: a read is EBADF) and
+    # `exec 1<f` / `exec 2<f` (the stream read-only: a write fails),
+    # pinned on 5.2; the file itself stays what the redirect made it.
     ws = _ws()
     try:
         await ws.execute(
             "echo original > /data/input; echo readable > /data/source")
-        await ws.execute("exec </data/source")
-        io = await ws.execute(f"exec {redirect}/data/input")
-        assert io.exit_code == 1
-        assert await io.stderr_str() == f"{fd}: Bad file descriptor\n"
-        io = await ws.execute("read value; echo visible:$value; echo error >&2"
-                              )
-        assert await io.stdout_str() == "visible:readable\n"
-        assert await io.stderr_str() == "error\n"
-        assert await _file(ws, "/data/input") == "original\n"
+        io = await ws.execute("( exec 0>/data/input; echo rc=$?; cat; "
+                              "echo rc=$?; read v; echo rc=$? )")
+        assert await io.stdout_str() == "rc=0\nrc=1\nrc=1\n"
+        assert "cat: -: Bad file descriptor" in (await io.stderr_str())
+        assert await _file(ws, "/data/input") == ""
+        io = await ws.execute("( exec 1</data/source; echo hi; "
+                              "echo rc=$? >&2 )")
+        assert await io.stdout_str() == ""
+        assert await io.stderr_str() == (
+            "echo: write error: Bad file descriptor\nrc=1\n")
+        io = await ws.execute("( exec 2</data/source; echo hi >&2; "
+                              "echo rc=$? )")
+        assert await io.stdout_str() == "rc=1\n"
     finally:
         await ws.close()
 

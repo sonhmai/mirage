@@ -203,6 +203,108 @@
         "stdout": "",
         "stderr": "bash: 1/0: division by 0\n"
       }
+    },
+    {
+      "id": "arith_substring_operand_failure_is_fatal",
+      "seq": 980109,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "zv=abc; echo \"${zv:1/0}\"; echo after",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: zv: 1/0: division by 0\n"
+      }
+    },
+    {
+      "id": "arith_subscript_failure_is_fatal",
+      "seq": 980110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "za=(1); echo \"${za[1/0]}\"; echo after",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: 1/0: division by 0\n"
+      }
+    },
+    {
+      "id": "arith_assignment_subscript_failure_is_fatal",
+      "seq": 980111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "za=(1); za[zx=3,1/0]=v; echo after",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: zx=3,1/0: division by 0\n"
+      }
     }
   ]
 }

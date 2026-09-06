@@ -634,23 +634,23 @@ describe('descriptor zero duplication', () => {
   })
 })
 
-it.each([
-  ['0>', 0],
-  ['0>>', 0],
-  ['0>|', 0],
-  ['1<', 1],
-  ['2<', 2],
-])('refuses persistent cross-direction files: %s', async (redirect, fd) => {
+it('opens a standard descriptor in the other direction', async () => {
+  // bash accepts `exec 0>f` (fd 0 write-only: a read is EBADF) and `exec
+  // 1<f` / `exec 2<f` (the stream read-only: a write fails), pinned on
+  // 5.2; the file itself stays what the redirect made it.
   const { ws } = await makeIntegrationWS({ input: 'original\n', source: 'readable\n' })
   try {
-    await ws.execute('exec </data/source')
-    const io = await ws.execute(`exec ${redirect}/data/input`)
-    expect(io.exitCode).toBe(1)
-    expect(io.stderrText).toBe(`${String(fd)}: Bad file descriptor\n`)
-    const after = await ws.execute('read value; echo visible:$value; echo error >&2')
-    expect(after.stdoutText).toBe('visible:readable\n')
-    expect(after.stderrText).toBe('error\n')
-    expect((await ws.execute('cat /data/input')).stdoutText).toBe('original\n')
+    const zero = await ws.execute(
+      '( exec 0>/data/input; echo rc=$?; cat; echo rc=$?; read v; echo rc=$? )',
+    )
+    expect(zero.stdoutText).toBe('rc=0\nrc=1\nrc=1\n')
+    expect(zero.stderrText).toContain('cat: -: Bad file descriptor')
+    expect((await ws.execute('cat /data/input')).stdoutText).toBe('')
+    const one = await ws.execute('( exec 1</data/source; echo hi; echo rc=$? >&2 )')
+    expect(one.stdoutText).toBe('')
+    expect(one.stderrText).toBe('echo: write error: Bad file descriptor\nrc=1\n')
+    const two = await ws.execute('( exec 2</data/source; echo hi >&2; echo rc=$? )')
+    expect(two.stdoutText).toBe('rc=1\n')
   } finally {
     await ws.close()
   }

@@ -15,69 +15,19 @@
 import { FindParseError } from '../errors.ts'
 import { parseDateExpr } from '../../utils/dates.ts'
 import type { PredNode } from './find_eval.ts'
-
-// The word an `-exec` argument that stands for the match is spelled as.
-export const EXEC_PLACEHOLDER = '{}'
-// The two terminators of an `-exec` argument list: `;` ends a per-match
-// run, `+` ends a batched run and only when it follows a word holding `{}`.
-export const EXEC_END = ';'
-export const EXEC_BATCH_END = '+'
-
-const VALUE_PREDICATES = new Set([
-  '-name',
-  '-iname',
-  '-path',
-  '-type',
-  '-size',
-  '-mtime',
-  '-maxdepth',
-  '-mindepth',
-  '-printf',
-  '-newer',
-  '-newermt',
-])
-
-// `-exec` takes every word up to its terminator, so it is neither a value
-// predicate nor a bare one.
-const EXEC_PREDICATES = new Set(['-exec'])
-
-const BARE_PREDICATES = new Set(['-empty', '-print', '-print0', '-delete', '-ls', '-depth'])
-
-const OPERATORS = new Set(['-not', '!', '-o', '-or', '-a', '-and', '(', ')'])
-
-function isExpressionToken(tok: string): boolean {
-  return (
-    VALUE_PREDICATES.has(tok) ||
-    BARE_PREDICATES.has(tok) ||
-    OPERATORS.has(tok) ||
-    EXEC_PREDICATES.has(tok)
-  )
-}
-
-/** One `-exec` action: the words between `-exec` and its terminator, `{}`
- * still in place, and whether it is `{} +` (one run over every match)
- * rather than `;` (one run per match). */
-export interface ExecAction {
-  readonly kind: 'exec'
-  readonly argv: readonly string[]
-  readonly batch: boolean
-}
-
-export type RowActionKind = 'print' | 'print0' | 'ls' | 'delete'
-
-/** One of find's row actions, in the position it was written. */
-export interface RowAction {
-  readonly kind: RowActionKind
-}
-
-export type FindAction = ExecAction | RowAction
-
-const ROW_ACTIONS: ReadonlyMap<string, RowActionKind> = new Map([
-  ['-print', 'print'],
-  ['-print0', 'print0'],
-  ['-ls', 'ls'],
-  ['-delete', 'delete'],
-])
+import {
+  EXEC_BATCH_END,
+  EXEC_END,
+  EXEC_PLACEHOLDER,
+  FIND_BARE_PREDICATES,
+  FIND_EXEC_PREDICATES,
+  FIND_EXPRESSION_TOKENS,
+  FIND_MAX_DEPTH,
+  FIND_ROW_ACTIONS,
+  FIND_VALID_TYPES,
+  FIND_VALUE_PREDICATES,
+} from './constants.ts'
+import type { ExecAction, FindAction } from './types.ts'
 
 const EXEC_PLACEMENT =
   'find: -exec is supported only in a top-level -a chain, not under -o, ! or parentheses'
@@ -86,10 +36,6 @@ const EXEC_PLACEMENT =
 export function execActions(actions: readonly FindAction[]): ExecAction[] {
   return actions.filter((a): a is ExecAction => a.kind === 'exec')
 }
-
-const VALID_TYPES = new Set(['b', 'c', 'd', 'p', 'f', 'l', 's'])
-
-const MAX_DEPTH = 100
 
 /**
  * One parsed find expression: the predicate tree plus everything the flat
@@ -159,7 +105,7 @@ export function execSpans(argv: readonly string[]): [number, number][] {
   const spans: [number, number][] = []
   let i = 0
   while (i < argv.length) {
-    if (!EXEC_PREDICATES.has(argv[i] ?? '')) {
+    if (!FIND_EXEC_PREDICATES.has(argv[i] ?? '')) {
       i += 1
       continue
     }
@@ -219,7 +165,7 @@ export function parseMtime(spec: string): [number | null, number | null] {
 function typeNode(value: string): PredNode {
   if (value === 'f' || value === 'file') return { op: 'type', kind: 'f' }
   if (value === 'd' || value === 'directory') return { op: 'type', kind: 'd' }
-  if (VALID_TYPES.has(value)) return { op: 'type', kind: value }
+  if (FIND_VALID_TYPES.has(value)) return { op: 'type', kind: value }
   throw new FindParseError(`find: Unknown argument to -type: ${value}`)
 }
 
@@ -241,7 +187,7 @@ export function findExprTail(rawArgv: string[]): string[] {
   for (let i = start; i < rawArgv.length; i++) {
     const tok = rawArgv[i]
     if (tok === undefined) continue
-    if (isExpressionToken(tok) || (tok.startsWith('-') && tok.length > 1)) {
+    if (FIND_EXPRESSION_TOKENS.has(tok) || (tok.startsWith('-') && tok.length > 1)) {
       return rawArgv.slice(i)
     }
   }
@@ -370,11 +316,11 @@ export function parseFindExpression(tokens: string[]): FindExpr {
     if (
       (g.actions.length > 0 || g.printf !== null) &&
       (tok === '-empty' ||
-        (VALUE_PREDICATES.has(tok) && !['-printf', '-maxdepth', '-mindepth'].includes(tok)))
+        (FIND_VALUE_PREDICATES.has(tok) && !['-printf', '-maxdepth', '-mindepth'].includes(tok)))
     ) {
       throw new FindParseError(`find: ${tok}: tests after actions are not supported`)
     }
-    if (VALUE_PREDICATES.has(tok)) {
+    if (FIND_VALUE_PREDICATES.has(tok)) {
       const value = advance()
       if (value === undefined) throw new FindParseError(`find: missing argument to '${tok}'`)
       if (tok === '-name') return { op: 'name', pattern: value, icase: false }
@@ -424,7 +370,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       mergeWindow(mtLo, mtHi)
       return { op: 'true' }
     }
-    if (EXEC_PREDICATES.has(tok)) {
+    if (FIND_EXEC_PREDICATES.has(tok)) {
       g.actions.push(parseExec())
       return { op: 'true' }
     }
@@ -432,7 +378,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       g.usesEmpty = true
       return { op: 'empty' }
     }
-    const rowKind = ROW_ACTIONS.get(tok)
+    const rowKind = FIND_ROW_ACTIONS.get(tok)
     if (rowKind !== undefined) {
       checkActionPlacement(tok)
       g.actions.push({ kind: rowKind })
@@ -443,13 +389,13 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       g.depthFirst = true
       return { op: 'true' }
     }
-    if (BARE_PREDICATES.has(tok)) return { op: 'true' }
+    if (FIND_BARE_PREDICATES.has(tok)) return { op: 'true' }
     throw new FindParseError(`find: unknown predicate '${tok}'`)
   }
 
   function factor(): PredNode {
     depth += 1
-    if (depth > MAX_DEPTH) throw new FindParseError('find: expression too deeply nested')
+    if (depth > FIND_MAX_DEPTH) throw new FindParseError('find: expression too deeply nested')
     try {
       const tok = peek()
       if (tok === '-not' || tok === '!') {

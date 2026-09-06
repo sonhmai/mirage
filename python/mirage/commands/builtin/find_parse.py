@@ -14,21 +14,14 @@
 
 import math
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Literal
 
+from mirage.commands.builtin import constants
 from mirage.commands.builtin.find_eval import (And, Empty, Name, Not, Or, Path,
                                                PredNode, TrueNode, Type)
+from mirage.commands.builtin.types import ExecAction, FindAction, RowAction
 from mirage.commands.errors import FindParseError
 from mirage.utils.dates import parse_date_expr
-
-# The word an `-exec` argument that stands for the match is spelled as.
-EXEC_PLACEHOLDER = "{}"
-# The two terminators of an `-exec` argument list: `;` ends a per-match
-# run, `+` ends a batched run and only when it follows a bare `{}`.
-EXEC_END = ";"
-EXEC_BATCH_END = "+"
 
 
 def parse_depth(value: str, flag: str) -> int:
@@ -96,90 +89,6 @@ def parse_mtime(spec: str) -> tuple[float | None, float | None]:
     if spec.startswith("-"):
         return now - n * day, None
     return now - (n + 1) * day, now - n * day
-
-
-_VALUE_PREDICATES = frozenset({
-    "-name",
-    "-iname",
-    "-path",
-    "-type",
-    "-size",
-    "-mtime",
-    "-maxdepth",
-    "-mindepth",
-    "-printf",
-    "-newer",
-    "-newermt",
-})
-
-# `-exec` takes every word up to its terminator, so it is neither a
-# value predicate nor a bare one.
-_EXEC_PREDICATES = frozenset({"-exec"})
-
-_BARE_PREDICATES = frozenset({
-    "-empty",
-    "-print",
-    "-print0",
-    "-delete",
-    "-ls",
-    "-depth",
-})
-
-_OPERATORS = frozenset({
-    "-not",
-    "!",
-    "-o",
-    "-or",
-    "-a",
-    "-and",
-    "(",
-    ")",
-})
-
-_EXPRESSION_TOKENS = (_VALUE_PREDICATES | _BARE_PREDICATES | _OPERATORS
-                      | _EXEC_PREDICATES)
-
-_VALID_TYPES = frozenset({"b", "c", "d", "p", "f", "l", "s"})
-
-_MAX_DEPTH = 100
-
-
-@dataclass(frozen=True, slots=True)
-class ExecAction:
-    """One ``-exec`` action: the command words and how it is run.
-
-    Args:
-        argv (tuple[str, ...]): the words between ``-exec`` and its
-            terminator, ``{}`` still in place.
-        batch (bool): ``{} +`` (one run over every match) rather than
-            ``;`` (one run per match).
-    """
-    argv: tuple[str, ...]
-    batch: bool = False
-
-
-RowActionKind = Literal["print", "print0", "ls", "delete"]
-
-
-@dataclass(frozen=True, slots=True)
-class RowAction:
-    """One of find's row actions, in the position it was written.
-
-    Args:
-        kind (RowActionKind): ``-print``, ``-print0``, ``-ls`` or
-            ``-delete``.
-    """
-    kind: RowActionKind
-
-
-FindAction = ExecAction | RowAction
-
-_ROW_ACTIONS: Mapping[str, RowActionKind] = {
-    "-print": "print",
-    "-print0": "print0",
-    "-ls": "ls",
-    "-delete": "delete",
-}
 
 
 @dataclass
@@ -318,9 +227,10 @@ def _parse_exec(state: _State) -> ExecAction:
         tok = _advance(state)
         if tok is None:
             raise FindParseError("find: missing argument to `-exec'")
-        if tok == EXEC_END:
+        if tok == constants.EXEC_END:
             break
-        if tok == EXEC_BATCH_END and argv and EXEC_PLACEHOLDER in argv[-1]:
+        if (tok == constants.EXEC_BATCH_END and argv
+                and constants.EXEC_PLACEHOLDER in argv[-1]):
             batch = True
             break
         argv.append(tok)
@@ -328,11 +238,12 @@ def _parse_exec(state: _State) -> ExecAction:
         raise FindParseError("find: missing argument to `-exec'")
     if batch:
         for word in argv:
-            if EXEC_PLACEHOLDER in word and word != EXEC_PLACEHOLDER:
+            if (constants.EXEC_PLACEHOLDER in word
+                    and word != constants.EXEC_PLACEHOLDER):
                 raise FindParseError(
                     "find: In '-exec ... {} +' the '{}' must appear by "
                     f"itself, but you specified '{word}'")
-        if argv.count(EXEC_PLACEHOLDER) > 1:
+        if argv.count(constants.EXEC_PLACEHOLDER) > 1:
             raise FindParseError("find: Only one instance of {} is supported "
                                  "with -exec ... +")
     if state.nested > 0 or state.in_or:
@@ -391,7 +302,7 @@ def _type_node(value: str) -> Type:
         return Type("f")
     if value in ("d", "directory"):
         return Type("d")
-    if value in _VALID_TYPES:
+    if value in constants.FIND_VALID_TYPES:
         return Type(value)
     raise FindParseError(f"find: Unknown argument to -type: {value}")
 
@@ -416,12 +327,12 @@ def _parse_primary(state: _State) -> PredNode:
     tok = _advance(state)
     if tok is None:
         raise FindParseError("find: expected predicate")
-    if ((state.expr.actions or state.expr.printf is not None) and
-        (tok == "-empty"
-         or tok in _VALUE_PREDICATES - {"-printf", "-maxdepth", "-mindepth"})):
+    if ((state.expr.actions or state.expr.printf is not None)
+            and (tok == "-empty" or tok in constants.FIND_VALUE_PREDICATES -
+                 {"-printf", "-maxdepth", "-mindepth"})):
         raise FindParseError(
             f"find: {tok}: tests after actions are not supported")
-    if tok in _VALUE_PREDICATES:
+    if tok in constants.FIND_VALUE_PREDICATES:
         value = _advance(state)
         if value is None:
             raise FindParseError(f"find: missing argument to '{tok}'")
@@ -468,29 +379,29 @@ def _parse_primary(state: _State) -> PredNode:
         mt_lo, mt_hi = _mtime_arg(value)
         _merge_window(state, mt_lo, mt_hi)
         return TrueNode()
-    if tok in _EXEC_PREDICATES:
+    if tok in constants.FIND_EXEC_PREDICATES:
         state.expr.actions.append(_parse_exec(state))
         return TrueNode()
     if tok == "-empty":
         state.expr.uses_empty = True
         return Empty()
-    if tok in _ROW_ACTIONS:
+    if tok in constants.FIND_ROW_ACTIONS:
         _check_action_placement(state, tok)
-        state.expr.actions.append(RowAction(_ROW_ACTIONS[tok]))
+        state.expr.actions.append(RowAction(constants.FIND_ROW_ACTIONS[tok]))
         if tok == "-delete":
             state.expr.depth_first = True
         return TrueNode()
     if tok == "-depth":
         state.expr.depth_first = True
         return TrueNode()
-    if tok in _BARE_PREDICATES:
+    if tok in constants.FIND_BARE_PREDICATES:
         return TrueNode()
     raise FindParseError(f"find: unknown predicate '{tok}'")
 
 
 def _parse_factor(state: _State) -> PredNode:
     state.depth += 1
-    if state.depth > _MAX_DEPTH:
+    if state.depth > constants.FIND_MAX_DEPTH:
         raise FindParseError("find: expression too deeply nested")
     try:
         tok = _peek(state)
@@ -574,7 +485,8 @@ def find_expr_tail(raw_argv: list[str]) -> list[str]:
         start += 1
     for i in range(start, len(raw_argv)):
         tok = raw_argv[i]
-        if tok in _EXPRESSION_TOKENS or (tok.startswith("-") and len(tok) > 1):
+        if tok in constants.FIND_EXPRESSION_TOKENS or (tok.startswith("-")
+                                                       and len(tok) > 1):
             return raw_argv[i:]
     return []
 
@@ -593,15 +505,16 @@ def exec_spans(argv: list[str]) -> list[tuple[int, int]]:
     spans: list[tuple[int, int]] = []
     i = 0
     while i < len(argv):
-        if argv[i] not in _EXEC_PREDICATES:
+        if argv[i] not in constants.FIND_EXEC_PREDICATES:
             i += 1
             continue
         start = i
         i += 1
         while i < len(argv):
             tok = argv[i]
-            if tok == EXEC_END or (tok == EXEC_BATCH_END and i > start + 1
-                                   and EXEC_PLACEHOLDER in argv[i - 1]):
+            if tok == constants.EXEC_END or (
+                    tok == constants.EXEC_BATCH_END and i > start + 1
+                    and constants.EXEC_PLACEHOLDER in argv[i - 1]):
                 break
             i += 1
         spans.append((start, min(i, len(argv) - 1)))

@@ -32,13 +32,12 @@ import { yieldBytes } from '../../io/stream.ts'
 import { FileType } from '../../types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import {
-  EXEC_PLACEHOLDER,
   execActions,
-  type ExecAction,
-  type FindAction,
   type FindExpr,
   parseFindExpression,
 } from '../../commands/builtin/find_parse.ts'
+import { EXEC_PLACEHOLDER } from '../../commands/builtin/constants.ts'
+import type { ExecAction, FindAction } from '../../commands/builtin/types.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 

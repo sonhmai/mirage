@@ -15,10 +15,7 @@
 import time
 from datetime import datetime, timezone
 
-from mirage.commands.builtin.utils.constants import (DEFAULT_MODES,
-                                                     EPOCH_LS_TIME, MONTHS,
-                                                     NUMERIC_PREFIX,
-                                                     TYPE_CHARS)
+from mirage.commands.builtin.utils import constants
 from mirage.commands.builtin.utils.identity import (UNKNOWN_NAME, Identity,
                                                     group_name, owner_name)
 from mirage.types import (DEVICE_NUMBERS_KEY, LINK_TARGET_KEY, FileStat,
@@ -77,20 +74,13 @@ def _perm_triplet(bits: int, special: str | None = None) -> str:
 
 
 def ls_mode_string(s: FileStat) -> str:
-    type_char = TYPE_CHARS.get(s.type, "-")
-    mode = s.mode if s.mode is not None else DEFAULT_MODES.get(s.type, 0o644)
+    type_char = constants.TYPE_CHARS.get(s.type, "-")
+    mode = s.mode if s.mode is not None else constants.DEFAULT_MODES.get(
+        s.type, 0o644)
     perms = (_perm_triplet(mode >> 6, "s" if mode & 0o4000 else None) +
              _perm_triplet(mode >> 3, "s" if mode & 0o2000 else None) +
              _perm_triplet(mode, "t" if mode & 0o1000 else None))
     return f"{type_char}{perms}"
-
-
-# GNU ls's window of "recent" times: half a Gregorian year of 365.2425
-# days, in seconds (ls.c). findutils draws its own line (listfile.c):
-# old past 180 days, future past an hour.
-_LS_RECENT_SECONDS = 31556952 // 2
-_FIND_OLD_SECONDS = 180 * 24 * 60 * 60
-_FIND_FUTURE_SECONDS = 60 * 60
 
 
 def _ls_time_string(modified: str | None, *, find_rule: bool = False) -> str:
@@ -104,21 +94,21 @@ def _ls_time_string(modified: str | None, *, find_rule: bool = False) -> str:
             never the future).
     """
     if not modified:
-        return EPOCH_LS_TIME
+        return constants.EPOCH_LS_TIME
     try:
         text = modified.replace("Z", "+00:00")
         dt = datetime.fromisoformat(text).astimezone(timezone.utc)
     except (ValueError, TypeError):
-        return EPOCH_LS_TIME
-    month = MONTHS[dt.month - 1]
+        return constants.EPOCH_LS_TIME
+    month = constants.MONTHS[dt.month - 1]
     day = f"{dt.day:>2}"
     now = time.time()
     when = dt.timestamp()
     if find_rule:
-        recent = not (now > when + _FIND_OLD_SECONDS
-                      or when > now + _FIND_FUTURE_SECONDS)
+        recent = not (now > when + constants.FIND_OLD_SECONDS
+                      or when > now + constants.FIND_FUTURE_SECONDS)
     else:
-        recent = now - _LS_RECENT_SECONDS < when < now
+        recent = now - constants.LS_RECENT_SECONDS < when < now
     if recent:
         return f"{month} {day} {dt.hour:02d}:{dt.minute:02d}"
     return f"{month} {day}  {dt.year}"
@@ -197,20 +187,6 @@ def format_ls_long(
     return out
 
 
-_FIND_LS_ESCAPES = {
-    "\\": "\\\\",
-    " ": "\\ ",
-    '"': '\\"',
-    "\n": "\\n",
-    "\t": "\\t",
-    "\r": "\\r",
-    "\a": "\\a",
-    "\b": "\\b",
-    "\f": "\\f",
-    "\v": "\\v",
-}
-
-
 def escape_find_name(text: str) -> str:
     """Spell a name the way ``find -ls`` prints it.
 
@@ -226,7 +202,7 @@ def escape_find_name(text: str) -> str:
     """
     out: list[str] = []
     for ch in text:
-        escaped = _FIND_LS_ESCAPES.get(ch)
+        escaped = constants.FIND_LS_ESCAPES.get(ch)
         if escaped is not None:
             out.append(escaped)
         elif " " < ch < "\x7f":
@@ -284,7 +260,7 @@ def to_number(val: str) -> float:
     Args:
         val (str): raw token; the leading numeric prefix counts, else 0.
     """
-    m = NUMERIC_PREFIX.match(val.strip())
+    m = constants.NUMERIC_PREFIX.match(val.strip())
     return float(m.group(0)) if m else 0.0
 
 

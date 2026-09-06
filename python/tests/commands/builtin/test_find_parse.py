@@ -232,7 +232,7 @@ def test_printf_combines_with_tests():
 
 
 def test_exec_per_match_and_batched():
-    from mirage.commands.builtin.find_parse import ExecAction
+    from mirage.commands.builtin.types import ExecAction
     expr = parse_find_expression(
         ["-name", "*.txt", "-exec", "echo", "got", "{}", ";"])
     assert expr.execs == [ExecAction(("echo", "got", "{}"), batch=False)]
@@ -284,7 +284,7 @@ def test_exec_allowed_after_a_parenthesized_or():
 
 
 def test_actions_are_recorded_in_order():
-    from mirage.commands.builtin.find_parse import ExecAction, RowAction
+    from mirage.commands.builtin.types import ExecAction, RowAction
     expr = parse_find_expression(
         ["-delete", "-exec", "echo", "{}", ";", "-print0", "-ls", "-print"])
     assert expr.actions == [

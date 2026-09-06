@@ -13,7 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DEVICE_NUMBERS_KEY, FileType, LINK_TARGET_KEY, type FileStat } from '../../../types.ts'
-import { DEFAULT_MODES, EPOCH_LS_TIME, MONTHS, NUMERIC_PREFIX, TYPE_CHARS } from './constants.ts'
+import {
+  DEFAULT_MODES,
+  EPOCH_LS_TIME,
+  FIND_FUTURE_SECONDS,
+  FIND_LS_ESCAPES,
+  FIND_OLD_SECONDS,
+  LS_RECENT_SECONDS,
+  MONTHS,
+  NUMERIC_PREFIX,
+  TYPE_CHARS,
+} from './constants.ts'
 import { UNKNOWN_NAME, groupName, ownerName, type Identity } from './identity.ts'
 
 // What a stat field a VFS cannot know renders as, in `stat -c` and in
@@ -98,13 +108,6 @@ export function lsModeString(s: FileStat): string {
 function padLeft(s: string, width: number): string {
   return s.length >= width ? s : ' '.repeat(width - s.length) + s
 }
-
-// GNU ls's window of "recent" times: half a Gregorian year of 365.2425
-// days, in seconds (ls.c). findutils draws its own line (listfile.c):
-// old past 180 days, future past an hour.
-const LS_RECENT_SECONDS = Math.floor(31556952 / 2)
-const FIND_OLD_SECONDS = 180 * 24 * 60 * 60
-const FIND_FUTURE_SECONDS = 60 * 60
 
 // The time column: `Mon DD HH:MM` for a recent time, `Mon DD  YYYY` for an
 // old or future one, as GNU prints it. `findRule` uses findutils' window
@@ -195,19 +198,6 @@ export function formatLsLong(stats: readonly FileStat[], opts: LsLongOptions = {
  * it; `identity` is null outside a workspace, where both name columns
  * fall back to `-`.
  */
-const FIND_LS_ESCAPES: Readonly<Record<string, string>> = {
-  '\\': '\\\\',
-  ' ': '\\ ',
-  '"': '\\"',
-  '\n': '\\n',
-  '\t': '\\t',
-  '\r': '\\r',
-  '\x07': '\\a',
-  '\b': '\\b',
-  '\f': '\\f',
-  '\v': '\\v',
-}
-
 /**
  * Spell a name the way `find -ls` prints it. findutils escapes a name so
  * one row stays one line and its fields stay in place: a backslash, a

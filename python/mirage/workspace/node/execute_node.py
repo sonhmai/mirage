@@ -19,7 +19,7 @@ from typing import Any, Callable
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.ops.types import SessionView
-from mirage.policy import PolicyDenied
+from mirage.policy import HandOff, PolicyDenied
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.arith import evaluate_arith
@@ -264,6 +264,7 @@ async def execute_node(
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision | None = None,
     sink: JobConsole | None = None,
+    handed: HandOff | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Walk tree-sitter AST and dispatch each node.
 
@@ -279,6 +280,11 @@ async def execute_node(
         stdin (Any): input stream.
         call_stack (CallStack): shell call stack.
         cancel (asyncio.Event | None): event used to abort mid-flight.
+        handed (HandOff | None): the hand-off this subtree runs on,
+            carried to every command's gate so it runs on the grants
+            claimed for this line and never another's, and bound into
+            ``execute_fn`` so every line the subtree evaluates stands
+            under it too.
         sink (JobConsole | None): console to write this node's output to
             as it is produced. When set, the node emits and returns no
             stdout; when None it returns stdout as a value, which is
@@ -306,6 +312,19 @@ async def execute_node(
     cs = call_stack if call_stack is not None else CallStack()
     session.errexit_immune = False
 
+    # The hand-off this subtree runs on is the one its nested
+    # evaluations run under. Everything a command hands a line to
+    # (eval, source, xargs, command, a substitution, a herestring, a
+    # redirect target) re-enters through execute_fn, so the hand-off is
+    # bound into it here, at the one door every node goes through,
+    # rather than where the line made it: a background job's subtree
+    # runs on a hand-off of the job's own, and a line it evaluates
+    # after the typed line has ended has to stand under that one.
+    # Under the line's, the inner gate could not see the grant the job
+    # holds and asked again, and what it claimed went back to a
+    # hand-off nothing revokes any more.
+    execute_fn = partial(execute_fn, handed=handed)
+
     recurse = partial(execute_node,
                       dispatch,
                       registry,
@@ -314,7 +333,8 @@ async def execute_node(
                       execute_fn,
                       agent_id,
                       cancel=cancel,
-                      routing_decision=routing_decision)
+                      routing_decision=routing_decision,
+                      handed=handed)
 
     kind = node_kind(node)
 
@@ -341,7 +361,8 @@ async def execute_node(
     # ── program (root / semicolons) ─────────────
     if kind == NodeKind.PROGRAM:
         return await execute_program(stream, node, session, stdin, cs,
-                                     job_table, agent_id, dispatch)
+                                     job_table, agent_id, dispatch, handed,
+                                     registry.decisions)
 
     # ── command ─────────────────────────────────
     if kind == NodeKind.COMMAND:
@@ -357,7 +378,8 @@ async def execute_node(
                                      job_table,
                                      cancel=cancel,
                                      routing_decision=routing_decision,
-                                     agent_id=agent_id)
+                                     agent_id=agent_id,
+                                     handed=handed)
 
     # ── pipeline ────────────────────────────────
     if kind == NodeKind.PIPELINE:
@@ -460,9 +482,11 @@ async def execute_node(
                               agent_id,
                               cancel=cancel,
                               routing_decision=routing_decision,
-                              sink=sink)
+                              sink=sink,
+                              handed=handed)
         return await handle_subshell(sub_recurse, list(node.children), session,
-                                     stdin, cs, sub_table, agent_id, dispatch)
+                                     stdin, cs, sub_table, agent_id, dispatch,
+                                     handed, registry.decisions)
 
     # ── arithmetic command ((( ... ))) ──────────
     if (kind == NodeKind.COMPOUND and node.children

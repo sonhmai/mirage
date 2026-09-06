@@ -22,15 +22,35 @@ import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { evaluateArith } from '../../shell/arith.ts'
+import { splitBacktickRegion } from '../../shell/backticks.ts'
 import { ArithError } from '../../shell/errors.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from '../../shell/escapes.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
 import { expandBraces, expansionWrite, lookupVar } from './variable.ts'
 import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
+import type { HandOff } from '../../policy/types.ts'
 
+/**
+ * The executor's door for a nested line. `node` is the node whose text
+ * the line is: the command running it (bound by the dispatcher for
+ * every word that runs a line) or the substitution being expanded,
+ * which names itself. The inner line's commands stand under it, where
+ * the judging pass placed them. `handed` is the hand-off of the subtree
+ * that runs the evaluation, bound by the walker (`withHandOff`): the
+ * line's own for a command in the foreground, a job's own for a command
+ * inside a background job. The inner line runs on a hand-off made under
+ * it, so a line a job evaluates after the typed line has ended still
+ * stands under the hand-off holding the job's grants.
+ */
 export type ExecuteFn = (
   command: string,
-  opts: { sessionId: string; stdin?: ByteSource | null },
+  opts: {
+    sessionId: string
+    stdin?: ByteSource | null
+    node?: TSNodeLike
+    span?: readonly [number, number]
+    handed?: HandOff
+  },
 ) => Promise<IOResult>
 
 // Whitespace tree-sitter folds into an expansion's opening token.
@@ -45,58 +65,31 @@ export function foldedWhitespace(node: TSNodeLike): string {
   return raw.slice(0, raw.length - raw.trimStart().length)
 }
 
-// Split a backtick region into segments, each flagged as a command or as
-// literal text. tree-sitter-bash lexes the gap between two backtick
-// substitutions as a single token when that gap is empty or
-// whitespace-only, so `a` `b` arrives as ONE command_substitution node
-// holding both commands and the text between them. Re-lexing the node's
-// own text on unescaped backticks recovers the real segments; a single
-// pair simply yields one command segment.
-//
-// Inside a command, POSIX keeps the backslash literal except before `$`,
-// a backtick and `\`, where it escapes. Consuming those pairs whole is
-// what makes the parity right: `\\` is one escaped backslash, so a
-// backtick straight after it still closes the region rather than reading
-// as an escaped backtick.
-function splitBacktickSegments(raw: string): [string, boolean][] {
-  const segments: [string, boolean][] = []
-  const ESCAPABLE = new Set(['$', '`', '\\'])
-  let buf = ''
-  let inCommand = false
-  let i = 0
-  while (i < raw.length) {
-    const next = raw[i + 1]
-    if (raw[i] === '\\' && inCommand && next !== undefined && ESCAPABLE.has(next)) {
-      buf += next
-      i += 2
-      continue
-    }
-    if (raw[i] === '`') {
-      segments.push([buf, inCommand])
-      buf = ''
-      inCommand = !inCommand
-      i += 1
-      continue
-    }
-    buf += raw.charAt(i)
-    i += 1
-  }
-  segments.push([buf, inCommand])
-  return segments.filter(([text, cmd]) => text !== '' || cmd)
-}
-
+/**
+ * Expand a backtick region, one nested line per pair. `offset` is where
+ * `raw` (the region's text, the folded prefix stripped) starts in the
+ * node's text.
+ */
 async function expandBacktickRegion(
   raw: string,
   session: Session,
   executeFn: ExecuteFn,
+  node: TSNodeLike,
+  offset: number,
 ): Promise<string> {
   let out = ''
-  for (const [text, isCommand] of splitBacktickSegments(raw)) {
-    if (!isCommand) {
-      out += text
+  for (const segment of splitBacktickRegion(raw)) {
+    if (!segment.command) {
+      out += segment.text
       continue
     }
-    const io = await executeFn(text, { sessionId: session.sessionId })
+    // Each pair is its own place on the line: the node holds every
+    // touching pair, so the span within it says which one runs.
+    const io = await executeFn(segment.text, {
+      sessionId: session.sessionId,
+      node,
+      span: [offset + segment.start, offset + segment.end],
+    })
     out += (await io.stdoutStr()).replace(/\n+$/, '')
     session.cmdsubSeq += 1
     session.cmdsubStatus = io.exitCode
@@ -314,8 +307,10 @@ export async function expandNodeMarked(
     const rawSub = tsNode.text.slice(prefix.length)
     if (rawSub.startsWith('`') && rawSub.endsWith('`')) {
       // Backtick regions are re-lexed here rather than trusted from the
-      // grammar, which merges adjacent pairs (see splitBacktickSegments).
-      return prefix + (await expandBacktickRegion(rawSub, session, executeFn))
+      // grammar, which merges adjacent pairs (see splitBacktickRegion).
+      return (
+        prefix + (await expandBacktickRegion(rawSub, session, executeFn, tsNode, prefix.length))
+      )
     }
     if (rawSub.startsWith('$((') && rawSub.endsWith('))')) {
       // Inside heredoc bodies tree-sitter parses `$((expr))` as a
@@ -350,7 +345,9 @@ export async function expandNodeMarked(
     // assignments, control flow).
     const inner = rawSub.slice(2, -1)
     if (inner.trim() === '') return prefix
-    const io = await executeFn(inner, { sessionId: session.sessionId })
+    // The substitution names its own node: the nested line's commands
+    // stand under it, which is where the pass placed them.
+    const io = await executeFn(inner, { sessionId: session.sessionId, node: tsNode })
     const text = (await io.stdoutStr()).replace(/\n+$/, '')
     // Record the substitution's status: an assignment-only statement
     // whose value ran substitutions reports the last one's status as

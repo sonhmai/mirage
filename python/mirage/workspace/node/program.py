@@ -17,6 +17,8 @@ from typing import Any
 from mirage.commands.spec.usage import read_fail_exit
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
+from mirage.policy.decisions import Decisions
+from mirage.policy.types import HandOff
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
@@ -38,12 +40,16 @@ async def execute_program(
     job_table,
     agent_id,
     dispatch=None,
+    handed: HandOff | None = None,
+    decisions: Decisions | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Execute program node (root / semicolon-separated).
 
     ``dispatch`` is the op door, threaded so an active ``exec`` redirect
     can send each statement's output to its file; None (a nested loop
-    that is not the program root) leaves output undiverted.
+    that is not the program root) leaves output undiverted. ``handed``
+    and ``decisions`` are the line's hand-off and its ledger, for a
+    background job to borrow.
     """
     # Every program loop is one parse, which is the unit bash's alias
     # rule counts in: an alias defined on this parse and row is not
@@ -55,7 +61,8 @@ async def execute_program(
     session._parse_current = session._parse_seq
     try:
         return await _run_program(recurse, node, session, stdin, call_stack,
-                                  job_table, agent_id, dispatch)
+                                  job_table, agent_id, dispatch, handed,
+                                  decisions)
     finally:
         session._parse_current = outer_parse
 
@@ -69,6 +76,8 @@ async def _run_program(
     job_table,
     agent_id,
     dispatch=None,
+    handed: HandOff | None = None,
+    decisions: Decisions | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     children = node.children
     all_stdout: list[Any] = []
@@ -129,7 +138,7 @@ async def _run_program(
         if is_bg:
             stdout, io, last_exec = await handle_background(
                 recurse, child, None, session, job_table, agent_id, stdin,
-                call_stack)
+                call_stack, handed, decisions)
             # Launching a job is itself a statement: bash sets $? to 0
             # (the launch status), so `false; cmd & echo $?` prints 0.
             session.last_exit_code = io.exit_code

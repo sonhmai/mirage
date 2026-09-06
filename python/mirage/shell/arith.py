@@ -415,16 +415,36 @@ class ArithEvaluator:
         merged = self._merged_env()
         return self.elements.resolve(name, subscript, merged)
 
-    def read_target(self, target: tuple[Any, ...]) -> int:
+    def key_of(self, target: tuple[Any, ...]) -> str | None:
+        """The canonical element key of a target, None for a scalar.
+
+        Resolved once per reference: a compound assignment or a ``++``
+        reads and writes the same element, and a subscript that draws
+        (``a[RANDOM]+=1``) must draw once, as bash's does.
+
+        Args:
+            target (tuple[Any, ...]): a ``var`` or ``elem`` target node.
+        """
+        if target[0] == "var":
+            return None
+        return self.elem_key(target[1], target[2])
+
+    def read_target(self,
+                    target: tuple[Any, ...],
+                    key: str | None = None) -> int:
         if target[0] == "var":
             return self.lookup(target[1])
-        key = self.elem_key(target[1], target[2])
+        if key is None:
+            key = self.elem_key(target[1], target[2])
         raw = self.elem_updates.get((target[1], key))
         if raw is None and self.elements is not None:
             raw = self.elements.read(target[1], key)
         return self._coerce(raw)
 
-    def write_target(self, target: tuple[Any, ...], value: int) -> None:
+    def write_target(self,
+                     target: tuple[Any, ...],
+                     value: int,
+                     key: str | None = None) -> None:
         text = str(value)
         if target[0] == "var":
             self.updates[target[1]] = text
@@ -432,7 +452,8 @@ class ArithEvaluator:
             if self.wrote_var is not None:
                 self.wrote_var(target[1], text)
             return
-        key = self.elem_key(target[1], target[2])
+        if key is None:
+            key = self.elem_key(target[1], target[2])
         self.elem_updates[(target[1], key)] = text
         self._record(target[1], key, text)
 
@@ -453,10 +474,17 @@ class ArithEvaluator:
             return value
         if kind == "assign":
             _, target, op, rhs = node
-            rhs_val = self.run(rhs)
-            value = (rhs_val if op == "=" else self.apply_binop(
-                op[:-1], self.read_target(target), rhs_val))
-            self.write_target(target, value)
+            key = self.key_of(target)
+            if op == "=":
+                value = self.run(rhs)
+            else:
+                # bash reads the target before it evaluates the right
+                # side, which a dynamic name makes observable:
+                # `RANDOM=42, RANDOM-=RANDOM` is the first draw minus
+                # the second.
+                current = self.read_target(target, key)
+                value = self.apply_binop(op[:-1], current, self.run(rhs))
+            self.write_target(target, value, key)
             return value
         if kind == "ternary":
             _, cond, then, other = node
@@ -482,13 +510,17 @@ class ArithEvaluator:
             return value
         if kind == "pre":
             _, op, target = node
-            value = _wrap(self.read_target(target) + (1 if op == "++" else -1))
-            self.write_target(target, value)
+            key = self.key_of(target)
+            value = _wrap(
+                self.read_target(target, key) + (1 if op == "++" else -1))
+            self.write_target(target, value, key)
             return value
         if kind == "post":
             _, op, target = node
-            value = self.read_target(target)
-            self.write_target(target, _wrap(value + (1 if op == "++" else -1)))
+            key = self.key_of(target)
+            value = self.read_target(target, key)
+            self.write_target(target, _wrap(value + (1 if op == "++" else -1)),
+                              key)
             return value
         raise ArithError(f"unsupported node: {kind}")
 

@@ -411,15 +411,25 @@ class ArithEvaluator {
     return this.elements.resolve(name, sub, { ...this.env, ...this.updates })
   }
 
-  private readTarget(target: ArithTarget): bigint {
+  /**
+   * The canonical element key of a target, null for a scalar. Resolved
+   * once per reference: a compound assignment or a `++` reads and writes
+   * the same element, and a subscript that draws (`a[RANDOM]+=1`) must
+   * draw once, as bash's does.
+   */
+  private keyOf(target: ArithTarget): string | null {
+    return target.kind === 'var' ? null : this.elemKey(target.name, target.sub)
+  }
+
+  private readTarget(target: ArithTarget, key: string | null = null): bigint {
     if (target.kind === 'var') return this.lookup(target.name)
-    const key = this.elemKey(target.name, target.sub)
+    key ??= this.elemKey(target.name, target.sub)
     const pending = this.elemUpdates.get(`${target.name} ${key}`)
     if (pending !== undefined) return this.coerce(pending)
     return this.coerce(this.elements === null ? null : this.elements.read(target.name, key))
   }
 
-  private writeTarget(target: ArithTarget, value: bigint): void {
+  private writeTarget(target: ArithTarget, value: bigint, key: string | null = null): void {
     const text = value.toString()
     if (target.kind === 'var') {
       this.updates[target.name] = text
@@ -427,7 +437,7 @@ class ArithEvaluator {
       this.wroteVar?.(target.name, text)
       return
     }
-    const key = this.elemKey(target.name, target.sub)
+    key ??= this.elemKey(target.name, target.sub)
     this.elemUpdates.set(`${target.name} ${key}`, text)
     this.record(target.name, key, text)
   }
@@ -451,12 +461,18 @@ class ArithEvaluator {
         return value
       }
       case 'assign': {
-        const rhsVal = this.run(node.rhs)
-        const value =
-          node.op === '='
-            ? rhsVal
-            : this.applyBinop(node.op.slice(0, -1), this.readTarget(node.target), rhsVal)
-        this.writeTarget(node.target, value)
+        const key = this.keyOf(node.target)
+        let value: bigint
+        if (node.op === '=') {
+          value = this.run(node.rhs)
+        } else {
+          // bash reads the target before it evaluates the right side,
+          // which a dynamic name makes observable: `RANDOM=42,
+          // RANDOM-=RANDOM` is the first draw minus the second.
+          const current = this.readTarget(node.target, key)
+          value = this.applyBinop(node.op.slice(0, -1), current, this.run(node.rhs))
+        }
+        this.writeTarget(node.target, value, key)
         return value
       }
       case 'ternary':
@@ -476,13 +492,15 @@ class ArithEvaluator {
         return value
       }
       case 'pre': {
-        const value = wrap(this.readTarget(node.target) + (node.op === '++' ? 1n : -1n))
-        this.writeTarget(node.target, value)
+        const key = this.keyOf(node.target)
+        const value = wrap(this.readTarget(node.target, key) + (node.op === '++' ? 1n : -1n))
+        this.writeTarget(node.target, value, key)
         return value
       }
       case 'post': {
-        const value = this.readTarget(node.target)
-        this.writeTarget(node.target, wrap(value + (node.op === '++' ? 1n : -1n)))
+        const key = this.keyOf(node.target)
+        const value = this.readTarget(node.target, key)
+        this.writeTarget(node.target, wrap(value + (node.op === '++' ? 1n : -1n)), key)
         return value
       }
     }

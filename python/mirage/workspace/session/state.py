@@ -15,7 +15,7 @@
 import errno
 import functools
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import replace
 
 from mirage.ops.types import SessionView
@@ -318,7 +318,9 @@ def strip_key_quotes(text: str) -> str:
 
 def element_index(subscript: str,
                   env: Mapping[str, str],
-                  elements: ElementOps | None = None) -> int:
+                  elements: ElementOps | None = None,
+                  read_var: Callable[[str], str | None] | None = None,
+                  wrote_var: Callable[[str, str], None] | None = None) -> int:
     """Resolve an indexed subscript in arithmetic context.
 
     bash evaluates indexed subscripts as arithmetic (``a[i+1]``); an
@@ -330,15 +332,37 @@ def element_index(subscript: str,
         env (Mapping[str, str]): environment for name resolution.
         elements (ElementOps | None): element callbacks, so a nested
             reference (``a[b[0]]``) resolves too.
+        read_var (Callable[[str], str | None] | None): dynamic reads,
+            the same ones the enclosing expression makes, so
+            ``a[RANDOM]`` draws.
+        wrote_var (Callable[[str, str], None] | None): told of the
+            subscript's assignments, as the enclosing expression is.
     """
     try:
         return int(subscript.strip())
     except ValueError:
         pass
     try:
-        return evaluate_arith(subscript, env, elements=elements).value
+        return evaluate_arith(subscript,
+                              env,
+                              elements=elements,
+                              read_var=read_var,
+                              wrote_var=wrote_var).value
     except ArithError:
         return 0
+
+
+def subscript_index(session: Session, subscript: str) -> int:
+    """An indexed subscript resolved outside an arithmetic expression:
+    ``${a[i]}``, ``a[i]=v``. ``RANDOM`` draws there as bash's does.
+
+    Args:
+        session (Session): the session the subscript reads.
+        subscript (str): the raw subscript text.
+    """
+    reader = random_reader(session)
+    return element_index(subscript, visible_env(session),
+                         session_elements(session, reader), reader.read)
 
 
 class _SessionElements:
@@ -353,10 +377,13 @@ class _SessionElements:
     imported the door would close a cycle.
     """
 
-    __slots__ = ("_session", )
+    __slots__ = ("_session", "_reader")
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self,
+                 session: Session,
+                 reader: "RandomReader | None" = None) -> None:
         self._session = session
+        self._reader = reader
 
     def resolve(self, name: str, subscript: str, env: Mapping[str,
                                                               str]) -> str:
@@ -370,7 +397,11 @@ class _SessionElements:
         """
         if name in visible_assocs(self._session):
             return strip_key_quotes(subscript)
-        idx = element_index(subscript, env, session_elements(self._session))
+        reader = self._reader
+        idx = element_index(subscript, env,
+                            session_elements(self._session, reader),
+                            reader.read if reader is not None else None,
+                            reader.wrote if reader is not None else None)
         if idx < 0:
             arr = visible_arrays(self._session).get(name)
             if arr is not None:
@@ -402,13 +433,17 @@ class _SessionElements:
         return array_get(arr, idx) if array_has(arr, idx) else None
 
 
-def session_elements(session: Session) -> ElementOps:
+def session_elements(session: Session,
+                     reader: "RandomReader | None" = None) -> ElementOps:
     """Element callbacks bound to one session, for ``evaluate_arith``.
 
     Args:
         session (Session): the session references resolve against.
+        reader (RandomReader | None): the expression's ``RANDOM``
+            reader, so a subscript draws from the same generator as the
+            expression around it; None where nothing draws.
     """
-    bound = _SessionElements(session)
+    bound = _SessionElements(session, reader)
     return ElementOps(resolve=bound.resolve, read=bound.read)
 
 
@@ -571,12 +606,13 @@ def _integer_text(session: Session, text: str) -> str:
         session (Session): the session the expression reads.
         text (str): the incoming value.
     """
+    reader = random_reader(session)
     try:
         return str(
             evaluate_arith(text,
                            visible_env(session),
-                           elements=session_elements(session),
-                           read_var=random_reader(session).read).value)
+                           elements=session_elements(session, reader),
+                           read_var=reader.read).value)
     except ArithError as exc:
         # The offending text leads, which is how every caller voices it
         # (`bash: 1+: syntax error: operand expected`), so it is spelled

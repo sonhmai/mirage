@@ -20,11 +20,10 @@ from mirage.shell.array import (array_count, array_extent, array_get,
                                 array_has, array_with)
 from mirage.shell.variable import ShellValue
 from mirage.workspace.session.session import Session
-from mirage.workspace.session.state import (deref, element_index,
-                                            ensure_var_visible, env_get,
-                                            seed_var, session_elements,
-                                            strip_key_quotes, visible_arrays,
-                                            visible_assocs, visible_env)
+from mirage.workspace.session.state import (deref, ensure_var_visible, env_get,
+                                            seed_var, strip_key_quotes,
+                                            subscript_index, visible_arrays,
+                                            visible_assocs)
 
 _ELEMENT_REF = re.compile(r"([A-Za-z_]\w*)(?:\[(.+)\])?\Z", re.DOTALL)
 
@@ -73,7 +72,7 @@ def element_is_set(session: Session, ref: str) -> bool:
         held = [scalar]
     else:
         return False
-    idx = element_index(sub, visible_env(session), session_elements(session))
+    idx = subscript_index(session, sub)
     if idx < 0:
         idx += array_extent(held)
     return array_has(held, idx)
@@ -144,8 +143,8 @@ async def assign_element(session: Session,
                 # empty: bash resolves `x[-1]` against the length-1
                 # array that produces.
                 arr = [] if scalar is None else [scalar]
-            idx = 0 if subscript is None else element_index(
-                subscript, visible_env(session), session_elements(session))
+            idx = 0 if subscript is None else subscript_index(
+                session, subscript)
             if idx < 0:
                 idx += array_extent(arr)
             if idx < 0:

@@ -21,11 +21,10 @@ from mirage.utils.hidden import var_hidden
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.shared import refusal, require_view
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.session import Session
 from mirage.workspace.session.state import (deref, env_get, session_view,
-                                            visible_arrays, visible_assocs,
-                                            visible_env)
+                                            subscript_index, visible_arrays,
+                                            visible_assocs)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -101,11 +100,11 @@ async def _unset_element(session: Session, view: SessionView, base: str,
         # the name's existence.
         if env_get(session, base) is None:
             return "ok"
-        if _array_index(subscript, visible_env(session)) != 0:
+        if subscript_index(session, subscript) != 0:
             return "notarray"
         await view.unset(base)
         return "ok"
-    idx = _array_index(subscript, visible_env(session))
+    idx = subscript_index(session, subscript)
     if idx < 0:
         idx += array_extent(arr)
         if idx < 0:

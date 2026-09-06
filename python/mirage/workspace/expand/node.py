@@ -404,7 +404,7 @@ async def expand_node_marked(
             reader = random_reader(session)
             result = evaluate_arith(expr,
                                     visible_env(session),
-                                    elements=session_elements(session),
+                                    elements=session_elements(session, reader),
                                     read_var=reader.read,
                                     wrote_var=reader.wrote)
         except ArithError as exc:

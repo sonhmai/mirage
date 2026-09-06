@@ -65,7 +65,10 @@ function dateUnit(word: string): string | null {
 }
 
 function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
+  return makeDate(
+    { year, month: month + 1, day: 0, hour: 0, minute: 0, second: 0, ms: 0 },
+    true,
+  ).getUTCDate()
 }
 
 interface DateParts {
@@ -90,9 +93,25 @@ function partsOf(dt: Date, utc: boolean): DateParts {
   }
 }
 
+/**
+ * A Date from its parts. `Date.UTC` and the `Date` constructor read a
+ * year below 100 as 1900 plus that year; the setters do not, so a year
+ * GNU and Python accept as itself (`0042-01-01`) lands where it belongs.
+ */
+function makeDate(p: DateParts, utc: boolean): Date {
+  const d = new Date(0)
+  if (utc) {
+    d.setUTCFullYear(p.year, p.month, p.day)
+    d.setUTCHours(p.hour, p.minute, p.second, p.ms)
+  } else {
+    d.setFullYear(p.year, p.month, p.day)
+    d.setHours(p.hour, p.minute, p.second, p.ms)
+  }
+  return d
+}
+
 function dateFrom(p: DateParts, utc: boolean): Date {
-  if (utc) return new Date(Date.UTC(p.year, p.month, p.day, p.hour, p.minute, p.second, p.ms))
-  return new Date(p.year, p.month, p.day, p.hour, p.minute, p.second, p.ms)
+  return makeDate(p, utc)
 }
 
 function addMonthsGnu(dt: Date, count: number, utc: boolean): Date {
@@ -160,7 +179,8 @@ function parseIsoWords(text: string, utc: boolean): Date | null {
       if (zoneHours > 23 || zoneMinutes > 59) return null
       offsetMin = (zm[1] === '-' ? -1 : 1) * (zoneHours * 60 + zoneMinutes)
     }
-    return new Date(Date.UTC(year, month, day, hour, minute, second, ms) - offsetMin * 60_000)
+    const wall = makeDate({ year, month, day, hour, minute, second, ms }, true)
+    return new Date(wall.getTime() - offsetMin * 60_000)
   }
   return dateFrom({ year, month, day, hour, minute, second, ms }, utc)
 }

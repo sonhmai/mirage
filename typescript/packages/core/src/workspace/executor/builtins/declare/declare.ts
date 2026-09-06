@@ -20,9 +20,8 @@ import { varHidden } from '../../../../utils/hidden.ts'
 import { sessionEntry, setSessionEntry } from '../../../session/session.ts'
 import type { ShellValue, VarAttr } from '../../../../shell/variable.ts'
 import { attrLetters } from '../../../../shell/variable.ts'
-import { elementIndex, sessionElements, setAttr } from '../../../session/state.ts'
+import { setAttr, subscriptIndex } from '../../../session/state.ts'
 import type { Session } from '../../../session/session.ts'
-import { visibleEnv } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { arithRefusal, isValidName, readonlyRefusal, refusal } from '../shared.ts'
@@ -124,9 +123,7 @@ export async function storeStagedArrays(
         const scalar = session.env[name]
         held = scalar === undefined ? null : [scalar]
       }
-      base = buildIndexedLiteral(held, items, append, (sub) =>
-        elementIndex(sub, visibleEnv(session), sessionElements(session)),
-      )
+      base = buildIndexedLiteral(held, items, append, (sub) => subscriptIndex(session, sub))
     }
     try {
       if (globalScope) await writeGlobal(session, view, name, base)

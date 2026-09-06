@@ -224,6 +224,12 @@ it.each([
     '17772\n26794\n',
   ],
   ['RANDOM=1; [[ $((RANDOM=42, RANDOM)) -eq 17772 ]]; echo $? $RANDOM', '0 26794\n'],
+  ['RANDOM=42; echo $((RANDOM=42, RANDOM-=RANDOM))', '-9022\n'],
+  ['RANDOM=42; echo $((RANDOM=42, RANDOM+=RANDOM)) $RANDOM', '44566 2815\n'],
+  ['RANDOM=42; a[42]=42; a[17772]=17772; echo $((a[RANDOM])) $RANDOM', '17772 26794\n'],
+  ['RANDOM=42; a[17772]=7; echo $((a[RANDOM]+=RANDOM)) ${a[17772]} $RANDOM', '26801 26801 1435\n'],
+  ['RANDOM=42; a[17772]=7; echo ${a[RANDOM]} $RANDOM', '7 26794\n'],
+  ['RANDOM=42; a[17772]=7; a[RANDOM]=9; echo ${a[17772]} $RANDOM', '9 26794\n'],
 ])('seeds RANDOM within the expression that assigns it: %s', async (command, stdout) => {
   const { ws } = await makeIntegrationWS()
   try {

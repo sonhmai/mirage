@@ -157,7 +157,7 @@ async function evalCforExpr(
       text,
       visibleEnv(session),
       0,
-      sessionElements(session),
+      sessionElements(session, reader),
       reader.read,
       reader.wrote,
     )
@@ -609,7 +609,7 @@ async function executeNodeBody(
         expr,
         visibleEnv(session),
         0,
-        sessionElements(session),
+        sessionElements(session, reader),
         reader.read,
         reader.wrote,
       )

@@ -268,11 +268,13 @@ export function elementIndex(
   subscript: string,
   env: Readonly<Record<string, string>>,
   elements: ElementOps | null = null,
+  readVar: ((name: string) => string | null) | null = null,
+  wroteVar: ((name: string, value: string) => void) | null = null,
 ): number {
   const trimmed = subscript.trim()
   if (/^-?\d+$/.test(trimmed)) return Number(trimmed)
   try {
-    return Number(evaluateArith(subscript, env, 0, elements).value)
+    return Number(evaluateArith(subscript, env, 0, elements, readVar, wroteVar).value)
   } catch (error) {
     if (error instanceof ArithError) return 0
     throw error
@@ -291,13 +293,23 @@ export function elementIndex(
  * close a cycle.
  */
 class SessionElements implements ElementOps {
-  constructor(private readonly session: Session) {}
+  constructor(
+    private readonly session: Session,
+    private readonly reader: RandomReader | null = null,
+  ) {}
 
   resolve(name: string, subscript: string, env: Readonly<Record<string, string>>): string {
     if (visibleAssocs(this.session)[name] !== undefined) {
       return stripKeyQuotes(subscript)
     }
-    let idx = elementIndex(subscript, env, sessionElements(this.session))
+    const reader = this.reader
+    let idx = elementIndex(
+      subscript,
+      env,
+      sessionElements(this.session, reader),
+      reader?.read ?? null,
+      reader?.wrote ?? null,
+    )
     if (idx < 0) {
       const arr = visibleArrays(this.session)[name]
       if (arr !== undefined) idx += arrayExtent(arr)
@@ -321,9 +333,19 @@ class SessionElements implements ElementOps {
   }
 }
 
-/** Element callbacks bound to one session, for `evaluateArith`. */
-export function sessionElements(session: Session): ElementOps {
-  return new SessionElements(session)
+/** Element callbacks bound to one session, for `evaluateArith`. `reader`
+ * is the expression's `RANDOM` reader, so a subscript draws from the
+ * same generator as the expression around it; null where nothing
+ * draws. */
+export function sessionElements(session: Session, reader: RandomReader | null = null): ElementOps {
+  return new SessionElements(session, reader)
+}
+
+/** An indexed subscript resolved outside an arithmetic expression:
+ * `${a[i]}`, `a[i]=v`. `RANDOM` draws there as bash's does. */
+export function subscriptIndex(session: Session, subscript: string): number {
+  const reader = randomReader(session)
+  return elementIndex(subscript, visibleEnv(session), sessionElements(session, reader), reader.read)
 }
 
 /**
@@ -468,13 +490,14 @@ export function randomReader(session: Session): RandomReader {
  * as in every other arithmetic context, so `n=RANDOM` and a
  * `RANDOM=RANDOM` seed both advance the generator. */
 function integerText(session: Session, text: string): string {
+  const reader = randomReader(session)
   try {
     return evaluateArith(
       text,
       visibleEnv(session),
       0,
-      sessionElements(session),
-      randomReader(session).read,
+      sessionElements(session, reader),
+      reader.read,
     ).value.toString()
   } catch (err) {
     if (err instanceof ArithError) throw new ArithError(`${text}: ${err.message}`)

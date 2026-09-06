@@ -35,12 +35,12 @@ import { assignElement } from '../session/elements.ts'
 import { ReadonlyVariableError } from '../session/errors.ts'
 import {
   ensureVarVisible,
-  sessionElements,
   visibleArrays,
   visibleAssocs,
   visibleEnv,
   deref,
   namerefTarget,
+  subscriptIndex,
 } from '../session/state.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { decodeAnsiC } from '../../shell/escapes.ts'
@@ -699,17 +699,6 @@ export async function expandArrayAt(
   return values.map((el) => valueOp(op, el, groups, env))
 }
 
-// bash evaluates subscripts in arithmetic context (${a[i+1]});
-// unresolvable expressions index element 0, mirroring bash's
-// unset-name-is-zero arithmetic rule.
-export function arrayIndex(
-  idxText: string,
-  env: Record<string, string>,
-  elements: ElementOps | null = null,
-): number {
-  return arithInt(idxText, env, elements) ?? 0
-}
-
 const SUBSCRIPT_LITERAL_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER, NT.ERROR])
 
 /**
@@ -905,7 +894,7 @@ export async function expandBraces(
       val = values.join(' ')
     } else {
       const subText = await expandSubscriptKey(p, expandChild)
-      let idx = arrayIndex(subText, env, sessionElements(session))
+      let idx = subscriptIndex(session, subText)
       if (idx < 0) idx += arrayExtent(arr)
       val = arrayGet(arr, idx)
       varInEnv = arrayHas(arr, idx)

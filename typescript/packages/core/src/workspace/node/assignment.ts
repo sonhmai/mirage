@@ -34,11 +34,10 @@ import { assignmentStatus } from '../executor/statement.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
 import { expandAndClassify } from '../expand/parts.ts'
-import { arrayIndex } from '../expand/variable.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
-import { deref, elementIndex, sessionElements, sessionView, visibleEnv } from '../session/state.ts'
+import { deref, sessionView, subscriptIndex } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -222,9 +221,7 @@ export async function executeAssignment(
     // trailing `unset arr[last]` left but skips interior ones; a
     // `[i]=v` element places at i and the next plain word continues
     // from there.
-    const base = buildIndexedLiteral(held, items, append, (sub) =>
-      elementIndex(sub, visibleEnv(session), sessionElements(session)),
-    )
+    const base = buildIndexedLiteral(held, items, append, (sub) => subscriptIndex(session, sub))
     await assignVar(view, key, base)
     const arrCode = assignmentStatus(session, subSeq)
     return [
@@ -289,7 +286,7 @@ export async function executeAssignment(
     } else {
       arr = [...existing]
     }
-    let idx = arrayIndex(subText, visibleEnv(session), sessionElements(session))
+    let idx = subscriptIndex(session, subText)
     if (idx < 0) idx += arrayExtent(arr)
     if (idx < 0) {
       // Same fatal shape as the empty subscript above.

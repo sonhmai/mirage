@@ -198,3 +198,11 @@ def test_dynamic_reader_is_asked_first_and_told_of_every_write():
     assert events == [("D", "42"), ("x", "7")]
     assert [(w.name, w.value) for w in result.writes] == [("D", "42"),
                                                           ("x", "7")]
+
+
+def test_compound_assignment_reads_the_target_before_the_right_side():
+    # bash 5.2: `RANDOM=42, RANDOM-=RANDOM` is the first draw minus the
+    # second, so a dynamic name is read for the target first.
+    draws = iter(["17772", "26794"])
+    result = evaluate_arith("D-=D", {}, read_var=lambda n: next(draws))
+    assert result.value == -9022

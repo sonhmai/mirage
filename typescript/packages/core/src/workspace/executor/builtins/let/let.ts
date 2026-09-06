@@ -56,7 +56,7 @@ export async function handleLet(
         expr,
         visibleEnv(session),
         0,
-        sessionElements(session),
+        sessionElements(session, reader),
         reader.read,
         reader.wrote,
       )

@@ -135,6 +135,40 @@
         "stdout": "17772 26794\n42 17772\n19344 26956\n27726 5703\n17773 26326\n17772 26794\n17772 26794\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "arith_compound_assignment_reads_the_target_first_and_subscripts_draw",
+      "seq": 445,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "RANDOM=42; echo $((RANDOM=42, RANDOM-=RANDOM)); RANDOM=42; echo $((RANDOM=42, RANDOM+=RANDOM)) $RANDOM; RANDOM=42; zra[42]=42; zra[17772]=17772; echo $((zra[RANDOM])) $RANDOM; RANDOM=42; zrb[17772]=7; echo $((zrb[RANDOM]+=RANDOM)) ${zrb[17772]} $RANDOM; RANDOM=42; echo ${zrb[RANDOM]} $RANDOM; RANDOM=42; zrb[RANDOM]=9; echo ${zrb[17772]} $RANDOM; unset zra zrb",
+      "expect": {
+        "exit": 0,
+        "stdout": "-9022\n44566 2815\n17772 26794\n26801 26801 1435\n26801 26794\n9 26794\n",
+        "stderr": ""
+      }
     }
   ]
 }

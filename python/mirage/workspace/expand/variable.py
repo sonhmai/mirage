@@ -38,7 +38,7 @@ from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.session.state import (nameref_target, next_random,
-                                            session_elements, visible_assocs)
+                                            subscript_index, visible_assocs)
 
 ExpandChild = Callable[[tree_sitter.Node], Awaitable[str]]
 
@@ -635,25 +635,6 @@ def _substring(val: str, groups: list[str], env: Mapping[str, str]) -> str:
     return val[offset:offset + length]
 
 
-def _array_index(idx_text: str,
-                 env: Mapping[str, str],
-                 elements: ElementOps | None = None) -> int:
-    """Resolve a numeric or arithmetic array subscript.
-
-    bash evaluates subscripts in arithmetic context (``${a[i+1]}``);
-    unresolvable expressions index element 0, mirroring bash's
-    unset-name-is-zero arithmetic rule.
-
-    Args:
-        idx_text (str): the raw subscript text.
-        env (Mapping[str, str]): session environment for name resolution.
-        elements (ElementOps | None): element callbacks, so a nested
-            reference (``a[b[0]]``) resolves too.
-    """
-    resolved = _arith_int(idx_text, env, elements)
-    return resolved if resolved is not None else 0
-
-
 _SUBSCRIPT_LITERAL_TYPES = frozenset({NT.WORD, NT.NUMBER, NT.ERROR})
 
 
@@ -791,7 +772,7 @@ async def expand_braces(node: tree_sitter.Node,
             # Expanded first (`${a[$k]}` resolves $k, `${a[i+1]}` stays
             # arithmetic), then evaluated as an index.
             sub_text = await _expand_subscript_key(p, expand_child)
-            idx = _array_index(sub_text, env, session_elements(session))
+            idx = subscript_index(session, sub_text)
             if idx < 0:
                 idx += array_extent(arr)
             val = array_get(arr, idx)

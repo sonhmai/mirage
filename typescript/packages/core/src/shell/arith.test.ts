@@ -229,3 +229,13 @@ describe('dynamic reads', () => {
     ])
   })
 })
+
+describe('compound assignment', () => {
+  it('reads the target before the right side', () => {
+    // bash 5.2: `RANDOM=42, RANDOM-=RANDOM` is the first draw minus the
+    // second, so a dynamic name is read for the target first.
+    const draws = ['17772', '26794']
+    const result = evaluateArith('D-=D', {}, 0, null, () => draws.shift() ?? null)
+    expect(result.value).toBe(-9022n)
+  })
+})

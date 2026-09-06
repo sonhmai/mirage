@@ -30,13 +30,10 @@ from mirage.types import word_text
 from mirage.workspace.executor.statement import assignment_status
 from mirage.workspace.expand import expand_and_classify, expand_node
 from mirage.workspace.expand.globs import glob_options, resolve_globs
-from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
-from mirage.workspace.session.state import (deref, element_index,
-                                            session_elements, session_view,
-                                            visible_env)
+from mirage.workspace.session.state import deref, session_view, subscript_index
 from mirage.workspace.types import ExecutionNode
 
 
@@ -235,10 +232,7 @@ async def execute_assignment(
         # a `[i]=v` element places at i and the next plain word
         # continues from there.
         base = build_indexed_literal(
-            held, items, append,
-            functools.partial(element_index,
-                              env=visible_env(session),
-                              elements=session_elements(session)))
+            held, items, append, functools.partial(subscript_index, session))
         await _assign_var(view, key, base)
         code = assignment_status(session, sub_seq)
         return None, IOResult(exit_code=code), ExecutionNode(command=text,
@@ -284,8 +278,7 @@ async def execute_assignment(
             arr = [] if scalar is None else [scalar]
         else:
             arr = list(arr)
-        idx = _array_index(sub_text, visible_env(session),
-                           session_elements(session))
+        idx = subscript_index(session, sub_text)
         if idx < 0:
             idx += array_extent(arr)
         if idx < 0:

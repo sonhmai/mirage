@@ -242,23 +242,32 @@ async def test_arithmetic_random_reads_are_lazy(command, stdout):
 # seeded and advanced by those reads, so the next `$RANDOM` continues
 # the sequence rather than restarting it. Pinned in docker.
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "command,stdout",
-    [('RANDOM=1; echo $((RANDOM=42, RANDOM)) $RANDOM', '17772 26794\n'),
-     ('RANDOM=1; echo $((RANDOM=42)) $RANDOM', '42 17772\n'),
-     ('RANDOM=1; echo $((RANDOM=42, RANDOM=7, RANDOM)) $RANDOM',
-      '19344 26956\n'),
-     ('RANDOM=1; echo $((RANDOM+=1, RANDOM)) $RANDOM', '27726 5703\n'),
-     ('RANDOM=1; echo $((RANDOM=42, RANDOM, RANDOM)) $RANDOM', '26794 1435\n'),
-     ('RANDOM=1; echo $((RANDOM=42, RANDOM=RANDOM+1)) $RANDOM',
-      '17773 26326\n'),
-     ('x=RANDOM; RANDOM=1; echo $((RANDOM=42, x)) $RANDOM', '17772 26794\n'),
-     ('RANDOM=1; (( RANDOM=42, x=RANDOM )); echo $x $RANDOM', '17772 26794\n'),
-     ('RANDOM=1; let "RANDOM=42, x=RANDOM"; echo $x $RANDOM', '17772 26794\n'),
-     ('RANDOM=1; for ((RANDOM=42, i=RANDOM; i>0; i=0)); do echo $i; done; '
-      'echo $RANDOM', '17772\n26794\n'),
-     ('RANDOM=1; [[ $((RANDOM=42, RANDOM)) -eq 17772 ]]; echo $? $RANDOM',
-      '0 26794\n')])
+@pytest.mark.parametrize("command,stdout", [
+    ('RANDOM=1; echo $((RANDOM=42, RANDOM)) $RANDOM', '17772 26794\n'),
+    ('RANDOM=1; echo $((RANDOM=42)) $RANDOM', '42 17772\n'),
+    ('RANDOM=1; echo $((RANDOM=42, RANDOM=7, RANDOM)) $RANDOM',
+     '19344 26956\n'),
+    ('RANDOM=1; echo $((RANDOM+=1, RANDOM)) $RANDOM', '27726 5703\n'),
+    ('RANDOM=1; echo $((RANDOM=42, RANDOM, RANDOM)) $RANDOM', '26794 1435\n'),
+    ('RANDOM=1; echo $((RANDOM=42, RANDOM=RANDOM+1)) $RANDOM',
+     '17773 26326\n'),
+    ('x=RANDOM; RANDOM=1; echo $((RANDOM=42, x)) $RANDOM', '17772 26794\n'),
+    ('RANDOM=1; (( RANDOM=42, x=RANDOM )); echo $x $RANDOM', '17772 26794\n'),
+    ('RANDOM=1; let "RANDOM=42, x=RANDOM"; echo $x $RANDOM', '17772 26794\n'),
+    ('RANDOM=1; for ((RANDOM=42, i=RANDOM; i>0; i=0)); do echo $i; done; '
+     'echo $RANDOM', '17772\n26794\n'),
+    ('RANDOM=1; [[ $((RANDOM=42, RANDOM)) -eq 17772 ]]; echo $? $RANDOM',
+     '0 26794\n'),
+    ('RANDOM=42; echo $((RANDOM=42, RANDOM-=RANDOM))', '-9022\n'),
+    ('RANDOM=42; echo $((RANDOM=42, RANDOM+=RANDOM)) $RANDOM', '44566 2815\n'),
+    ('RANDOM=42; a[42]=42; a[17772]=17772; echo $((a[RANDOM])) $RANDOM',
+     '17772 26794\n'),
+    ('RANDOM=42; a[17772]=7; echo $((a[RANDOM]+=RANDOM)) ${a[17772]} '
+     '$RANDOM', '26801 26801 1435\n'),
+    ('RANDOM=42; a[17772]=7; echo ${a[RANDOM]} $RANDOM', '7 26794\n'),
+    ('RANDOM=42; a[17772]=7; a[RANDOM]=9; echo ${a[17772]} $RANDOM',
+     '9 26794\n')
+])
 async def test_arithmetic_random_assignment_seeds_within_the_expression(
         command, stdout):
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)

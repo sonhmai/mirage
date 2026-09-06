@@ -15,12 +15,11 @@
 import { IOResult } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { arrayExtent, arrayUnset } from '../../../../shell/array.ts'
-import { arrayIndex } from '../../../expand/variable.ts'
 import { varHidden } from '../../../../utils/hidden.ts'
 import { sessionEntry } from '../../../session/session.ts'
 import { deref } from '../../../session/state.ts'
 import type { Session } from '../../../session/session.ts'
-import { envGet, visibleArrays, visibleAssocs, visibleEnv } from '../../../session/state.ts'
+import { envGet, subscriptIndex, visibleArrays, visibleAssocs } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { refusal, requireView } from '../shared.ts'
@@ -90,11 +89,11 @@ async function unsetElement(
     // branch's silent no-op instead of a denial that would leak the
     // name's existence.
     if (envGet(session, base) === null) return 'ok'
-    if (arrayIndex(subscript, visibleEnv(session)) !== 0) return 'notarray'
+    if (subscriptIndex(session, subscript) !== 0) return 'notarray'
     await view.unset(base)
     return 'ok'
   }
-  let idx = arrayIndex(subscript, visibleEnv(session))
+  let idx = subscriptIndex(session, subscript)
   if (idx < 0) {
     idx += arrayExtent(arr)
     if (idx < 0) return 'subscript'

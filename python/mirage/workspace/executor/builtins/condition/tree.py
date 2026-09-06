@@ -90,15 +90,16 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
         # resolve, expressions compute, bare unset words are 0. The
         # visible env, so a hidden name reads as unset here too.
         try:
-            elements = session_elements(ctx.session)
+            reader = random_reader(ctx.session)
+            elements = session_elements(ctx.session, reader)
             li = evaluate_arith(node.left,
                                 visible_env(ctx.session),
                                 elements=elements,
-                                read_var=random_reader(ctx.session).read).value
+                                read_var=reader.read).value
             ri = evaluate_arith(node.right,
                                 visible_env(ctx.session),
                                 elements=elements,
-                                read_var=random_reader(ctx.session).read).value
+                                read_var=reader.read).value
         except ArithError:
             raise CondError("mirage: syntax error in conditional expression")
         return compare(li, ri)

@@ -133,3 +133,14 @@ describe('parseDateExpr', () => {
     expect(parseDateExpr('@abc', true, NOW)).toBeNull()
   })
 })
+
+describe('parseDateExpr years below 100', () => {
+  it('keeps a year below 100 as itself, as GNU and Python do', () => {
+    // `Date.UTC(42, ...)` is 1942; GNU `date -d 0042-01-01` is year 42.
+    expect(parseDateExpr('0042-01-01', true)?.getUTCFullYear()).toBe(42)
+    expect(parseDateExpr('0042-01-01T00:00:00Z', true)?.getUTCFullYear()).toBe(42)
+    expect(parseDateExpr('0042-01-01T00:00+01:00', true)?.getUTCFullYear()).toBe(41)
+    expect(parseDateExpr('0099-12-31', false)?.getFullYear()).toBe(99)
+    expect(parseDateExpr('0042-01-01', true)?.getTime()).toBe(-60841756800 * 1000)
+  })
+})

@@ -83,21 +83,10 @@ async function evalCondBinary(
     let li: bigint
     let ri: bigint
     try {
-      const elements = sessionElements(ctx.session)
-      li = evaluateArith(
-        node.left,
-        visibleEnv(ctx.session),
-        0,
-        elements,
-        randomReader(ctx.session).read,
-      ).value
-      ri = evaluateArith(
-        node.right,
-        visibleEnv(ctx.session),
-        0,
-        elements,
-        randomReader(ctx.session).read,
-      ).value
+      const reader = randomReader(ctx.session)
+      const elements = sessionElements(ctx.session, reader)
+      li = evaluateArith(node.left, visibleEnv(ctx.session), 0, elements, reader.read).value
+      ri = evaluateArith(node.right, visibleEnv(ctx.session), 0, elements, reader.read).value
     } catch (exc) {
       if (!(exc instanceof ArithError)) throw exc
       throw new CondError('mirage: syntax error in conditional expression')

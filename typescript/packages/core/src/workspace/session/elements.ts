@@ -25,15 +25,13 @@ import {
 import type { ShellValue } from '../../shell/variable.ts'
 import type { Session } from './session.ts'
 import {
-  elementIndex,
+  subscriptIndex,
   ensureVarVisible,
   envGet,
   seedVar,
-  sessionElements,
   stripKeyQuotes,
   visibleArrays,
   visibleAssocs,
-  visibleEnv,
   deref,
 } from './state.ts'
 
@@ -74,7 +72,7 @@ export function elementIsSet(session: Session, ref: string): boolean {
   if (arr !== undefined) held = arr
   else if (scalar !== null) held = [scalar]
   else return false
-  let idx = elementIndex(sub, visibleEnv(session), sessionElements(session))
+  let idx = subscriptIndex(session, sub)
   if (idx < 0) idx += arrayExtent(held)
   return arrayHas(held, idx)
 }
@@ -129,10 +127,7 @@ export async function assignElement(
         // resolves `x[-1]` against the length-1 array that produces.
         arr = scalar === undefined ? [] : [scalar]
       }
-      let idx =
-        subscript === null
-          ? 0
-          : elementIndex(subscript, visibleEnv(session), sessionElements(session))
+      let idx = subscript === null ? 0 : subscriptIndex(session, subscript)
       if (idx < 0) idx += arrayExtent(arr)
       if (idx < 0) return 'subscript'
       const base = append ? arrayGet(arr, idx) : ''

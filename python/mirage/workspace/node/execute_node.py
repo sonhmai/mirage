@@ -117,7 +117,7 @@ async def _eval_cfor_expr(
         # (ensure_var_visible), caught by the loop beside ReadonlyError.
         result = evaluate_arith(text,
                                 visible_env(session),
-                                elements=session_elements(session),
+                                elements=session_elements(session, reader),
                                 read_var=reader.read,
                                 wrote_var=reader.wrote)
     except ArithError as exc:
@@ -532,7 +532,7 @@ async def _execute_node(
             # command's own voice like the readonly refusal.
             arith = evaluate_arith(expr,
                                    visible_env(session),
-                                   elements=session_elements(session),
+                                   elements=session_elements(session, reader),
                                    read_var=reader.read,
                                    wrote_var=reader.wrote)
         except ArithError as exc:

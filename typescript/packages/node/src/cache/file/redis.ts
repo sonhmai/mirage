@@ -50,6 +50,8 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
   private readonly dataPrefix: string
   private readonly metaPrefix: string
   private maxDrainBytesValue: number | null = null
+  // Local invalidation also discards fills paused in cooperative hashing.
+  private invalidationVersion = 0
   readonly drainTasks = new Map<string, Promise<void>>()
 
   constructor(options: RedisFileCacheOptions = {}) {
@@ -112,8 +114,10 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
     data: Uint8Array,
     options: { fingerprint?: string | null; ttl?: number | null } = {},
   ): Promise<void> {
+    const version = this.invalidationVersion
     const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
     const c = await this.cacheClient()
+    if (version !== this.invalidationVersion) return
     const dk = this.dataKey(key)
     const mk = this.metaKey(key)
     const pipe = c.multi()
@@ -131,8 +135,10 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
     data: Uint8Array,
     options: { fingerprint?: string | null; ttl?: number | null } = {},
   ): Promise<boolean> {
+    const version = this.invalidationVersion
     const c = await this.cacheClient()
     const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
+    if (version !== this.invalidationVersion) return false
     // A background drain is insert-only: an older drain finishing late must
     // not overwrite a newer cache fill. add.lua keeps the check, bytes,
     // fingerprint and TTL in one execution so writers cannot interleave.
@@ -148,6 +154,7 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
   }
 
   async remove(key: string): Promise<void> {
+    this.invalidationVersion++
     // Promises cannot be cancelled: dropping the map entry makes the
     // pending backgroundDrain skip its cache fill, mirroring the RAM
     // store's task cancel.
@@ -173,6 +180,7 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
   }
 
   async evictPrefix(prefix: string): Promise<void> {
+    this.invalidationVersion++
     for (const key of [...this.drainTasks.keys()]) {
       if (key.startsWith(prefix)) this.drainTasks.delete(key)
     }
@@ -197,6 +205,7 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
   }
 
   async clear(): Promise<void> {
+    this.invalidationVersion++
     this.drainTasks.clear()
     const c = await this.cacheClient()
     for (const pattern of [`${this.dataPrefix}*`, `${this.metaPrefix}*`]) {

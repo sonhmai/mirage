@@ -142,6 +142,62 @@ describe('find actions', () => {
     }
   })
 
+  it('renders the stat find already holds for -ls', async () => {
+    // GNU findutils 4.9: a start point is statted when the walk opens and
+    // any other row only for a test that needs the inode, so `find d/f
+    // -delete -ls` and `find d -name g -size -1k -delete -ls` list the row
+    // they removed (exit 0) while `-type f -delete -ls` reports it gone.
+    const ws = await shellWs()
+    try {
+      const r = await ws.execute(
+        'mkdir -p /data/dl; touch /data/dl/f /data/dl/g; cd /data; find dl/f -delete -ls; echo rc=$?; find dl -name g -size -1k -delete -ls; echo rc=$?; find dl -type d -delete -ls; echo rc=$?; test -e dl; echo e=$?',
+        { sessionId: 's' },
+      )
+      const lines = r.stdoutText.split('\n').filter((l) => l !== '')
+      const rows = lines.filter((l) => / dl(\/[fg])?$/.test(l))
+      expect(rows.map((row) => row.slice(row.lastIndexOf(' ') + 1))).toEqual(['dl/f', 'dl/g', 'dl'])
+      expect(
+        rows[0]
+          ?.split(/\s+/)
+          .filter((w) => w !== '')[2]
+          ?.startsWith('-'),
+      ).toBe(true)
+      expect(
+        rows[2]
+          ?.split(/\s+/)
+          .filter((w) => w !== '')[2]
+          ?.startsWith('d'),
+      ).toBe(true)
+      expect(lines.filter((l) => l.startsWith('rc=') || l.startsWith('e='))).toEqual([
+        'rc=0',
+        'rc=0',
+        'rc=0',
+        'e=1',
+      ])
+      expect(r.stderrText).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('runs the -exec head as a program', async () => {
+    // execvp answers `printf` with coreutils printf, which has no -v: the
+    // word is the format (GNU adds a warning about the excess arguments,
+    // which mirage's printf does not report). A nested shell the line
+    // starts is a shell again, so its printf assigns.
+    const ws = await shellWs()
+    try {
+      const r = await ws.execute(
+        'mkdir -p /data/fp; touch /data/fp/f; cd /data/fp; find . -type f -exec printf -v x hi \\; ; echo "[$x]"; find . -type f -exec sh -c \'printf -v y hi; echo "[$y]"\' \\; ; printf -v z hi; echo "[$z]"',
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe('-v[]\n[hi]\n[hi]\n')
+      expect(r.stderrText).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('reads a slow stdin incrementally for a child', async () => {
     // A source that never ends must still feed `head -c 1` its byte: the
     // cursor pulls a chunk at a time rather than waiting for EOF.

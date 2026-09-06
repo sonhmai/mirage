@@ -22,13 +22,14 @@ from mirage.commands.builtin.utils.formatting import format_find_ls
 from mirage.commands.builtin.utils.identity import Identity
 from mirage.commands.config import ExecContext
 from mirage.context import (get_current_session, reset_op_policies,
+                            reset_program_invocation, set_program_invocation,
                             suspend_op_policies)
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, StatPath
 from mirage.policy import pre_ops_gate
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import fs_strerror
 from mirage.utils.path import resolve_path
 from mirage.utils.stream import ensure_stream
@@ -205,9 +206,19 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
         errors.append(f"find: '{head}': No such file or directory\n".encode())
         return False
     # A function or alias of the head's name is invisible to execvp, so
-    # the line runs the program past it, as `command` does.
+    # the line runs the program past it, as `command` does. The run is
+    # marked a program run for the session, so a builtin that doubles
+    # as a program answers as the program (`printf -v` is a format).
     line = ("command " if shadowed else "") + shlex.join(words)
-    io = await execute_fn(f"( {line} )", session_id=session_id, stdin=stdin)
+    sess = get_current_session()
+    token = set_program_invocation(sess) if sess is not None else None
+    try:
+        io = await execute_fn(f"( {line} )",
+                              session_id=session_id,
+                              stdin=stdin)
+    finally:
+        if token is not None:
+            reset_program_invocation(token)
     if io.stdout is not None:
         data = await materialize(io.stdout)
         if data:
@@ -310,20 +321,19 @@ async def _delete(ps: PathSpec, registry: MountRegistry, cwd: str,
     return True
 
 
-async def _ls_row(ps: PathSpec, ns: NamespaceView | None,
-                  stat_path: StatPath | None, identity: Identity | None,
-                  errors: list[bytes]) -> bytes | None:
-    """Render one accepted row in ``find -ls``'s own layout.
+async def _row_stat(ps: PathSpec, ns: NamespaceView | None,
+                    stat_path: StatPath | None,
+                    errors: list[bytes]) -> FileStat | None:
+    """The facts ``find -ls`` renders one accepted row from.
 
-    The row's facts come from the two doors the command boundary has: a
-    symlink is namespace state no backend can see, so the link view
-    answers for one (lstat, as GNU's ``-ls`` reports the link itself),
-    and every other row is statted through the op dispatcher, which
-    answers for a mount point and a namespace-only ancestor as well as
-    a backend entry. A row that cannot be statted (an earlier
-    ``-delete`` removed it, or the backend refuses it) is GNU's
-    ``find: 'path': <reason>``; None with a line appended is the
-    caller's signal to end the row's chain.
+    They come from the two doors the command boundary has: a symlink is
+    namespace state no backend can see, so the link view answers for
+    one (lstat, as GNU's ``-ls`` reports the link itself), and every
+    other row is statted through the op dispatcher, which answers for a
+    mount point and a namespace-only ancestor as well as a backend
+    entry. A row that cannot be statted (the backend refuses it, or it
+    is gone) is GNU's ``find: 'path': <reason>``; None with a line
+    appended is the caller's signal to end the row's chain.
 
     Args:
         ps (PathSpec): the selected row, with its display spelling.
@@ -331,8 +341,6 @@ async def _ls_row(ps: PathSpec, ns: NamespaceView | None,
             row renders as the link.
         stat_path (StatPath | None): dispatcher stat; None outside a
             workspace, where no row can be rendered.
-        identity (Identity | None): who the session is, for the owner
-            and group columns.
         errors (list[bytes]): where a failure's line is appended.
     """
     path = ps.raw_path or ps.virtual
@@ -354,8 +362,36 @@ async def _ls_row(ps: PathSpec, ns: NamespaceView | None,
         errors.append(
             f"find: '{path}': {fs_strerror(FileNotFoundError())}\n".encode())
         return None
+    return st
+
+
+def _ls_row(ps: PathSpec, st: FileStat, identity: Identity | None) -> bytes:
+    """Render one accepted row in ``find -ls``'s own layout.
+
+    Args:
+        ps (PathSpec): the selected row, with its display spelling.
+        st (FileStat): the row's facts.
+        identity (Identity | None): who the session is, for the owner
+            and group columns.
+    """
+    path = ps.raw_path or ps.virtual
     row = format_find_ls(st.model_copy(update={"name": path}), identity)
     return (row + "\n").encode()
+
+
+def _tests_stat(expr: FindExpr) -> bool:
+    """Whether the expression's tests made find stat every row it kept.
+
+    GNU reads ``-name``, ``-path`` and ``-type`` off the directory
+    entry and stats only for a test that needs the inode: a size or
+    time window, ``-newer`` and ``-empty``.
+
+    Args:
+        expr (FindExpr): the parsed expression.
+    """
+    return (expr.min_size is not None or expr.max_size is not None
+            or expr.mtime_min is not None or expr.mtime_max is not None
+            or expr.uses_empty or bool(expr.newer))
 
 
 def _has_actions(expr: FindExpr) -> bool:
@@ -421,6 +457,7 @@ async def _apply_find_actions(
     identity: Identity | None = None,
     namespace: Namespace | None = None,
     stdin: ByteSource | None = None,
+    starts: list[PathSpec] | None = None,
 ) -> tuple[ByteSource | None, bytes, int]:
     """Apply find's actions (-exec / -delete / -print0 / -ls) to its rows.
 
@@ -441,7 +478,14 @@ async def _apply_find_actions(
     An action other than ``-print`` suppresses the implicit print.
     ``-delete`` runs at its position, so a later ``-exec`` sees the row
     gone, and a row it cannot delete ends the chain with GNU's line and
-    find's exit 1. It also turns on ``-depth``, which orders every
+    find's exit 1. ``-ls`` renders the stat find already holds, as GNU's
+    does: GNU stats a start point when it opens the walk and any other
+    row only when a test needs it (``-size``, ``-mtime``, ``-newer``,
+    ``-empty``; ``-name`` and ``-type`` read the directory entry), so
+    ``find d/f -delete -ls`` and ``find d -size -1k -delete -ls`` list
+    the row they removed and exit 0, while ``find d -type f -delete
+    -ls`` reports it gone and exits 1. ``starts`` names the operands
+    that rule reads. It also turns on ``-depth``, which orders every
     directory after its contents, the only order a tree can be removed
     in; ``-depth`` alone reorders the implicit print the same way, and
     both order one start point's walk at a time: GNU walks each start
@@ -479,6 +523,9 @@ async def _apply_find_actions(
             children share as one cursor, as GNU's do (a pipe feeds one
             reader, and a child that never reads leaves it for the next);
             None keeps the ambient stdin for every child.
+        starts (list[PathSpec] | None): the start operands, whose rows
+            GNU statted when it opened the walk; None or empty means the
+            working directory.
     """
     once = _SharedStdin(stdin) if stdin is not None else None
     expr = parse_find_expression(list(texts))
@@ -501,8 +548,16 @@ async def _apply_find_actions(
     out: list[bytes] = []
     batches: dict[int, list[str]] = {}
     exit_code = 0
+    lists = any(isinstance(a, RowAction) and a.kind == "ls" for a in actions)
+    statted = _tests_stat(expr)
+    start_virtuals = {s.virtual for s in starts} if starts else {cwd}
     for match in matches:
         path = match.raw_path or match.virtual
+        # The stat -ls renders is the one find already holds, taken
+        # before any action of the chain can remove the row; a row it
+        # never statted is looked up by the -ls that reaches it.
+        held = (await _row_stat(match, ns, stat_path, []) if lists and
+                (statted or match.virtual in start_virtuals) else None)
         for position, action in enumerate(actions):
             if isinstance(action, ExecAction):
                 if action.batch:
@@ -514,15 +569,14 @@ async def _apply_find_actions(
                                        once):
                     break
             elif action.kind == "ls":
-                before = len(errors)
-                row = await _ls_row(match, ns, stat_path, identity, errors)
-                if row is not None:
-                    out.append(row)
-                elif len(errors) > before:
+                st = held if held is not None else await _row_stat(
+                    match, ns, stat_path, errors)
+                if st is None:
                     # A row -ls cannot list is false, so the chain ends
                     # for it, as GNU's does.
                     exit_code = 1
                     break
+                out.append(_ls_row(match, st, identity))
             elif action.kind == "delete":
                 # A structural row is skipped, not refused, the way Unix
                 # leaves a mount point in place.

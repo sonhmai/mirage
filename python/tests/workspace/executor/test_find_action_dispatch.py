@@ -827,3 +827,51 @@ async def test_exec_child_reads_a_slow_stdin_incrementally():
         if len(got) == 2:
             break
     assert got == [b"a", b"b"]
+
+
+@pytest.mark.asyncio
+async def test_ls_renders_the_stat_find_already_holds():
+    # GNU findutils 4.9: a start point is statted when the walk opens and
+    # any other row only for a test that needs the inode, so `find d/f
+    # -delete -ls` and `find d -name g -size -1k -delete -ls` list the
+    # row they removed (exit 0) while `-type f -delete -ls` (pinned in
+    # test_a_row_ls_cannot_list_ends_its_chain) reports it gone.
+    ws = _ws()
+    try:
+        io = await ws.execute(
+            "mkdir -p /data/dl; touch /data/dl/f /data/dl/g; cd /data; "
+            "find dl/f -delete -ls; echo rc=$?; "
+            "find dl -name g -size -1k -delete -ls; echo rc=$?; "
+            "find dl -type d -delete -ls; echo rc=$?; test -e dl; echo e=$?")
+        lines = (await io.stdout_str()).splitlines()
+        rows = [
+            line for line in lines if line.endswith((" dl/f", " dl/g", " dl"))
+        ]
+        assert [row.rsplit(" ", 1)[1]
+                for row in rows] == ["dl/f", "dl/g", "dl"]
+        assert rows[0].split()[2].startswith("-")
+        assert rows[2].split()[2].startswith("d")
+        assert [line for line in lines if line.startswith(("rc=", "e="))
+                ] == ["rc=0", "rc=0", "rc=0", "e=1"]
+        assert await io.stderr_str() == ""
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_exec_runs_the_head_as_a_program():
+    # execvp answers `printf` with coreutils printf, which has no -v: the
+    # word is the format (GNU adds a warning about the excess arguments,
+    # which mirage's printf does not report). A nested shell the line
+    # starts is a shell again, so its printf assigns.
+    ws = _ws()
+    try:
+        io = await ws.execute(
+            "mkdir -p /data/fp; touch /data/fp/f; cd /data/fp; "
+            "find . -type f -exec printf -v x hi \\; ; echo \"[$x]\"; "
+            "find . -type f -exec sh -c 'printf -v y hi; echo \"[$y]\"' \\; ; "
+            "printf -v z hi; echo \"[$z]\"")
+        assert await io.stdout_str() == "-v[]\n[hi]\n[hi]\n"
+        assert await io.stderr_str() == ""
+    finally:
+        await ws.close()

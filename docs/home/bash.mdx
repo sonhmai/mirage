@@ -218,8 +218,13 @@ runs there (`echo`, `printf`, `true`, a registered CLI), so a shell function
 or a shell-only builtin such as `cd` or `export` is refused with
 `find: 'name': No such file or directory`, and a function or alias that
 shadows a program name is bypassed, the program running as it would under
-`command`. Changes to variables, working directory, arguments, and shell
-options stay in the child.
+`command`, and a builtin that doubles as a program answers as the program
+(`printf -v` is a format string there, as under coreutils printf). Changes
+to variables, working directory, arguments, and shell options stay in the
+child. `-ls` renders the stat find already holds, as GNU's does: a start
+point, or a row a `-size`, `-mtime`, `-newer` or `-empty` test statted,
+still lists after `-delete`, while a row only `-name` or `-type` selected is
+reported gone.
 Predicates must precede actions: `find d -name '*.txt' -exec echo {} \;`
 works, while a test following `-exec`, `-print`, `-delete`, or another action
 is refused because backend filtering cannot preserve that evaluation order.

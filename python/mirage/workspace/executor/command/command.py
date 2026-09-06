@@ -77,17 +77,19 @@ JOB_HANDLERS = {
 }
 
 
-async def _finish_find(stdout: ByteSource | None,
-                       io: IOResult,
-                       texts: list[str],
-                       registry: MountRegistry,
-                       session: Session,
-                       execute_fn: ExecuteLine | None,
-                       ns: NamespaceView | None,
-                       stat_path: StatPath | None,
-                       dispatch: DispatchFn,
-                       namespace: Namespace | None = None,
-                       stdin: ByteSource | None = None) -> ByteSource | None:
+async def _finish_find(
+        stdout: ByteSource | None,
+        io: IOResult,
+        texts: list[str],
+        registry: MountRegistry,
+        session: Session,
+        execute_fn: ExecuteLine | None,
+        ns: NamespaceView | None,
+        stat_path: StatPath | None,
+        dispatch: DispatchFn,
+        namespace: Namespace | None = None,
+        stdin: ByteSource | None = None,
+        starts: list[PathSpec] | None = None) -> ByteSource | None:
     """Apply find's actions once, at the command boundary.
 
     Every runner below this point (one mount, a fan-out over nested
@@ -112,6 +114,8 @@ async def _finish_find(stdout: ByteSource | None,
             meta is dropped from.
         stdin (ByteSource | None): find's own input, for its ``-exec``
             children.
+        starts (list[PathSpec] | None): the start operands, for the
+            stat ``-ls`` renders after a ``-delete``.
     """
     stdout, action_err, action_exit = await _apply_find_actions(
         stdout,
@@ -126,7 +130,8 @@ async def _finish_find(stdout: ByteSource | None,
         dispatch=dispatch,
         identity=identity_from(ns, session_view(session, registry.policies)),
         namespace=namespace,
-        stdin=stdin)
+        stdin=stdin,
+        starts=starts)
     if action_err:
         existing = await materialize(io.stderr) if io.stderr else b""
         io.stderr = existing + action_err
@@ -349,7 +354,8 @@ async def handle_command(
                                         cross_stat,
                                         dispatch,
                                         namespace=namespace,
-                                        stdin=stdin)
+                                        stdin=stdin,
+                                        starts=cross_scopes)
         if cross_parsed.warnings:
             warn = "".join(f"{cmd_name}: {w}\n"
                            for w in cross_parsed.warnings).encode()
@@ -462,7 +468,8 @@ async def handle_command(
                                         single_stat,
                                         dispatch,
                                         namespace=namespace,
-                                        stdin=stdin)
+                                        stdin=stdin,
+                                        starts=paths)
             node.exit_code = io.exit_code
             node.stderr = await materialize(io.stderr) if io.stderr else b""
         if warn_bytes:
@@ -493,7 +500,8 @@ async def handle_command(
                                     single_stat,
                                     dispatch,
                                     namespace=namespace,
-                                    stdin=stdin)
+                                    stdin=stdin,
+                                    starts=paths)
 
     if warn_bytes:
         existing = await materialize(io.stderr) if io.stderr else b""

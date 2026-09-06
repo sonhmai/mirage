@@ -153,6 +153,21 @@ async def test_self_dups_change_nothing():
         ('cat </data/a.txt 1<&0 0<&1 1>/data/out; cat /data/out', 'a', '', 0),
         # bash 5.2: stdout is open for writing only, so the read fails.
         ('cat </data/a.txt 0<&1', '', 'cat: -: Bad file descriptor\n', 1),
+        # A descriptor `exec` closed for the shell refuses a dup from it
+        # too; a redirect that opens it or a rebinding takes it back.
+        ('exec 1>&-; touch /data/marker 2>&1; echo rc=$? >&2; '
+         'test -e /data/marker; echo e=$? >&2', '',
+         '1: Bad file descriptor\nrc=1\ne=1\n', 0),
+        ('exec 0<&-; touch /data/marker 1<&0; echo rc=$? >&2; '
+         'test -e /data/marker; echo e=$? >&2', '',
+         '0: Bad file descriptor\nrc=1\ne=1\n', 0),
+        ('exec 1>&-; true 1>&1; echo rc=$? >&2', '', 'rc=0\n', 0),
+        ('exec 1>&-; touch /data/marker >/data/f 2>&1; echo rc=$? >&2; '
+         'test -e /data/marker; echo e=$? >&2', '', 'rc=0\ne=0\n', 0),
+        ('exec 1>&-; exec 1>&2; touch /data/marker 2>&1; echo rc=$?; '
+         'test -e /data/marker; echo e=$?', '', 'rc=0\ne=0\n', 0),
+        ('exec 2>&-; touch /data/marker 1>&2; test -e /data/marker; '
+         'echo e=$?', 'e=1\n', '', 0),
     ])
 async def test_descriptor_zero_duplication_tracks_direction_and_order(
         line, out, err, code):

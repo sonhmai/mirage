@@ -139,11 +139,13 @@ export async function handleRedirect(
       inputs[fd] = await readOpenSource(dispatch, binding)
     }
   }
-  // A descriptor an earlier redirect closed is not merely write-only: a
-  // later dup from it is bash's `0: Bad file descriptor`, and the command
-  // never runs (`touch marker 0<&- 1<&0` creates nothing). A dup of a
-  // closed descriptor onto itself stays the no-op it is.
-  const closed = new Set<number>()
+  // A descriptor an earlier redirect closed, or an `exec` closed for the
+  // shell, is not merely write-only: a later dup from it is bash's `0: Bad
+  // file descriptor`, and the command never runs (`touch marker 0<&- 1<&0`
+  // and `exec 1>&-; touch marker 2>&1` create nothing). A dup of a closed
+  // descriptor onto itself stays the no-op it is, and a redirect that
+  // opens or dups onto the descriptor takes it out of the set again.
+  const closed = persistentlyClosed(session)
 
   for (const r of redirects) {
     if (typeof r.target === 'number') {
@@ -517,6 +519,16 @@ async function applyPendingOpens(dispatch: DispatchFn, pending: PathSpec[]): Pro
       if (!isFsError(err)) throw err
     }
   }
+}
+
+/** The descriptors an `exec` closed for the shell, which a line's dup
+ * from refuses before the command runs. */
+function persistentlyClosed(session: Session): Set<number> {
+  const closed = new Set<number>()
+  if (session.execStdinIdentity === EXEC_CLOSED) closed.add(FD_STDIN)
+  if (session.execStdout === EXEC_CLOSED) closed.add(FD_STDOUT)
+  if (session.execStderr === EXEC_CLOSED) closed.add(FD_STDERR)
+  return closed
 }
 
 /**

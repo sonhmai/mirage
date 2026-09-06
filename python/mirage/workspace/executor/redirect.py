@@ -70,6 +70,23 @@ class _Unreadable(Enum):
     TOKEN = auto()
 
 
+def _persistently_closed(session: Session) -> set[int]:
+    """The descriptors an ``exec`` closed for the shell, which a line's
+    dup from refuses before the command runs.
+
+    Args:
+        session (Session): shell session state.
+    """
+    closed: set[int] = set()
+    if session.exec_stdin_identity == CLOSED:
+        closed.add(FD_STDIN)
+    if session.exec_stdout == CLOSED:
+        closed.add(FD_STDOUT)
+    if session.exec_stderr == CLOSED:
+        closed.add(FD_STDERR)
+    return closed
+
+
 def _stdin_dest(session: Session) -> _Fd | str:
     """Where a write through fd 0 lands, read off the shell's bindings.
 
@@ -174,11 +191,14 @@ async def handle_redirect(
                         (FD_STDERR, session.exec_stderr)):
         if binding is not None and binding.startswith(OPEN_FOR_READING):
             inputs[fd] = await read_open_source(dispatch, binding)
-    # A descriptor an earlier redirect closed is not merely write-only:
-    # a later dup from it is bash's `0: Bad file descriptor`, and the
-    # command never runs (`touch marker 0<&- 1<&0` creates nothing). A
-    # dup of a closed descriptor onto itself stays the no-op it is.
-    closed: set[int] = set()
+    # A descriptor an earlier redirect closed, or an `exec` closed for
+    # the shell, is not merely write-only: a later dup from it is bash's
+    # `0: Bad file descriptor`, and the command never runs (`touch
+    # marker 0<&- 1<&0` and `exec 1>&-; touch marker 2>&1` create
+    # nothing). A dup of a closed descriptor onto itself stays the no-op
+    # it is, and a redirect that opens or dups onto the descriptor
+    # takes it out of the set again.
+    closed = _persistently_closed(session)
     for r in redirects:
         if isinstance(r.target, int):
             if r.target == FD_CLOSE:

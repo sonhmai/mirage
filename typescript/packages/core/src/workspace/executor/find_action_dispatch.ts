@@ -20,7 +20,11 @@ import type { Identity } from '../../commands/builtin/utils/identity.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { type ByteSource, materialize } from '../../io/types.ts'
-import { getCurrentSession, runWithSuspendedOpPolicies } from '../../context/session_context.ts'
+import {
+  getCurrentSession,
+  runAsProgram,
+  runWithSuspendedOpPolicies,
+} from '../../context/session_context.ts'
 import { preOpsGate } from '../../policy/policies.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -63,6 +67,9 @@ export interface FindActionDoors {
   // GNU's do (a pipe feeds one reader, and a child that never reads leaves
   // it for the next).
   stdin?: ByteSource | null
+  /** The start operands, whose rows GNU statted when it opened the
+   * walk; empty means the working directory. */
+  readonly starts?: readonly PathSpec[]
 }
 
 const enc = new TextEncoder()
@@ -220,9 +227,13 @@ async function runExec(
     return false
   }
   // A function or alias of the head's name is invisible to execvp, so the
-  // line runs the program past it, as `command` does.
+  // line runs the program past it, as `command` does. The run is marked a
+  // program run for the session, so a builtin that doubles as a program
+  // answers as the program (`printf -v` is a format).
   const line = (shadowed ? 'command ' : '') + shellJoin(words)
-  const io = await executeFn(`( ${line} )`, { sessionId, stdin })
+  const sess = getCurrentSession()
+  const run = () => executeFn(`( ${line} )`, { sessionId, stdin })
+  const io = sess === null ? await run() : await runAsProgram(sess, run)
   if (io.stdout !== null) {
     const data = await materialize(io.stdout)
     if (data.byteLength > 0) out.push(data)
@@ -339,13 +350,12 @@ function refusalWhy(err: unknown): string {
  * null with a line appended is the caller's signal to end the row's
  * chain.
  */
-async function lsRow(
+async function rowStat(
   ps: PathSpec,
   ns: NamespaceView | null,
   statPath: StatPath | null,
-  identity: Identity | null,
   errors: Uint8Array[],
-): Promise<Uint8Array | null> {
+): Promise<FileStat | null> {
   const path = ps.rawPath || ps.virtual
   if (statPath === null) {
     errors.push(enc.encode(`find: '${path}': no stat door\n`))
@@ -363,6 +373,12 @@ async function lsRow(
     errors.push(enc.encode(`find: '${path}': ${gnuStrerror('ENOENT') ?? 'ENOENT'}\n`))
     return null
   }
+  return st
+}
+
+/** Render one accepted row in `find -ls`'s own layout. */
+function lsRow(ps: PathSpec, st: FileStat, identity: Identity | null): Uint8Array {
+  const path = ps.rawPath || ps.virtual
   return enc.encode(`${formatFindLs(st.with({ name: path }), identity)}\n`)
 }
 
@@ -402,6 +418,23 @@ function structural(path: PathSpec, registry: MountRegistry): boolean {
 /** Whether the actions differ from the implicit print: one explicit
  * `-print` is exactly what the backend already rendered, two of them
  * print every row twice, as GNU does. */
+/**
+ * Whether the expression's tests made find stat every row it kept. GNU
+ * reads `-name`, `-path` and `-type` off the directory entry and stats
+ * only for a test that needs the inode: a size or time window, `-newer`
+ * and `-empty`.
+ */
+function testsStat(expr: FindExpr): boolean {
+  return (
+    expr.minSize !== null ||
+    expr.maxSize !== null ||
+    expr.mtimeMin !== null ||
+    expr.mtimeMax !== null ||
+    expr.usesEmpty ||
+    expr.newer.length > 0
+  )
+}
+
 function hasActions(expr: FindExpr): boolean {
   return expr.actions.length > 1 || expr.actions.some((a) => a.kind !== 'print')
 }
@@ -457,6 +490,7 @@ export async function applyFindActions(
   const statPath = doors.statPath ?? null
   const dispatch = doors.dispatch ?? null
   const identity = doors.identity ?? null
+  const starts = doors.starts ?? []
   const namespace = doors.namespace ?? null
   const once =
     doors.stdin === undefined || doors.stdin === null ? null : new SharedStdin(doors.stdin)
@@ -474,8 +508,18 @@ export async function applyFindActions(
   const out: Uint8Array[] = []
   const batches = new Map<number, string[]>()
   let exitCode = 0
+  const lists = actions.some((a) => a.kind === 'ls')
+  const statted = testsStat(expr)
+  const startVirtuals = new Set(starts.length > 0 ? starts.map((s) => s.virtual) : [cwd])
   for (const match of matches) {
     const path = match.rawPath || match.virtual
+    // The stat -ls renders is the one find already holds, taken before
+    // any action of the chain can remove the row; a row it never statted
+    // is looked up by the -ls that reaches it.
+    const held =
+      lists && (statted || startVirtuals.has(match.virtual))
+        ? await rowStat(match, ns, statPath, [])
+        : null
     for (const [position, action] of actions.entries()) {
       if (action.kind === 'exec') {
         if (action.batch) {
@@ -501,15 +545,14 @@ export async function applyFindActions(
         )
           break
       } else if (action.kind === 'ls') {
-        const before = errors.length
-        const row = await lsRow(match, ns, statPath, identity, errors)
-        if (row !== null) out.push(row)
-        else if (errors.length > before) {
+        const st = held ?? (await rowStat(match, ns, statPath, errors))
+        if (st === null) {
           // A row -ls cannot list is false, so the chain ends for it, as
           // GNU's does.
           exitCode = 1
           break
         }
+        out.push(lsRow(match, st, identity))
       } else if (action.kind === 'delete') {
         // A structural row is skipped, not refused, the way Unix leaves
         // a mount point in place.

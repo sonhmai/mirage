@@ -780,9 +780,29 @@ async def test_exec_children_inherit_finds_stdin():
             "echo rc=$?; printf y | find d -type f -exec cat \\; ; "
             "echo rc=$?; "
             "printf z | find d -maxdepth 0 -exec true \\; -exec cat \\; ; "
+            "echo rc=$?; "
+            "printf abc | find d -maxdepth 0 -exec head -c 1 \\; "
+            "-exec cat \\; ; "
             "echo rc=$?")
-        # A child that never reads (`true`) leaves the bytes for the next.
-        assert await io.stdout_str() == "xrc=0\nyrc=0\nzrc=0\n"
+        # A child that never reads (`true`) leaves the bytes for the next,
+        # and one that reads part (`head -c 1`) leaves the rest.
+        assert await io.stdout_str() == "xrc=0\nyrc=0\nzrc=0\nabcrc=0\n"
+        assert await io.stderr_str() == ""
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_exec_runs_a_program_an_alias_shadows():
+    # An alias is as invisible to execvp as a function: the program runs.
+    ws = _ws()
+    try:
+        await ws.execute("shopt -s expand_aliases; alias cat='echo BAD'")
+        io = await ws.execute(
+            "mkdir -p /data/al; printf 'content\\n' > /data/al/f; "
+            "cd /data/al; find . -type f -exec cat {} \\; ; echo rc=$?; "
+            "command cat f")
+        assert await io.stdout_str() == "content\nrc=0\ncontent\n"
         assert await io.stderr_str() == ""
     finally:
         await ws.close()

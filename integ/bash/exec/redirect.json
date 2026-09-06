@@ -443,6 +443,40 @@
         "stderr": "a=l1\n"
       },
       "note": "Two files on purpose: mirage's stdin line buffer is keyed on the bound bytes, so a second `exec < f` of the same file in one line resumes after the first subshell's read where bash reopens at the top; what the case pins is that a dup from a descriptor holding stdin's read end keeps stdin readable."
+    },
+    {
+      "id": "exec_descriptor_zero_keeps_its_identity_across_lines",
+      "seq": 940113,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( exec 0<&-; exec 1<&0; echo rc=$?; echo after ); ( exec 0<&1; exec 2<&0; echo hi >&2; echo rc=$? )",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nafter\nhi\nrc=0\n",
+        "stderr": "0: Bad file descriptor\n"
+      }
     }
   ]
 }

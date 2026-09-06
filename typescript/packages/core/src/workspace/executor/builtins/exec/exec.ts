@@ -75,7 +75,10 @@ function execFailure(line: Uint8Array | null, out: Uint8Array | null = null): Re
  * stream bound to it (`exec 1>&0`) has nowhere to write.
  */
 function identity(session: Session, fd: number): [string, boolean] {
-  if (fd === FD_STDIN) return [TO_STDIN, false]
+  // fd 0 is its own read end unless an `exec` rebound it: closed, or a
+  // writing stream's identity (`exec 0<&1`), which a later dup from fd 0
+  // copies as bash's does.
+  if (fd === FD_STDIN) return [session.execStdinIdentity ?? TO_STDIN, false]
   if (fd === FD_STDERR) return [session.execStderr ?? TO_STDERR, session.execStderrAppend]
   return [session.execStdout ?? TO_STDOUT, session.execStdoutAppend]
 }
@@ -125,6 +128,7 @@ function bindingsOf(session: Session): StreamBindings {
     execStderrAppend: session.execStderrAppend,
     execStdin: session.execStdin,
     execStdinUnreadable: session.execStdinUnreadable,
+    execStdinIdentity: session.execStdinIdentity,
   }
 }
 
@@ -200,19 +204,30 @@ async function install(
         // 1<&0; exec 0<&1`), which bash reads from as before. Not
         // modelled: a stdin rebound between the two dups, which bash's fd
         // 1 would still hold the old end of.
-        const reads =
-          r.target === FD_STDIN ||
-          (r.target !== FD_CLOSE && identity(session, r.target)[0] === TO_STDIN)
-        if (reads) {
+        if (r.target === FD_CLOSE) {
+          session.execStdin = null
+          session.execStdinUnreadable = true
+          session.execStdinIdentity = CLOSED
+          continue
+        }
+        const source = identity(session, r.target)[0]
+        if (source === CLOSED) return badDescriptorLine(r.target)
+        if (source === TO_STDIN) {
           session.execStdinUnreadable = false
+          session.execStdinIdentity = null
         } else {
           session.execStdin = null
           session.execStdinUnreadable = true
+          session.execStdinIdentity = source
         }
       } else if (r.target === FD_CLOSE) {
         bind(session, r.fd, CLOSED, false)
       } else {
-        bind(session, r.fd, ...identity(session, r.target))
+        const [id, append] = identity(session, r.target)
+        // A dup from a closed descriptor is refused, as bash's `exec 0<&-;
+        // exec 1<&0` is with `0: Bad file descriptor`.
+        if (id === CLOSED) return badDescriptorLine(r.target)
+        bind(session, r.fd, id, append)
       }
       continue
     }
@@ -225,6 +240,7 @@ async function install(
         const [data] = await dispatch('read', scope)
         session.execStdin = await materialize(data as ByteSource)
         session.execStdinUnreadable = false
+        session.execStdinIdentity = null
       } catch (err) {
         if (!isFsError(err)) throw err
         return errorLine(scope.rawPath, err)

@@ -113,7 +113,10 @@ async def _head_state(head: str, registry: MountRegistry, cwd: str,
     program = any(layer is not Consumer.FUNCTION and (
         layer is not Consumer.SESSION or head not in SHELL_ONLY_BUILTINS)
                   for layer in layers)
-    return not program, Consumer.FUNCTION in layers
+    # An alias is as invisible to execvp as a function, and `command`
+    # masks both for the run.
+    shadowed = Consumer.FUNCTION in layers or head in sess.aliases
+    return not program, shadowed
 
 
 class _SharedStdin:
@@ -131,21 +134,27 @@ class _SharedStdin:
         source (ByteSource): find's own input, unread.
     """
 
-    __slots__ = ("_source", )
+    __slots__ = ("_source", "_data", "_pos")
 
     def __init__(self, source: ByteSource) -> None:
         self._source: ByteSource | None = source
+        self._data = b""
+        self._pos = 0
 
     def __aiter__(self) -> AsyncIterator[bytes]:
         return self._drain()
 
     async def _drain(self) -> AsyncIterator[bytes]:
-        source, self._source = self._source, None
-        if source is None:
-            return
-        data = await materialize(source)
-        if data:
-            yield data
+        # One byte per pull, so a child that stops reading early (`head
+        # -c 1`) leaves the rest at the cursor for the next child, the
+        # way a shared descriptor's offset does.
+        if self._source is not None:
+            source, self._source = self._source, None
+            self._data = await materialize(source)
+        while self._pos < len(self._data):
+            chunk = self._data[self._pos:self._pos + 1]
+            self._pos += 1
+            yield chunk
 
 
 async def _run_exec(execute_fn: ExecuteLine, session_id: str,
@@ -185,8 +194,8 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
     if missing:
         errors.append(f"find: '{head}': No such file or directory\n".encode())
         return False
-    # A function of the head's name is invisible to execvp, so the line
-    # runs the program past it, as `command` does.
+    # A function or alias of the head's name is invisible to execvp, so
+    # the line runs the program past it, as `command` does.
     line = ("command " if shadowed else "") + shlex.join(words)
     io = await execute_fn(f"( {line} )", session_id=session_id, stdin=stdin)
     if io.stdout is not None:

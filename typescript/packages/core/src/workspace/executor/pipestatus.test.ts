@@ -15,12 +15,12 @@
 import { expect, it } from 'vitest'
 import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
 
-// A fresh shell's PIPESTATUS is empty (pinned on bash 5.2), and a loop
-// that never iterates stamps 0 only into that empty record; otherwise it
-// leaves the last record standing, as every transparent construct does.
+// A fresh shell's PIPESTATUS is empty (pinned on bash 5.2 in an isolated
+// run), and a loop that never iterates leaves the record as it stood,
+// empty included, as every transparent construct does.
 it.each([
   ['echo "[${PIPESTATUS[@]}]"', '[]\n'],
-  ['for x in; do :; done; echo "[${PIPESTATUS[@]}]"', '[0]\n'],
+  ['for x in; do :; done; echo "[${PIPESTATUS[@]}]"', '[]\n'],
   ['false; for x in; do :; done; echo ${PIPESTATUS[@]}', '1\n'],
   ['false | true; for x in; do :; done; echo ${PIPESTATUS[@]}', '1 0\n'],
   ['f() { :; }; echo "[${PIPESTATUS[@]}]"', '[]\n'],

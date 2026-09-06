@@ -359,6 +359,12 @@ class Session:
     exec_stderr_append: bool = False
     exec_stdin: bytes | None = None
     exec_stdin_unreadable: bool = False
+    # What fd 0 holds when it is not its own read end: `CLOSED` after
+    # `exec <&-`, a writing stream's identity after `exec 0<&1`, so a
+    # later dup from fd 0 copies that (`exec 2<&0` then writes to
+    # stdout) or is refused (`0: Bad file descriptor`); None for the
+    # read end itself.
+    exec_stdin_identity: str | None = None
     _exec_opened: set[str] = field(default_factory=set, repr=False)
     _parse_seq: int = field(default=0, repr=False)
     _parse_current: int = field(default=0, repr=False)

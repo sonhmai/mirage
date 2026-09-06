@@ -35,4 +35,5 @@ export const EXEC_STREAM_FIELDS = [
   'execStderrAppend',
   'execStdin',
   'execStdinUnreadable',
+  'execStdinIdentity',
 ] as const

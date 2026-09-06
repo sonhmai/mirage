@@ -31,4 +31,4 @@ TO_STDERR = "&2"
 # unit when a later redirect on the line fails.
 EXEC_STREAM_FIELDS = ("exec_stdout", "exec_stdout_append", "exec_stderr",
                       "exec_stderr_append", "exec_stdin",
-                      "exec_stdin_unreadable")
+                      "exec_stdin_unreadable", "exec_stdin_identity")

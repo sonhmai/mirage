@@ -681,13 +681,6 @@ async def _execute_node(
                                        stdin,
                                        cs,
                                        policies=namespace.registry.policies)
-        if not classified and not session.pipe_status:
-            # bash: a loop that never iterates leaves `${PIPESTATUS[*]}`
-            # as it stood, except in a shell that has recorded nothing
-            # yet, where it stamps the loop's own 0 (pinned on bash 5.2:
-            # fresh `for x in; do :; done` then `<0>`, `false; for ...`
-            # then `<1>`).
-            record_status(session, 0)
         return await handle_for(stream,
                                 var,
                                 classified,

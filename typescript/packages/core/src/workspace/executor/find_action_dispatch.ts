@@ -135,7 +135,10 @@ async function headState(
     (layer) =>
       layer !== Consumer.FUNCTION && (layer !== Consumer.SESSION || !SHELL_ONLY_BUILTINS.has(head)),
   )
-  return [!program, layers.includes(Consumer.FUNCTION)]
+  // An alias is as invisible to execvp as a function, and `command` masks
+  // both for the run.
+  const shadowed = layers.includes(Consumer.FUNCTION) || head in sess.aliases
+  return [!program, shadowed]
 }
 
 /**
@@ -156,6 +159,8 @@ async function headState(
  */
 class SharedStdin implements AsyncIterable<Uint8Array> {
   private source: ByteSource | null
+  private data: Uint8Array = new Uint8Array()
+  private pos = 0
 
   constructor(source: ByteSource) {
     this.source = source
@@ -163,18 +168,22 @@ class SharedStdin implements AsyncIterable<Uint8Array> {
 
   // The source is read only on the first iteration: find itself never
   // reads its stdin, so a walk with no reading child (`yes | find d
-  // -maxdepth 0`) must not wait on it.
+  // -maxdepth 0`) must not wait on it. One byte per pull after that, so
+  // a child that stops reading early (`head -c 1`) leaves the rest at
+  // the cursor for the next child, the way a shared descriptor's offset
+  // does.
   [Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
-    const source = this.source
-    this.source = null
-    let done = source === null
     return {
       next: async () => {
-        if (done || source === null) return { done: true, value: undefined }
-        done = true
-        const data = await materialize(source)
-        if (data.byteLength === 0) return { done: true, value: undefined }
-        return { done: false, value: data }
+        if (this.source !== null) {
+          const source = this.source
+          this.source = null
+          this.data = await materialize(source)
+        }
+        if (this.pos >= this.data.byteLength) return { done: true, value: undefined }
+        const chunk = this.data.subarray(this.pos, this.pos + 1)
+        this.pos += 1
+        return { done: false, value: chunk }
       },
     }
   }
@@ -202,8 +211,8 @@ async function runExec(
     errors.push(enc.encode(`find: '${head}': No such file or directory\n`))
     return false
   }
-  // A function of the head's name is invisible to execvp, so the line
-  // runs the program past it, as `command` does.
+  // A function or alias of the head's name is invisible to execvp, so the
+  // line runs the program past it, as `command` does.
   const line = (shadowed ? 'command ' : '') + shellJoin(words)
   const io = await executeFn(`( ${line} )`, { sessionId, stdin })
   if (io.stdout !== null) {

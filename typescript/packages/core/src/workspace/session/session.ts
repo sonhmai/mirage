@@ -65,6 +65,7 @@ export interface ChildShellState {
   execStderrAppend: boolean
   execStdin: Uint8Array | null
   execStdinUnreadable: boolean
+  execStdinIdentity: string | null
   execOpened: Set<string>
   randomState: number | null
   randomSeed: string | null
@@ -463,6 +464,11 @@ export class Session {
   execStderrAppend = false
   execStdin: Uint8Array | null = null
   execStdinUnreadable = false
+  // What fd 0 holds when it is not its own read end: CLOSED after `exec
+  // <&-`, a writing stream's identity after `exec 0<&1`, so a later dup
+  // from fd 0 copies that (`exec 2<&0` then writes to stdout) or is
+  // refused (`0: Bad file descriptor`); null for the read end itself.
+  execStdinIdentity: string | null = null
   execOpened = new Set<string>()
   localFrames: Map<string, ShellVar | null>[] = []
   mountModes: ReadonlyMap<string, MountMode> | null
@@ -576,6 +582,7 @@ export class Session {
     forked.execStderrAppend = this.execStderrAppend
     forked.execStdin = this.execStdin
     forked.execStdinUnreadable = this.execStdinUnreadable
+    forked.execStdinIdentity = this.execStdinIdentity
     forked.execOpened = new Set(this.execOpened)
     return forked
   }
@@ -666,6 +673,7 @@ export class Session {
       execStderrAppend: this.execStderrAppend,
       execStdin: this.execStdin,
       execStdinUnreadable: this.execStdinUnreadable,
+      execStdinIdentity: this.execStdinIdentity,
       execOpened: new Set(this.execOpened),
       randomState: this.randomState,
       randomSeed: this.randomSeed,
@@ -710,6 +718,7 @@ export class Session {
     this.execStderrAppend = state.execStderrAppend
     this.execStdin = state.execStdin
     this.execStdinUnreadable = state.execStdinUnreadable
+    this.execStdinIdentity = state.execStdinIdentity
     this.randomState = state.randomState
     this.randomSeed = state.randomSeed
     this.randomLast = state.randomLast

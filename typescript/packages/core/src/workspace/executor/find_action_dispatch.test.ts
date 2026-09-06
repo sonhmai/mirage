@@ -113,11 +113,28 @@ describe('find actions', () => {
     const ws = await shellWs()
     try {
       const r = await ws.execute(
-        'mkdir -p /data/fi/d; touch /data/fi/d/a /data/fi/d/b; cd /data/fi; printf x | find d -maxdepth 0 -exec cat \\; ; echo rc=$?; printf y | find d -type f -exec cat \\; ; echo rc=$?; printf z | find d -maxdepth 0 -exec true \\; -exec cat \\; ; echo rc=$?',
+        'mkdir -p /data/fi/d; touch /data/fi/d/a /data/fi/d/b; cd /data/fi; printf x | find d -maxdepth 0 -exec cat \\; ; echo rc=$?; printf y | find d -type f -exec cat \\; ; echo rc=$?; printf z | find d -maxdepth 0 -exec true \\; -exec cat \\; ; echo rc=$?; printf abc | find d -maxdepth 0 -exec head -c 1 \\; -exec cat \\; ; echo rc=$?',
         { sessionId: 's' },
       )
-      // A child that never reads (`true`) leaves the bytes for the next.
-      expect(r.stdoutText).toBe('xrc=0\nyrc=0\nzrc=0\n')
+      // A child that never reads (`true`) leaves the bytes for the next,
+      // and one that reads part (`head -c 1`) leaves the rest.
+      expect(r.stdoutText).toBe('xrc=0\nyrc=0\nzrc=0\nabcrc=0\n')
+      expect(r.stderrText).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('runs a program an alias shadows', async () => {
+    // An alias is as invisible to execvp as a function: the program runs.
+    const ws = await shellWs()
+    try {
+      await ws.execute("shopt -s expand_aliases; alias cat='echo BAD'", { sessionId: 's' })
+      const r = await ws.execute(
+        "mkdir -p /data/al; printf 'content\\n' > /data/al/f; cd /data/al; find . -type f -exec cat {} \\; ; echo rc=$?; command cat f",
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe('content\nrc=0\ncontent\n')
       expect(r.stderrText).toBe('')
     } finally {
       await ws.close()

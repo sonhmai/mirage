@@ -130,18 +130,31 @@ async def _install(dispatch: DispatchFn, session: Session,
                 # (`exec 1<&0; exec 0<&1`), which bash reads from as
                 # before. Not modelled: a stdin rebound between the two
                 # dups, which bash's fd 1 would still hold the old end of.
-                reads = r.target == FD_STDIN or (
-                    r.target != FD_CLOSE
-                    and _identity(session, r.target)[0] == TO_STDIN)
-                if reads:
+                if r.target == FD_CLOSE:
+                    session.exec_stdin = None
+                    session.exec_stdin_unreadable = True
+                    session.exec_stdin_identity = CLOSED
+                    continue
+                source = _identity(session, r.target)[0]
+                if source == CLOSED:
+                    return bad_descriptor_line(r.target)
+                if source == TO_STDIN:
                     session.exec_stdin_unreadable = False
+                    session.exec_stdin_identity = None
                 else:
                     session.exec_stdin = None
                     session.exec_stdin_unreadable = True
-            elif r.target == FD_CLOSE:
+                    session.exec_stdin_identity = source
+                continue
+            if r.target == FD_CLOSE:
                 _bind(session, r.fd, CLOSED, False)
-            else:
-                _bind(session, r.fd, *_identity(session, r.target))
+                continue
+            identity, append = _identity(session, r.target)
+            if identity == CLOSED:
+                # A dup from a closed descriptor is refused, as bash's
+                # `exec 0<&-; exec 1<&0` is with `0: Bad file descriptor`.
+                return bad_descriptor_line(r.target)
+            _bind(session, r.fd, identity, append)
             continue
         if ((r.kind == RedirectKind.STDIN) != (r.fd == FD_STDIN)):
             return bad_descriptor_line(r.fd)
@@ -153,6 +166,7 @@ async def _install(dispatch: DispatchFn, session: Session,
                 return _error_line(scope.raw_path, exc)
             session.exec_stdin = await materialize(data) or b""
             session.exec_stdin_unreadable = False
+            session.exec_stdin_identity = None
             continue
         path = scope.virtual
         try:
@@ -272,7 +286,11 @@ def _identity(session: Session, fd: int) -> tuple[str, bool]:
         fd (int): the descriptor being copied.
     """
     if fd == FD_STDIN:
-        return TO_STDIN, False
+        # fd 0 is its own read end unless an `exec` rebound it: closed,
+        # or a writing stream's identity (`exec 0<&1`), which a later dup
+        # from fd 0 copies as bash's does.
+        identity = session.exec_stdin_identity
+        return (TO_STDIN if identity is None else identity), False
     if fd == FD_STDERR:
         return (TO_STDERR if session.exec_stderr is None else
                 session.exec_stderr, session.exec_stderr_append)

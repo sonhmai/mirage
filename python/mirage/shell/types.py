@@ -381,3 +381,23 @@ class BuiltinGroup(StrEnum):
     NESTED_SHELLS = "nested-shells"
     INTERPRETERS = "interpreters"
     COMMAND_RUNNERS = "command-runners"
+
+
+@dataclass(frozen=True, slots=True)
+class BacktickSegment:
+    """One piece of a backtick region as the evaluator lexes it: a
+    command a pair encloses, or the literal text between two pairs.
+
+    Args:
+        text (str): the segment's text, a command's with its escapes
+            resolved, as the nested line parses it.
+        command (bool): whether a pair encloses it.
+        start (int): where the segment's raw text starts in the region.
+        end (int): the index after its last raw character; for a
+            command, the closing backtick's.
+    """
+
+    text: str
+    command: bool
+    start: int
+    end: int

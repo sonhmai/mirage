@@ -32,11 +32,12 @@ from mirage.policy.profile import (CommandsBlock, CompiledProfile,
 from mirage.policy.script import ScriptPolicy
 
 from mirage.policy.types import (  # isort: skip
-    VALIDITY, Abandoned, Action, Ask, CommandContext, CommandRule,
-    AdmissionRules, Decision, Deny, DenyScope, ExecuteResultContext,
-    Explanation, Limit, MountRootQuery, OpsContext, OpsResultContext, Outcome,
-    Pending, ProfileScript, Scope, SessionCommandsQuery, SessionContext,
-    SessionDecisionsQuery, SessionScriptsQuery)
+    VALIDITY, Abandoned, Action, Ask, Claim, Claimant, CommandContext,
+    CommandRule, AdmissionRules, Decision, Deny, DenyScope,
+    ExecuteResultContext, Explanation, HandOff, Limit, MountRootQuery,
+    Occurrence, OpsContext, OpsResultContext, Outcome, Pending, ProfileScript,
+    Scope, SessionCommandsQuery, SessionContext, SessionDecisionsQuery,
+    SessionScriptsQuery)
 
 __all__ = [
     "Abandoned",
@@ -59,7 +60,11 @@ __all__ = [
     "Deny",
     "DenyScope",
     "ExecuteResultContext",
+    "Claim",
+    "Claimant",
     "Explanation",
+    "HandOff",
+    "Occurrence",
     "FALLBACK_LIMIT",
     "Limit",
     "MountCommandsBlock",

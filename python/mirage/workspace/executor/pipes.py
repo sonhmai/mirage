@@ -20,6 +20,8 @@ from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, close_quietly, merge_stdout_stderr
 from mirage.io.types import ByteSource, materialize
+from mirage.policy.decisions import Decisions
+from mirage.policy.types import HandOff
 from mirage.runtime.types import DispatchFn
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
@@ -238,6 +240,8 @@ async def handle_subshell(
     job_table: JobTable | None = None,
     agent_id: str | None = None,
     dispatch: DispatchFn | None = None,
+    handed: HandOff | None = None,
+    decisions: Decisions | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute body in isolated env.
 
@@ -278,7 +282,7 @@ async def handle_subshell(
             if is_bg and job_table is not None:
                 stdout, io, last_exec = await handle_background(
                     execute_node, child, None, session, job_table, agent_id
-                    or "", stdin, call_stack)
+                    or "", stdin, call_stack, handed, decisions)
                 merged_io = await merged_io.merge(io)
                 # Seed $? for later body commands (mirrors program loop).
                 record_status(session, io.exit_code)

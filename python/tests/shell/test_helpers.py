@@ -20,12 +20,13 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import RedirectKind
 
 from mirage.shell.helpers import (  # isort: skip
-    brace_expands, get_case_items, get_case_word, get_command_name,
-    get_declaration_keyword, get_for_parts, get_function_body,
-    get_function_name, get_heredoc_meta, get_heredoc_parts, get_if_branches,
-    get_list_parts, get_negated_command, get_parts, get_pipeline_commands,
-    get_process_sub_body, get_redirects, get_subshell_body, get_text,
-    get_while_parts, literal_word, split_env_prefix)
+    brace_expands, byte_offset, get_case_items, get_case_word,
+    get_command_name, get_declaration_keyword, get_for_parts,
+    get_function_body, get_function_name, get_heredoc_meta, get_heredoc_parts,
+    get_if_branches, get_list_parts, get_negated_command, get_parts,
+    get_pipeline_commands, get_process_sub_body, get_redirects,
+    get_subshell_body, get_text, get_while_parts, literal_word,
+    split_env_prefix)
 
 _LANG = tree_sitter.Language(tree_sitter_bash.language())
 _PARSER = tree_sitter.Parser(_LANG)
@@ -827,3 +828,10 @@ def test_brace_expands():
     assert brace_expands("{a,{b,c}}")
     assert not brace_expands("{}") and not brace_expands("{abc}")
     assert not brace_expands("a,b") and not brace_expands("{a,b")
+
+
+def test_byte_offset_counts_the_bytes_before_an_index():
+    assert byte_offset("cat é x", 4) == 4
+    assert byte_offset("cat é x", 5) == 6
+    assert byte_offset("cat é x", 7) == 8
+    assert byte_offset("", 0) == 0

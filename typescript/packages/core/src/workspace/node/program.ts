@@ -29,6 +29,8 @@ import { ReturnSignal } from '../executor/command.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
 import { divertStatement } from '../executor/builtins/exec/index.ts'
 import { handleBackground } from '../executor/jobs.ts'
+import type { Decisions } from '../../policy/decisions.ts'
+import type { HandOff } from '../../policy/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
@@ -52,6 +54,9 @@ export async function executeProgram(
   // statement's output to its file; undefined (a nested loop that is not
   // the program root) leaves output undiverted.
   dispatch?: DispatchFn,
+  // The line's hand-off and its ledger, for a background job to borrow.
+  handed: HandOff | null = null,
+  decisions: Decisions | null = null,
 ): Promise<Result> {
   // Every program loop is one parse, which is the unit bash's alias rule
   // counts in: an alias defined on this parse and row is not expanded by
@@ -61,7 +66,18 @@ export async function executeProgram(
   const outerParse = session.parseCurrent
   session.parseCurrent = session.parseSeq
   try {
-    return await runProgram(recurse, node, session, stdin, callStack, jobTable, agentId, dispatch)
+    return await runProgram(
+      recurse,
+      node,
+      session,
+      stdin,
+      callStack,
+      jobTable,
+      agentId,
+      dispatch,
+      handed,
+      decisions,
+    )
   } finally {
     session.parseCurrent = outerParse
   }
@@ -81,6 +97,8 @@ async function runProgram(
   jobTable: JobTable,
   agentId: string,
   dispatch?: DispatchFn,
+  handed: HandOff | null = null,
+  decisions: Decisions | null = null,
 ): Promise<Result> {
   const children = node.children
   const allStdout: ByteSource[] = []
@@ -160,6 +178,8 @@ async function runProgram(
         agentId,
         stdin,
         callStack,
+        handed,
+        decisions,
       )
       stdout = bgStdout
       io = bgIo

@@ -31,6 +31,20 @@ def get_text(node: tree_sitter.Node) -> str:
     return (node.text or b"").decode()
 
 
+def byte_offset(text: str, index: int) -> int:
+    """Where an index into a node's text falls in the parser's offsets.
+
+    tree-sitter places a node by the bytes of the UTF-8 source, so an
+    index counted in code points reads one place too early for every
+    multibyte character before it.
+
+    Args:
+        text (str): the text the index is into.
+        index (int): a code-point index into it.
+    """
+    return len(text[:index].encode())
+
+
 def get_command_name(node: tree_sitter.Node) -> str:
     """Get the command name string."""
     for c in node.named_children:

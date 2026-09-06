@@ -28,6 +28,8 @@ import type { Session } from '../session/session.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { type ExecuteNodeFn, handleBackground } from './jobs.ts'
+import type { Decisions } from '../../policy/decisions.ts'
+import type { HandOff } from '../../policy/types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -277,6 +279,9 @@ export async function handleSubshell(
   // installs is restored with the rest of the snapshot when the body
   // ends.
   dispatch?: DispatchFn,
+  // The line's hand-off and its ledger, for a background job to borrow.
+  handed: HandOff | null = null,
+  decisions: Decisions | null = null,
 ): Promise<Result> {
   const saved = session.snapshot()
   try {
@@ -305,6 +310,8 @@ export async function handleSubshell(
           agentId ?? '',
           stdin,
           callStack,
+          handed,
+          decisions,
         )
         if (bgStdout !== null) allStdout.push(bgStdout)
         mergedIo = await mergedIo.merge(bgIo)

@@ -20,11 +20,12 @@ import tree_sitter
 
 from mirage.ops.types import SessionView
 from mirage.shell.arith import evaluate_arith
+from mirage.shell.backticks import split_backtick_region
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.escapes import (decode_ansi_c, unescape_dquoted,
                                   unescape_unquoted)
-from mirage.shell.helpers import get_text
+from mirage.shell.helpers import byte_offset, get_text
 from mirage.shell.parse import parse
 from mirage.shell.types import NodeType as NT
 from mirage.utils.glob_walk import mark_escaped_globs, mark_globs, unmark_globs
@@ -54,58 +55,36 @@ def _folded_whitespace(node: tree_sitter.Node) -> str:
     return raw[:len(raw) - len(raw.lstrip())]
 
 
-def _split_backtick_segments(raw: str) -> list[tuple[str, bool]]:
-    """Split a backtick region into (text, is_command) segments.
-
-    tree-sitter-bash lexes the gap between two backtick substitutions as
-    a single token when that gap is empty or whitespace-only, so
-    ``\\`a\\` \\`b\\``` arrives as ONE command_substitution node holding
-    both commands and the literal text between them. Re-lexing the
-    node's own text on unescaped backticks recovers the real segments;
-    a single pair simply yields one command segment.
-
-    Inside a command, POSIX keeps the backslash literal except before
-    ``$``, `` ` `` and ``\\``, where it escapes. Consuming those pairs
-    whole is what makes the parity right: ``\\\\`` is one escaped
-    backslash, so a backtick straight after it still closes the region
-    rather than reading as an escaped backtick.
-
-    Args:
-        raw (str): the node's text, opening and closing with a backtick.
-    """
-    segments: list[tuple[str, bool]] = []
-    buf: list[str] = []
-    in_command = False
-    i = 0
-    while i < len(raw):
-        if (raw[i] == "\\" and in_command and i + 1 < len(raw)
-                and raw[i + 1] in ("$", "`", "\\")):
-            buf.append(raw[i + 1])
-            i += 2
-            continue
-        if raw[i] == "`":
-            segments.append(("".join(buf), in_command))
-            buf = []
-            in_command = not in_command
-            i += 1
-            continue
-        buf.append(raw[i])
-        i += 1
-    segments.append(("".join(buf), in_command))
-    return [(text, cmd) for text, cmd in segments if text or cmd]
-
-
 async def _expand_backtick_region(
     raw: str,
     session: Session,
     execute_fn: Callable[..., Any],
+    node: tree_sitter.Node,
+    offset: int,
 ) -> str:
+    """Expand a backtick region, one nested line per pair.
+
+    Args:
+        raw (str): the region's text, the folded prefix stripped.
+        session (Session): the session expanding it.
+        execute_fn (Callable[..., Any]): the nested-line door.
+        node (tree_sitter.Node): the region's node.
+        offset (int): where ``raw`` starts in the node's text, in the
+            parser's offsets.
+    """
     parts: list[str] = []
-    for text, is_command in _split_backtick_segments(raw):
-        if not is_command:
-            parts.append(text)
+    for segment in split_backtick_region(raw):
+        if not segment.command:
+            parts.append(segment.text)
             continue
-        io = await execute_fn(f"( {text}\n)", session_id=session.session_id)
+        # Each pair is its own place on the line: the node holds every
+        # touching pair, so the span within it says which one runs,
+        # measured as the parser measures the node.
+        io = await execute_fn(f"( {segment.text}\n)",
+                              session_id=session.session_id,
+                              node=node,
+                              span=(offset + byte_offset(raw, segment.start),
+                                    offset + byte_offset(raw, segment.end)))
         parts.append((await io.stdout_str()).rstrip("\n"))
         session._diagnostics.append(await io.materialize_stderr())
         session._cmdsub_seq += 1
@@ -358,9 +337,9 @@ async def expand_node_marked(
         if raw.startswith("`") and raw.endswith("`"):
             # Backtick regions are re-lexed here rather than trusted from
             # the grammar, which merges adjacent pairs (see
-            # _split_backtick_segments).
+            # split_backtick_region).
             return prefix + await _expand_backtick_region(
-                raw, session, execute_fn)
+                raw, session, execute_fn, ts_node, len(prefix.encode()))
         if raw.startswith("$((") and raw.endswith("))"):
             # Inside heredoc bodies tree-sitter parses `$((expr))` as a
             # command substitution wrapping a subshell; reparse in
@@ -379,7 +358,11 @@ async def expand_node_marked(
         inner = raw[2:-1]
         if not inner.strip():
             return prefix
-        io = await execute_fn(f"( {inner}\n)", session_id=session.session_id)
+        # The substitution names its own node: the nested line's
+        # commands stand under it, which is where the pass placed them.
+        io = await execute_fn(f"( {inner}\n)",
+                              session_id=session.session_id,
+                              node=ts_node)
         text = (await io.stdout_str()).rstrip("\n")
         # Record the substitution's status: an assignment-only
         # statement whose value ran substitutions reports the last

@@ -29,7 +29,8 @@ from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.workspace.executor.builtins.exec.constants import (
-    CLOSED, EXEC_STREAM_FIELDS, TO_STDERR, TO_STDIN, TO_STDOUT)
+    CLOSED, EXEC_STREAM_FIELDS, OPEN_FOR_READING, TO_STDERR, TO_STDIN,
+    TO_STDOUT)
 from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.create import create_file
@@ -149,6 +150,14 @@ async def _install(dispatch: DispatchFn, session: Session,
                 if source == TO_STDIN:
                     session.exec_stdin_unreadable = False
                     session.exec_stdin_identity = None
+                elif source.startswith(OPEN_FOR_READING):
+                    # The descriptor holds a file's read end (`exec 1<f`):
+                    # fd 0 takes the same end, read from the file's
+                    # start, and a later dup from fd 0 copies it on.
+                    session.exec_stdin = await read_open_source(
+                        dispatch, source)
+                    session.exec_stdin_unreadable = False
+                    session.exec_stdin_identity = source
                 else:
                     session.exec_stdin = None
                     session.exec_stdin_unreadable = True
@@ -174,11 +183,12 @@ async def _install(dispatch: DispatchFn, session: Session,
             except FS_ERRORS as exc:
                 return _error_line(scope.raw_path, exc)
             if r.fd != FD_STDIN:
-                # `exec 1<f`: the stream is open for reading only, so a
+                # `exec 1<f`: the stream holds the file's read end, so a
                 # write to it fails as one to stdin's end does
-                # (`echo: write error: Bad file descriptor`). Not
-                # modelled: reading the file back through `<&1`.
-                _bind(session, r.fd, TO_STDIN, False)
+                # (`echo: write error: Bad file descriptor`), a dup onto
+                # fd 0 (`exec 0<&1`) reads the file, and so does a
+                # transient `<&1`.
+                _bind(session, r.fd, OPEN_FOR_READING + scope.virtual, False)
                 continue
             session.exec_stdin = await materialize(data) or b""
             session.exec_stdin_unreadable = False
@@ -192,9 +202,8 @@ async def _install(dispatch: DispatchFn, session: Session,
             return _error_line(scope.raw_path, exc)
         if r.fd == FD_STDIN:
             # `exec 0>f`: fd 0 holds the file's write end, so a read
-            # fails with EBADF and a later dup from it (`exec 1>&0`)
-            # writes there. Not modelled: a transient `>&0` reaching
-            # the file.
+            # fails with EBADF, a later dup from it (`exec 1>&0`) writes
+            # there, and so does a transient `>&0`.
             session.exec_stdin = None
             session.exec_stdin_unreadable = True
             session.exec_stdin_identity = path
@@ -294,11 +303,34 @@ def _exec_failure(
                                                     stderr=err or b"")
 
 
+async def read_open_source(dispatch: DispatchFn, identity: str) -> bytes:
+    """The bytes a read through a read-open stream yields.
+
+    The file an `OPEN_FOR_READING` identity names, from its start:
+    mirage keeps no offset on a descriptor, where bash's second read
+    through the same end would be at EOF. A file gone since `exec`
+    opened it reads empty, where bash's still-open end would keep the
+    old bytes.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher.
+        identity (str): the stream's binding, `<` then the path.
+    """
+    scope = _to_scope(identity[len(OPEN_FOR_READING):])
+    try:
+        data, _ = await dispatch("read", scope)
+        return await materialize(data) or b""
+    except FS_ERRORS as exc:
+        logger.debug("exec read-open source gone for %s: %s", identity, exc)
+        return b""
+
+
 def _identity(session: Session, fd: int) -> tuple[str, bool]:
     """What a descriptor points at right now, named so a dup can copy it.
 
-    A path with its append flag, `CLOSED`, or one of the terminal's
-    own streams (`&0`, `&1`, `&2`). The terminal streams are named
+    A path with its append flag, `CLOSED`, a file's read end
+    (`OPEN_FOR_READING` then the path), or one of the terminal's own
+    streams (`&0`, `&1`, `&2`). The terminal streams are named
     rather than left as None because a dup copies the *target*, not
     the role: after `exec 1>&2`, fd 1 is the terminal's stderr whatever
     fd 2 is later pointed at, and `exec 2>&1` after that puts stderr
@@ -354,8 +386,9 @@ async def _route(
 
     To the terminal's stdout, to the terminal's stderr, into a file, or
     nowhere. Returns the bytes for each terminal stream and whether the
-    write failed: a stream bound to stdin (`exec 1>&0`) cannot be
-    written, which is bash's `write error: Bad file descriptor`.
+    write failed: a stream bound to stdin (`exec 1>&0`) or to a file's
+    read end (`exec 1<f`) cannot be written, which is bash's
+    `write error: Bad file descriptor`.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
@@ -369,7 +402,7 @@ async def _route(
         return data, None, False
     if target == TO_STDERR:
         return None, data, False
-    if target == TO_STDIN:
+    if target == TO_STDIN or target.startswith(OPEN_FOR_READING):
         return None, None, True
     if target != CLOSED:
         await _append(dispatch, session, target, data)

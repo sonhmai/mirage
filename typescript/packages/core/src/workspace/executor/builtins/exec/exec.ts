@@ -27,7 +27,7 @@ import { ExecutionNode } from '../../../types.ts'
 import { createFile } from '../../create.ts'
 import { toScope } from '../scope.ts'
 import type { EXEC_STREAM_FIELDS } from './constants.ts'
-import { CLOSED, TO_STDERR, TO_STDIN, TO_STDOUT } from './constants.ts'
+import { CLOSED, OPEN_FOR_READING, TO_STDERR, TO_STDIN, TO_STDOUT } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 
 /** The `exec` builtin without redirects: bare `exec` is a no-op that
@@ -74,6 +74,24 @@ function execFailure(line: Uint8Array | null, out: Uint8Array | null = null): Re
  * terminal's stderr, as bash does. Stdin is always the read end, so a
  * stream bound to it (`exec 1>&0`) has nowhere to write.
  */
+/**
+ * The bytes a read through a read-open stream yields: the file an
+ * `OPEN_FOR_READING` identity names, from its start, since mirage keeps
+ * no offset on a descriptor (bash's second read through the same end
+ * would be at EOF). A file gone since `exec` opened it reads empty, where
+ * bash's still-open end would keep the old bytes.
+ */
+export async function readOpenSource(dispatch: DispatchFn, identity: string): Promise<Uint8Array> {
+  const scope = toScope(identity.slice(OPEN_FOR_READING.length))
+  try {
+    const [data] = await dispatch('read', scope)
+    return await materialize(data as ByteSource)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    return new Uint8Array()
+  }
+}
+
 function identity(session: Session, fd: number): [string, boolean] {
   // fd 0 is its own read end unless an `exec` rebound it: closed, or a
   // writing stream's identity (`exec 0<&1`), which a later dup from fd 0
@@ -100,8 +118,8 @@ function bind(session: Session, fd: number, id: string, append: boolean): void {
  * Deliver one stream's bytes where its binding points: to the terminal's
  * stdout, to the terminal's stderr, into a file, or nowhere. Returns the
  * bytes for each terminal stream and whether the write failed: a stream
- * bound to stdin (`exec 1>&0`) cannot be written, which is bash's `write
- * error: Bad file descriptor`.
+ * bound to stdin (`exec 1>&0`) or to a file's read end (`exec 1<f`) cannot
+ * be written, which is bash's `write error: Bad file descriptor`.
  */
 async function route(
   dispatch: DispatchFn,
@@ -113,7 +131,7 @@ async function route(
   const target = binding ?? own
   if (target === TO_STDOUT) return [data, null, false]
   if (target === TO_STDERR) return [null, data, false]
-  if (target === TO_STDIN) return [null, null, true]
+  if (target === TO_STDIN || target.startsWith(OPEN_FOR_READING)) return [null, null, true]
   if (target !== CLOSED) await appendTo(dispatch, session, target, data)
   return [null, null, false]
 }
@@ -222,6 +240,13 @@ async function install(
         if (source === TO_STDIN) {
           session.execStdinUnreadable = false
           session.execStdinIdentity = null
+        } else if (source.startsWith(OPEN_FOR_READING)) {
+          // The descriptor holds a file's read end (`exec 1<f`): fd 0
+          // takes the same end, read from the file's start, and a later
+          // dup from fd 0 copies it on.
+          session.execStdin = await readOpenSource(dispatch, source)
+          session.execStdinUnreadable = false
+          session.execStdinIdentity = source
         } else {
           session.execStdin = null
           session.execStdinUnreadable = true
@@ -250,11 +275,11 @@ async function install(
         return errorLine(scope.rawPath, err)
       }
       if (r.fd !== FD_STDIN) {
-        // `exec 1<f`: the stream is open for reading only, so a write to
+        // `exec 1<f`: the stream holds the file's read end, so a write to
         // it fails as one to stdin's end does (`echo: write error: Bad
-        // file descriptor`). Not modelled: reading the file back through
-        // `<&1`.
-        bind(session, r.fd, TO_STDIN, false)
+        // file descriptor`), a dup onto fd 0 (`exec 0<&1`) reads the
+        // file, and so does a transient `<&1`.
+        bind(session, r.fd, OPEN_FOR_READING + scope.virtual, false)
         continue
       }
       session.execStdin = await materialize(data as ByteSource)
@@ -271,8 +296,8 @@ async function install(
     }
     if (r.fd === FD_STDIN) {
       // `exec 0>f`: fd 0 holds the file's write end, so a read fails with
-      // EBADF and a later dup from it (`exec 1>&0`) writes there. Not
-      // modelled: a transient `>&0` reaching the file.
+      // EBADF, a later dup from it (`exec 1>&0`) writes there, and so does
+      // a transient `>&0`.
       session.execStdin = null
       session.execStdinUnreadable = true
       session.execStdinIdentity = path

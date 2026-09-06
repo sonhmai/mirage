@@ -35,6 +35,9 @@ from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, format_fs_error, fs_strerror
 from mirage.workspace.executor.builtins import _to_scope
+from mirage.workspace.executor.builtins.exec.constants import (
+    CLOSED, OPEN_FOR_READING, TO_STDERR, TO_STDOUT)
+from mirage.workspace.executor.builtins.exec.exec import read_open_source
 from mirage.workspace.executor.create import create_file
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
@@ -65,6 +68,29 @@ class _Unreadable(Enum):
     """A descriptor a read cannot use: closed, or open for writing only."""
 
     TOKEN = auto()
+
+
+def _stdin_dest(session: Session) -> _Fd | str:
+    """Where a write through fd 0 lands, read off the shell's bindings.
+
+    Its own read end, a closed descriptor and a file's read end take
+    no write (`echo x >&0` is bash's `write error: Bad file descriptor`
+    with stdin a pipe); a terminal stream dup'd onto it (`exec 0<&1`)
+    writes where that stream goes; a file opened for writing
+    (`exec 0>f`) is the file.
+
+    Args:
+        session (Session): shell session state.
+    """
+    identity = session.exec_stdin_identity
+    if (identity is None or identity == CLOSED
+            or identity.startswith(OPEN_FOR_READING)):
+        return _CLOSED
+    if identity == TO_STDOUT:
+        return _TO_STDOUT
+    if identity == TO_STDERR:
+        return _TO_STDERR
+    return identity
 
 
 async def handle_redirect(
@@ -142,6 +168,12 @@ async def handle_redirect(
     inputs: list[ByteSource | None | _Unreadable] = [
         stdin, _Unreadable.TOKEN, _Unreadable.TOKEN
     ]
+    # A stream `exec 1<f` opened for reading answers a read through it
+    # (`cat <&1`) with the file, from its start.
+    for fd, binding in ((FD_STDOUT, session.exec_stdout),
+                        (FD_STDERR, session.exec_stderr)):
+        if binding is not None and binding.startswith(OPEN_FOR_READING):
+            inputs[fd] = await read_open_source(dispatch, binding)
     # A descriptor an earlier redirect closed is not merely write-only:
     # a later dup from it is bash's `0: Bad file descriptor`, and the
     # command never runs (`touch marker 0<&- 1<&0` creates nothing). A
@@ -240,13 +272,22 @@ async def handle_redirect(
             io.exit_code = read_fail_exit(name, exc)
         stderr_data = await materialize(io.stderr) or b""
 
-    fds: list[_Fd | str] = [_CLOSED, _TO_STDOUT, _TO_STDERR]
+    fds: list[_Fd | str] = [_stdin_dest(session), _TO_STDOUT, _TO_STDERR]
     file_bufs: dict[str, bytearray] = {}
     file_scopes: dict[str, PathSpec] = {}
 
     for r in redirects:
         if isinstance(r.target, int):
-            fds[r.fd] = _CLOSED if r.target == FD_CLOSE else fds[r.target]
+            dest = _CLOSED if r.target == FD_CLOSE else fds[r.target]
+            fds[r.fd] = dest
+            if isinstance(dest, str) and dest not in file_bufs and not refused:
+                # fd 0 holds a file's write end (`exec 0>f`), which
+                # `exec` truncated when it opened it, so a dup from it
+                # appends, as writes through bash's shared offset do.
+                scope = _ensure_scope(dest)
+                file_scopes[dest] = scope
+                file_bufs[dest] = bytearray(await
+                                            _read_existing(dispatch, scope))
             continue
 
         if r.kind in (RedirectKind.STDIN, RedirectKind.HEREDOC,

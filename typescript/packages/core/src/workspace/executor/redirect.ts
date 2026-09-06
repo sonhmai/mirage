@@ -36,6 +36,13 @@ import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { createFile } from './create.ts'
+import {
+  CLOSED as EXEC_CLOSED,
+  OPEN_FOR_READING,
+  TO_STDERR as EXEC_TO_STDERR,
+  TO_STDOUT as EXEC_TO_STDOUT,
+} from './builtins/exec/constants.ts'
+import { readOpenSource } from './builtins/exec/exec.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -122,6 +129,16 @@ export async function handleRedirect(
   // as a source that fails on its first read, as in bash (`cat 0<&1`,
   // `cat <&-`), while one that never reads is untouched (`true 0<&1`).
   const inputs: (ByteSource | null | typeof UNREADABLE)[] = [stdin, UNREADABLE, UNREADABLE]
+  // A stream `exec 1<f` opened for reading answers a read through it
+  // (`cat <&1`) with the file, from its start.
+  for (const [fd, binding] of [
+    [FD_STDOUT, session.execStdout],
+    [FD_STDERR, session.execStderr],
+  ] as [number, string | null][]) {
+    if (binding?.startsWith(OPEN_FOR_READING)) {
+      inputs[fd] = await readOpenSource(dispatch, binding)
+    }
+  }
   // A descriptor an earlier redirect closed is not merely write-only: a
   // later dup from it is bash's `0: Bad file descriptor`, and the command
   // never runs (`touch marker 0<&- 1<&0` creates nothing). A dup of a
@@ -235,13 +252,22 @@ export async function handleRedirect(
     stderrData = await materialize(io.stderr)
   }
 
-  const fds: FdDest[] = [CLOSED, TO_STDOUT, TO_STDERR]
+  const fds: FdDest[] = [stdinDest(session), TO_STDOUT, TO_STDERR]
   const fileBufs = new Map<string, Uint8Array>()
   const fileScopes = new Map<string, PathSpec>()
 
   for (const r of redirects) {
     if (typeof r.target === 'number') {
-      fds[r.fd] = r.target === FD_CLOSE ? CLOSED : (fds[r.target] ?? CLOSED)
+      const dest = r.target === FD_CLOSE ? CLOSED : (fds[r.target] ?? CLOSED)
+      fds[r.fd] = dest
+      if (typeof dest === 'string' && !fileBufs.has(dest) && !refused) {
+        // fd 0 holds a file's write end (`exec 0>f`), which `exec`
+        // truncated when it opened it, so a dup from it appends, as writes
+        // through bash's shared offset do.
+        const scope = ensureScope(dest)
+        fileScopes.set(dest, scope)
+        fileBufs.set(dest, await readExisting(dispatch, scope))
+      }
       continue
     }
     if (
@@ -491,6 +517,21 @@ async function applyPendingOpens(dispatch: DispatchFn, pending: PathSpec[]): Pro
       if (!isFsError(err)) throw err
     }
   }
+}
+
+/**
+ * Where a write through fd 0 lands, read off the shell's bindings. Its
+ * own read end, a closed descriptor and a file's read end take no write
+ * (`echo x >&0` is bash's `write error: Bad file descriptor` with stdin a
+ * pipe); a terminal stream dup'd onto it (`exec 0<&1`) writes where that
+ * stream goes; a file opened for writing (`exec 0>f`) is the file.
+ */
+function stdinDest(session: Session): FdDest {
+  const id = session.execStdinIdentity
+  if (id === null || id === EXEC_CLOSED || id.startsWith(OPEN_FOR_READING)) return CLOSED
+  if (id === EXEC_TO_STDOUT) return TO_STDOUT
+  if (id === EXEC_TO_STDERR) return TO_STDERR
+  return id
 }
 
 async function readExisting(dispatch: DispatchFn, scope: PathSpec): Promise<Uint8Array> {

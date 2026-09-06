@@ -27,6 +27,13 @@ TO_STDIN = "&0"
 TO_STDOUT = "&1"
 TO_STDERR = "&2"
 
+# What `exec 1<f` binds a stream to: the file's read end, `<` then the
+# virtual path. Distinct from a path (which starts with `/`), from CLOSED
+# and from the terminal streams. A dup copies it (`exec 0<&1` reads the
+# file), a transient `<&1` reads it, and a write to it fails as one to
+# stdin's end does.
+OPEN_FOR_READING = "<"
+
 # The session fields an `exec` redirect line binds, put back as one
 # unit when a later redirect on the line fails.
 EXEC_STREAM_FIELDS = ("exec_stdout", "exec_stdout_append", "exec_stderr",

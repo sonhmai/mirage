@@ -12,11 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import './utils.ts'
+
 import { readFileSync } from 'node:fs'
 import { CacheType } from '@struktoai/mirage-core/cache/file/config'
 import { validateMaxDrainBytes } from '@struktoai/mirage-core/cache/file/mixin'
 import type { FileCache } from '@struktoai/mirage-core/cache/file/mixin'
-import { defaultFingerprint, globEscape, parseLimit } from '@struktoai/mirage-core/cache/file/utils'
+import {
+  defaultFingerprintAsync,
+  globEscape,
+  parseLimit,
+} from '@struktoai/mirage-core/cache/file/utils'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { registerFileCacheStore } from '@struktoai/mirage-core/workspace/workspace/cache'
 import type { RedisClientType } from 'redis'
@@ -106,7 +112,7 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
     data: Uint8Array,
     options: { fingerprint?: string | null; ttl?: number | null } = {},
   ): Promise<void> {
-    const fp = options.fingerprint ?? defaultFingerprint(data)
+    const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
     const c = await this.cacheClient()
     const dk = this.dataKey(key)
     const mk = this.metaKey(key)
@@ -126,7 +132,7 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
     options: { fingerprint?: string | null; ttl?: number | null } = {},
   ): Promise<boolean> {
     const c = await this.cacheClient()
-    const fp = options.fingerprint ?? defaultFingerprint(data)
+    const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
     // A background drain is insert-only: an older drain finishing late must
     // not overwrite a newer cache fill. add.lua keeps the check, bytes,
     // fingerprint and TTL in one execution so writers cannot interleave.

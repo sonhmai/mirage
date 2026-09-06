@@ -312,7 +312,7 @@ describe('background job kill', () => {
 
 // CPU work must offer cancellation points even when every read is immediately ready.
 describe('large in-memory commands', () => {
-  it.each(['wc -l /big', 'grep -c line /big', 'cat /big | wc -l'])(
+  it.each(['wc /big', 'grep -c line /big', 'cat /big | wc'])(
     'honors a caller abort during %s',
     async (command) => {
       const ram = new RAMResource()

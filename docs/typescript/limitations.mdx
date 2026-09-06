@@ -184,4 +184,6 @@ The Node limitations are runtime-level, not Mirage design decisions. Python's eq
 
 Line readers, cache drains, and `wc` processing periodically yield to the event loop. Large RAM files and warm cache reads therefore allow host timers and I/O callbacks to run. `Workspace.execute(command, { signal })` forwards caller cancellation to builtin input processing; Python provides the corresponding `cancel=asyncio.Event()` path and task cancellation.
 
-These checkpoints are cooperative, not a hard execution-time bound. A synchronous regex call, native sort, whole-buffer allocation, or hashing operation can still occupy the thread until that operation returns. Custom handlers must observe cancellation themselves. Embeddings requiring isolation from arbitrary CPU work should run the workspace in a separate worker or process.
+File-cache fingerprints use incremental MD5: the Node package installs native hashing with 64 KiB updates, while browser/core uses JavaScript block batches. Both yield on a time budget; Python uses incremental `hashlib` updates.
+
+These checkpoints are cooperative, not a hard execution-time bound. A synchronous regex call, native sort, whole-buffer allocation, or individual hash chunk can still occupy the thread until that operation returns. Custom handlers must observe cancellation themselves. Embeddings requiring isolation from arbitrary CPU work should run the workspace in a separate worker or process.

@@ -351,19 +351,20 @@ async def execute_line(
                     sources = await ws._secret_sources()
                     await fill_env(effective_session, names, sources)
                     names = plan_names(nodes)
-        io, _ = await run_cancellable(run_command_tree(
-            ws.dispatch,
-            ws._registry,
-            ws._namespace,
-            ws.job_table,
-            exec_recursion,
-            agent or "",
-            ast,
-            effective_session,
-            stdin,
-            cancel,
-            routing_decision=decision,
-        ), cancel)
+        io, _ = await run_cancellable(
+            run_command_tree(
+                ws.dispatch,
+                ws._registry,
+                ws._namespace,
+                ws.job_table,
+                exec_recursion,
+                agent or "",
+                ast,
+                effective_session,
+                stdin,
+                cancel,
+                routing_decision=decision,
+            ), cancel)
         # A record a nested line earned is the line's to report when
         # its own tree earned none (see NestedRefusal).
         if io.refusal is None:

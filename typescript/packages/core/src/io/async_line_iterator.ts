@@ -21,6 +21,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   private buf: Uint8Array<ArrayBuffer> = new Uint8Array(0)
   private exhausted = false
   private readonly checkpoint = new Checkpoint()
+  private linesSinceCheck = 0
 
   constructor(source: AsyncIterable<Uint8Array> | AsyncIterator<Uint8Array>) {
     const s = source as AsyncIterable<Uint8Array>
@@ -42,8 +43,12 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   }
 
   async readline(): Promise<Uint8Array | null> {
-    const pending = this.checkpoint.run()
-    if (pending !== undefined) await pending
+    // Amortize clock reads on short-line workloads; chunk pulls also check.
+    if (++this.linesSinceCheck >= 64) {
+      this.linesSinceCheck = 0
+      const pending = this.checkpoint.run()
+      if (pending !== undefined) await pending
+    }
     const idx = this.buf.indexOf(NEWLINE)
     if (idx >= 0) {
       const line = this.buf.subarray(0, idx)

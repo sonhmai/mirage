@@ -70,7 +70,18 @@ export function parseFlags(flags: Record<string, FlagValue>): WcFlags | string {
 // running maximum rather than a per-line one because carriage return and form
 // feed rewind the column without ending the line -- which is why the old
 // `split(/\r?\n/)` could not express it. Mirrors Python's `_scan_text`.
-async function countsOf(source: ByteSource, opts: CommandOpts): Promise<WcCounts> {
+async function countsOf(source: ByteSource, opts: CommandOpts, flags: WcFlags): Promise<WcCounts> {
+  const byteCountsOnly =
+    (flags.lines || flags.bytes) && !flags.words && !flags.chars && !flags.maxLineLength
+  if (byteCountsOnly) {
+    let lines = 0
+    let bytes = 0
+    for await (const chunk of guardInput(source, opts)) {
+      bytes += chunk.byteLength
+      if (flags.lines) for (let i = 0; i < chunk.byteLength; i++) if (chunk[i] === 0x0a) lines++
+    }
+    return { lines, words: 0, bytes, chars: 0, maxLineLength: 0 }
+  }
   const decoder = new TextDecoder('utf-8', { fatal: false })
   let bytes = 0
   let lines = 0
@@ -106,6 +117,7 @@ async function countsOf(source: ByteSource, opts: CommandOpts): Promise<WcCounts
     scan(decoder.decode(chunk, { stream: true }))
   }
   scan(decoder.decode())
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- scan mutates inWord across decoded chunks.
   if (inWord) words += 1
   return { lines, words, bytes, chars, maxLineLength }
 }
@@ -192,7 +204,7 @@ export async function wcGeneric(
     for (const p of paths) {
       let counts: WcCounts
       try {
-        counts = await countsOf(stream(p), opts)
+        counts = await countsOf(stream(p), opts, parsed)
       } catch (e) {
         if (!isFsError(e)) throw e
         err += fsErrorLine('wc', p, e)
@@ -214,7 +226,7 @@ export async function wcGeneric(
     const msg = err instanceof Error ? err.message : String(err)
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
   }
-  const counts = await countsOf(source, opts)
+  const counts = await countsOf(source, opts, parsed)
   const values = selectedValues(counts, parsed)
   if (parsed.total === 'only') {
     return [ENC.encode(`${values.join(' ')}\n`), new IOResult()]

@@ -70,6 +70,7 @@ async def test_caller_cancel_joins_producer():
 
 @pytest.mark.asyncio
 async def test_long_line_preserves_delimiter_and_tail():
+
     async def source():
         yield b"x" * 100_000 + b"\nlast"
 
@@ -84,3 +85,34 @@ async def test_wc_keeps_utf8_and_word_state_across_chunks():
     counts = await wc(("a" * 16_383 + "é x\n").encode())
     assert (counts.lines, counts.words, counts.bytes_, counts.chars,
             counts.max_line_length) == (1, 2, 16_388, 16_387, 16_386)
+
+
+@pytest.mark.asyncio
+async def test_delimiter_spanning_chunk_boundary():
+    from mirage.io.async_line_iterator import AsyncLineIterator
+
+    async def source():
+        yield b"abc\r"
+        yield b"\ndef"
+
+    reader = AsyncLineIterator(source())
+    assert await reader.read_until(b"\r\n") == (b"abc", True)
+    assert await reader.readline() == b"def"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_read_chars_closes_source():
+    from mirage.io.async_line_iterator import AsyncLineIterator
+    closed = False
+
+    async def source():
+        nonlocal closed
+        try:
+            yield b"x" * 1_000_000
+        finally:
+            closed = True
+
+    reader = AsyncLineIterator(source())
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(reader.read_chars(1_000_000, None), 0.001)
+    assert closed

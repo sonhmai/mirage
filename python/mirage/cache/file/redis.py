@@ -18,7 +18,7 @@ from importlib.resources import files
 from typing import Any
 
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
-from mirage.cache.file.utils import (default_fingerprint, glob_escape,
+from mirage.cache.file.utils import (default_fingerprint_async, glob_escape,
                                      parse_limit)
 from mirage.resource.redis.redis import RedisResource
 
@@ -67,7 +67,7 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
         ttl: int | None = None,
     ) -> None:
         if fingerprint is None:
-            fingerprint = default_fingerprint(data)
+            fingerprint = await default_fingerprint_async(data)
         pipe = self._cache_client.pipeline()
         dk = self._data_key(key)
         mk = self._meta_key(key)
@@ -86,7 +86,7 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
         ttl: int | None = None,
     ) -> bool:
         if fingerprint is None:
-            fingerprint = default_fingerprint(data)
+            fingerprint = await default_fingerprint_async(data)
         # The background drain deliberately uses insert-only semantics: an
         # older drain finishing late must not overwrite a newer cache fill.
         # add.lua keeps the existence check, bytes, fingerprint and TTL in

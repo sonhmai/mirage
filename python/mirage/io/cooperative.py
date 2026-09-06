@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 
 CHUNK_SIZE = 16 * 1024
 
@@ -21,7 +21,8 @@ class Checkpoint:
         self._next_yield = time.monotonic() + .01
 
 
-async def chunks(source: bytes | AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+async def chunks(
+        source: bytes | AsyncIterator[bytes]) -> AsyncGenerator[bytes, None]:
     """Split even a single RAM/cache blob; close producers on cancellation."""
     checkpoint = Checkpoint()
     if isinstance(source, bytes):

@@ -394,7 +394,8 @@ async def test_python3_mount_limit_follows_script_path(restore_defaults):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("command", ["wc -l /big", "grep -c line /big", "cat /big | wc -l"])
+@pytest.mark.parametrize("command",
+                         ["wc /big", "grep -c line /big", "cat /big | wc"])
 async def test_large_ram_command_honors_caller_cancel(command):
     from mirage.workspace.abort import MirageAbortError
 

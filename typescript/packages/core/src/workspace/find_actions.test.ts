@@ -237,6 +237,32 @@ describe('find action layer', () => {
       }
     })
 
+    it('does not see a shell-only builtin under -exec', async () => {
+      // GNU findutils 4.10 finds `echo`, `true`, `printf`, `test` and the
+      // like through execvp, since coreutils ships them, and nothing the
+      // shell alone defines: `cd`, `export`, `read` are `No such file or
+      // directory` per match, exit 0.
+      const ws = await singleMountWs()
+      try {
+        await ws.execute('mkdir -p /w/d; cd /w')
+        const io = await ws.execute('find d -maxdepth 0 -exec cd {} \\;; echo rc=$?')
+        expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([
+          'rc=0\n',
+          "find: 'cd': No such file or directory\n",
+          0,
+        ])
+        const mixed = await ws.execute(
+          'find d -maxdepth 0 -exec export X=1 \\;; find d -maxdepth 0 -exec echo hi {} \\;',
+        )
+        expect([mixed.stdoutText, mixed.stderrText]).toEqual([
+          'hi d\n',
+          "find: 'export': No such file or directory\n",
+        ])
+      } finally {
+        await ws.close()
+      }
+    })
+
     it('does not see a shell function under -exec', async () => {
       // GNU findutils 4.10 execs the head through execvp, which sees no
       // shell function: `find: 'f': No such file or directory` per match,
@@ -322,7 +348,15 @@ describe('find -exec isolation', () => {
     const actions =
       terminator === '{} +'
         ? [BATCH, MUTATE, MUTATE_EXIT]
-        : ['cd /', 'unset KEEP', 'export KEEP=child', 'set -- child', 'set -u', MUTATE, MUTATE_EXIT]
+        : [
+            "sh -c 'cd /'",
+            "sh -c 'unset KEEP'",
+            "sh -c 'export KEEP=child'",
+            "sh -c 'set -- child'",
+            "sh -c 'set -u'",
+            MUTATE,
+            MUTATE_EXIT,
+          ]
     it.each(actions)(`isolates %s ${terminator}`, async (action) => {
       const ws = await singleMountWs()
       try {

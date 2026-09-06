@@ -283,13 +283,18 @@ export function inMtimeWindow(
 // displacements). A null return is the caller's cue for GNU's
 // `date: invalid date '...'` refusal, never a NaN render. Mirrors the
 // Python parse_date_expr.
+const EPOCH_RE = /^@\s*[+-]?\d+(?:\.\d+)?$/
+
 export function parseDateExpr(text: string, utc: boolean, now?: Date): Date | null {
   const raw = text.trim()
   if (raw === '') return null
   if (raw.startsWith('@')) {
-    const epoch = Number(raw.slice(1))
-    if (Number.isNaN(epoch)) return null
-    return new Date(epoch * 1000)
+    // gnulib's epoch grammar (findutils 4.10): blanks, a sign, a decimal
+    // count of seconds and a fraction with digits on both sides; `@0x1`,
+    // `@1e2`, `@1.` and `@.5` are not dates, however readily Number()
+    // would take them.
+    if (!EPOCH_RE.test(raw)) return null
+    return new Date(Number(raw.slice(1)) * 1000)
   }
   const whole = parseIsoWords(raw, utc)
   if (whole !== null) return whole

@@ -14,6 +14,7 @@
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.ops.types import SessionView
 from mirage.runtime.types import DispatchFn
 from mirage.shell.errors import ExitSignal
 from mirage.shell.types import ShellBuiltin as SB
@@ -26,6 +27,7 @@ from mirage.workspace.executor.builtins.condition.types import (CondContext,
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
+from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
 
@@ -35,6 +37,7 @@ async def handle_test(
     args: list[str | PathSpec] | CondNode,
     session: Session,
     name: str = "test",
+    view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Evaluate test/[ (flat argv) or [[ (condition tree).
 
@@ -45,11 +48,14 @@ async def handle_test(
             test/[, a CondNode tree for [[.
         session (Session): session for cwd, env, and BASH_REMATCH.
         name (str): invocation name for diagnostics: "test", "[", "[[".
+        view (SessionView | None): the session plane's gated door, for
+            an assignment inside a numeric operand.
     """
     ctx = CondContext(dispatch=dispatch,
                       namespace=namespace,
                       session=session,
-                      name=name)
+                      name=name,
+                      view=view)
     try:
         if isinstance(args, list):
             result = await eval_flat(ctx, args)
@@ -92,4 +98,7 @@ async def test_builtin(call: BuiltinCall) -> Result:
                              call.namespace,
                              test_args,
                              call.session,
-                             name=test_name)
+                             name=test_name,
+                             view=session_view(
+                                 call.session,
+                                 call.namespace.registry.policies))

@@ -839,7 +839,14 @@ async function executeNodeBody(
         callStack,
         sessionView(session, registry.policies),
       )
-      return handleTest(dispatch, deps.namespace, tree, session, '[[')
+      return handleTest(
+        dispatch,
+        deps.namespace,
+        tree,
+        session,
+        '[[',
+        sessionView(session, registry.policies),
+      )
     }
     const expanded = await expandTestExpr(
       node,
@@ -848,7 +855,14 @@ async function executeNodeBody(
       callStack,
       sessionView(session, registry.policies),
     )
-    return handleTest(dispatch, deps.namespace, expanded, session, '[')
+    return handleTest(
+      dispatch,
+      deps.namespace,
+      expanded,
+      session,
+      '[',
+      sessionView(session, registry.policies),
+    )
   }
 
   if (kind === NodeKind.NEGATED) {

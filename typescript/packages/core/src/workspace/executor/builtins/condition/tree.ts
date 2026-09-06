@@ -14,6 +14,8 @@
 
 import { randomReader, seedVar, sessionElements } from '../../../session/state.ts'
 import { evaluateArith } from '../../../../shell/arith.ts'
+import type { ArithResult } from '../../../../shell/types.ts'
+import { assignElement } from '../../../session/elements.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { makeArray } from '../../../../shell/array.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
@@ -80,18 +82,46 @@ async function evalCondBinary(
     // [[ evaluates numeric operands as arithmetic: variables resolve,
     // expressions compute, bare unset words are 0. The visible env,
     // so a hidden name reads as unset here too.
-    let li: bigint
-    let ri: bigint
+    let left: ArithResult
+    let right: ArithResult
+    const reader = randomReader(ctx.session)
     try {
-      const reader = randomReader(ctx.session)
       const elements = sessionElements(ctx.session, reader)
-      li = evaluateArith(node.left, visibleEnv(ctx.session), 0, elements, reader.read).value
-      ri = evaluateArith(node.right, visibleEnv(ctx.session), 0, elements, reader.read).value
+      left = evaluateArith(
+        node.left,
+        visibleEnv(ctx.session),
+        0,
+        elements,
+        reader.read,
+        reader.wrote,
+      )
+      right = evaluateArith(
+        node.right,
+        visibleEnv(ctx.session),
+        0,
+        elements,
+        reader.read,
+        reader.wrote,
+      )
     } catch (exc) {
       if (!(exc instanceof ArithError)) throw exc
       throw new CondError('mirage: syntax error in conditional expression')
     }
-    return compare(li, ri)
+    // An assignment inside an operand lands as `(( ))`'s do, through the
+    // gated door, RANDOM's seed included (`[[ RANDOM=42 -eq RANDOM ]]`
+    // seeds, then draws).
+    for (const write of [...left.writes, ...right.writes]) {
+      const status = await assignElement(
+        ctx.session,
+        ctx.view ?? null,
+        write.name,
+        write.key,
+        write.value,
+      )
+      if (status !== 'ok') throw new CondError(`${ctx.name}: ${write.name}: ${status}`)
+    }
+    reader.settle()
+    return compare(left.value, right.value)
   }
   if (FILE_PAIR_BINARY.has(node.op)) return applyFilePair(ctx, node.op, node.left, node.right)
   throw new CondError('mirage: conditional binary operator expected')

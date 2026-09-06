@@ -14,6 +14,7 @@
 
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { Session } from '../../../session/session.ts'
+import type { SessionView } from '../../../../ops/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 
 export type CondNode =
@@ -32,4 +33,7 @@ export interface CondContext {
   namespace: Namespace
   session: Session
   name: string
+  // The session plane's gated door, which an assignment inside a numeric
+  // operand lands through; absent outside a workspace.
+  view?: SessionView
 }

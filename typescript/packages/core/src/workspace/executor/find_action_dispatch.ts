@@ -24,6 +24,7 @@ import { getCurrentSession, runWithSuspendedOpPolicies } from '../../context/ses
 import { preOpsGate } from '../../policy/policies.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { SHELL_ONLY_BUILTINS } from '../lookup/constants.ts'
 import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { NamespaceView, StatPath } from '../../ops/types.ts'
@@ -94,12 +95,15 @@ async function headMissing(
     return statPath !== null && (await statPath(resolvePath(head, cwd))) === null
   }
   const sess = getCurrentSession()
-  // A shell function is not found either: GNU execs the head through
-  // execvp, which sees programs and nothing the shell defined, so
-  // `f(){ :; }; find d -exec f {} \;` reports `find: 'f': No such file
-  // or directory` per match.
+  // A shell function is not found either, nor a builtin that is the
+  // shell's own: GNU execs the head through execvp, which sees programs
+  // and nothing the shell defined, so `f(){ :; }; find d -exec f {} \;`
+  // and `find d -exec cd {} \;` report `No such file or directory` per
+  // match while `-exec echo` or `-exec sh -c` runs (SHELL_ONLY_BUILTINS
+  // names the shell's own).
   if (sess === null) return false
   const consumer = lookup(head, sess, registry)
+  if (consumer === Consumer.SESSION) return SHELL_ONLY_BUILTINS.has(head)
   return consumer === Consumer.UNKNOWN || consumer === Consumer.FUNCTION
 }
 

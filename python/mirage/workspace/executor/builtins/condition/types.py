@@ -15,6 +15,7 @@
 from dataclasses import dataclass
 from typing import Union
 
+from mirage.ops.types import SessionView
 from mirage.runtime.types import DispatchFn
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
@@ -79,3 +80,6 @@ class CondContext:
     namespace: Namespace
     session: Session
     name: str
+    # The session plane's gated door, which an assignment inside a
+    # numeric operand lands through; None outside a workspace.
+    view: SessionView | None = None

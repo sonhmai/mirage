@@ -203,6 +203,40 @@
         "stdout": "1 26794\n1 5\n1 9\n3\n",
         "stderr": "bash: ((: RANDOM=42, RANDOM + 1/0: division by 0\nbash: ((: zae=5, 1/0: division by 0\nbash: let: zae=9, 1/0: division by 0\nbash: ((: zae=3, 1/0: division by 0\n"
       }
+    },
+    {
+      "id": "arith_seed_coercion_and_condition_land_their_assignments",
+      "seq": 447,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "zx=1; RANDOM=\"zx=5\"; echo $zx $RANDOM; declare -i zn; zn=\"zx=7\"; echo $zn $zx; RANDOM=1; [[ RANDOM=42 -eq RANDOM ]]; echo $? $RANDOM; zx=1; [[ zx=5 -eq 5 ]]; echo $? $zx; unset zx zn",
+      "expect": {
+        "exit": 0,
+        "stdout": "5 18498\n7 7\n1 26794\n0 5\n",
+        "stderr": ""
+      }
     }
   ]
 }

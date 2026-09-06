@@ -30,6 +30,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.errors import fs_strerror
 from mirage.utils.path import resolve_path
+from mirage.workspace.lookup.constants import SHELL_ONLY_BUILTINS
 from mirage.workspace.lookup.lookup import lookup
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
@@ -69,9 +70,12 @@ async def _head_missing(head: str, registry: MountRegistry, cwd: str,
     builtin, function or CLI can claim, so it is statted where the
     line would read it; any other head is looked up by name across
     the layers dispatch consults. A shell function is not found
-    either: GNU execs the head through ``execvp``, which sees programs
-    and nothing the shell defined, so ``f(){ :; }; find d -exec f {} \\;``
-    reports ``find: 'f': No such file or directory`` per match.
+    either, nor a builtin that is the shell's own: GNU execs the head
+    through ``execvp``, which sees programs and nothing the shell
+    defined, so ``f(){ :; }; find d -exec f {} \\;`` and
+    ``find d -exec cd {} \\;`` report ``No such file or directory``
+    per match while ``-exec echo`` or ``-exec sh -c`` runs
+    (``SHELL_ONLY_BUILTINS`` names the shell's own).
 
     Args:
         head (str): the first word of the action.
@@ -84,8 +88,12 @@ async def _head_missing(head: str, registry: MountRegistry, cwd: str,
         return (stat_path is not None
                 and await stat_path(resolve_path(head, cwd)) is None)
     sess = get_current_session()
-    return sess is not None and lookup(
-        head, sess, registry) in (Consumer.UNKNOWN, Consumer.FUNCTION)
+    if sess is None:
+        return False
+    consumer = lookup(head, sess, registry)
+    if consumer is Consumer.SESSION:
+        return head in SHELL_ONLY_BUILTINS
+    return consumer in (Consumer.UNKNOWN, Consumer.FUNCTION)
 
 
 async def _run_exec(execute_fn: ExecuteLine, session_id: str,

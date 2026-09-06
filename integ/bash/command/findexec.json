@@ -1927,7 +1927,7 @@
       }
     },
     {
-      "id": "find_exec_does_not_see_a_shell_function",
+      "id": "find_exec_does_not_see_a_shell_function_or_builtin",
       "seq": 981535,
       "targets": [
         "ram",
@@ -1953,11 +1953,45 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/ff/d && cd /data/ff && zff() { echo BAD; }; find d -maxdepth 0 -exec zff {} \\; ; echo rc=$?; unset -f zff; cd / && rm -r /data/ff",
+      "command": "mkdir -p /data/ff/d && cd /data/ff && zff() { echo BAD; }; find d -maxdepth 0 -exec zff {} \\; ; echo rc=$?; find d -maxdepth 0 -exec cd {} \\; ; echo rc=$?; find d -maxdepth 0 -exec echo hi {} \\; ; unset -f zff; cd / && rm -r /data/ff",
       "expect": {
         "exit": 0,
-        "stdout": "rc=0\n",
-        "stderr": "find: 'zff': No such file or directory\n"
+        "stdout": "rc=0\nrc=0\nhi d\n",
+        "stderr": "find: 'zff': No such file or directory\nfind: 'cd': No such file or directory\n"
+      }
+    },
+    {
+      "id": "find_newermt_rejects_a_non_decimal_epoch",
+      "seq": 981536,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fq/a && cd /data/fq && find a -newermt @0x1; echo rc=$?; find a -newermt @1e2; echo rc=$?; find a -newermt @1.5 >/dev/null; echo rc=$?; find a -newermt '@ 1' >/dev/null; echo rc=$?; cd / && rm -r /data/fq",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=0\nrc=0\n",
+        "stderr": "find: I cannot figure out how to interpret '@0x1' as a date or time\nfind: I cannot figure out how to interpret '@1e2' as a date or time\n"
       }
     }
   ]

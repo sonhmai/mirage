@@ -281,6 +281,14 @@ async def test_arithmetic_random_reads_are_lazy(command, stdout):
         ('x=1; (( x=5, 1/0 )) 2>/dev/null; echo $? $x', '1 5\n'),
         ('x=1; let "x=9, 1/0" 2>/dev/null; echo $? $x', '1 9\n'),
         ('x=1; for ((x=3, 1/0;;)); do :; done 2>/dev/null; echo $x', '3\n'),
+        # A seed, a -i coercion and a numeric [[ ]] operand land the
+        # assignments they make, through the door.
+        ('x=1; RANDOM="x=5"; echo $x $RANDOM', '5 18498\n'),
+        ('declare -i n; n="x=7"; echo $n $x', '7 7\n'),
+        ('a=(1 2); declare -i n; n="a[1]=9"; echo $n ${a[1]}', '9 9\n'),
+        ('RANDOM=1; [[ RANDOM=42 -eq RANDOM ]]; echo $? $RANDOM', '1 26794\n'),
+        ('RANDOM=1; [[ RANDOM=42 -eq 42 ]]; echo $? $RANDOM', '0 17772\n'),
+        ('x=1; [[ x=5 -eq 5 ]]; echo $? $x', '0 5\n'),
     ])
 async def test_arithmetic_random_assignment_seeds_within_the_expression(
         command, stdout):

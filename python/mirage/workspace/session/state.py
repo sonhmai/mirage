@@ -23,11 +23,11 @@ from mirage.policy import Policies, PolicyDenied, pre_session_gate
 from mirage.policy.types import SessionContext
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
-                                array_values)
+                                array_values, array_with, make_array)
 from mirage.shell.constants import (PIPESTATUS, RANDOM, RANDOM_MODULUS,
                                     RANDOM_UNSET)
 from mirage.shell.errors import ArithError
-from mirage.shell.types import ElementOps
+from mirage.shell.types import ArithWrite, ElementOps
 from mirage.shell.variable import (ShellValue, ShellVar, VarAttr, coerce_value,
                                    detach, with_attr, with_value)
 from mirage.utils.hidden import var_hidden
@@ -589,35 +589,76 @@ def random_reader(session: Session) -> RandomReader:
     return RandomReader(session)
 
 
-def _integer_text(session: Session, text: str) -> str:
-    """The `-i` coercion: evaluate the incoming text as arithmetic.
+class _IntegerCoercion:
+    """The `-i` coercion and the ``RANDOM`` seed, as one evaluation.
 
-    Reads resolve against the visible env, so `n=x+1` sees `x`, and
-    element references resolve through the session's resolver, so
-    `n=a[1]+1` and `n=m[k]+1` see the element; an unresolvable name is
-    0 (`n=abc` stores `0`), which is the arithmetic rule, not a
-    refusal. `RANDOM` draws, as it does in every other arithmetic
-    context, so `n=RANDOM` and a `RANDOM=RANDOM` seed both advance the
-    generator. A malformed expression raises ArithError, and the caller
-    decides how to voice it (bash aborts the line with the evaluator's
-    own message).
+    The incoming text evaluates as arithmetic against the visible env,
+    element references resolving through the session's resolver, so
+    `n=x+1` sees `x` and `n=a[1]+1` the element; an unresolvable name
+    is 0 (`n=abc` stores `0`), the arithmetic rule, not a refusal.
+    ``RANDOM`` draws, as in every other arithmetic context, so `n=RANDOM`
+    and a `RANDOM=RANDOM` seed both advance the generator. The
+    assignments the expression makes are kept for the door to land
+    (``_land_coercion``): bash binds `x` in `n='x=5'` and in
+    `RANDOM='x=5'`, before the error too if the expression then fails.
+    A malformed expression raises ArithError with the offending text
+    leading, the way every caller voices it.
 
     Args:
         session (Session): the session the expression reads.
-        text (str): the incoming value.
     """
-    reader = random_reader(session)
-    try:
-        return str(
-            evaluate_arith(text,
-                           visible_env(session),
-                           elements=session_elements(session, reader),
-                           read_var=reader.read).value)
-    except ArithError as exc:
-        # The offending text leads, which is how every caller voices it
-        # (`bash: 1+: syntax error: operand expected`), so it is spelled
-        # once here rather than at each of the sites that catch it.
-        raise ArithError(f"{text}: {exc}") from exc
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+        self.reader = random_reader(session)
+        self.writes: list[ArithWrite] = []
+
+    def __call__(self, text: str) -> str:
+        session = self.session
+        try:
+            result = evaluate_arith(text,
+                                    visible_env(session),
+                                    elements=session_elements(
+                                        session, self.reader),
+                                    read_var=self.reader.read,
+                                    wrote_var=self.reader.wrote)
+        except ArithError as exc:
+            self.writes.extend(exc.writes)
+            raise ArithError(f"{text}: {exc}") from exc
+        self.writes.extend(result.writes)
+        return str(result.value)
+
+
+async def _land_coercion(session: Session, policies: Policies | None,
+                         coercion: _IntegerCoercion) -> None:
+    """Land the assignments a coercion made, each through the door, then
+    settle its ``RANDOM`` draws.
+
+    A scalar lands as itself; an element lands as the whole array it
+    produces, the way ``assign_element`` lands one, so a refusal never
+    leaves a write half-applied.
+
+    Args:
+        session (Session): the shell session.
+        policies (Policies | None): the session plane's gate.
+        coercion (_IntegerCoercion): the evaluation that made the writes.
+    """
+    for write in coercion.writes:
+        if write.key is None:
+            await set_var(session, policies, write.name, write.value)
+            continue
+        assoc = visible_assocs(session).get(write.name)
+        if assoc is not None:
+            await set_var(session, policies, write.name, {
+                **assoc, write.key: write.value
+            })
+            continue
+        arr = visible_arrays(session).get(write.name)
+        await set_var(
+            session, policies, write.name,
+            array_with(arr if arr is not None else make_array([]),
+                       int(write.key), write.value))
+    coercion.reader.settle()
 
 
 def ensure_var_visible(session: Session, name: str) -> None:
@@ -698,9 +739,9 @@ async def set_var(session: Session,
     # Coercion runs before the gate so a rule judges the value that
     # will land: `declare -l profile; profile=ADMIN` stores `admin`, and a
     # rule refusing `admin` must see that, not the raw text.
+    coercion = _IntegerCoercion(session)
     if existing is not None and existing.attrs:
-        value = coerce_value(value, existing.attrs,
-                             functools.partial(_integer_text, session))
+        value = coerce_value(value, existing.attrs, coercion)
     if isinstance(value, str):
         rendered = value
     elif isinstance(value, dict):
@@ -717,13 +758,17 @@ async def set_var(session: Session,
     if name == RANDOM and session._random_seed != RANDOM_UNSET and isinstance(
             value, str):
         try:
-            seed = int(_integer_text(session, value)) % RANDOM_MODULUS
+            seed = int(coercion(value)) % RANDOM_MODULUS
         except ArithError as exc:
             session._diagnostics.append(str(exc))
+            await _land_coercion(session, policies, coercion)
             return
         session._random_state = seed
         session._random_seed = value
         session._random_last = 0
+    # The assignments the coercion or the seed made land now, gated
+    # each, before the name they were made for.
+    await _land_coercion(session, policies, coercion)
     stored = ShellVar(value) if existing is None else with_value(
         existing, value)
     # An agent write to a managed name shadows session-locally: the

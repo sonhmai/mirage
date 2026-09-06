@@ -448,8 +448,9 @@ BATCH = "sh -c 'KEEP=child; cd /; set -- child; set -u'"
 @pytest.mark.parametrize(
     "action,terminator",
     [(action, r"\;")
-     for action in ('cd /', 'unset KEEP', 'export KEEP=child', 'set -- child',
-                    'set -u', MUTATE, MUTATE_EXIT)] +
+     for action in ("sh -c 'cd /'", "sh -c 'unset KEEP'",
+                    "sh -c 'export KEEP=child'", "sh -c 'set -- child'",
+                    "sh -c 'set -u'", MUTATE, MUTATE_EXIT)] +
     [(action, '{} +') for action in (BATCH, MUTATE, MUTATE_EXIT)])
 async def test_exec_isolates_each_invocation(action, terminator):
     # The mutating programs are `sh -c` lines: GNU's -exec sees no shell
@@ -657,6 +658,22 @@ async def test_a_row_ls_cannot_list_ends_its_chain():
         "find: 'd/b.txt': No such file or directory\n"
         "find: 'd/sub/c.txt': No such file or directory\n", 1)
     assert await _run_line(ws, "find d -type f") == ("", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_exec_does_not_see_a_shell_only_builtin():
+    # GNU findutils 4.10 finds `echo`, `true`, `printf`, `test` and the
+    # like through execvp, since coreutils ships them, and nothing the
+    # shell alone defines: `cd`, `export`, `read` are `No such file or
+    # directory` per match, exit 0.
+    ws = await _exec_ws()
+    assert await _run_line(
+        ws, "find d -maxdepth 0 -exec cd {} \\;; echo rc=$?") == (
+            "rc=0\n", "find: 'cd': No such file or directory\n", 0)
+    assert await _run_line(
+        ws, "find d -maxdepth 0 -exec export X=1 \\;; find d -maxdepth 0 "
+        "-exec echo hi {} \\;") == (
+            "hi d\n", "find: 'export': No such file or directory\n", 0)
 
 
 @pytest.mark.asyncio

@@ -722,7 +722,8 @@ async def _execute_node(
                                      namespace,
                                      tree,
                                      session,
-                                     name="[[")
+                                     name="[[",
+                                     view=view)
         test_argv = await expand_test_expr(node,
                                            session,
                                            execute_fn,
@@ -732,7 +733,8 @@ async def _execute_node(
                                  namespace,
                                  test_argv,
                                  session,
-                                 name="[")
+                                 name="[",
+                                 view=view)
 
     # ── negated command ─────────────────────────
     if kind == NodeKind.NEGATED:

@@ -22,6 +22,7 @@ from mirage.workspace.executor.builtins.condition.constants import (
 from mirage.workspace.executor.builtins.condition.operators import (
     apply_file_pair, apply_unary)
 from mirage.workspace.session import visible_env
+from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.state import (random_reader, seed_var,
                                             session_elements)
 
@@ -92,17 +93,28 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
         try:
             reader = random_reader(ctx.session)
             elements = session_elements(ctx.session, reader)
-            li = evaluate_arith(node.left,
-                                visible_env(ctx.session),
-                                elements=elements,
-                                read_var=reader.read).value
-            ri = evaluate_arith(node.right,
-                                visible_env(ctx.session),
-                                elements=elements,
-                                read_var=reader.read).value
+            left = evaluate_arith(node.left,
+                                  visible_env(ctx.session),
+                                  elements=elements,
+                                  read_var=reader.read,
+                                  wrote_var=reader.wrote)
+            right = evaluate_arith(node.right,
+                                   visible_env(ctx.session),
+                                   elements=elements,
+                                   read_var=reader.read,
+                                   wrote_var=reader.wrote)
         except ArithError:
             raise CondError("mirage: syntax error in conditional expression")
-        return compare(li, ri)
+        # An assignment inside an operand lands as `(( ))`'s do, through
+        # the gated door, RANDOM's seed included (`[[ RANDOM=42 -eq
+        # RANDOM ]]` seeds, then draws).
+        for write in (*left.writes, *right.writes):
+            status = await assign_element(ctx.session, ctx.view, write.name,
+                                          write.key, write.value)
+            if status != "ok":
+                raise CondError(f"{ctx.name}: {write.name}: {status}")
+        reader.settle()
+        return compare(left.value, right.value)
     if node.op in FILE_PAIR_BINARY:
         return await apply_file_pair(ctx, node.op, node.left, node.right)
     raise CondError("mirage: conditional binary operator expected")

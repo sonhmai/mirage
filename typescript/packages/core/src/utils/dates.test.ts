@@ -144,3 +144,23 @@ describe('parseDateExpr years below 100', () => {
     expect(parseDateExpr('0042-01-01', true)?.getTime()).toBe(-60841756800 * 1000)
   })
 })
+
+describe('parseDateExpr @epoch', () => {
+  it.each([
+    ['@0', true],
+    ['@1', true],
+    ['@-1', true],
+    ['@1.5', true],
+    ['@ 1', true],
+    ['@+1', true],
+    ['@01', true],
+    ['@0x1', false],
+    ['@1e2', false],
+    ['@1.', false],
+    ['@.5', false],
+  ])('%s is %s', (word, accepted) => {
+    // findutils 4.10 (gnulib): Number() would take `0x1`, `1e2`, `1.` and
+    // `.5`, and GNU refuses every one of them.
+    expect(parseDateExpr(word, true) !== null).toBe(accepted)
+  })
+})

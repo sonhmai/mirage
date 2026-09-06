@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from mirage.utils.dates import iso_timestamp, parse_date_expr, timestamp_iso
 
 NOW = datetime(2026, 8, 16, 13, 45, 30)
@@ -81,3 +83,22 @@ def test_timestamp_iso_spells_utc():
 
 def test_timestamp_iso_passes_none_through():
     assert timestamp_iso(None) is None
+
+
+@pytest.mark.parametrize("word,accepted", [
+    ("@0", True),
+    ("@1", True),
+    ("@-1", True),
+    ("@1.5", True),
+    ("@ 1", True),
+    ("@+1", True),
+    ("@01", True),
+    ("@0x1", False),
+    ("@1e2", False),
+    ("@1.", False),
+    ("@.5", False),
+])
+def test_epoch_is_a_decimal_count_of_seconds(word, accepted):
+    # findutils 4.10 (gnulib): float() would take `0x1`, `1e2`, `1.` and
+    # `.5`, and GNU refuses every one of them.
+    assert (parse_date_expr(word, utc=True) is not None) is accepted

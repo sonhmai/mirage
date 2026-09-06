@@ -15,10 +15,18 @@
 import type { SessionView } from '../../ops/types.ts'
 import { PolicyDenied, preSessionGate, type Policies } from '../../policy/index.ts'
 import { evaluateArith } from '../../shell/arith.ts'
-import { arrayExtent, arrayGet, arrayHas, arrayValues, type ShellArray } from '../../shell/array.ts'
+import {
+  arrayExtent,
+  arrayGet,
+  arrayHas,
+  arrayValues,
+  arrayWith,
+  makeArray,
+  type ShellArray,
+} from '../../shell/array.ts'
 import { PIPESTATUS, RANDOM, RANDOM_MODULUS, RANDOM_UNSET } from '../../shell/constants.ts'
 import { ArithError } from '../../shell/errors.ts'
-import type { ElementOps } from '../../shell/types.ts'
+import type { ArithWrite, ElementOps } from '../../shell/types.ts'
 import { varHidden } from '../../utils/hidden.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { ReadonlyVariableError } from './errors.ts'
@@ -485,24 +493,80 @@ export function randomReader(session: Session): RandomReader {
   return new RandomReader(session)
 }
 
-/** The `-i` coercion: evaluate the incoming text as arithmetic against
- * the visible env and the session's element resolver. `RANDOM` draws,
- * as in every other arithmetic context, so `n=RANDOM` and a
- * `RANDOM=RANDOM` seed both advance the generator. */
-function integerText(session: Session, text: string): string {
-  const reader = randomReader(session)
-  try {
-    return evaluateArith(
-      text,
-      visibleEnv(session),
-      0,
-      sessionElements(session, reader),
-      reader.read,
-    ).value.toString()
-  } catch (err) {
-    if (err instanceof ArithError) throw new ArithError(`${text}: ${err.message}`)
-    throw err
+/**
+ * The `-i` coercion and the `RANDOM` seed, as one evaluation. The
+ * incoming text evaluates as arithmetic against the visible env, element
+ * references resolving through the session's resolver, so `n=x+1` sees
+ * `x` and `n=a[1]+1` the element; an unresolvable name is 0 (`n=abc`
+ * stores `0`), the arithmetic rule, not a refusal. `RANDOM` draws, as in
+ * every other arithmetic context, so `n=RANDOM` and a `RANDOM=RANDOM`
+ * seed both advance the generator. The assignments the expression makes
+ * are kept for the door to land (`landCoercion`): bash binds `x` in
+ * `n='x=5'` and in `RANDOM='x=5'`, before the error too if the expression
+ * then fails. A malformed expression throws ArithError with the
+ * offending text leading, the way every caller voices it.
+ */
+class IntegerCoercion {
+  readonly reader: RandomReader
+  readonly writes: ArithWrite[] = []
+
+  constructor(private readonly session: Session) {
+    this.reader = randomReader(session)
   }
+
+  readonly run = (text: string): string => {
+    const session = this.session
+    try {
+      const result = evaluateArith(
+        text,
+        visibleEnv(session),
+        0,
+        sessionElements(session, this.reader),
+        this.reader.read,
+        this.reader.wrote,
+      )
+      this.writes.push(...result.writes)
+      return result.value.toString()
+    } catch (err) {
+      if (err instanceof ArithError) {
+        this.writes.push(...err.writes)
+        throw new ArithError(`${text}: ${err.message}`)
+      }
+      throw err
+    }
+  }
+}
+
+/**
+ * Land the assignments a coercion made, each through the door, then
+ * settle its `RANDOM` draws. A scalar lands as itself; an element lands
+ * as the whole array it produces, the way `assignElement` lands one, so
+ * a refusal never leaves a write half-applied.
+ */
+async function landCoercion(
+  session: Session,
+  policies: Policies | null,
+  coercion: IntegerCoercion,
+): Promise<void> {
+  for (const write of coercion.writes) {
+    if (write.key === null) {
+      await setVar(session, policies, write.name, write.value)
+      continue
+    }
+    const assoc = visibleAssocs(session)[write.name]
+    if (assoc !== undefined) {
+      await setVar(session, policies, write.name, { ...assoc, [write.key]: write.value })
+      continue
+    }
+    const arr = visibleArrays(session)[write.name]
+    await setVar(
+      session,
+      policies,
+      write.name,
+      arrayWith(arr ?? makeArray([]), Number(write.key), write.value),
+    )
+  }
+  coercion.reader.settle()
 }
 
 export function ensureVarVisible(session: Session, name: string): void {
@@ -536,9 +600,10 @@ async function setVar(
   // as bash does. Coercion runs before the gate so a rule judges the
   // value that will land: `declare -l profile; profile=ADMIN` stores `admin`,
   // and a rule refusing `admin` must see that, not the raw text.
+  const coercion = new IntegerCoercion(session)
   const shaped =
     existing !== undefined && existing.attrs.size > 0
-      ? coerceValue(value, existing.attrs, (text) => integerText(session, text))
+      ? coerceValue(value, existing.attrs, coercion.run)
       : value
   const rendered =
     typeof shaped === 'string'
@@ -558,17 +623,21 @@ async function setVar(
   })
   if (name === RANDOM && session.randomSeed !== RANDOM_UNSET && typeof shaped === 'string') {
     try {
-      const value = BigInt(integerText(session, shaped))
+      const value = BigInt(coercion.run(shaped))
       const modulus = BigInt(RANDOM_MODULUS)
       session.randomState = Number(((value % modulus) + modulus) % modulus)
     } catch (err) {
       if (!(err instanceof ArithError)) throw err
       session.diagnostics.push(err.message)
+      await landCoercion(session, policies, coercion)
       return
     }
     session.randomSeed = shaped
     session.randomLast = 0
   }
+  // The assignments the coercion or the seed made land now, gated each,
+  // before the name they were made for.
+  await landCoercion(session, policies, coercion)
   let stored = existing === undefined ? makeVar(shaped) : withValue(existing, shaped)
   // An agent write to a managed name shadows session-locally: the
   // pointer drops and the record becomes a plain variable for this

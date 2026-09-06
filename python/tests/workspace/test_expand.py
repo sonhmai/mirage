@@ -188,7 +188,9 @@ def test_expand_command_sub_runs_the_whole_body():
     execute_fn.return_value = io
     result = _run(expand_node(node, _session(), execute_fn))
     assert result == "a\nb"
-    assert execute_fn.call_args.args[0] == "( echo a; echo b\n)"
+    # Unwrapped: the child shell is the session restore around the run,
+    # not a subshell in the text.
+    assert execute_fn.call_args.args[0] == "echo a; echo b"
 
 
 def test_expand_command_sub_runs_a_declaration():
@@ -196,7 +198,7 @@ def test_expand_command_sub_runs_a_declaration():
     execute_fn = AsyncMock()
     execute_fn.return_value = IOResult()
     _run(expand_node(node, _session(), execute_fn))
-    assert execute_fn.call_args.args[0] == "( export X=1\n)"
+    assert execute_fn.call_args.args[0] == "export X=1"
 
 
 # ── arithmetic expansion $((expr)) ──────────────

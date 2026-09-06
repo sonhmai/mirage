@@ -34,7 +34,8 @@ from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
-from mirage.workspace.session.state import deref, session_view, subscript_index
+from mirage.workspace.session.state import (conversion_scalar, deref,
+                                            session_view, subscript_index)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -271,7 +272,7 @@ async def execute_assignment(
                 command=text, exit_code=code)
         held = session.arrays.get(key)
         if append and held is None:
-            scalar = session.env.get(key)
+            scalar = conversion_scalar(session, key)
             held = None if scalar is None else [scalar]
         # `arr+=(...)` starts at the extent, so it fills the hole a
         # trailing `unset arr[last]` left but skips interior ones;
@@ -321,7 +322,7 @@ async def execute_assignment(
                 command=text, exit_code=code)
         arr = session.arrays.get(key)
         if arr is None:
-            scalar = session.env.get(key)
+            scalar = conversion_scalar(session, key)
             arr = [] if scalar is None else [scalar]
         else:
             arr = list(arr)

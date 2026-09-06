@@ -25,6 +25,7 @@ from mirage.workspace.executor.command.types import ExecuteNodeFn
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.executor.statement import finish_statement
 from mirage.workspace.session import Session
+from mirage.workspace.session.state import restore_locals
 from mirage.workspace.types import ExecutionNode
 
 
@@ -97,10 +98,6 @@ async def run_shell_function(
         return combined, merged_io, last_exec
     finally:
         cs.pop()
-        for key, old in saved_locals.items():
-            if old is None:
-                session.vars.pop(key, None)
-            else:
-                session.vars[key] = old
+        restore_locals(session, saved_locals)
         session._local_frames.pop()
         session._local_vars = outer_locals

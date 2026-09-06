@@ -32,7 +32,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import { ReadonlyVariableError } from './errors.ts'
 import { draw, initialSeed } from './rng.ts'
 import { ownRecord, sessionEntry, setSessionEntry } from './session.ts'
-import type { ShellValue } from '../../shell/variable.ts'
+import type { ShellValue, ShellVar } from '../../shell/variable.ts'
 import { coerceValue, detach, makeVar, VarAttr, withAttr, withValue } from '../../shell/variable.ts'
 import type { Session } from './session.ts'
 
@@ -551,6 +551,36 @@ export class RandomReader {
   }
 }
 
+/**
+ * End `RANDOM`'s special meaning when a non-string lands on it.
+ *
+ * bash's `convert_var_to_array` drops the dynamic value and the assign
+ * hook, so `RANDOM=(1 2)`, `declare -a RANDOM`, `RANDOM[1]=5` and
+ * `RANDOM+=(3)` all leave an ordinary array that `$RANDOM` reads element
+ * 0 of, for good, as `unset RANDOM` does. Every store door calls this,
+ * gated or not, since a host seeding an array onto the name means the
+ * same thing.
+ */
+export function noteRandomKind(session: Session, name: string, value: ShellValue): void {
+  if (name === RANDOM && typeof value !== 'string') session.randomSeed = RANDOM_UNSET
+}
+
+/**
+ * The scalar an array conversion keeps as element 0.
+ *
+ * bash's `convert_var_to_array` copies the variable's current value into
+ * element 0, and for a live `RANDOM` looking the name up is what draws:
+ * `RANDOM[1]=5` leaves `[0]` holding one draw and `declare -a RANDOM` one
+ * alone, after which the array is ordinary.
+ */
+export function conversionScalar(session: Session, name: string): string | undefined {
+  if (name === RANDOM) {
+    const drawn = nextRandom(session, visibleEnv(session)[RANDOM])
+    if (drawn !== null) return String(drawn)
+  }
+  return session.env[name]
+}
+
 /** Bind arithmetic `$RANDOM` reads to a session. */
 export function randomReader(session: Session): RandomReader {
   return new RandomReader(session)
@@ -689,6 +719,7 @@ async function setVar(
     session.randomSeed = shaped
     session.randomLast = 0
   }
+  noteRandomKind(session, name, shaped)
   // The assignments the coercion or the seed made land now, gated each,
   // before the name they were made for.
   await landCoercion(session, policies, coercion)
@@ -742,6 +773,47 @@ async function unsetVar(
 }
 
 /**
+ * Record the caller's record before a `local` shadows it, once per frame.
+ *
+ * `RANDOM` parks its generator marker too: a local `RANDOM` is an ordinary
+ * variable for the function's extent (`local RANDOM=5; echo $RANDOM`
+ * prints 5, and `local RANDOM=(7)` leaves the caller's generator alone),
+ * and `restoreLocals` hands the marker back.
+ */
+export function shadowLocal(
+  session: Session,
+  locals: Map<string, ShellVar | null>,
+  name: string,
+): void {
+  if (locals.has(name)) return
+  locals.set(name, sessionEntry(session.vars, name) ?? null)
+  if (name === RANDOM) {
+    session.localRandom.push(session.randomSeed)
+    session.randomSeed = RANDOM_UNSET
+  }
+}
+
+/**
+ * Put a returning function's shadowed records back.
+ *
+ * Deliberate divergence: bash reseeds the global generator when a local
+ * `RANDOM` is popped (`RANDOM=42; f(){ local RANDOM; }; f; echo $RANDOM`
+ * prints 11074 where 17772 was next); mirage resumes the caller's
+ * sequence where it left off.
+ */
+export function restoreLocals(session: Session, locals: Map<string, ShellVar | null>): void {
+  for (const [key, old] of locals) {
+    if (old === null) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.vars[key]
+    } else {
+      setSessionEntry(session.vars, key, old)
+    }
+  }
+  if (locals.has(RANDOM)) session.randomSeed = session.localRandom.pop() ?? null
+}
+
+/**
  * The session plane's view: five facts bound to one session.
  *
  * The one constructor every tier uses — builtins, the command
@@ -766,6 +838,7 @@ export function seedVar(session: Session, name: string, value: ShellValue): void
     name,
     existing === undefined ? makeVar(value) : withValue(existing, value),
   )
+  noteRandomKind(session, name, value)
 }
 
 /**

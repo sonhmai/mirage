@@ -72,6 +72,7 @@ TRANSIENT_FIELDS: tuple[str, ...] = (
     "_stdin_source",
     "_local_vars",
     "_local_frames",
+    "_local_random",
     "_cmdsub_seq",
     "_cmdsub_status",
     "_diagnostics",

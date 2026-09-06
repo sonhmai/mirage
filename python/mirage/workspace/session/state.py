@@ -572,6 +572,44 @@ def next_random(session: Session, stored: str | None) -> int | None:
     return value
 
 
+def note_random_kind(session: Session, name: str, value: ShellValue) -> None:
+    """End ``RANDOM``'s special meaning when a non-string lands on it.
+
+    bash's ``convert_var_to_array`` drops the dynamic value and the
+    assign hook, so ``RANDOM=(1 2)``, ``declare -a RANDOM``,
+    ``RANDOM[1]=5`` and ``RANDOM+=(3)`` all leave an ordinary array that
+    ``$RANDOM`` reads element 0 of, for good, as ``unset RANDOM`` does.
+    Every store door calls this, gated or not, since a host seeding an
+    array onto the name means the same thing.
+
+    Args:
+        session (Session): the session the store landed in.
+        name (str): the variable stored.
+        value (ShellValue): what it now holds.
+    """
+    if name == RANDOM and not isinstance(value, str):
+        session._random_seed = RANDOM_UNSET
+
+
+def conversion_scalar(session: Session, name: str) -> str | None:
+    """The scalar an array conversion keeps as element 0.
+
+    bash's ``convert_var_to_array`` copies the variable's current value
+    into element 0, and for a live ``RANDOM`` looking the name up is
+    what draws: ``RANDOM[1]=5`` leaves ``[0]`` holding one draw and
+    ``declare -a RANDOM`` one alone, after which the array is ordinary.
+
+    Args:
+        session (Session): the session the conversion happens in.
+        name (str): the variable turning into an array.
+    """
+    if name == RANDOM:
+        drawn = next_random(session, visible_env(session).get(RANDOM))
+        if drawn is not None:
+            return str(drawn)
+    return session.env.get(name)
+
+
 class RandomReader:
     """Arithmetic's reads of ``$RANDOM``, bound to one session.
 
@@ -831,6 +869,7 @@ async def set_var(session: Session,
         session._random_state = seed
         session._random_seed = value
         session._random_last = 0
+    note_random_kind(session, name, value)
     # The assignments the coercion or the seed made land now, gated
     # each, before the name they were made for.
     await _land_coercion(session, policies, coercion)
@@ -894,6 +933,51 @@ async def unset_var(session: Session,
         session._random_seed = RANDOM_UNSET
 
 
+def shadow_local(session: Session, local_vars: dict[str, ShellVar | None],
+                 name: str) -> None:
+    """Record the caller's record before a ``local`` shadows it, once
+    per frame.
+
+    ``RANDOM`` parks its generator marker too: a local ``RANDOM`` is an
+    ordinary variable for the function's extent (``local RANDOM=5; echo
+    $RANDOM`` prints 5, and ``local RANDOM=(7)`` leaves the caller's
+    generator alone), and ``restore_locals`` hands the marker back.
+
+    Args:
+        session (Session): the session the function runs in.
+        local_vars (dict[str, ShellVar | None]): the running frame.
+        name (str): the variable being declared local.
+    """
+    if name in local_vars:
+        return
+    local_vars[name] = session.vars.get(name)
+    if name == RANDOM:
+        session._local_random.append(session._random_seed)
+        session._random_seed = RANDOM_UNSET
+
+
+def restore_locals(session: Session,
+                   local_vars: dict[str, ShellVar | None]) -> None:
+    """Put a returning function's shadowed records back.
+
+    Deliberate divergence: bash reseeds the global generator when a
+    local ``RANDOM`` is popped (``RANDOM=42; f(){ local RANDOM; }; f;
+    echo $RANDOM`` prints 11074 where 17772 was next); mirage resumes
+    the caller's sequence where it left off.
+
+    Args:
+        session (Session): the session the function ran in.
+        local_vars (dict[str, ShellVar | None]): the frame being popped.
+    """
+    for key, old in local_vars.items():
+        if old is None:
+            session.vars.pop(key, None)
+        else:
+            session.vars[key] = old
+    if RANDOM in local_vars:
+        session._random_seed = session._local_random.pop()
+
+
 def seed_var(session: Session, name: str, value: ShellValue) -> None:
     """Write a variable without consulting the gate.
 
@@ -927,6 +1011,7 @@ def seed_var(session: Session, name: str, value: ShellValue) -> None:
     existing = session.vars.get(name)
     session.vars[name] = (ShellVar(value) if existing is None else with_value(
         existing, value))
+    note_random_kind(session, name, value)
 
 
 def set_attr(session: Session,

@@ -14,11 +14,21 @@
 
 import { describe, expect, it } from 'vitest'
 import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
-import { RANDOM, RANDOM_MAX } from '../../shell/constants.ts'
-import { makeVar } from '../../shell/variable.ts'
+import { RANDOM, RANDOM_MAX, RANDOM_UNSET } from '../../shell/constants.ts'
+import { makeVar, type ShellVar } from '../../shell/variable.ts'
 import { Session } from './session.ts'
 import { ArithError } from '../../shell/errors.ts'
-import { nextRandom, randomReader, seedFrom, sessionView } from './state.ts'
+import {
+  conversionScalar,
+  nextRandom,
+  noteRandomKind,
+  randomReader,
+  restoreLocals,
+  seedFrom,
+  seedVar,
+  sessionView,
+  shadowLocal,
+} from './state.ts'
 
 function stored(s: Session): string | undefined {
   const v = s.vars[RANDOM]?.value
@@ -405,3 +415,114 @@ it.each([
     }
   },
 )
+
+describe('RANDOM as an array', () => {
+  // bash 5.2 on debian:stable-slim, with three documented gaps: bash
+  // prints `declare -ai` because RANDOM carries the integer attribute; a
+  // `RANDOM[i]=v`, `${RANDOM[i]:=v}`, `$((RANDOM[i]=v))` or bare
+  // `declare -a RANDOM` conversion looks the name up more than once
+  // there, so element 0 holds a later draw of the same sequence; and a
+  // popped local RANDOM reseeds bash's generator where mirage resumes.
+  it.each([
+    [
+      'declare -a RANDOM=(1 2); printf "%s|%s\\n" "$RANDOM" "${RANDOM[1]}"; echo $RANDOM; declare -p RANDOM',
+      '1|2\n1\ndeclare -a RANDOM=([0]="1" [1]="2")\n',
+    ],
+    [
+      'RANDOM=(9); echo $((RANDOM)) ${RANDOM[0]} ${#RANDOM[@]}; RANDOM=3; echo $RANDOM; declare -p RANDOM',
+      '9 9 1\n3\ndeclare -a RANDOM=([0]="3")\n',
+    ],
+    [
+      'RANDOM=42; RANDOM+=(3); declare -p RANDOM; echo $RANDOM $RANDOM',
+      'declare -a RANDOM=([0]="17772" [1]="3")\n17772 17772\n',
+    ],
+    [
+      'RANDOM=42; RANDOM[1]=5; declare -p RANDOM; echo $RANDOM $RANDOM',
+      'declare -a RANDOM=([0]="17772" [1]="5")\n17772 17772\n',
+    ],
+    [
+      'RANDOM=42; declare -a RANDOM; declare -p RANDOM; echo $RANDOM',
+      'declare -a RANDOM=([0]="17772")\n17772\n',
+    ],
+    ['RANDOM=42; declare -A RANDOM; declare -p RANDOM', 'declare -A RANDOM=([0]="17772" )\n'],
+    [
+      'RANDOM=42; : $((RANDOM[1]=5)); declare -p RANDOM; echo $RANDOM',
+      'declare -a RANDOM=([0]="17772" [1]="5")\n17772\n',
+    ],
+    [
+      'RANDOM=42; echo ${RANDOM[1]:=5}; declare -p RANDOM',
+      '5\ndeclare -a RANDOM=([0]="17772" [1]="5")\n',
+    ],
+    ['declare -A RANDOM=([k]=v); echo "[$RANDOM]"; RANDOM=7; echo $RANDOM', '[]\n7\n'],
+    [
+      'RANDOM=(9); echo "${RANDOM:0:1}|${RANDOM^^}|${RANDOM/9/X}|${RANDOM:-x}|${#RANDOM}"',
+      '9|9|X|9|1\n',
+    ],
+    ['RANDOM=42; (RANDOM=(1); echo $RANDOM); echo $RANDOM', '1\n17772\n'],
+    ['RANDOM=42; RANDOM=(1 2); echo $RANDOM; unset RANDOM; RANDOM=5; echo $RANDOM', '1\n5\n'],
+    [
+      'RANDOM=42; f(){ local RANDOM=(7); g; echo $RANDOM; }; g(){ local RANDOM=(8); echo $RANDOM; }; f; echo $RANDOM',
+      '8\n7\n17772\n',
+    ],
+    ['RANDOM=42; f(){ local RANDOM=5; echo $RANDOM; }; f; echo $RANDOM', '5\n17772\n'],
+    [
+      'RANDOM=42; f(){ declare -a RANDOM; echo "[$RANDOM]" ${#RANDOM[@]}; }; f; echo $RANDOM $RANDOM',
+      '[] 0\n17772 26794\n',
+    ],
+    ['unset RANDOM; f(){ local RANDOM=(7); echo $RANDOM; }; f; echo "[$RANDOM]"', '7\n[]\n'],
+  ])('ends the special meaning: %s', async (command, stdout) => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const io = await ws.execute(command)
+      expect(io.stderrText).toBe('')
+      expect(io.exitCode).toBe(0)
+      expect(io.stdoutText).toBe(stdout)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('ends the meaning through every store door on a non-string', async () => {
+    const s = new Session({ sessionId: 's' })
+    seedVar(s, RANDOM, ['1', '2'])
+    expect(nextRandom(s, undefined)).toBeNull()
+    expect(s.vars[RANDOM]?.value).toEqual(['1', '2'])
+    const t = new Session({ sessionId: 't' })
+    await sessionView(t, null).set(RANDOM, { k: 'v' })
+    expect(nextRandom(t, undefined)).toBeNull()
+    expect(t.vars[RANDOM]?.value).toEqual({ k: 'v' })
+    const u = new Session({ sessionId: 'u' })
+    noteRandomKind(u, 'other', ['1'])
+    expect(nextRandom(u, undefined)).not.toBeNull()
+  })
+
+  it('conversion draws once for a live RANDOM', () => {
+    const s = new Session({ sessionId: 's' })
+    seedVar(s, RANDOM, '42')
+    expect(conversionScalar(s, RANDOM)).toBe('17772')
+    expect(s.vars[RANDOM]?.value).toBe('17772')
+    seedVar(s, 'x', '5')
+    expect(conversionScalar(s, 'x')).toBe('5')
+    expect(conversionScalar(s, 'absent')).toBeUndefined()
+    const u = new Session({ sessionId: 'u' })
+    u.randomSeed = RANDOM_UNSET
+    expect(conversionScalar(u, RANDOM)).toBeUndefined()
+  })
+
+  it('a local RANDOM parks the marker and restores it', () => {
+    const s = new Session({ sessionId: 's' })
+    seedVar(s, RANDOM, '42')
+    expect(nextRandom(s, '42')).toBe(17772)
+    const frame = new Map<string, ShellVar | null>()
+    shadowLocal(s, frame, RANDOM)
+    shadowLocal(s, frame, RANDOM)
+    expect(frame.get(RANDOM)?.value).toBe('17772')
+    expect(s.localRandom).toEqual(['17772'])
+    expect(nextRandom(s, '17772')).toBeNull()
+    seedVar(s, RANDOM, ['7'])
+    restoreLocals(s, frame)
+    expect(s.vars[RANDOM]?.value).toBe('17772')
+    expect(s.localRandom).toEqual([])
+    expect(nextRandom(s, '17772')).toBe(26794)
+  })
+})

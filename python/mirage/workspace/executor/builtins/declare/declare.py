@@ -29,7 +29,8 @@ from mirage.workspace.executor.builtins.shared import (arith_refusal,
                                                        readonly_refusal,
                                                        refusal)
 from mirage.workspace.session import Session
-from mirage.workspace.session.state import set_attr, subscript_index
+from mirage.workspace.session.state import (conversion_scalar, set_attr,
+                                            shadow_local, subscript_index)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -150,7 +151,7 @@ async def store_staged_arrays(
             else:
                 held = session.arrays.get(name)
                 if append and held is None:
-                    scalar = session.env.get(name)
+                    scalar = conversion_scalar(session, name)
                     held = None if scalar is None else [scalar]
                 base = await build_indexed_literal(
                     held, items, append,
@@ -491,8 +492,7 @@ def note_local_array(session: Session, name: str) -> bool:
     local_vars = session._local_vars
     if local_vars is None:
         return False
-    if name not in local_vars:
-        local_vars[name] = session.vars.get(name)
+    shadow_local(session, local_vars, name)
     return True
 
 

@@ -471,6 +471,10 @@ export class Session {
   execStdinIdentity: string | null = null
   execOpened = new Set<string>()
   localFrames: Map<string, ShellVar | null>[] = []
+  // The caller's `RANDOM` marker for every frame that shadows the name,
+  // innermost last: a local `RANDOM` is an ordinary variable for the
+  // function's extent, and the generator resumes when it returns.
+  localRandom: (string | null)[] = []
   mountModes: ReadonlyMap<string, MountMode> | null
   hiddenPaths: HiddenPaths | null
   shownPaths: ShownPaths | null

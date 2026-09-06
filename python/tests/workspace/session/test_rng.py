@@ -15,12 +15,14 @@
 import pytest
 
 from mirage import MountMode, RAMResource, Workspace
-from mirage.shell.constants import RANDOM, RANDOM_MAX
+from mirage.shell.constants import RANDOM, RANDOM_MAX, RANDOM_UNSET
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellVar
 from mirage.workspace.session import Session
-from mirage.workspace.session.state import (next_random, random_reader,
-                                            seed_from, seed_var, set_var)
+from mirage.workspace.session.state import (conversion_scalar, next_random,
+                                            note_random_kind, random_reader,
+                                            restore_locals, seed_from,
+                                            seed_var, set_var, shadow_local)
 
 
 def test_seed_from_evaluates_the_word_as_arithmetic():
@@ -464,3 +466,99 @@ async def test_a_conditional_operators_word_expands_only_when_selected(
         assert await io.stderr_str() == stderr
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command,stdout", [
+    ('declare -a RANDOM=(1 2); printf "%s|%s\\n" "$RANDOM" "${RANDOM[1]}"; '
+     'echo $RANDOM; declare -p RANDOM',
+     '1|2\n1\ndeclare -a RANDOM=([0]="1" [1]="2")\n'),
+    ('RANDOM=(9); echo $((RANDOM)) ${RANDOM[0]} ${#RANDOM[@]}; RANDOM=3; '
+     'echo $RANDOM; declare -p RANDOM',
+     '9 9 1\n3\ndeclare -a RANDOM=([0]="3")\n'),
+    ('RANDOM=42; RANDOM+=(3); declare -p RANDOM; echo $RANDOM $RANDOM',
+     'declare -a RANDOM=([0]="17772" [1]="3")\n17772 17772\n'),
+    ('RANDOM=42; RANDOM[1]=5; declare -p RANDOM; echo $RANDOM $RANDOM',
+     'declare -a RANDOM=([0]="17772" [1]="5")\n17772 17772\n'),
+    ('RANDOM=42; declare -a RANDOM; declare -p RANDOM; echo $RANDOM',
+     'declare -a RANDOM=([0]="17772")\n17772\n'),
+    ('RANDOM=42; declare -A RANDOM; declare -p RANDOM',
+     'declare -A RANDOM=([0]="17772" )\n'),
+    ('RANDOM=42; : $((RANDOM[1]=5)); declare -p RANDOM; echo $RANDOM',
+     'declare -a RANDOM=([0]="17772" [1]="5")\n17772\n'),
+    ('RANDOM=42; echo ${RANDOM[1]:=5}; declare -p RANDOM',
+     '5\ndeclare -a RANDOM=([0]="17772" [1]="5")\n'),
+    ('declare -A RANDOM=([k]=v); echo "[$RANDOM]"; RANDOM=7; echo $RANDOM',
+     '[]\n7\n'),
+    ('RANDOM=(9); echo "${RANDOM:0:1}|${RANDOM^^}|${RANDOM/9/X}|${RANDOM:-x}|'
+     '${#RANDOM}"', '9|9|X|9|1\n'),
+    ('RANDOM=42; (RANDOM=(1); echo $RANDOM); echo $RANDOM', '1\n17772\n'),
+    ('RANDOM=42; RANDOM=(1 2); echo $RANDOM; unset RANDOM; RANDOM=5; '
+     'echo $RANDOM', '1\n5\n'),
+    ('RANDOM=42; f(){ local RANDOM=(7); g; echo $RANDOM; }; '
+     'g(){ local RANDOM=(8); echo $RANDOM; }; f; echo $RANDOM',
+     '8\n7\n17772\n'),
+    ('RANDOM=42; f(){ local RANDOM=5; echo $RANDOM; }; f; echo $RANDOM',
+     '5\n17772\n'),
+    ('RANDOM=42; f(){ declare -a RANDOM; echo "[$RANDOM]" ${#RANDOM[@]}; }; '
+     'f; echo $RANDOM $RANDOM', '[] 0\n17772 26794\n'),
+    ('unset RANDOM; f(){ local RANDOM=(7); echo $RANDOM; }; f; '
+     'echo "[$RANDOM]"', '7\n[]\n'),
+])
+async def test_an_array_on_random_ends_its_special_meaning(command, stdout):
+    # bash 5.2 on debian:stable-slim, with three documented gaps: bash
+    # prints `declare -ai` because RANDOM carries the integer attribute;
+    # a `RANDOM[i]=v`, `${RANDOM[i]:=v}`, `$((RANDOM[i]=v))` or bare
+    # `declare -a RANDOM` conversion looks the name up more than once
+    # there, so element 0 holds a later draw of the same sequence; and a
+    # popped local RANDOM reseeds bash's generator where mirage resumes.
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    io = await ws.execute(command)
+    assert await io.stderr_str() == ''
+    assert io.exit_code == 0
+    assert await io.stdout_str() == stdout
+
+
+@pytest.mark.asyncio
+async def test_every_store_door_ends_the_meaning_on_a_non_string():
+    s = Session(session_id="s")
+    seed_var(s, RANDOM, ["1", "2"])
+    assert next_random(s, None) is None
+    assert s.vars[RANDOM].value == ["1", "2"]
+    t = Session(session_id="t")
+    await set_var(t, None, RANDOM, {"k": "v"})
+    assert next_random(t, None) is None
+    assert t.vars[RANDOM].value == {"k": "v"}
+    u = Session(session_id="u")
+    note_random_kind(u, "other", ["1"])
+    assert next_random(u, None) is not None
+
+
+def test_conversion_scalar_draws_once_for_a_live_random():
+    s = Session(session_id="s")
+    seed_var(s, RANDOM, "42")
+    assert conversion_scalar(s, RANDOM) == "17772"
+    assert s.vars[RANDOM].value == "17772"
+    seed_var(s, "x", "5")
+    assert conversion_scalar(s, "x") == "5"
+    assert conversion_scalar(s, "absent") is None
+    u = Session(session_id="u")
+    u._random_seed = RANDOM_UNSET
+    assert conversion_scalar(u, RANDOM) is None
+
+
+def test_a_local_random_parks_the_marker_and_restores_it():
+    s = Session(session_id="s")
+    seed_var(s, RANDOM, "42")
+    assert next_random(s, "42") == 17772
+    frame: dict[str, ShellVar | None] = {}
+    shadow_local(s, frame, RANDOM)
+    shadow_local(s, frame, RANDOM)
+    assert frame[RANDOM] is not None and frame[RANDOM].value == "17772"
+    assert s._local_random == ["17772"]
+    assert next_random(s, "17772") is None
+    seed_var(s, RANDOM, ["7"])
+    restore_locals(s, frame)
+    assert s.vars[RANDOM].value == "17772"
+    assert s._local_random == []
+    assert next_random(s, "17772") == 26794

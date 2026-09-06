@@ -20,7 +20,8 @@ from mirage.shell.array import (array_count, array_extent, array_get,
                                 array_has, array_with)
 from mirage.shell.variable import ShellValue
 from mirage.workspace.session.session import Session
-from mirage.workspace.session.state import (deref, ensure_var_visible, env_get,
+from mirage.workspace.session.state import (conversion_scalar, deref,
+                                            ensure_var_visible, env_get,
                                             seed_var, strip_key_quotes,
                                             subscript_index, visible_arrays,
                                             visible_assocs)
@@ -143,7 +144,7 @@ async def assign_element(session: Session,
             stored = (session.env.get(name, "") + value) if append else value
         else:
             if arr is None:
-                scalar = session.env.get(name)
+                scalar = conversion_scalar(session, name)
                 # An existing scalar becomes element 0, even when
                 # empty: bash resolves `x[-1]` against the length-1
                 # array that produces.

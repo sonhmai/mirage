@@ -312,6 +312,10 @@ class Session:
     _local_frames: list[dict[str,
                              ShellVar | None]] = field(default_factory=list,
                                                        repr=False)
+    # The caller's `RANDOM` marker for every frame that shadows the
+    # name, innermost last: a local `RANDOM` is an ordinary variable for
+    # the function's extent, and the generator resumes when it returns.
+    _local_random: list[str | None] = field(default_factory=list, repr=False)
     # Hidden `getopts` state: the 1-based char offset within the current
     # word being scanned, plus the OPTIND value that offset belongs to.
     # A caller resetting OPTIND (e.g. to 1) makes the seen value stale,

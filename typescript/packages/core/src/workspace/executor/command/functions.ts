@@ -21,7 +21,7 @@ import { ERREXIT_EXEMPT_TYPES } from '../../../shell/constants.ts'
 import type { PathSpec } from '../../../types.ts'
 import { wordText } from '../../../types.ts'
 import type { Session } from '../../session/session.ts'
-import { setSessionEntry } from '../../session/session.ts'
+import { restoreLocals } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import type { ExecuteNodeFn } from '../jobs.ts'
@@ -88,14 +88,7 @@ export async function executeShellFunction(
     }
   } finally {
     cs.pop()
-    for (const [key, old] of savedLocals) {
-      if (old === null) {
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete session.vars[key]
-      } else {
-        setSessionEntry(session.vars, key, old)
-      }
-    }
+    restoreLocals(session, savedLocals)
     session.localFrames.pop()
     session.localVars = outerLocals
   }

@@ -20,7 +20,7 @@ import { varHidden } from '../../../../utils/hidden.ts'
 import { sessionEntry, setSessionEntry } from '../../../session/session.ts'
 import type { ShellValue, VarAttr } from '../../../../shell/variable.ts'
 import { attrLetters } from '../../../../shell/variable.ts'
-import { setAttr, subscriptIndex } from '../../../session/state.ts'
+import { conversionScalar, setAttr, shadowLocal, subscriptIndex } from '../../../session/state.ts'
 import type { Session } from '../../../session/session.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -124,7 +124,7 @@ export async function storeStagedArrays(
       } else {
         let held: ShellArray | null = session.arrays[name] ?? null
         if (append && held === null) {
-          const scalar = session.env[name]
+          const scalar = conversionScalar(session, name)
           held = scalar === undefined ? null : [scalar]
         }
         base = await buildIndexedLiteral(held, items, append, (sub) =>
@@ -443,7 +443,7 @@ export function handleDeclareFunctions(
 export function noteLocalArray(session: Session, name: string): boolean {
   const locals = session.localVars
   if (locals === null) return false
-  if (!locals.has(name)) locals.set(name, sessionEntry(session.vars, name) ?? null)
+  shadowLocal(session, locals, name)
   return true
 }
 

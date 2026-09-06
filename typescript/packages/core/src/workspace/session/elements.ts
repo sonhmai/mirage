@@ -25,6 +25,7 @@ import {
 import type { ShellValue } from '../../shell/variable.ts'
 import type { Session } from './session.ts'
 import {
+  conversionScalar,
   subscriptIndex,
   ensureVarVisible,
   envGet,
@@ -128,7 +129,7 @@ export async function assignElement(
       stored = append ? (session.env[name] ?? '') + value : value
     } else {
       if (arr === undefined) {
-        const scalar = session.env[name]
+        const scalar = conversionScalar(session, name)
         // An existing scalar becomes element 0, even when empty: bash
         // resolves `x[-1]` against the length-1 array that produces.
         arr = scalar === undefined ? [] : [scalar]

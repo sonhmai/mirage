@@ -37,7 +37,7 @@ import { expandAndClassify } from '../expand/parts.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
-import { deref, sessionView, subscriptIndex } from '../session/state.ts'
+import { conversionScalar, deref, sessionView, subscriptIndex } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -248,7 +248,7 @@ export async function executeAssignment(
     }
     let held: ShellArray | null = session.arrays[key] ?? null
     if (append && held === null) {
-      const scalar = session.env[key]
+      const scalar = conversionScalar(session, key)
       held = scalar === undefined ? null : [scalar]
     }
     // `arr+=(...)` starts at the extent, so it fills the hole a
@@ -317,7 +317,7 @@ export async function executeAssignment(
     const existing = session.arrays[key]
     let arr: ShellArray
     if (existing === undefined) {
-      const scalar = session.env[key]
+      const scalar = conversionScalar(session, key)
       arr = scalar === undefined ? [] : [scalar]
     } else {
       arr = [...existing]

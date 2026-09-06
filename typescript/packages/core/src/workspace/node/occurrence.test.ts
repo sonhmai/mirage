@@ -8,6 +8,7 @@ import {
   argvFrame,
   bodyFrame,
   claimantFor,
+  evaluatedFrom,
   type Frame,
   lineFrame,
   occurrenceIn,
@@ -205,5 +206,23 @@ describe('occurrence', () => {
       if (parent === null) throw new Error('no parent')
       expect(line.slice(parent.start, parent.end)).toBe(inner.text)
     }
+  })
+
+  it('stands a line read from a node under it', async () => {
+    // One text read from two nodes (an alias invoked twice) is two places
+    // on the line: the rewritten line's command is placed under the word
+    // that named it, and the line it runs as hands up to the line's own
+    // hand-off.
+    const handed: HandOff = { claimed: [], parent: null, origin: null }
+    const root = await parse('c && c')
+    const underFirst = evaluatedFrom(command(root, 0), handed)
+    const underSecond = evaluatedFrom(command(root, 1), handed)
+    expect(underFirst.parent).toBe(handed)
+    expect(underSecond.parent).toBe(handed)
+    expect(underFirst.origin).toEqual(occurrenceOf(command(root, 0), handed))
+    expect(underFirst.origin).not.toEqual(underSecond.origin)
+    const cat = command(await parse('cat /data/secret.txt'), 0)
+    expect(occurrenceOf(cat, underFirst).parent).toEqual(underFirst.origin)
+    expect(occurrenceOf(cat, underFirst)).not.toEqual(occurrenceOf(cat, underSecond))
   })
 })

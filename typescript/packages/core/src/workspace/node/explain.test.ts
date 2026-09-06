@@ -47,6 +47,8 @@ const ALLOW = [
   'touch',
   'printf',
   'mapfile',
+  'alias',
+  'shopt',
 ]
 
 const PROFILE = parseSessionProfile({
@@ -110,6 +112,20 @@ async function inlineWs(onAsk: AskHandler, profile = PROFILE): Promise<Workspace
   await w.execute('echo a > /data/a.txt')
   await w.execute('echo s > /data/secret.txt')
   w.createSession('s', { profile: 'r' })
+  return w
+}
+
+/**
+ * The inline world with `c` an alias for the guarded read and `d` an
+ * alias for `c`, defined on a line of their own so the lines after it
+ * expand them.
+ */
+async function aliased(asked: string[]): Promise<Workspace> {
+  const w = await inlineWs(answering(asked, Outcome.ALLOW))
+  const defined = await w.execute("shopt -s expand_aliases; alias c='cat /data/secret.txt' d=c", {
+    sessionId: 's',
+  })
+  expect(defined.exitCode).toBe(0)
   return w
 }
 
@@ -1052,6 +1068,55 @@ describe('prejudge scope', () => {
     expect(asked).toEqual([])
     const waited = await w.execute('wait', { sessionId: 's' })
     expect(waited.exitCode).toBe(0)
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it.each(['c && c', 'c; c', "eval 'c && c'", 'd && d'])(
+    'reads each invocation of an alias as a place of its own: %s',
+    async (line) => {
+      // An invocation reads its rewritten line as a line of its own under
+      // the word that named it, so two invocations on one line are two
+      // places and two questions, as the spelled-out `cat ... && cat ...`
+      // is, through an alias of an alias as well. Run on the line's own
+      // hand-off instead, both reads stood at the same offsets of the
+      // same text, and the second ran on the first's nod.
+      const asked: string[] = []
+      const w = await aliased(asked)
+      const ran = await w.execute(line, { sessionId: 's' })
+      expect(ran.exitCode).toBe(0)
+      expect(DEC.decode(ran.stdout)).toBe('s\ns\n')
+      expect(asked).toHaveLength(2)
+      expect(w.decisions.list('s')).toEqual([])
+    },
+  )
+
+  it('runs one alias invocation reached twice on one nod', async () => {
+    // A loop body visits one invocation twice: the same word at the same
+    // place reads the same line, so the second visit runs on what the
+    // first claimed and handed back to the line, and the line's end
+    // spends it.
+    const asked: string[] = []
+    const w = await aliased(asked)
+    const ran = await w.execute('for i in 1 2; do c; done', { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('s\ns\n')
+    expect(asked).toHaveLength(1)
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
+  it('hands what an alias a job runs late claims to the job', async () => {
+    // The job expands the alias after the line has returned, so the
+    // rewritten line stands under the job's hand-off, not the finished
+    // line's: what its gate claims is handed to the job, and the job's
+    // end spends it rather than leaving it standing for good.
+    const asked: string[] = []
+    const w = await aliased(asked)
+    const ran = await w.execute('sleep 0.2 && c &', { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    const waited = await w.execute('wait', { sessionId: 's' })
+    expect(waited.exitCode).toBe(0)
+    expect(DEC.decode(waited.stdout)).toBe('s\n')
     expect(asked).toHaveLength(1)
     expect(w.decisions.list('s')).toEqual([])
   })

@@ -487,7 +487,8 @@ export class Decisions {
    * the line's end.
    *
    * A line the executor evaluates from inside another (`$( )`, `eval`, a
-   * batch `xargs` hands on) ends before the outer line does, and what
+   * batch `xargs` hands on, the line an alias rewrites to) ends before
+   * the outer line does, and what
    * its gates claimed is the outer line's: the next evaluation from the
    * same node (the next batch, the next iteration of a loop around the
    * `eval`) stands at the same occurrence and runs on it, and the typed

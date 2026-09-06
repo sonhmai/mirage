@@ -858,8 +858,11 @@ async def unrefused_nodes(
     out: list[Any] = []
     for position, node in enumerate(nodes):
         # Each node is read in the frame of its own tree: the line's,
-        # or the one a stored body or alias expansion was parsed from,
-        # which is the frame its gate will read it in.
+        # or the one a stored body was parsed from, which is the frame
+        # its gate will read it in. An alias expansion is parsed here
+        # with a rest word no reader can spell (``line_nodes``), so it
+        # is never one literal command and its frame goes unread; its
+        # gate reads it under the word that invoked it.
         item = _sole_literal_command(node, session,
                                      root_frame(node, handed.origin))
         if item is None:

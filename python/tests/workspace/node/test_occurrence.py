@@ -17,10 +17,11 @@ from mirage.runtime.routing import command_nodes
 from mirage.shell import parse
 from mirage.shell.types import NodeType
 from mirage.workspace.node.occurrence import (Frame, argv_frame, body_frame,
-                                              claimant_for, line_frame,
-                                              occurrence_in, occurrence_of,
-                                              part_of, root_frame,
-                                              segment_frames, whole_occurrence)
+                                              claimant_for, evaluated_from,
+                                              line_frame, occurrence_in,
+                                              occurrence_of, part_of,
+                                              root_frame, segment_frames,
+                                              whole_occurrence)
 
 
 def _first(node, kind: str):
@@ -179,3 +180,20 @@ def test_a_pair_after_a_multibyte_character_stands_at_its_bytes():
     for inner in (first, second):
         assert inner.parent is not None
         assert raw[inner.parent.start:inner.parent.end].decode() == inner.text
+
+
+def test_a_line_read_from_a_node_stands_under_it():
+    # One text read from two nodes (an alias invoked twice) is two places
+    # on the line: the rewritten line's command is placed under the word
+    # that named it, and the line it runs as hands up to the line's own
+    # hand-off.
+    handed = HandOff()
+    first, second = command_nodes(parse("c && c"))
+    under_first = evaluated_from(first, handed)
+    under_second = evaluated_from(second, handed)
+    assert under_first.parent is handed and under_second.parent is handed
+    assert under_first.origin == occurrence_of(first, handed)
+    assert under_first.origin != under_second.origin
+    cat = list(command_nodes(parse("cat /data/secret.txt")))[0]
+    assert occurrence_of(cat, under_first).parent == under_first.origin
+    assert occurrence_of(cat, under_first) != occurrence_of(cat, under_second)

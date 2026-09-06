@@ -42,9 +42,10 @@ import { PathSpec, wordText } from '../../types.ts'
 import { Argv, expandArgv } from '../expand/argv.ts'
 import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
-import { claimantFor } from './occurrence.ts'
+import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { handleCommand } from '../executor/command.ts'
+import type { ExecuteNodeOpts } from '../executor/jobs.ts'
 import { type AliasMark, aliasCommandText } from '../executor/builtins/alias/index.ts'
 import { findSyntaxError } from '../../shell/parse/index.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
@@ -86,6 +87,7 @@ export async function executeCommand(
     s: Session,
     i: ByteSource | null,
     cs: CallStack | null,
+    opts?: ExecuteNodeOpts,
   ) => Promise<Result>,
   dispatch: DispatchFn,
   registry: MountRegistry,
@@ -149,10 +151,25 @@ export async function executeCommand(
         ]
       }
       session.aliasStack.push(head)
+      // The rewritten line is read from this node, so it runs as a line
+      // of its own under the word that named it: each invocation of one
+      // alias is a place of its own on the line (`c && c` asks twice, as
+      // its spelled-out form does), and what its gates claim is the
+      // line's again at its end. Run on the line's own hand-off, both
+      // reads stood at the same offsets of the same text and the second
+      // ran on the first's nod.
+      const expansion = handed === undefined ? null : evaluatedFrom(node, handed)
       try {
-        return await recurse(ast, session, stdinIn, callStack)
+        return await recurse(
+          ast,
+          session,
+          stdinIn,
+          callStack,
+          expansion === null ? undefined : { handed: expansion },
+        )
       } finally {
         session.aliasStack.pop()
+        if (expansion !== null) registry.decisions.handUp(session.sessionId, expansion)
       }
     }
   }

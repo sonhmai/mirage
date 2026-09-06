@@ -51,7 +51,7 @@ import { failureResult, isControlFlowError } from './failure.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { cliEnvNames, fillEnv, fillNames, guestBound, lineNodes } from './fill.ts'
 import { admitLine, isPending, isPendingRefusal } from '../node/admission.ts'
-import { occurrenceOf } from '../node/occurrence.ts'
+import { evaluatedFrom } from '../node/occurrence.ts'
 import { runWholeLine } from './line.ts'
 import type { WorkspaceMeta } from './meta.ts'
 import type { Router } from './routing.ts'
@@ -290,11 +290,10 @@ async function runLine(
     // text this is; outside a walk (no hand-off bound) the inner line
     // is a line of its own.
     if (opts.handed !== undefined) {
-      innerOpts.handed = {
-        claimed: [],
-        parent: opts.handed,
-        origin: opts.node === undefined ? null : occurrenceOf(opts.node, opts.handed, opts.span),
-      }
+      innerOpts.handed =
+        opts.node === undefined
+          ? { claimed: [], parent: opts.handed, origin: null }
+          : evaluatedFrom(opts.node, opts.handed, opts.span)
     }
     // `command NAME` re-runs the inner line and must forward the pipe
     // stdin so `... | command cat` filters the upstream output; the same

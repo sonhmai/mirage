@@ -296,7 +296,8 @@ export interface Claim {
  * Compared by identity, because the hand-off is the line.
  *
  * A line the executor evaluates from inside another (`$( )`, `eval`,
- * `source`, `xargs`) is a line of its own with a hand-off of its own,
+ * `source`, `xargs`, the line an alias invocation rewrites to) is a line
+ * of its own with a hand-off of its own,
  * linked to the outer line's through `parent` and standing under the
  * node that ran it through `origin`: the outer pass reads into the
  * words it runs, so the grants it claimed for them are the inner line's

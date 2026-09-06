@@ -230,6 +230,29 @@ def occurrence_of(node: Any,
     return at if span is None else part_of(at, *span)
 
 
+def evaluated_from(node: Any,
+                   handed: HandOff,
+                   span: tuple[int, int] | None = None) -> HandOff:
+    """The hand-off a line read from a node's text runs on.
+
+    Every re-parse the executor runs is a line of its own: the body a
+    substitution expands, the words ``eval`` or ``xargs`` hand on, the
+    line an alias invocation rewrites to. It runs under the hand-off of
+    the subtree reading it and stands at the node whose text it is, so
+    its commands are placed where the outer pass placed them, and one
+    text read from two nodes (``c && c`` under one alias) is two places
+    on the line, each needing a nod of its own. What its gates claim
+    goes back to that hand-off when it ends (``Decisions.hand_up``).
+
+    Args:
+        node (Any): the node whose text the line is read from.
+        handed (HandOff): the hand-off of the subtree running the node.
+        span (tuple[int, int] | None): the span within the node's text
+            that runs, when the node holds several lines.
+    """
+    return HandOff(parent=handed, origin=occurrence_of(node, handed, span))
+
+
 def claimant_for(node: Any, handed: HandOff | None) -> Claimant | None:
     """The reader of the ledger for one command the executor runs, None
     outside a line.

@@ -177,6 +177,28 @@ export function occurrenceOf(
 }
 
 /**
+ * The hand-off a line read from a node's text runs on.
+ *
+ * Every re-parse the executor runs is a line of its own: the body a
+ * substitution expands, the words `eval` or `xargs` hand on, the line an
+ * alias invocation rewrites to. It runs under the hand-off of the
+ * subtree reading it and stands at the node whose text it is, so its
+ * commands are placed where the outer pass placed them, and one text
+ * read from two nodes (`c && c` under one alias) is two places on the
+ * line, each needing a nod of its own. What its gates claim goes back
+ * to that hand-off when it ends (`Decisions.handUp`). `span` is the part
+ * of the node's text that runs, when the node holds several lines.
+ * Mirrors the Python `evaluated_from`.
+ */
+export function evaluatedFrom(
+  node: TSNodeLike,
+  handed: HandOff,
+  span?: readonly [number, number],
+): HandOff {
+  return { claimed: [], parent: handed, origin: occurrenceOf(node, handed, span) }
+}
+
+/**
  * The reader of the ledger for one command the executor runs, null
  * outside a line.
  */

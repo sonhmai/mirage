@@ -363,15 +363,16 @@ class HandOff:
     because the hand-off is the line.
 
     A line the executor evaluates from inside another (``$( )``,
-    ``eval``, ``source``, ``xargs``) is a line of its own with a
-    hand-off of its own, linked to the outer line's through ``parent``
-    and standing under the node that ran it through ``origin``: the
-    outer pass reads into the words it runs, so the grants it claimed
-    for them are the inner line's to run on, at the occurrences the
-    outer pass computed for them, and what the inner line's own gates
-    claim is handed to the outer line when it ends
-    (``Decisions.hand_up``), for the next evaluation from the same node
-    to run on and the typed line's end to spend.
+    ``eval``, ``source``, ``xargs``, the line an alias invocation
+    rewrites to) is a line of its own with a hand-off of its own,
+    linked to the outer line's through ``parent`` and standing under
+    the node that ran it through ``origin``: the outer pass reads into
+    the words it runs, so the grants it claimed for them are the inner
+    line's to run on, at the occurrences the outer pass computed for
+    them, and what the inner line's own gates claim is handed to the
+    outer line when it ends (``Decisions.hand_up``), for the next
+    evaluation from the same node to run on and the typed line's end
+    to spend.
 
     Args:
         claimed (list[Claim]): the grants matched so far, in the order

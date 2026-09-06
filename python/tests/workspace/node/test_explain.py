@@ -46,7 +46,8 @@ PROFILE = {
     "commands": {
         "allow": [
             "ls", "cat", "git", "rm", "mkdir", "cd", "echo", "sleep", "wait",
-            "eval", "command", "xargs", "touch", "printf", "mapfile"
+            "eval", "command", "xargs", "touch", "printf", "mapfile", "alias",
+            "shopt"
         ],
         "deny": [{
             "reason": "production data is protected",
@@ -1163,6 +1164,81 @@ async def test_what_a_jobs_late_gate_claims_is_the_jobs_to_spend():
         assert asked == []
         waited = await ws.execute("wait", session_id="s")
         assert waited.exit_code == 0
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+async def _aliased(asked: list[str]) -> Workspace:
+    """The inline world with ``c`` an alias for the guarded read and
+    ``d`` an alias for ``c``, defined on a line of their own so the
+    lines after it expand them.
+
+    Args:
+        asked (list[str]): where each question's id is appended.
+    """
+    ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
+    defined = await ws.execute(
+        "shopt -s expand_aliases; alias c='cat /data/secret.txt' d=c",
+        session_id="s")
+    assert defined.exit_code == 0
+    return ws
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["c && c", "c; c", "eval 'c && c'", "d && d"])
+async def test_each_invocation_of_an_alias_is_a_place_of_its_own(line):
+    # An invocation reads its rewritten line as a line of its own under
+    # the word that named it, so two invocations on one line are two
+    # places and two questions, as the spelled-out `cat ... && cat ...`
+    # is, through an alias of an alias as well. Run on the line's own
+    # hand-off instead, both reads stood at the same offsets of the
+    # same text, and the second ran on the first's nod.
+    asked: list[str] = []
+    ws = await _aliased(asked)
+    try:
+        ran = await ws.execute(line, session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout == b"s\ns\n"
+        assert len(asked) == 2
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_one_alias_invocation_reached_twice_runs_on_one_nod():
+    # A loop body visits one invocation twice: the same word at the same
+    # place reads the same line, so the second visit runs on what the
+    # first claimed and handed back to the line, and the line's end
+    # spends it.
+    asked: list[str] = []
+    ws = await _aliased(asked)
+    try:
+        ran = await ws.execute("for i in 1 2; do c; done", session_id="s")
+        assert ran.exit_code == 0
+        assert ran.stdout == b"s\ns\n"
+        assert len(asked) == 1
+        assert ws.decisions.list("s") == ()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_alias_a_job_runs_late_hands_its_claim_to_the_job():
+    # The job expands the alias after the line has returned, so the
+    # rewritten line stands under the job's hand-off, not the finished
+    # line's: what its gate claims is handed to the job, and the job's
+    # end spends it rather than leaving it standing for good.
+    asked: list[str] = []
+    ws = await _aliased(asked)
+    try:
+        ran = await ws.execute("sleep 0.2 && c &", session_id="s")
+        assert ran.exit_code == 0
+        waited = await ws.execute("wait", session_id="s")
+        assert waited.exit_code == 0
+        assert waited.stdout == b"s\n"
         assert len(asked) == 1
         assert ws.decisions.list("s") == ()
     finally:

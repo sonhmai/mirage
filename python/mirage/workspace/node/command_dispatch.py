@@ -43,7 +43,7 @@ from mirage.workspace.expand.globs import expand_boundary_globs
 from mirage.workspace.lookup import (SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS,
                                      follows_last_component)
 from mirage.workspace.node.admission import Admitted, Refused, admit
-from mirage.workspace.node.occurrence import claimant_for
+from mirage.workspace.node.occurrence import claimant_for, evaluated_from
 from mirage.workspace.session.state import (ensure_var_visible,
                                             pre_session_gate, seed_var,
                                             session_view, set_attr)
@@ -110,10 +110,28 @@ async def execute_command(
                                                exit_code=io.exit_code,
                                                stderr=bad)
             session._alias_stack.append(head)
+            # The rewritten line is read from this node, so it runs as
+            # a line of its own under the word that named it: each
+            # invocation of one alias is a place of its own on the line
+            # (`c && c` asks twice, as its spelled-out form does), and
+            # what its gates claim is the line's again at its end. Run
+            # on the line's own hand-off, both reads stood at the same
+            # offsets of the same text and the second ran on the
+            # first's nod.
+            expansion = (evaluated_from(node, handed)
+                         if handed is not None else None)
             try:
-                return await recurse(ast, session, stdin, call_stack)
+                if expansion is None:
+                    return await recurse(ast, session, stdin, call_stack)
+                return await recurse(ast,
+                                     session,
+                                     stdin,
+                                     call_stack,
+                                     handed=expansion)
             finally:
                 session._alias_stack.pop()
+                if expansion is not None:
+                    registry.decisions.hand_up(session.session_id, expansion)
 
     prefix_assignments: list[tuple[str, str]] = []
     for p in assignment_nodes:

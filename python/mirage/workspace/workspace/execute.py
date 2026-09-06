@@ -37,7 +37,7 @@ from mirage.workspace.node import provision_node, run_command_tree
 from mirage.workspace.node.admission import (admit_line, is_pending,
                                              is_pending_refusal)
 from mirage.workspace.node.explain import prejudge_line, unrefused_nodes
-from mirage.workspace.node.occurrence import occurrence_of
+from mirage.workspace.node.occurrence import evaluated_from
 from mirage.workspace.session import (get_current_session_for,
                                       reset_current_session,
                                       set_current_session)
@@ -144,15 +144,18 @@ async def recurse(
             went back to a hand-off nothing revokes. None outside a
             walk, which makes the inner line a line of its own.
     """
-    origin = (occurrence_of(node, handed, span)
-              if node is not None and handed is not None else None)
+    if handed is None:
+        inner = None
+    elif node is None:
+        inner = HandOff(parent=handed)
+    else:
+        inner = evaluated_from(node, handed, span)
     io = await ws.execute(cmd,
                           cancel=cancel,
                           record=False,
                           routing_decision=routing_decision,
                           agent_id=agent_id,
-                          handed=(HandOff(parent=handed, origin=origin)
-                                  if handed is not None else None),
+                          handed=inner,
                           **opts)
     if isinstance(io, IOResult) and io.refusal is not None:
         nested.latest = io.refusal

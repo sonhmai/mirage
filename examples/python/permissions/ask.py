@@ -22,7 +22,10 @@ from mirage.resource.ram import RAMResource
 # `ask` puts one of those commands to a person before it runs.
 ROLE = {
     "commands": {
-        "allow": ["ls", "rm", "printf", "xargs", "sleep", "wait", "eval"],
+        "allow": [
+            "ls", "rm", "printf", "xargs", "sleep", "wait", "eval", "shopt",
+            "alias"
+        ],
         "ask": [{
             "reason": "deletes are reviewed",
             "commands": ["rm"]
@@ -74,6 +77,11 @@ async def main() -> None:
         # and nothing asks again when the job gets to it.
         await run(ws, "sleep 0.2 && eval 'rm -f /data/a.txt' &")
         await run(ws, "wait")
+        # An alias is read as a fresh line under the word that named it,
+        # so each invocation is a place of its own: `d && d` is two
+        # questions, as `rm -f /data/a.txt && rm -f /data/a.txt` is.
+        await run(ws, "shopt -s expand_aliases; alias d='rm -f /data/a.txt'")
+        await run(ws, "d && d")
     finally:
         await ws.close()
 

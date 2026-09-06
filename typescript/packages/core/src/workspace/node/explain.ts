@@ -800,8 +800,11 @@ export async function unrefusedNodes(
   const out: TSNodeLike[] = []
   for (const [position, node] of nodes.entries()) {
     // Each node is read in the frame of its own tree: the line's, or
-    // the one a stored body or alias expansion was parsed from, which
-    // is the frame its gate will read it in.
+    // the one a stored body was parsed from, which is the frame its gate
+    // will read it in. An alias expansion is parsed here with a rest
+    // word no reader can spell (`lineNodes`), so it is never one literal
+    // command and its frame goes unread; its gate reads it under the
+    // word that invoked it.
     const item = soleLiteralCommand(node, session, rootFrame(node, handed.origin), reparse)
     if (item === null) {
       out.push(node)

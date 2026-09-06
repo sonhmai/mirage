@@ -119,18 +119,22 @@ async def test_self_dups_change_nothing():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("line,out,err,code", [
-    ('echo x 1>&0', '', 'echo: write error: Bad file descriptor\n', 1),
-    ('echo x 2>&0 1>&2', '', '', 1),
-    ('echo x 0>&1 1>&0', 'x\n', '', 0),
-    ('echo x 1>&0 0>&1', '', 'echo: write error: Bad file descriptor\n', 1),
-    ('echo x 1>&0 2>&1', '', '', 1),
-    ('echo x 1>&0 2>/data/err; cat /data/err',
-     'echo: write error: Bad file descriptor\n', '', 0),
-    ('echo x 0>/data/out 1>&0; cat /data/out', 'x\n', '', 0),
-    ('cat </data/a.txt 1<&0 0<&1 1>/data/out; cat /data/out', 'a', '', 0),
-    ('cat </data/a.txt 0<&1', '', '', 0),
-])
+@pytest.mark.parametrize(
+    "line,out,err,code",
+    [
+        ('echo x 1>&0', '', 'echo: write error: Bad file descriptor\n', 1),
+        ('echo x 2>&0 1>&2', '', '', 1),
+        ('echo x 0>&1 1>&0', 'x\n', '', 0),
+        ('echo x 1>&0 0>&1', '', 'echo: write error: Bad file descriptor\n',
+         1),
+        ('echo x 1>&0 2>&1', '', '', 1),
+        ('echo x 1>&0 2>/data/err; cat /data/err',
+         'echo: write error: Bad file descriptor\n', '', 0),
+        ('echo x 0>/data/out 1>&0; cat /data/out', 'x\n', '', 0),
+        ('cat </data/a.txt 1<&0 0<&1 1>/data/out; cat /data/out', 'a', '', 0),
+        # bash 5.2: stdout is open for writing only, so the read fails.
+        ('cat </data/a.txt 0<&1', '', 'cat: -: Bad file descriptor\n', 1),
+    ])
 async def test_descriptor_zero_duplication_tracks_direction_and_order(
         line, out, err, code):
     ws = await _ws()

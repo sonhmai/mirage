@@ -89,11 +89,11 @@ async function unsetElement(
     // branch's silent no-op instead of a denial that would leak the
     // name's existence.
     if (envGet(session, base) === null) return 'ok'
-    if (subscriptIndex(session, subscript) !== 0) return 'notarray'
+    if ((await subscriptIndex(session, subscript, view)) !== 0) return 'notarray'
     await view.unset(base)
     return 'ok'
   }
-  let idx = subscriptIndex(session, subscript)
+  let idx = await subscriptIndex(session, subscript, view)
   if (idx < 0) {
     idx += arrayExtent(arr)
     if (idx < 0) return 'subscript'

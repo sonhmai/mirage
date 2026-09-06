@@ -231,8 +231,9 @@ async def execute_assignment(
         # trailing `unset arr[last]` left but skips interior ones;
         # a `[i]=v` element places at i and the next plain word
         # continues from there.
-        base = build_indexed_literal(
-            held, items, append, functools.partial(subscript_index, session))
+        base = await build_indexed_literal(
+            held, items, append,
+            functools.partial(subscript_index, session, view=view))
         await _assign_var(view, key, base)
         code = assignment_status(session, sub_seq)
         return None, IOResult(exit_code=code), ExecutionNode(command=text,
@@ -278,7 +279,7 @@ async def execute_assignment(
             arr = [] if scalar is None else [scalar]
         else:
             arr = list(arr)
-        idx = subscript_index(session, sub_text)
+        idx = await subscript_index(session, sub_text, view)
         if idx < 0:
             idx += array_extent(arr)
         if idx < 0:

@@ -271,6 +271,40 @@
         "stdout": "0 5\n0 5\n5 5\n17772 26794\n4 2\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "arith_subscripts_and_offsets_land_their_assignments",
+      "seq": 449,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unset za zx zy zv; RANDOM=42; zv=abcdefghij; echo ${zv:RANDOM%10:1} $RANDOM; zv=abcdef; echo ${zv:(zx=1):(zy=zx+1)} $zx $zy; RANDOM=1; za[RANDOM=42]=x; echo $RANDOM ${!za[@]}; za=(0 1 2 3); echo ${za[zx=3]} $zx; za=(0 1 2); unset \"za[zx=1]\"; echo ${za[@]} $zx; za=(0 1 2 3 4); echo ${za[@]:(zx=1):(zy=zx+1)} $zx $zy; RANDOM=1; za=(0 1 2); [[ -v za[RANDOM%3] ]]; echo $? $RANDOM; za=([zy=3]=v [zy+1]=w); echo ${!za[@]} $zy; zx=0; echo ${za[zx=1]:=q} $zx; unset za zx zy zv",
+      "expect": {
+        "exit": 0,
+        "stdout": "c 26794\nbc 1 2\n17772 42\n3 3\n0 2 1\n1 2 1 2\n0 10791\n3 4 3\nq 1\n",
+        "stderr": ""
+      }
     }
   ]
 }

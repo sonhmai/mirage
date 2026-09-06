@@ -76,7 +76,7 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
     if op == "-z":
         return text == ""
     if op == "-v":
-        return element_is_set(ctx.session, text)
+        return await element_is_set(ctx.session, text, ctx.view)
     if op in ("-L", "-h"):
         resolved = resolve_path(text, ctx.session.cwd)
         return ctx.namespace.is_link(resolved)

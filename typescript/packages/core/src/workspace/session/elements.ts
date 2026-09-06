@@ -44,9 +44,15 @@ const ELEMENT_REF = /^([A-Za-z_]\w*)(?:\[([\s\S]+)\])?$/
  * literal key `"0"` for an associative one), which is GNU's rule;
  * `name[@]` and `name[*]` ask whether any element is set. An
  * associative subscript is the key verbatim; an indexed one evaluates
- * as arithmetic.
+ * as arithmetic, and its assignments land through `view`
+ * (`[[ -v a[x=2] ]]` leaves x at 2, as bash does); null lands them
+ * ungated, outside a workspace.
  */
-export function elementIsSet(session: Session, ref: string): boolean {
+export async function elementIsSet(
+  session: Session,
+  ref: string,
+  view: SessionView | null = null,
+): Promise<boolean> {
   const match = ELEMENT_REF.exec(ref)
   if (match?.[1] === undefined) return false
   const name = deref(session, match[1]) || match[1]
@@ -72,7 +78,7 @@ export function elementIsSet(session: Session, ref: string): boolean {
   if (arr !== undefined) held = arr
   else if (scalar !== null) held = [scalar]
   else return false
-  let idx = subscriptIndex(session, sub)
+  let idx = await subscriptIndex(session, sub, view)
   if (idx < 0) idx += arrayExtent(held)
   return arrayHas(held, idx)
 }
@@ -127,7 +133,7 @@ export async function assignElement(
         // resolves `x[-1]` against the length-1 array that produces.
         arr = scalar === undefined ? [] : [scalar]
       }
-      let idx = subscript === null ? 0 : subscriptIndex(session, subscript)
+      let idx = subscript === null ? 0 : await subscriptIndex(session, subscript, view)
       if (idx < 0) idx += arrayExtent(arr)
       if (idx < 0) return 'subscript'
       const base = append ? arrayGet(arr, idx) : ''

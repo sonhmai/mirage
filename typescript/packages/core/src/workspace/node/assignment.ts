@@ -221,7 +221,9 @@ export async function executeAssignment(
     // trailing `unset arr[last]` left but skips interior ones; a
     // `[i]=v` element places at i and the next plain word continues
     // from there.
-    const base = buildIndexedLiteral(held, items, append, (sub) => subscriptIndex(session, sub))
+    const base = await buildIndexedLiteral(held, items, append, (sub) =>
+      subscriptIndex(session, sub, view),
+    )
     await assignVar(view, key, base)
     const arrCode = assignmentStatus(session, subSeq)
     return [
@@ -286,7 +288,7 @@ export async function executeAssignment(
     } else {
       arr = [...existing]
     }
-    let idx = subscriptIndex(session, subText)
+    let idx = await subscriptIndex(session, subText, view)
     if (idx < 0) idx += arrayExtent(arr)
     if (idx < 0) {
       // Same fatal shape as the empty subscript above.

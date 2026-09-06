@@ -311,6 +311,44 @@ async def test_arithmetic_random_assignment_seeds_within_the_expression(
         await ws.close()
 
 
+@pytest.mark.parametrize(
+    "command,stdout",
+    [
+        # A substring offset or length is arithmetic: it draws, seeds,
+        # and assigns, and the second operand sees the first's write.
+        # Parenthesized because tree-sitter-bash emits an ERROR node for
+        # a bare `=` inside `${v:...}`; the parenthesized form is the
+        # same expression to bash.
+        ('RANDOM=42; v=abcdefghij; echo ${v:RANDOM%10:1} $RANDOM', 'c 26794\n'
+         ),
+        ('v=abcdef; echo ${v:(x=1):(y=x+1)} $x $y', 'bc 1 2\n'),
+        ('RANDOM=1; v=abc; echo ${v:(RANDOM=42,1)} ${v:RANDOM%3}', 'bc abc\n'),
+        ('a=(0 1 2 3 4); echo ${a[@]:(x=1):(y=x+1)} $x $y', '1 2 1 2\n'),
+        # So is a subscript, wherever it is spelled: an expansion, an
+        # assignment, a literal, `unset`, and `[[ -v ]]`.
+        ('RANDOM=1; a[RANDOM=42]=x; echo $RANDOM ${!a[@]}', '17772 42\n'),
+        ('a=(0 1 2 3); echo ${a[x=3]} $x', '3 3\n'),
+        ('RANDOM=1; a=(0 1); echo ${a[RANDOM=1, 1]} $RANDOM', '1 16807\n'),
+        ('x=0; echo ${a[x=1]:=z} ${a[@]} $x', 'z z 1\n'),
+        ('a=(0 1 2); unset "a[x=1]"; echo ${a[@]} $x', '0 2 1\n'),
+        ('RANDOM=1; a=(0 1 2); [[ -v a[RANDOM%3] ]]; echo $? $RANDOM',
+         '0 10791\n'),
+        ('declare -a a=([x=2]=v); echo ${!a[@]} $x', '2 2\n'),
+        ('a=([y=3]=v [y+1]=w); echo ${!a[@]} $y', '3 4 3\n'),
+        ('unset a; a[i=2]+=x; echo ${!a[@]} $i', '2 2\n'),
+    ])
+@pytest.mark.asyncio
+async def test_subscripts_and_offsets_land_their_assignments(command, stdout):
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        io = await ws.execute(command)
+        assert io.exit_code == 0
+        assert await io.stdout_str() == stdout
+        assert await io.stderr_str() == ""
+    finally:
+        await ws.close()
+
+
 def test_random_reader_draws_from_the_pending_seed_and_settles():
     # The reader is told of the assignment, draws from a scratch
     # generator seeded with it, and replays those draws on the session

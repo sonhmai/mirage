@@ -26,12 +26,16 @@ import { Session } from './session.ts'
 import {
   elementIndex,
   envSnapshot,
+  nextRandom,
   seedVar,
   sessionElements,
   sessionView,
   stripKeyQuotes,
+  subscriptIndex,
   visibleEnv,
 } from './state.ts'
+import { RANDOM } from '../../shell/constants.ts'
+import { makeVar } from '../../shell/variable.ts'
 
 class DenySecrets {
   preSession(ctx: SessionContext): Action | null {
@@ -300,6 +304,32 @@ describe('elementIndex', () => {
     // An unresolvable expression indexes element 0, bash's
     // unset-name-is-zero arithmetic rule.
     expect(elementIndex('$bad', {})).toBe(0)
+  })
+})
+
+describe('subscriptIndex', () => {
+  it('lands the assignments a subscript makes and seeds RANDOM', async () => {
+    const s = new Session({ sessionId: 's' })
+    seedVar(s, 'i', '1')
+    s.vars[RANDOM] = makeVar('1')
+    expect(await subscriptIndex(s, '3')).toBe(3)
+    expect(await subscriptIndex(s, 'i+1')).toBe(2)
+    // The subscript's assignment lands, bash's `a[x=3]`.
+    expect(await subscriptIndex(s, 'x=3')).toBe(3)
+    expect(s.vars.x?.value).toBe('3')
+    // One that fails indexes 0 and still lands what it assigned before
+    // failing.
+    expect(await subscriptIndex(s, 'y=4, 1/0')).toBe(0)
+    expect(s.vars.y?.value).toBe('4')
+    // A seed reaches the generator, and the draw after it advances the
+    // session past it.
+    expect(await subscriptIndex(s, 'RANDOM=42, RANDOM')).toBe(17772)
+    const drawn = s.vars[RANDOM].value
+    expect(nextRandom(s, typeof drawn === 'string' ? drawn : undefined)).toBe(26794)
+    // Through a door, a refusal is the gate's.
+    const view = sessionView(s, new Policies([new DenySecrets()]))
+    await expect(subscriptIndex(s, 'SECRET_N=1', view)).rejects.toBeInstanceOf(PolicyDenied)
+    expect(s.env.SECRET_N).toBeUndefined()
   })
 })
 

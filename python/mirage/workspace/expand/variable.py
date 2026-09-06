@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import tree_sitter
@@ -28,7 +28,7 @@ from mirage.shell.constants import RANDOM
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import get_text
-from mirage.shell.types import ArithWrite, ElementOps
+from mirage.shell.types import ArithWrite
 from mirage.shell.types import NodeType as NT
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
@@ -38,7 +38,8 @@ from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.session.state import (RandomReader, nameref_target,
-                                            next_random, subscript_index,
+                                            next_random, random_reader,
+                                            session_elements, subscript_index,
                                             visible_assocs)
 
 ExpandChild = Callable[[tree_sitter.Node], Awaitable[str]]
@@ -107,6 +108,39 @@ def guard_expansion_write(session: Session, *names: str) -> None:
                              contained_code=1) from exc
 
 
+def _write_refusal(exc: PolicyDenied | ArithError) -> ExitSignal:
+    """The line's death for a refused expansion-time write.
+
+    The gate's own reason, or the ``-i`` coercion refusing the text;
+    status 1, the shape ``${var:?}`` uses.
+
+    Args:
+        exc (PolicyDenied | ArithError): the refusal.
+    """
+    why = exc.strerror if isinstance(exc, PolicyDenied) else str(exc)
+    return ExitSignal(1, stderr=f"bash: {why}\n".encode(), contained_code=1)
+
+
+async def _expansion_index(session: Session, view: SessionView | None,
+                           subscript: str) -> int:
+    """``subscript_index`` in the expansion's voice.
+
+    The subscript's assignments land as the index resolves
+    (``${a[x=3]}`` leaves x at 3, ``${a[RANDOM=42]}`` seeds), and a
+    refused one dies the way ``expansion_write``'s does.
+
+    Args:
+        session (Session): the session the subscript reads.
+        view (SessionView | None): the gated door; None outside a
+            workspace.
+        subscript (str): the raw subscript text.
+    """
+    try:
+        return await subscript_index(session, subscript, view)
+    except (PolicyDenied, ArithError) as exc:
+        raise _write_refusal(exc) from exc
+
+
 async def land_arith_writes(session: Session, view: SessionView | None,
                             writes: tuple[ArithWrite,
                                           ...], reader: RandomReader) -> None:
@@ -173,15 +207,8 @@ async def expansion_write(session: Session, view: SessionView | None,
     guard_expansion_write(session, name)
     try:
         status = await assign_element(session, view, name, key, value)
-    except PolicyDenied as exc:
-        raise ExitSignal(1,
-                         stderr=f"bash: {exc.strerror}\n".encode(),
-                         contained_code=1) from exc
-    except ArithError as exc:
-        # The name carries `-i` and the text does not evaluate. The
-        # line dies as it does for `n=1+`, in the evaluator's voice.
-        raise ExitSignal(1, stderr=f"bash: {exc}\n".encode(),
-                         contained_code=1) from exc
+    except (PolicyDenied, ArithError) as exc:
+        raise _write_refusal(exc) from exc
     if status == "readonly":
         raise ReadonlyVariableError(name)
     if status != "ok":
@@ -612,43 +639,71 @@ def _case_mod(op: str, val: str, pattern: str) -> str:
     return "".join(chars)
 
 
-def _arith_int(text: str,
-               env: Mapping[str, str],
-               elements: ElementOps | None = None) -> int | None:
-    """Resolve an arithmetic-context operand (offsets, subscripts).
+class _ArithOperand:
+    """The arithmetic operands of one expansion, evaluated in one record.
 
-    bash evaluates substring offsets and array subscripts as
-    arithmetic (``${v:1+1}``, ``${a[i+1]}``).
+    A substring offset, a length and a slice bound are arithmetic
+    (``${v:1+1}``, ``${a[@]:i:n}``), so each may assign and seed. bash
+    binds an assignment as it makes it, so the second operand sees the
+    first's (``${v:x=1:y=x+1}`` leaves y at 2) and draws from a
+    ``RANDOM`` the first seeded; the writes themselves land through the
+    door once the word has expanded (``land_arith_writes``), so a
+    refusal never leaves the word half-applied. Element references
+    resolve through the session, so an operand may name one
+    (``${v:a[0]}``).
 
     Args:
-        text (str): the raw operand text.
-        env (Mapping[str, str]): session environment for name resolution.
-        elements (ElementOps | None): element callbacks, so the operand
-            may itself reference an array element.
+        session (Session): the session the operands read.
     """
-    try:
-        return int(text.strip())
-    except ValueError:
-        pass
-    try:
-        value = evaluate_arith(text, env, elements=elements).value
-    except ArithError:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+
+    __slots__ = ("session", "reader", "writes", "_pending")
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+        self.reader = random_reader(session)
+        self.writes: list[ArithWrite] = []
+        self._pending: dict[str, str] = {}
+
+    def value(self, text: str) -> int | None:
+        """The operand's value, None for one that does not evaluate.
+
+        Args:
+            text (str): the raw operand text.
+        """
+        try:
+            return int(text.strip())
+        except ValueError:
+            pass
+        env = {**visible_env(self.session), **self._pending}
+        try:
+            result = evaluate_arith(text,
+                                    env,
+                                    elements=session_elements(
+                                        self.session, self.reader),
+                                    read_var=self.reader.read,
+                                    wrote_var=self.reader.wrote)
+        except ArithError as exc:
+            self._record(exc.writes)
+            return None
+        self._record(result.writes)
+        return result.value
+
+    def _record(self, writes: tuple[ArithWrite, ...]) -> None:
+        self.writes.extend(writes)
+        for write in writes:
+            if write.key is None:
+                self._pending[write.name] = write.value
 
 
-def _substring(val: str, groups: list[str], env: Mapping[str, str]) -> str:
+def _substring(val: str, groups: list[str], operand: _ArithOperand) -> str:
     if not groups:
         return val
-    offset = _arith_int(groups[0], env)
+    offset = operand.value(groups[0])
     if offset is None:
         return val
     length = None
     if len(groups) > 1:
-        length = _arith_int(groups[1], env)
+        length = operand.value(groups[1])
         if length is None:
             return val
     if offset < 0:
@@ -683,8 +738,8 @@ async def _expand_subscript_key(p: _BraceParse,
     return "".join(parts)
 
 
-def _value_op(op: str, val: str, groups: list[str], env: Mapping[str,
-                                                                 str]) -> str:
+def _value_op(op: str, val: str, groups: list[str],
+              operand: _ArithOperand) -> str:
     if op in _STRIP_OPS:
         pattern = groups[0] if groups else ""
         return _glob_strip(val, pattern, op in ("##", "%%"), op in ("#", "##"))
@@ -696,7 +751,7 @@ def _value_op(op: str, val: str, groups: list[str], env: Mapping[str,
     if op in _CASE_OPS:
         return _case_mod(op, val, groups[0] if groups else "")
     if op == ":":
-        return _substring(val, groups, env)
+        return _substring(val, groups, operand)
     return val
 
 
@@ -707,13 +762,32 @@ async def expand_braces(node: tree_sitter.Node,
                         view: SessionView | None = None) -> str:
     """Expand ${VAR}, ${VAR<op>...}, ${a[i]}, ${#a[@]}, etc.
 
+    An offset, length or slice bound is arithmetic and may assign
+    (``${v:x=1:y=2}``) or seed (``${v:RANDOM%10:1}``); those land
+    through the door once the word has expanded, then the ``RANDOM``
+    reader settles, so the line ends where bash's does.
+
     Args:
         node (tree_sitter.Node): the ``expansion`` tree-sitter node.
         session (Session): shell session (env, arrays, positionals).
         call_stack (CallStack | None): function-call scope, if any.
         expand_child (ExpandChild): callback that expands a nested node
             (dependency-injected to avoid a cycle with ``expand_node``).
+        view (SessionView | None): the gated door the expansion's
+            writes land through; None outside a workspace.
     """
+    operand = _ArithOperand(session)
+    value = await _expand_braces(node, session, call_stack, expand_child, view,
+                                 operand)
+    await land_arith_writes(session, view, tuple(operand.writes),
+                            operand.reader)
+    return value
+
+
+async def _expand_braces(node: tree_sitter.Node, session: Session,
+                         call_stack: CallStack | None,
+                         expand_child: ExpandChild, view: SessionView | None,
+                         operand: _ArithOperand) -> str:
     p = _parse_braces(node)
     if any(c.type == "}" and c.is_missing for c in node.children):
         # tree-sitter-bash cannot parse a $-spelled substring offset
@@ -754,10 +828,10 @@ async def expand_braces(node: tree_sitter.Node,
             if p.length_op:
                 return str(len(values))
             if p.op == ":":
-                return " ".join(_slice_array(list(values), groups, env))
+                return " ".join(_slice_array(list(values), groups, operand))
             if p.op in _STRIP_OPS | _REPLACE_OPS | _CASE_OPS:
                 return " ".join(
-                    _value_op(p.op, el, groups, env) for el in values)
+                    _value_op(p.op, el, groups, operand) for el in values)
             val = " ".join(values)
             var_in_env = bool(amap)
         else:
@@ -787,17 +861,17 @@ async def expand_braces(node: tree_sitter.Node,
             if p.length_op:
                 return str(len(values))
             if p.op == ":":
-                sliced = _slice_array(arr, groups, env)
+                sliced = _slice_array(arr, groups, operand)
                 return " ".join(sliced)
             if p.op in _STRIP_OPS | _REPLACE_OPS | _CASE_OPS:
                 return " ".join(
-                    _value_op(p.op, el, groups, env) for el in values)
+                    _value_op(p.op, el, groups, operand) for el in values)
             val = " ".join(values)
         else:
             # Expanded first (`${a[$k]}` resolves $k, `${a[i+1]}` stays
             # arithmetic), then evaluated as an index.
             sub_text = await _expand_subscript_key(p, expand_child)
-            idx = subscript_index(session, sub_text)
+            idx = await _expansion_index(session, view, sub_text)
             if idx < 0:
                 idx += array_extent(arr)
             val = array_get(arr, idx)
@@ -895,26 +969,26 @@ async def expand_braces(node: tree_sitter.Node,
         return (groups[0] if groups else "") if val else ""
     if p.op == "+":
         return (groups[0] if groups else "") if var_in_env else ""
-    return _value_op(p.op, val, groups, env)
+    return _value_op(p.op, val, groups, operand)
 
 
 def _slice_array(arr: ShellArray, groups: list[str],
-                 env: Mapping[str, str]) -> list[str]:
+                 operand: _ArithOperand) -> list[str]:
     """Resolve ``${a[@]:offset:length}`` against a shell array.
 
     Args:
         arr (ShellArray): the array being sliced.
         groups (list[str]): the raw offset and length words.
-        env (Mapping[str, str]): environment for the arithmetic context.
+        operand (_ArithOperand): the expansion's arithmetic record.
     """
     if not groups:
         return array_values(arr)
-    offset = _arith_int(groups[0], env)
+    offset = operand.value(groups[0])
     if offset is None:
         return array_values(arr)
     length = None
     if len(groups) > 1:
-        length = _arith_int(groups[1], env)
+        length = operand.value(groups[1])
         if length is None:
             return array_values(arr)
     return array_slice(arr, offset, length)
@@ -976,21 +1050,39 @@ def is_multiword_at(node: tree_sitter.Node) -> bool:
     return p.op in _MULTIWORD_AT_OPS
 
 
-async def expand_array_at(node: tree_sitter.Node, session: Session,
+async def expand_array_at(node: tree_sitter.Node,
+                          session: Session,
                           call_stack: CallStack | None,
-                          expand_child: ExpandChild) -> list[str]:
+                          expand_child: ExpandChild,
+                          view: SessionView | None = None) -> list[str]:
     """Resolve a multi-word "${a[@]...}" splat to its word list.
 
     Only call when ``is_multiword_at`` is True; the caller word-splits
     (or stitches prefix/suffix onto) the returned words, matching bash's
-    quoted-splat semantics.
+    quoted-splat semantics. A slice bound is arithmetic and may assign
+    (``${a[@]:x=1:y=x+1}``); those land through the door once the
+    words are known, as ``expand_braces`` lands its own.
 
     Args:
         node (tree_sitter.Node): the ``expansion`` node.
         session (Session): shell session (arrays, env).
         call_stack (CallStack | None): function-call scope, if any.
         expand_child (ExpandChild): nested-node expander for op operands.
+        view (SessionView | None): the gated door the slice's writes
+            land through; None outside a workspace.
     """
+    operand = _ArithOperand(session)
+    words = await _expand_array_at(node, session, call_stack, expand_child,
+                                   operand)
+    await land_arith_writes(session, view, tuple(operand.writes),
+                            operand.reader)
+    return words
+
+
+async def _expand_array_at(node: tree_sitter.Node, session: Session,
+                           call_stack: CallStack | None,
+                           expand_child: ExpandChild,
+                           operand: _ArithOperand) -> list[str]:
     if node.type == NT.SIMPLE_EXPANSION:
         return _positional_args(session, call_stack)
     p = _parse_braces(node)
@@ -1030,5 +1122,5 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
         groups.append(await _expand_group(group, expand_child, pattern_mode,
                                           session, call_stack))
     if p.op == ":":
-        return _slice_array(arr, groups, env)
-    return [_value_op(p.op, el, groups, env) for el in values]
+        return _slice_array(arr, groups, operand)
+    return [_value_op(p.op, el, groups, operand) for el in values]

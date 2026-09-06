@@ -28,18 +28,23 @@ from mirage.workspace.session.state import (deref, ensure_var_visible, env_get,
 _ELEMENT_REF = re.compile(r"([A-Za-z_]\w*)(?:\[(.+)\])?\Z", re.DOTALL)
 
 
-def element_is_set(session: Session, ref: str) -> bool:
+async def element_is_set(session: Session,
+                         ref: str,
+                         view: SessionView | None = None) -> bool:
     """Whether a ``name`` / ``name[sub]`` reference names a set value.
 
     What ``test -v`` asks. A bare name over an array checks element 0
     (the literal key ``"0"`` for an associative one), which is GNU's
     rule; ``name[@]`` and ``name[*]`` ask whether any element is set.
     An associative subscript is the key verbatim; an indexed one
-    evaluates as arithmetic.
+    evaluates as arithmetic, and what it assigns lands
+    (``[[ -v a[x=2] ]]`` leaves x at 2, as bash does).
 
     Args:
         session (Session): shell session state.
         ref (str): the reference as the operand spelled it.
+        view (SessionView | None): the gated door the subscript's
+            assignments land through; None outside a workspace.
     """
     match = _ELEMENT_REF.fullmatch(ref)
     if match is None:
@@ -72,7 +77,7 @@ def element_is_set(session: Session, ref: str) -> bool:
         held = [scalar]
     else:
         return False
-    idx = subscript_index(session, sub)
+    idx = await subscript_index(session, sub, view)
     if idx < 0:
         idx += array_extent(held)
     return array_has(held, idx)
@@ -143,8 +148,8 @@ async def assign_element(session: Session,
                 # empty: bash resolves `x[-1]` against the length-1
                 # array that produces.
                 arr = [] if scalar is None else [scalar]
-            idx = 0 if subscript is None else subscript_index(
-                session, subscript)
+            idx = (0 if subscript is None else await subscript_index(
+                session, subscript, view))
             if idx < 0:
                 idx += array_extent(arr)
             if idx < 0:

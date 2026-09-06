@@ -264,6 +264,38 @@ it.each([
   }
 })
 
+it.each([
+  // A substring offset or length is arithmetic: it draws, seeds, and
+  // assigns, and the second operand sees the first's write. Parenthesized
+  // because tree-sitter-bash emits an ERROR node for a bare `=` inside
+  // `${v:...}`; the parenthesized form is the same expression to bash.
+  ['RANDOM=42; v=abcdefghij; echo ${v:RANDOM%10:1} $RANDOM', 'c 26794\n'],
+  ['v=abcdef; echo ${v:(x=1):(y=x+1)} $x $y', 'bc 1 2\n'],
+  ['RANDOM=1; v=abc; echo ${v:(RANDOM=42,1)} ${v:RANDOM%3}', 'bc abc\n'],
+  ['a=(0 1 2 3 4); echo ${a[@]:(x=1):(y=x+1)} $x $y', '1 2 1 2\n'],
+  // So is a subscript, wherever it is spelled: an expansion, an
+  // assignment, a literal, `unset`, and `[[ -v ]]`.
+  ['RANDOM=1; a[RANDOM=42]=x; echo $RANDOM ${!a[@]}', '17772 42\n'],
+  ['a=(0 1 2 3); echo ${a[x=3]} $x', '3 3\n'],
+  ['RANDOM=1; a=(0 1); echo ${a[RANDOM=1, 1]} $RANDOM', '1 16807\n'],
+  ['x=0; echo ${a[x=1]:=z} ${a[@]} $x', 'z z 1\n'],
+  ['a=(0 1 2); unset "a[x=1]"; echo ${a[@]} $x', '0 2 1\n'],
+  ['RANDOM=1; a=(0 1 2); [[ -v a[RANDOM%3] ]]; echo $? $RANDOM', '0 10791\n'],
+  ['declare -a a=([x=2]=v); echo ${!a[@]} $x', '2 2\n'],
+  ['a=([y=3]=v [y+1]=w); echo ${!a[@]} $y', '3 4 3\n'],
+  ['unset a; a[i=2]+=x; echo ${!a[@]} $i', '2 2\n'],
+])('lands the assignments a subscript or offset makes: %s', async (command, stdout) => {
+  const { ws } = await makeIntegrationWS()
+  try {
+    const io = await ws.execute(command)
+    expect(io.exitCode).toBe(0)
+    expect(io.stdoutText).toBe(stdout)
+    expect(io.stderrText).toBe('')
+  } finally {
+    await ws.close()
+  }
+})
+
 it('draws from the pending seed and settles once the door has landed it', () => {
   // The reader is told of the assignment, draws from a scratch
   // generator seeded with it, and replays those draws on the session

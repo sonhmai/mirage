@@ -100,11 +100,11 @@ async def _unset_element(session: Session, view: SessionView, base: str,
         # the name's existence.
         if env_get(session, base) is None:
             return "ok"
-        if subscript_index(session, subscript) != 0:
+        if await subscript_index(session, subscript, view) != 0:
             return "notarray"
         await view.unset(base)
         return "ok"
-    idx = subscript_index(session, subscript)
+    idx = await subscript_index(session, subscript, view)
     if idx < 0:
         idx += array_extent(arr)
         if idx < 0:

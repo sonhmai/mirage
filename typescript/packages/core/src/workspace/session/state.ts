@@ -349,11 +349,66 @@ export function sessionElements(session: Session, reader: RandomReader | null = 
   return new SessionElements(session, reader)
 }
 
-/** An indexed subscript resolved outside an arithmetic expression:
- * `${a[i]}`, `a[i]=v`. `RANDOM` draws there as bash's does. */
-export function subscriptIndex(session: Session, subscript: string): number {
+/**
+ * The whole variable one arithmetic write produces. A scalar is itself;
+ * an element is the array it lands in, the way `assignElement` lands
+ * one, so a refusal never leaves a write half-applied.
+ */
+function writtenValue(session: Session, write: ArithWrite): ShellValue {
+  if (write.key === null) return write.value
+  const assoc = visibleAssocs(session)[write.name]
+  if (assoc !== undefined) return { ...assoc, [write.key]: write.value }
+  const arr = visibleArrays(session)[write.name]
+  return arrayWith(arr ?? makeArray([]), Number(write.key), write.value)
+}
+
+/**
+ * An indexed subscript resolved outside an arithmetic expression:
+ * `${a[i]}`, `a[i]=v`, `unset 'a[i]'`, `[[ -v a[i] ]]`.
+ *
+ * The subscript is arithmetic, so it may assign (`a[x=3]`) and seed
+ * (`a[RANDOM=42]`), and bash binds those as it evaluates them. Each
+ * lands through the door once the index is known, then the `RANDOM`
+ * reader replays the draws made after the seed; a subscript that fails
+ * to evaluate indexes element 0 and still lands what it assigned before
+ * failing, bash's own order. `view` is the gated door; null lands the
+ * writes ungated, outside a workspace. Throws what the door throws: a
+ * PolicyDenied, a ReadonlyVariableError, or an ArithError from a `-i`
+ * name refusing the value.
+ */
+export async function subscriptIndex(
+  session: Session,
+  subscript: string,
+  view: SessionView | null = null,
+): Promise<number> {
+  const trimmed = subscript.trim()
+  if (/^-?\d+$/.test(trimmed)) return Number(trimmed)
   const reader = randomReader(session)
-  return elementIndex(subscript, visibleEnv(session), sessionElements(session, reader), reader.read)
+  let idx: number
+  let writes: readonly ArithWrite[]
+  try {
+    const result = evaluateArith(
+      subscript,
+      visibleEnv(session),
+      0,
+      sessionElements(session, reader),
+      reader.read,
+      reader.wrote,
+    )
+    idx = Number(result.value)
+    writes = result.writes
+  } catch (err) {
+    if (!(err instanceof ArithError)) throw err
+    idx = 0
+    writes = err.writes
+  }
+  for (const write of writes) {
+    const value = writtenValue(session, write)
+    if (view !== null) await view.set(write.name, value)
+    else await setVar(session, null, write.name, value)
+  }
+  reader.settle()
+  return idx
 }
 
 /**
@@ -539,9 +594,7 @@ class IntegerCoercion {
 
 /**
  * Land the assignments a coercion made, each through the door, then
- * settle its `RANDOM` draws. A scalar lands as itself; an element lands
- * as the whole array it produces, the way `assignElement` lands one, so
- * a refusal never leaves a write half-applied.
+ * settle its `RANDOM` draws.
  */
 async function landCoercion(
   session: Session,
@@ -549,22 +602,7 @@ async function landCoercion(
   coercion: IntegerCoercion,
 ): Promise<void> {
   for (const write of coercion.writes) {
-    if (write.key === null) {
-      await setVar(session, policies, write.name, write.value)
-      continue
-    }
-    const assoc = visibleAssocs(session)[write.name]
-    if (assoc !== undefined) {
-      await setVar(session, policies, write.name, { ...assoc, [write.key]: write.value })
-      continue
-    }
-    const arr = visibleArrays(session)[write.name]
-    await setVar(
-      session,
-      policies,
-      write.name,
-      arrayWith(arr ?? makeArray([]), Number(write.key), write.value),
-    )
+    await setVar(session, policies, write.name, writtenValue(session, write))
   }
   coercion.reader.settle()
 }

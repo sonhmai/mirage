@@ -26,9 +26,10 @@ from mirage.workspace.session import Session
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.session import vars_from_env
 from mirage.workspace.session.state import (element_index, env_snapshot,
-                                            seed_var, session_elements,
-                                            session_view, set_attr,
-                                            strip_key_quotes, visible_env)
+                                            next_random, seed_var,
+                                            session_elements, session_view,
+                                            set_attr, strip_key_quotes,
+                                            subscript_index, visible_env)
 
 
 class DenySecrets(Policy):
@@ -322,6 +323,34 @@ def test_element_index_int_arith_and_error():
     # An unresolvable expression indexes element 0, bash's
     # unset-name-is-zero arithmetic rule.
     assert element_index("$bad", {}) == 0
+
+
+def test_subscript_index_lands_its_assignments_and_seeds_random():
+    session = Session(session_id="s", cwd="/")
+    seed_var(session, "i", "1")
+    session.vars["RANDOM"] = ShellVar("1")
+
+    async def run():
+        assert await subscript_index(session, "3") == 3
+        assert await subscript_index(session, "i+1") == 2
+        # The subscript's assignment lands, bash's `a[x=3]`.
+        assert await subscript_index(session, "x=3") == 3
+        assert session.vars["x"].value == "3"
+        # One that fails indexes 0 and still lands what it assigned
+        # before failing.
+        assert await subscript_index(session, "y=4, 1/0") == 0
+        assert session.vars["y"].value == "4"
+        # A seed reaches the generator, and the draw after it advances
+        # the session past it.
+        assert await subscript_index(session, "RANDOM=42, RANDOM") == 17772
+        assert next_random(session, session.vars["RANDOM"].value) == 26794
+        # Through a door, a refusal is the gate's.
+        view = session_view(session, Policies([DenySecrets()]))
+        with pytest.raises(PolicyDenied):
+            await subscript_index(session, "SECRET_N=1", view)
+        assert "SECRET_N" not in session.env
+
+    asyncio.run(run())
 
 
 def test_resolve_assoc_is_literal():

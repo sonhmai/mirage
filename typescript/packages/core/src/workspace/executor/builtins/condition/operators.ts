@@ -58,7 +58,7 @@ export async function applyUnary(
   const text = scopePath(val)
   if (op === '-n') return text !== ''
   if (op === '-z') return text === ''
-  if (op === '-v') return elementIsSet(ctx.session, text)
+  if (op === '-v') return elementIsSet(ctx.session, text, ctx.view ?? null)
   if (op === '-L' || op === '-h') {
     const resolved = resolvePath(text, ctx.session.cwd)
     return ctx.namespace.isLink(resolved)

@@ -352,17 +352,75 @@ def element_index(subscript: str,
         return 0
 
 
-def subscript_index(session: Session, subscript: str) -> int:
+def _written_value(session: Session, write: ArithWrite) -> ShellValue:
+    """The whole variable one arithmetic write produces.
+
+    A scalar is itself; an element is the array it lands in, the way
+    ``assign_element`` lands one, so a refusal never leaves a write
+    half-applied.
+
+    Args:
+        session (Session): the session the write reads.
+        write (ArithWrite): the assignment.
+    """
+    if write.key is None:
+        return write.value
+    assoc = visible_assocs(session).get(write.name)
+    if assoc is not None:
+        return {**assoc, write.key: write.value}
+    arr = visible_arrays(session).get(write.name)
+    return array_with(arr if arr is not None else make_array([]),
+                      int(write.key), write.value)
+
+
+async def subscript_index(session: Session,
+                          subscript: str,
+                          view: SessionView | None = None) -> int:
     """An indexed subscript resolved outside an arithmetic expression:
-    ``${a[i]}``, ``a[i]=v``. ``RANDOM`` draws there as bash's does.
+    ``${a[i]}``, ``a[i]=v``, ``unset 'a[i]'``, ``[[ -v a[i] ]]``.
+
+    The subscript is arithmetic, so it may assign (``a[x=3]``) and seed
+    (``a[RANDOM=42]``), and bash binds those as it evaluates them. Each
+    lands through the door once the index is known, then the ``RANDOM``
+    reader replays the draws made after the seed; a subscript that
+    fails to evaluate indexes element 0 and still lands what it
+    assigned before failing, bash's own order.
 
     Args:
         session (Session): the session the subscript reads.
         subscript (str): the raw subscript text.
+        view (SessionView | None): the gated door the assignments land
+            through; None lands them ungated, outside a workspace.
+
+    Raises:
+        PolicyDenied: the door refused an assignment.
+        ReadonlyVariableError: an assignment named a readonly variable.
+        ArithError: an assigned name carries ``-i`` and the value does
+            not evaluate.
     """
+    try:
+        return int(subscript.strip())
+    except ValueError:
+        pass
     reader = random_reader(session)
-    return element_index(subscript, visible_env(session),
-                         session_elements(session, reader), reader.read)
+    writes: tuple[ArithWrite, ...]
+    try:
+        result = evaluate_arith(subscript,
+                                visible_env(session),
+                                elements=session_elements(session, reader),
+                                read_var=reader.read,
+                                wrote_var=reader.wrote)
+        idx, writes = result.value, result.writes
+    except ArithError as exc:
+        idx, writes = 0, exc.writes
+    for write in writes:
+        value = _written_value(session, write)
+        if view is not None:
+            await view.set(write.name, value)
+        else:
+            await set_var(session, None, write.name, value)
+    reader.settle()
+    return idx
 
 
 class _SessionElements:
@@ -634,30 +692,14 @@ async def _land_coercion(session: Session, policies: Policies | None,
     """Land the assignments a coercion made, each through the door, then
     settle its ``RANDOM`` draws.
 
-    A scalar lands as itself; an element lands as the whole array it
-    produces, the way ``assign_element`` lands one, so a refusal never
-    leaves a write half-applied.
-
     Args:
         session (Session): the shell session.
         policies (Policies | None): the session plane's gate.
         coercion (_IntegerCoercion): the evaluation that made the writes.
     """
     for write in coercion.writes:
-        if write.key is None:
-            await set_var(session, policies, write.name, write.value)
-            continue
-        assoc = visible_assocs(session).get(write.name)
-        if assoc is not None:
-            await set_var(session, policies, write.name, {
-                **assoc, write.key: write.value
-            })
-            continue
-        arr = visible_arrays(session).get(write.name)
-        await set_var(
-            session, policies, write.name,
-            array_with(arr if arr is not None else make_array([]),
-                       int(write.key), write.value))
+        await set_var(session, policies, write.name,
+                      _written_value(session, write))
     coercion.reader.settle()
 
 

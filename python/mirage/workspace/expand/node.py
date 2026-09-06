@@ -18,6 +18,7 @@ from typing import Any
 
 import tree_sitter
 
+from mirage.io import IOResult
 from mirage.ops.types import SessionView
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.backticks import split_backtick_region
@@ -80,16 +81,47 @@ async def _expand_backtick_region(
         # Each pair is its own place on the line: the node holds every
         # touching pair, so the span within it says which one runs,
         # measured as the parser measures the node.
-        io = await execute_fn(f"( {segment.text}\n)",
-                              session_id=session.session_id,
-                              node=node,
-                              span=(offset + byte_offset(raw, segment.start),
-                                    offset + byte_offset(raw, segment.end)))
+        io = await child_line(session, execute_fn, segment.text, node,
+                              (offset + byte_offset(raw, segment.start),
+                               offset + byte_offset(raw, segment.end)))
         parts.append((await io.stdout_str()).rstrip("\n"))
         session._diagnostics.append(await io.materialize_stderr())
         session._cmdsub_seq += 1
         session._cmdsub_status = io.exit_code
     return "".join(parts)
+
+
+async def child_line(session: Session,
+                     execute_fn: Callable[..., Any],
+                     text: str,
+                     node: Any,
+                     span: tuple[int, int] | None = None) -> IOResult:
+    """Run a substitution's line in a child shell.
+
+    bash forks for ``$(...)`` and backticks, so what the line assigns,
+    ``cd``s or seeds (``RANDOM``) never reaches the parent: the session
+    is restored around the run, as ``handle_subshell`` restores it
+    around a ``( )`` body. The line reaches the executor unwrapped,
+    under the node that named it, so the pass places its commands
+    where they were typed rather than under a subshell of their own.
+
+    Args:
+        session (Session): the parent shell's session.
+        execute_fn (Callable[..., Any]): the workspace's nested-line
+            executor.
+        text (str): the line the substitution holds.
+        node (Any): the tree-sitter node the substitution stands under.
+        span (tuple[int, int] | None): the pair's byte span within the
+            node, for a backtick region holding several.
+    """
+    saved = session.snapshot()
+    try:
+        return await execute_fn(text,
+                                session_id=session.session_id,
+                                node=node,
+                                span=span)
+    finally:
+        session.restore(saved)
 
 
 def unescape_heredoc(text: str) -> str:
@@ -360,9 +392,7 @@ async def expand_node_marked(
             return prefix
         # The substitution names its own node: the nested line's
         # commands stand under it, which is where the pass placed them.
-        io = await execute_fn(f"( {inner}\n)",
-                              session_id=session.session_id,
-                              node=ts_node)
+        io = await child_line(session, execute_fn, inner, ts_node)
         text = (await io.stdout_str()).rstrip("\n")
         # Record the substitution's status: an assignment-only
         # statement whose value ran substitutions reports the last

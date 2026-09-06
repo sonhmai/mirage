@@ -85,11 +85,10 @@ async function expandBacktickRegion(
     }
     // Each pair is its own place on the line: the node holds every
     // touching pair, so the span within it says which one runs.
-    const io = await executeFn(`( ${segment.text}\n)`, {
-      sessionId: session.sessionId,
-      node,
-      span: [offset + segment.start, offset + segment.end],
-    })
+    const io = await childLine(session, executeFn, segment.text, node, [
+      offset + segment.start,
+      offset + segment.end,
+    ])
     out += (await io.stdoutStr()).replace(/\n+$/, '')
     session.diagnostics.push(await io.materializeStderr())
     session.cmdsubSeq += 1
@@ -100,6 +99,36 @@ async function expandBacktickRegion(
 
 // Unquoted-heredoc escapes: \$, \`, \\, \<newline> only.
 // Unlike double quotes, \" stays literal in heredoc bodies.
+/**
+ * Run a substitution's line in a child shell.
+ *
+ * bash forks for `$(...)` and backticks, so what the line assigns, `cd`s
+ * or seeds (`RANDOM`) never reaches the parent: the session is restored
+ * around the run, as `handleSubshell` restores it around a `( )` body.
+ * The line reaches the executor unwrapped, under the node that named it,
+ * so the pass places its commands where they were typed rather than
+ * under a subshell of their own. `span` is the pair's span within the
+ * node, for a backtick region holding several.
+ */
+async function childLine(
+  session: Session,
+  executeFn: ExecuteFn,
+  text: string,
+  node: TSNodeLike,
+  span?: [number, number],
+): Promise<IOResult> {
+  const saved = session.snapshot()
+  try {
+    return await executeFn(text, {
+      sessionId: session.sessionId,
+      node,
+      ...(span === undefined ? {} : { span }),
+    })
+  } finally {
+    session.restore(saved)
+  }
+}
+
 export function unescapeHeredoc(text: string): string {
   if (!text.includes('\\')) return text
   const NUL = String.fromCharCode(0)
@@ -384,7 +413,7 @@ export async function expandNodeMarked(
     if (inner.trim() === '') return prefix
     // The substitution names its own node: the nested line's commands
     // stand under it, which is where the pass placed them.
-    const io = await executeFn(`( ${inner}\n)`, { sessionId: session.sessionId, node: tsNode })
+    const io = await childLine(session, executeFn, inner, tsNode)
     const text = (await io.stdoutStr()).replace(/\n+$/, '')
     // Record the substitution's status: an assignment-only statement
     // whose value ran substitutions reports the last one's status as

@@ -286,9 +286,12 @@ async def execute_node(
     outer = session._diagnostics
     session._diagnostics = []
     try:
-        stdout, io, exec_node = await _execute_node(
-            dispatch, registry, namespace, job_table, execute_fn, agent_id,
-            node, session, stdin, call_stack, cancel, routing_decision, sink)
+        stdout, io, exec_node = await _execute_node(dispatch, registry,
+                                                    namespace, job_table,
+                                                    execute_fn, agent_id, node,
+                                                    session, stdin, call_stack,
+                                                    cancel, routing_decision,
+                                                    sink, handed)
         if session._diagnostics:
             err = _diagnostic_stderr(node, session)
             io.stderr = err + await io.materialize_stderr()
@@ -329,6 +332,7 @@ async def _execute_node(
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision | None = None,
     sink: JobConsole | None = None,
+    handed: HandOff | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Walk tree-sitter AST and dispatch each node.
 

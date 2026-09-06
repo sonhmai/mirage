@@ -31,6 +31,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import fs_strerror
 from mirage.utils.path import resolve_path
+from mirage.utils.stream import ensure_stream
 from mirage.workspace.lookup.constants import SHELL_ONLY_BUILTINS
 from mirage.workspace.lookup.lookup import lookup_all
 from mirage.workspace.lookup.types import Consumer
@@ -125,20 +126,21 @@ class _SharedStdin:
     GNU's children inherit find's stdin descriptor, so its offset moves
     only when a child reads: ``-exec true \\; -exec cat \\;`` leaves the
     bytes for cat, while two cats see them once. The same object rides
-    into every child as its stdin, and the first read drains it. The
-    source is read only then: find itself never reads its stdin, so a
-    walk with no reading child (``yes | find d -maxdepth 0``) must not
-    wait on it.
+    into every child as its stdin, and the source is pulled only as a
+    child reads: find itself never reads its stdin, so a walk with no
+    reading child (``yes | find d -maxdepth 0``) must not wait on it,
+    and a child that reads a little of an unbounded input
+    (``-exec head -c 1``) must get its byte without waiting for EOF.
 
     Args:
         source (ByteSource): find's own input, unread.
     """
 
-    __slots__ = ("_source", "_data", "_pos")
+    __slots__ = ("_chunks", "_buffer", "_pos")
 
     def __init__(self, source: ByteSource) -> None:
-        self._source: ByteSource | None = source
-        self._data = b""
+        self._chunks: AsyncIterator[bytes] | None = ensure_stream(source)
+        self._buffer = b""
         self._pos = 0
 
     def __aiter__(self) -> AsyncIterator[bytes]:
@@ -147,12 +149,20 @@ class _SharedStdin:
     async def _drain(self) -> AsyncIterator[bytes]:
         # One byte per pull, so a child that stops reading early (`head
         # -c 1`) leaves the rest at the cursor for the next child, the
-        # way a shared descriptor's offset does.
-        if self._source is not None:
-            source, self._source = self._source, None
-            self._data = await materialize(source)
-        while self._pos < len(self._data):
-            chunk = self._data[self._pos:self._pos + 1]
+        # way a shared descriptor's offset does; the next source chunk
+        # is pulled only once the buffered one is spent.
+        while True:
+            if self._pos >= len(self._buffer):
+                if self._chunks is None:
+                    return
+                try:
+                    self._buffer = await anext(self._chunks)
+                except StopAsyncIteration:
+                    self._chunks = None
+                    return
+                self._pos = 0
+                continue
+            chunk = self._buffer[self._pos:self._pos + 1]
             self._pos += 1
             yield chunk
 

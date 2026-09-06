@@ -1058,6 +1058,15 @@ async function expandBracesIn(
       val = amap['0'] ?? ''
       varInEnv = amap['0'] !== undefined
     }
+    if (!varInEnv && p.varName === RANDOM) {
+      // `${RANDOM}` draws as `$RANDOM` does: the env holds the last word,
+      // which a read must not hand back unchanged.
+      const drawn = nextRandom(session, env[RANDOM])
+      if (drawn !== null) {
+        val = String(drawn)
+        varInEnv = true
+      }
+    }
     if (!varInEnv && p.varName in env) {
       val = env[p.varName] ?? ''
       varInEnv = true

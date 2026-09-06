@@ -294,6 +294,15 @@ it.each([
   ['RANDOM=1; y="RANDOM=42,1/0"; [[ 0 -eq y ]] 2>/dev/null; echo rc=$? $RANDOM', 'rc=1 17772\n'],
   // An element the first operand assigns is read by the second.
   ['a=(1); v=abcdef; echo "${v:(a[0]=2):(a[0])}" ${a[0]}', 'cd 2\n'],
+  // `${RANDOM}` draws like `$RANDOM`, once per expansion. bash draws more
+  // than once inside some operators (`${#RANDOM}` consumes two,
+  // `${RANDOM/1/X}` three); those are its own re-evaluation and are not
+  // modelled, so only the single-draw forms are pinned.
+  ['RANDOM=42; echo ${RANDOM} ${RANDOM}', '17772 26794\n'],
+  [
+    'RANDOM=42; echo "${RANDOM:-x} $RANDOM"; RANDOM=42; echo "${RANDOM:+y} $RANDOM"',
+    '17772 26794\ny 26794\n',
+  ],
 ])('lands the assignments a subscript or offset makes: %s', async (command, stdout) => {
   const { ws } = await makeIntegrationWS()
   try {

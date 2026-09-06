@@ -373,6 +373,41 @@
         "stdout": "cd 2\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "random_brace_expansion_draws",
+      "seq": 452,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "RANDOM=42; echo ${RANDOM} ${RANDOM}; RANDOM=42; echo \"${RANDOM:-x} $RANDOM\"; RANDOM=42; echo \"${RANDOM:+y} $RANDOM\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "17772 26794\n17772 26794\ny 26794\n",
+        "stderr": ""
+      },
+      "note": "bash draws RANDOM more than once inside some operators (`${#RANDOM}` consumes two draws, `${RANDOM/1/X}` three, pinned on 5.2); that re-evaluation is bash's own and is not modelled, so only the single-draw forms are pinned."
     }
   ]
 }

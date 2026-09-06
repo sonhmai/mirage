@@ -19,6 +19,7 @@ import { MountMode } from '../../types.ts'
 import type { Action, OpsContext, Policy } from '../../policy/index.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { SharedStdin } from './find_action_dispatch.ts'
 
 class NoRmdir implements Policy {
   preOps(ctx: OpsContext): Action | null {
@@ -139,5 +140,21 @@ describe('find actions', () => {
     } finally {
       await ws.close()
     }
+  })
+
+  it('reads a slow stdin incrementally for a child', async () => {
+    // A source that never ends must still feed `head -c 1` its byte: the
+    // cursor pulls a chunk at a time rather than waiting for EOF.
+    async function* endless(): AsyncIterable<Uint8Array> {
+      yield new TextEncoder().encode('ab')
+      await new Promise<void>(() => undefined)
+    }
+    const shared = new SharedStdin(endless())
+    const got: string[] = []
+    for await (const chunk of shared) {
+      got.push(new TextDecoder().decode(chunk))
+      if (got.length === 2) break
+    }
+    expect(got).toEqual(['a', 'b'])
   })
 })

@@ -28,6 +28,7 @@ import { SHELL_ONLY_BUILTINS } from '../lookup/constants.ts'
 import { lookupAll } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { NamespaceView, StatPath } from '../../ops/types.ts'
+import { yieldBytes } from '../../io/stream.ts'
 import { FileType } from '../../types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import {
@@ -157,31 +158,39 @@ async function headState(
  * cat, while two cats see them once. The same object rides into every
  * child as its stdin, and the first read drains it.
  */
-class SharedStdin implements AsyncIterable<Uint8Array> {
-  private source: ByteSource | null
-  private data: Uint8Array = new Uint8Array()
+export class SharedStdin implements AsyncIterable<Uint8Array> {
+  private chunks: AsyncIterator<Uint8Array> | null
+  private buffer: Uint8Array = new Uint8Array()
   private pos = 0
 
   constructor(source: ByteSource) {
-    this.source = source
+    this.chunks = (source instanceof Uint8Array ? yieldBytes(source) : source)[
+      Symbol.asyncIterator
+    ]()
   }
 
-  // The source is read only on the first iteration: find itself never
-  // reads its stdin, so a walk with no reading child (`yes | find d
-  // -maxdepth 0`) must not wait on it. One byte per pull after that, so
-  // a child that stops reading early (`head -c 1`) leaves the rest at
-  // the cursor for the next child, the way a shared descriptor's offset
-  // does.
+  // The source is pulled only as a child reads: find itself never reads
+  // its stdin, so a walk with no reading child (`yes | find d -maxdepth
+  // 0`) must not wait on it, and a child that reads a little of an
+  // unbounded input (`-exec head -c 1`) must get its byte without waiting
+  // for EOF. One byte per pull, so a child that stops reading early
+  // leaves the rest at the cursor for the next child, the way a shared
+  // descriptor's offset does; the next source chunk is pulled only once
+  // the buffered one is spent.
   [Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
     return {
       next: async () => {
-        if (this.source !== null) {
-          const source = this.source
-          this.source = null
-          this.data = await materialize(source)
+        while (this.pos >= this.buffer.byteLength) {
+          if (this.chunks === null) return { done: true, value: undefined }
+          const step = await this.chunks.next()
+          if (step.done === true) {
+            this.chunks = null
+            return { done: true, value: undefined }
+          }
+          this.buffer = step.value
+          this.pos = 0
         }
-        if (this.pos >= this.data.byteLength) return { done: true, value: undefined }
-        const chunk = this.data.subarray(this.pos, this.pos + 1)
+        const chunk = this.buffer.subarray(this.pos, this.pos + 1)
         this.pos += 1
         return { done: false, value: chunk }
       },

@@ -911,6 +911,13 @@ async def _expand_braces(node: tree_sitter.Node, session: Session,
             # literal key, exactly as bash reads it.
             val = amap.get("0", "")
             var_in_env = "0" in amap
+        if not var_in_env and p.var_name == RANDOM:
+            # `${RANDOM}` draws as `$RANDOM` does: the env holds the
+            # last word, which a read must not hand back unchanged.
+            drawn = next_random(session, env.get(RANDOM))
+            if drawn is not None:
+                val = str(drawn)
+                var_in_env = True
         if not var_in_env and p.var_name in env:
             val = env[p.var_name]
             var_in_env = True

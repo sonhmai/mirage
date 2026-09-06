@@ -1914,17 +1914,17 @@
         "sharepoint",
         "sharepoint-prefix",
         "ssh",
-        "nextcloud",
         "gdrive",
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d && printf 1 > '/data/fe/d/a b' && printf 2 > '/data/fe/d/c\\d' && printf 3 > '/data/fe/d/e\"f' && cd /data/fe && find d -type f -ls | sed 's/.* [0-9][0-9]:[0-9][0-9] //' | sort; find d -name 'a b'; cd / && rm -r /data/fe",
+      "command": "mkdir -p /data/fe/d && printf 1 > '/data/fe/d/a b' && printf 2 > '/data/fe/d/c\\d' && printf 3 > '/data/fe/d/e\"f' && cd /data/fe && find d -type f -ls | sed -E 's/.* ([0-9]{2}:[0-9]{2}|[0-9]{4}) //' | sort; find d -name 'a b'; cd / && rm -r /data/fe",
       "expect": {
         "exit": 0,
         "stdout": "d/a\\ b\nd/c\\\\d\nd/e\\\"f\nd/a b\n",
         "stderr": ""
-      }
+      },
+      "note": "The time column is stripped in either form, since a backend whose mtime reads as future or old renders the year. nextcloud is excused in integ/target_exceptions.json: its WebDAV layer refuses a backslash in a name, and the escaping under test is find's."
     },
     {
       "id": "find_exec_does_not_see_a_shell_function_or_builtin",
@@ -1953,7 +1953,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/ff/d && cd /data/ff && zff() { echo BAD; }; find d -maxdepth 0 -exec zff {} \\; ; echo rc=$?; find d -maxdepth 0 -exec cd {} \\; ; echo rc=$?; find d -maxdepth 0 -exec echo hi {} \\; ; unset -f zff; cd / && rm -r /data/ff",
+      "command": "mkdir -p /data/ff/d && printf x > /data/ff/d/keep && cd /data/ff && zff() { echo BAD; }; find d -maxdepth 0 -exec zff {} \\; ; echo rc=$?; find d -maxdepth 0 -exec cd {} \\; ; echo rc=$?; find d -maxdepth 0 -exec echo hi {} \\; ; unset -f zff; cd / && rm -r /data/ff",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nrc=0\nhi d\n",
@@ -1987,7 +1987,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fq/a && cd /data/fq && find a -newermt @0x1; echo rc=$?; find a -newermt @1e2; echo rc=$?; find a -newermt @1.5 >/dev/null; echo rc=$?; find a -newermt '@ 1' >/dev/null; echo rc=$?; cd / && rm -r /data/fq",
+      "command": "mkdir -p /data/fq/a && printf x > /data/fq/a/keep && cd /data/fq && find a -newermt @0x1; echo rc=$?; find a -newermt @1e2; echo rc=$?; find a -newermt @1.5 >/dev/null; echo rc=$?; find a -newermt '@ 1' >/dev/null; echo rc=$?; cd / && rm -r /data/fq",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=0\nrc=0\n",

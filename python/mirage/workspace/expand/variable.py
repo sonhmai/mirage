@@ -28,7 +28,7 @@ from mirage.shell.constants import RANDOM
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import get_text
-from mirage.shell.types import ArithWrite
+from mirage.shell.types import ArithWrite, ElementOps
 from mirage.shell.types import NodeType as NT
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
@@ -656,13 +656,31 @@ class _ArithOperand:
         session (Session): the session the operands read.
     """
 
-    __slots__ = ("session", "reader", "writes", "_pending")
+    __slots__ = ("session", "reader", "writes", "_pending", "_pending_elems")
 
     def __init__(self, session: Session) -> None:
         self.session = session
         self.reader = random_reader(session)
         self.writes: list[ArithWrite] = []
         self._pending: dict[str, str] = {}
+        self._pending_elems: dict[tuple[str, str], str] = {}
+
+    def _elements(self) -> ElementOps:
+        """The session's element callbacks, the pending element writes
+        laid over their reads, so ``${v:(a[0]=2):(a[0])}`` reads the 2
+        the first operand assigned."""
+        inner = session_elements(self.session, self.reader)
+        pending = self._pending_elems
+
+        def read(name: str,
+                 key: str,
+                 _inner: ElementOps = inner) -> str | None:
+            value = pending.get((name, key))
+            return value if value is not None else _inner.read(name, key)
+
+        return ElementOps(resolve=inner.resolve,
+                          read=read,
+                          is_assoc=inner.is_assoc)
 
     def value(self, text: str) -> int | None:
         """The operand's value, None for one that does not evaluate.
@@ -678,8 +696,7 @@ class _ArithOperand:
         try:
             result = evaluate_arith(text,
                                     env,
-                                    elements=session_elements(
-                                        self.session, self.reader),
+                                    elements=self._elements(),
                                     read_var=self.reader.read,
                                     wrote_var=self.reader.wrote)
         except ArithError as exc:
@@ -693,6 +710,8 @@ class _ArithOperand:
         for write in writes:
             if write.key is None:
                 self._pending[write.name] = write.value
+            else:
+                self._pending_elems[(write.name, write.key)] = write.value
 
 
 def _substring(val: str, groups: list[str], operand: _ArithOperand) -> str:

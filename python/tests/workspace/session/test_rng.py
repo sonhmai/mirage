@@ -346,6 +346,8 @@ async def test_arithmetic_random_assignment_seeds_within_the_expression(
          'rc=1 x=6\n'),
         ('RANDOM=1; y="RANDOM=42,1/0"; [[ 0 -eq y ]] 2>/dev/null; '
          'echo rc=$? $RANDOM', 'rc=1 17772\n'),
+        # An element the first operand assigns is read by the second.
+        ('a=(1); v=abcdef; echo "${v:(a[0]=2):(a[0])}" ${a[0]}', 'cd 2\n'),
     ])
 @pytest.mark.asyncio
 async def test_subscripts_and_offsets_land_their_assignments(command, stdout):

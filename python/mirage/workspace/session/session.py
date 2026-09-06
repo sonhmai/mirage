@@ -236,7 +236,9 @@ class Session:
     # pipeline, where a simple command is a one-segment pipeline. Written
     # only through `record_status` (`executor/statement.py`), the one
     # door `$?` goes through as well, so the two can never disagree.
-    pipe_status: tuple[int, ...] = ()
+    # A fresh shell starts with the one-segment status `0`, as bash
+    # does, so the first `${PIPESTATUS[*]}` expands to `0`.
+    pipe_status: tuple[int, ...] = (0, )
     shell_options: dict[str, bool] = field(default_factory=dict)
     # `shopt` options, kept apart from `set -o` ones because bash keeps
     # two vocabularies (`shopt -o` is the bridge). Only the names set

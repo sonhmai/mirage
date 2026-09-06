@@ -106,7 +106,8 @@ async def _out(ws: Workspace, line: str) -> str:
         ("false | true; echo ${PIPESTATUS[@]}; echo ${PIPESTATUS[@]}",
          "1 0\n0"),
         ("set -o pipefail; false | true; echo $? ${PIPESTATUS[@]}", "1 1 0"),
-        ("echo \"[${PIPESTATUS[@]}]\"", "[]"),
+        # A fresh shell starts with the one-segment status 0.
+        ("echo \"[${PIPESTATUS[@]}]\"", "[0]"),
         ("! false | true; echo $? ${PIPESTATUS[@]}", "1 1 0"),
         ("f() { false | true; }; f; echo ${PIPESTATUS[@]}", "0"),
         ("false | true; { true; false; } | echo ${PIPESTATUS[*]}", "1 0"),

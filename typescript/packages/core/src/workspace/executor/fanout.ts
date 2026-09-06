@@ -28,6 +28,8 @@ import { FindParseError } from '../../commands/errors.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/types.ts'
 import type { NamespaceView, StatPath } from '../../ops/types.ts'
+import { inMtimeWindow } from '../../utils/dates.ts'
+import { modifiedTs } from '../../core/generic/find.ts'
 import { mergeDuBlocks } from '../../commands/builtin/generic/crossmount/fanout/du.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
@@ -193,12 +195,13 @@ function adjustDepthTexts(
 // start and each mount root (`/ghost` above a mount at `/ghost/deep`)
 // get a row too: no backend walk covers them, yet `ls` lists them
 // through the door's structure merge, so find must agree.
-function synthesizeFindMountEntries(
+async function synthesizeFindMountEntries(
   targetPath: string,
   descendants: readonly MountEntry[],
   texts: readonly string[],
   raw: string,
-): PathSpec[] {
+  statPath: StatPath | null,
+): Promise<PathSpec[]> {
   let expr: FindExpr
   try {
     expr = parseFindExpression([...texts])
@@ -229,6 +232,15 @@ function synthesizeFindMountEntries(
       const segs = pathSegments(candidate)
       const base = segs[segs.length - 1] ?? candidate
       if (!keep({ key: candidate, name: base, kind: 'd', depth }, tree, minDepth)) continue
+      // A time window (-newermt, -newer) lives beside the tree: the
+      // candidate is statted and held to it the way the generic holds every
+      // real row, a future cutoff excluding the mount points too.
+      if ((expr.mtimeMin !== null || expr.mtimeMax !== null) && statPath !== null) {
+        const st = await statPath(candidate)
+        if (st === null || !inMtimeWindow(modifiedTs(st.modified), expr.mtimeMin, expr.mtimeMax)) {
+          continue
+        }
+      }
       out.push(
         new PathSpec({
           virtual: candidate,
@@ -501,11 +513,12 @@ export async function fanOutTraversal(
 
   let rows: PathSpec[] = []
   if (cmdName === 'find') {
-    const synthetic = synthesizeFindMountEntries(
+    const synthetic = await synthesizeFindMountEntries(
       targetPath,
       descendants,
       texts,
       paths[0]?.rawPath ?? targetPath,
+      statPath,
     )
     // The mount points a walk cannot see belong to the first operand's
     // run, the one that holds them.

@@ -28,7 +28,7 @@ import {
 import type { CallStack } from '../../shell/call_stack.ts'
 import { RANDOM } from '../../shell/constants.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
-import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
+import { NodeType as NT, type ElementOps, type TSNodeLike } from '../../shell/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { SessionView } from '../../ops/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -576,9 +576,25 @@ class ArithOperand {
   readonly reader: RandomReader
   readonly writes: ArithWrite[] = []
   private readonly pending: Record<string, string> = {}
+  private readonly pendingElems = new Map<string, string>()
 
   constructor(private readonly session: Session) {
     this.reader = randomReader(session)
+  }
+
+  /**
+   * The session's element callbacks, the pending element writes laid
+   * over their reads, so `${v:(a[0]=2):(a[0])}` reads the 2 the first
+   * operand assigned.
+   */
+  private elements(): ElementOps {
+    const inner = sessionElements(this.session, this.reader)
+    const pending = this.pendingElems
+    return {
+      resolve: (name, subscript, env) => inner.resolve(name, subscript, env),
+      read: (name, key) => pending.get(`${name}\0${key}`) ?? inner.read(name, key),
+      isAssoc: (name) => inner.isAssoc?.(name) ?? false,
+    }
   }
 
   /** The operand's value, null for one that does not evaluate. */
@@ -590,7 +606,7 @@ class ArithOperand {
         text,
         env,
         0,
-        sessionElements(this.session, this.reader),
+        this.elements(),
         this.reader.read,
         this.reader.wrote,
       )
@@ -607,6 +623,7 @@ class ArithOperand {
     this.writes.push(...writes)
     for (const write of writes) {
       if (write.key === null) this.pending[write.name] = write.value
+      else this.pendingElems.set(`${write.name}\0${write.key}`, write.value)
     }
   }
 }

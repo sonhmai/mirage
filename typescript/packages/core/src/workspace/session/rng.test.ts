@@ -292,6 +292,8 @@ it.each([
   // error, RANDOM's seed included.
   ['y="x=6,1/0"; [[ 0 -eq y ]] 2>/dev/null; echo rc=$? "x=$x"', 'rc=1 x=6\n'],
   ['RANDOM=1; y="RANDOM=42,1/0"; [[ 0 -eq y ]] 2>/dev/null; echo rc=$? $RANDOM', 'rc=1 17772\n'],
+  // An element the first operand assigns is read by the second.
+  ['a=(1); v=abcdef; echo "${v:(a[0]=2):(a[0])}" ${a[0]}', 'cd 2\n'],
 ])('lands the assignments a subscript or offset makes: %s', async (command, stdout) => {
   const { ws } = await makeIntegrationWS()
   try {

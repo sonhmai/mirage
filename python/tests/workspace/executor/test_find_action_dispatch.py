@@ -778,8 +778,11 @@ async def test_exec_children_inherit_finds_stdin():
             "mkdir -p /data/fi/d; touch /data/fi/d/a /data/fi/d/b; "
             "cd /data/fi; printf x | find d -maxdepth 0 -exec cat \\; ; "
             "echo rc=$?; printf y | find d -type f -exec cat \\; ; "
+            "echo rc=$?; "
+            "printf z | find d -maxdepth 0 -exec true \\; -exec cat \\; ; "
             "echo rc=$?")
-        assert await io.stdout_str() == "xrc=0\nyrc=0\n"
+        # A child that never reads (`true`) leaves the bytes for the next.
+        assert await io.stdout_str() == "xrc=0\nyrc=0\nzrc=0\n"
         assert await io.stderr_str() == ""
     finally:
         await ws.close()

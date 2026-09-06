@@ -30,6 +30,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, StatPath
 from mirage.types import FileType, PathSpec, Producer
+from mirage.utils.dates import matches_mtime
 from mirage.utils.path import respell_one
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
@@ -249,11 +250,12 @@ def _adjust_depth_texts(
     return out
 
 
-def _synthesize_find_mount_entries(
+async def _synthesize_find_mount_entries(
     target_path: str,
     descendants: list[MountEntry],
     texts: list[str],
     raw: str,
+    stat_path: StatPath | None = None,
 ) -> list[PathSpec]:
     """Return synthetic find paths for descendant mount roots.
 
@@ -265,14 +267,20 @@ def _synthesize_find_mount_entries(
     structure merge, so find must agree. The find expression is parsed
     into a predicate tree and evaluated per entry (kind "d"),
     mirroring the per-backend cores, so -not / -o / -path / -type and
-    the -maxdepth / -mindepth window all apply. Entries print in the
-    operand's typed spelling like every other line of the walk.
+    the -maxdepth / -mindepth window all apply. A time window
+    (``-newermt``, ``-newer``) lives beside the tree, so a candidate is
+    statted through the dispatcher and held to it the way the generic
+    holds every real row, a future cutoff excluding the mount points
+    too. Entries print in the operand's typed spelling like every other
+    line of the walk.
 
     Args:
         target_path (str): the find start path the fan-out runs from.
         descendants (list): descendant mounts to inject as entries.
         texts (list[str]): the find expression tokens.
         raw (str): the operand's typed spelling (``PathSpec.raw_path``).
+        stat_path (StatPath | None): dispatcher stat, for the time
+            window; None (no window can be checked) keeps the rows.
     """
     try:
         expr = parse_find_expression(list(texts))
@@ -303,6 +311,12 @@ def _synthesize_find_mount_entries(
             entry = FindEntry(key=candidate, name=base, kind="d", depth=depth)
             if not keep(entry, tree, min_depth):
                 continue
+            if ((expr.mtime_min is not None or expr.mtime_max is not None)
+                    and stat_path is not None):
+                st = await stat_path(candidate)
+                if st is None or not matches_mtime(st.modified, expr.mtime_min,
+                                                   expr.mtime_max):
+                    continue
             out.append(
                 PathSpec(virtual=candidate,
                          directory=candidate,
@@ -552,8 +566,8 @@ async def _fan_out_traversal(
 
     all_rows: list[PathSpec] = []
     if cmd_name == "find":
-        synthetic = _synthesize_find_mount_entries(target_path, descendants,
-                                                   texts, paths[0].raw_path)
+        synthetic = await _synthesize_find_mount_entries(
+            target_path, descendants, texts, paths[0].raw_path, stat_path)
         # The mount points a walk cannot see belong to the first
         # operand's run, the one that holds them.
         if synthetic:

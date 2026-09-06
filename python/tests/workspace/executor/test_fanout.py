@@ -9,7 +9,7 @@ from mirage.commands.spec.types import spec_flag_names
 from mirage.io import IOResult
 from mirage.ops.types import NamespaceView
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.workspace import Workspace
 from mirage.workspace.executor.fanout import (_adjust_depth_texts,
                                               _fan_out_traversal,
@@ -17,9 +17,11 @@ from mirage.workspace.executor.fanout import (_adjust_depth_texts,
                                               _synthesize_find_mount_entries)
 
 
-def _shown_mount_entries(target, descendants, texts, raw):
-    return "\n".join(p.raw_path for p in _synthesize_find_mount_entries(
-        target, descendants, texts, raw))
+def _shown_mount_entries(target, descendants, texts, raw, stat_path=None):
+    return "\n".join(p.raw_path
+                     for p in asyncio.run(
+                         _synthesize_find_mount_entries(
+                             target, descendants, texts, raw, stat_path)))
 
 
 class TraversalMount:
@@ -627,3 +629,28 @@ def test_synthesize_respells_entries_with_the_typed_base():
     desc = _mounts("/ram/", "/disk/")
     assert _shown_mount_entries("/", desc, [], ".") == "./ram\n./disk"
     assert _shown_mount_entries("/", desc, [], "") == "ram\ndisk"
+
+
+def test_synthesize_honors_the_time_window():
+    # -newermt lives beside the predicate tree; a mount point is held to
+    # it like every real row, so a future cutoff drops it and a past one
+    # keeps it, and a candidate that cannot be statted is dropped.
+    mounts = [TraversalMount("/child")]
+    stats = {
+        "/child":
+        FileStat(name="child",
+                 type=FileType.DIRECTORY,
+                 modified="2026-01-02T00:00:00Z")
+    }
+
+    async def stat_path(path):
+        return stats.get(path)
+
+    assert _shown_mount_entries("/", mounts, ["-newermt", "2099-01-01"], "/",
+                                stat_path) == ""
+    assert _shown_mount_entries("/", mounts, ["-newermt", "2020-01-01"], "/",
+                                stat_path) == "/child"
+    assert _shown_mount_entries("/", mounts, [], "/", stat_path) == "/child"
+    stats.clear()
+    assert _shown_mount_entries("/", mounts, ["-newermt", "2020-01-01"], "/",
+                                stat_path) == ""

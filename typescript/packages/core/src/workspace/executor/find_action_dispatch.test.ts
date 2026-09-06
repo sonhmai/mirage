@@ -113,10 +113,11 @@ describe('find actions', () => {
     const ws = await shellWs()
     try {
       const r = await ws.execute(
-        'mkdir -p /data/fi/d; touch /data/fi/d/a /data/fi/d/b; cd /data/fi; printf x | find d -maxdepth 0 -exec cat \\; ; echo rc=$?; printf y | find d -type f -exec cat \\; ; echo rc=$?',
+        'mkdir -p /data/fi/d; touch /data/fi/d/a /data/fi/d/b; cd /data/fi; printf x | find d -maxdepth 0 -exec cat \\; ; echo rc=$?; printf y | find d -type f -exec cat \\; ; echo rc=$?; printf z | find d -maxdepth 0 -exec true \\; -exec cat \\; ; echo rc=$?',
         { sessionId: 's' },
       )
-      expect(r.stdoutText).toBe('xrc=0\nyrc=0\n')
+      // A child that never reads (`true`) leaves the bytes for the next.
+      expect(r.stdoutText).toBe('xrc=0\nyrc=0\nzrc=0\n')
       expect(r.stderrText).toBe('')
     } finally {
       await ws.close()

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import shlex
+from collections.abc import AsyncIterator
 
 from mirage.commands.builtin.find_parse import (EXEC_PLACEHOLDER, ExecAction,
                                                 FindExpr, RowAction,
@@ -115,36 +116,37 @@ async def _head_state(head: str, registry: MountRegistry, cwd: str,
     return not program, Consumer.FUNCTION in layers
 
 
-class _StdinOnce:
-    """find's own input, handed to the first ``-exec`` child that runs.
+class _SharedStdin:
+    """find's own input, shared by its ``-exec`` children as one cursor.
 
-    GNU's children inherit find's stdin, and a pipe feeds one reader:
-    the first child that reads takes it, the ones after read EOF. A
-    child of a find with no input of its own (None) keeps the ambient
-    stdin.
+    GNU's children inherit find's stdin descriptor, so its offset moves
+    only when a child reads: ``-exec true \\; -exec cat \\;`` leaves the
+    bytes for cat, while two cats see them once. The same object rides
+    into every child as its stdin, and the first read drains it.
 
     Args:
-        data (bytes | None): find's materialized input, None for none.
+        data (bytes): find's materialized input.
     """
 
     __slots__ = ("_data", )
 
-    def __init__(self, data: bytes | None) -> None:
+    def __init__(self, data: bytes) -> None:
         self._data = data
 
-    def take(self) -> bytes | None:
-        """The input for the next child."""
-        data = self._data
-        if data is not None:
-            self._data = b""
-        return data
+    def __aiter__(self) -> AsyncIterator[bytes]:
+        return self._drain()
+
+    async def _drain(self) -> AsyncIterator[bytes]:
+        data, self._data = self._data, b""
+        if data:
+            yield data
 
 
 async def _run_exec(execute_fn: ExecuteLine, session_id: str,
                     registry: MountRegistry, cwd: str,
                     stat_path: StatPath | None, action: ExecAction,
                     paths: list[str], out: list[bytes], errors: list[bytes],
-                    stdin: _StdinOnce) -> bool:
+                    stdin: _SharedStdin | None) -> bool:
     """Run one ``-exec`` invocation, collecting its streams.
 
     A command that cannot be found is GNU's ``find: 'cmd': No such file
@@ -165,7 +167,8 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
         paths (list[str]): the match, or every match for a batched run.
         out (list[bytes]): where the run's stdout is appended.
         errors (list[bytes]): where its stderr is appended.
-        stdin (_StdinOnce): find's own input, taken by the first child.
+        stdin (_SharedStdin | None): find's own input, one cursor shared
+            by every child; None keeps the ambient stdin.
     """
     # GNU substitutes the matches into the words and only then hands
     # them to execvp, so the head looked up is the substituted one:
@@ -179,9 +182,7 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
     # A function of the head's name is invisible to execvp, so the line
     # runs the program past it, as `command` does.
     line = ("command " if shadowed else "") + shlex.join(words)
-    io = await execute_fn(f"( {line} )",
-                          session_id=session_id,
-                          stdin=stdin.take())
+    io = await execute_fn(f"( {line} )", session_id=session_id, stdin=stdin)
     if io.stdout is not None:
         data = await materialize(io.stdout)
         if data:
@@ -449,12 +450,13 @@ async def _apply_find_actions(
     Returns:
         The rows to print, the stderr to append, and the exit status the
         actions impose (0 when they impose none, even with stderr).
-        stdin (ByteSource | None): find's own input, which the first
-            ``-exec`` child to run inherits as GNU's does (a pipe feeds
-            one reader), the later ones reading EOF; None keeps the
-            ambient stdin for every child.
+        stdin (ByteSource | None): find's own input, which its ``-exec``
+            children share as one cursor, as GNU's do (a pipe feeds one
+            reader, and a child that never reads leaves it for the next);
+            None keeps the ambient stdin for every child.
     """
-    once = _StdinOnce(await materialize(stdin) if stdin is not None else None)
+    once = (_SharedStdin(await materialize(stdin))
+            if stdin is not None else None)
     expr = parse_find_expression(list(texts))
     reorders = expr.depth_first and expr.printf is None
     if stdout is None or not (_has_actions(expr) or reorders):

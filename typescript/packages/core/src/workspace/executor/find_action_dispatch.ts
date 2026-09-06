@@ -59,8 +59,9 @@ export interface FindActionDoors {
   // Who the session is, for the owner and group columns of `-ls`.
   identity?: Identity | null
   namespace?: Namespace | null
-  // find's own input, which the first `-exec` child to run inherits as
-  // GNU's does (a pipe feeds one reader), the later ones reading EOF.
+  // find's own input, which its `-exec` children share as one cursor, as
+  // GNU's do (a pipe feeds one reader, and a child that never reads leaves
+  // it for the next).
   stdin?: ByteSource | null
 }
 
@@ -147,18 +148,26 @@ async function headState(
  * whether the run succeeded, which is the action's truth value.
  */
 /**
- * find's own input, handed to the first `-exec` child that runs. GNU's
- * children inherit find's stdin, and a pipe feeds one reader: the first
- * child that reads takes it, the ones after read EOF. A child of a find
- * with no input of its own (null) keeps the ambient stdin.
+ * find's own input, shared by its `-exec` children as one cursor. GNU's
+ * children inherit find's stdin descriptor, so its offset moves only
+ * when a child reads: `-exec true \; -exec cat \;` leaves the bytes for
+ * cat, while two cats see them once. The same object rides into every
+ * child as its stdin, and the first read drains it.
  */
-class StdinOnce {
-  constructor(private data: Uint8Array | null) {}
+class SharedStdin implements AsyncIterable<Uint8Array> {
+  constructor(private data: Uint8Array) {}
 
-  take(): Uint8Array | null {
+  [Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
     const data = this.data
-    if (data !== null) this.data = new Uint8Array()
-    return data
+    this.data = new Uint8Array()
+    let done = data.byteLength === 0
+    return {
+      next: () => {
+        if (done) return Promise.resolve({ done: true, value: undefined })
+        done = true
+        return Promise.resolve({ done: false, value: data })
+      },
+    }
   }
 }
 
@@ -172,7 +181,7 @@ async function runExec(
   paths: readonly string[],
   out: Uint8Array[],
   errors: Uint8Array[],
-  stdin: StdinOnce,
+  stdin: SharedStdin | null,
 ): Promise<boolean> {
   // GNU substitutes the matches into the words and only then hands them
   // to execvp, so the head looked up is the substituted one: `-exec {}
@@ -187,7 +196,7 @@ async function runExec(
   // A function of the head's name is invisible to execvp, so the line
   // runs the program past it, as `command` does.
   const line = (shadowed ? 'command ' : '') + shellJoin(words)
-  const io = await executeFn(`( ${line} )`, { sessionId, stdin: stdin.take() })
+  const io = await executeFn(`( ${line} )`, { sessionId, stdin })
   if (io.stdout !== null) {
     const data = await materialize(io.stdout)
     if (data.byteLength > 0) out.push(data)
@@ -423,9 +432,10 @@ export async function applyFindActions(
   const dispatch = doors.dispatch ?? null
   const identity = doors.identity ?? null
   const namespace = doors.namespace ?? null
-  const once = new StdinOnce(
-    doors.stdin === undefined || doors.stdin === null ? null : await materialize(doors.stdin),
-  )
+  const once =
+    doors.stdin === undefined || doors.stdin === null
+      ? null
+      : new SharedStdin(await materialize(doors.stdin))
   if (matchedRuns === null)
     return [null, enc.encode('find: actions require structured matches\n'), 1]
   const matches = matchedRuns.flatMap((run) =>

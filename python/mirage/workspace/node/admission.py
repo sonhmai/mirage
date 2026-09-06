@@ -737,5 +737,6 @@ def statement_redirects(node: Any, home: str | None) -> tuple[Word, ...]:
     return tuple(
         Word(str(r.target), literal_word(r.target_node, home))
         for r in redirects
-        if r.kind not in (RedirectKind.HEREDOC, RedirectKind.HERESTRING)
+        if r.kind not in (RedirectKind.HEREDOC, RedirectKind.HERESTRING,
+                          RedirectKind.AMBIGUOUS)
         and not isinstance(r.target, int) and r.target_node is not None)

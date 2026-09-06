@@ -105,6 +105,14 @@ export async function handleRedirect(
   callStack: CallStack | null = null,
 ): Promise<Result> {
   const badFd = unsupportedDescriptor(redirects)
+  for (const r of redirects) {
+    // bash's word: `3>&foo` is refused before any descriptor is judged or
+    // any file opened, and the command never runs.
+    if (r.kind === RedirectKind.AMBIGUOUS) {
+      const word = r.target instanceof PathSpec ? r.target.rawPath : String(r.target)
+      return shellFailure(new TextEncoder().encode(`${word}: ambiguous redirect\n`))
+    }
+  }
   if (badFd !== null) return shellFailure(badDescriptorLine(badFd))
   // What each descriptor would yield to a read: stdin as given, and the
   // two output descriptors nothing, since they are open for writing

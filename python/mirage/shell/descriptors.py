@@ -16,7 +16,7 @@ import errno
 from collections.abc import AsyncIterator, Iterable
 
 from mirage.shell.constants import FD_BOTH, FD_CLOSE, SHELL_FDS
-from mirage.shell.types import Redirect
+from mirage.shell.types import Redirect, RedirectKind
 from mirage.utils.errors import BadDescriptorError
 
 
@@ -29,10 +29,16 @@ def unsupported_descriptor(redirects: Iterable[Redirect]) -> int | None:
     `2>&3`). `&>`'s FD_BOTH and `>&-`'s FD_CLOSE are the two sentinels
     the parser spells with -1, and neither is a descriptor.
 
+    An ambiguous redirect (``3>&word``) is skipped: bash refuses it in
+    its own words before it judges the descriptor, and so does the
+    installer.
+
     Args:
         redirects (Iterable[Redirect]): parsed redirects, in line order.
     """
     for r in redirects:
+        if r.kind == RedirectKind.AMBIGUOUS:
+            continue
         if r.fd not in SHELL_FDS and r.fd != FD_BOTH:
             return r.fd
         if (isinstance(r.target, int) and r.target not in SHELL_FDS

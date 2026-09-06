@@ -116,6 +116,10 @@ async def _install(dispatch: DispatchFn, session: Session,
         redirects (list[Redirect]): the expanded redirects.
     """
     for r in redirects:
+        if r.kind == RedirectKind.AMBIGUOUS:
+            word = (r.target.raw_path
+                    if isinstance(r.target, PathSpec) else str(r.target))
+            return f"{word}: ambiguous redirect\n".encode()
         if isinstance(r.target, int):
             # Keyed on the descriptor claimed, not the operator's
             # direction: `2<&-` closes stderr and `0>&-` stdin, as in

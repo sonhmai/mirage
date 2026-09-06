@@ -134,6 +134,16 @@ async def test_self_dups_change_nothing():
          '0: Bad file descriptor\n', 1),
         ('echo hi 1>&- 2>&1', '', '1: Bad file descriptor\n', 1),
         ('cat 0<&- 0<&0 </data/a.txt', 'a', '', 0),
+        # `>&word` on a descriptor other than 1 is bash's ambiguous
+        # redirect, refused before the command runs; bare and on 1 it is
+        # the both-streams file.
+        ('touch /data/marker 3>&/data/foo; '
+         'test -e /data/marker || test -e /data/foo', '',
+         '/data/foo: ambiguous redirect\n', 1),
+        ('echo x 2>&/data/foo; test -e /data/foo', '',
+         '/data/foo: ambiguous redirect\n', 1),
+        ('( echo out; echo err >&2 ) 1>&/data/both; cat /data/both',
+         'out\nerr\n', '', 0),
         # An output redirect leaves its descriptor write-only.
         ('cat 1>/data/out 0<&1; wc -c < /data/out', '0\n',
          'cat: -: Bad file descriptor\n', 0),

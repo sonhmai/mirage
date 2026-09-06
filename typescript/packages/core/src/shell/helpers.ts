@@ -345,11 +345,16 @@ function parseFileRedirect(child: TSNodeLike, claimed: number | null = null): Re
   }
 
   // `>&word` with a word rather than a number is bash's other spelling
-  // of `&>word`.
-  if (
-    (op !== null && BOTH_OPERATORS.has(op)) ||
-    (op === NT.REDIRECT_STDERR && dupFd === null && targetNode !== null)
-  ) {
+  // of `&>word`, bare or on descriptor 1 (`1>&word` sends both streams
+  // too, pinned on bash 5.2). On any other explicit descriptor bash
+  // refuses it as `word: ambiguous redirect`, before the command runs and
+  // before any file opens, so the parse keeps the word for the message
+  // rather than turning `3>&foo` into a both-streams file.
+  const wordDup = op === NT.REDIRECT_STDERR && dupFd === null && targetNode !== null
+  if (wordDup && fd !== null && fd !== FD_STDOUT) {
+    return new Redirect({ fd, target, targetNode, kind: RedirectKind.AMBIGUOUS })
+  }
+  if ((op !== null && BOTH_OPERATORS.has(op)) || wordDup) {
     return new Redirect({
       fd: FD_BOTH,
       target,

@@ -189,6 +189,11 @@ export const RedirectKind = Object.freeze({
   STDERR_TO_STDOUT: 'stderr_to_stdout',
   HEREDOC: 'heredoc',
   HERESTRING: 'herestring',
+  // `N>&word` with a word that is neither a number nor `-` on a
+  // descriptor other than 1: bash refuses it as `word: ambiguous redirect`
+  // before the command runs, so the target is kept for the message and
+  // nothing is opened.
+  AMBIGUOUS: 'ambiguous',
 } as const)
 
 export type RedirectKind = (typeof RedirectKind)[keyof typeof RedirectKind]

@@ -717,7 +717,12 @@ export function statementRedirects(node: TSNodeLike, home: string | null): Word[
   const [, redirects] = getRedirects(parent)
   const words: Word[] = []
   for (const r of redirects) {
-    if (r.kind === RedirectKind.HEREDOC || r.kind === RedirectKind.HERESTRING) continue
+    if (
+      r.kind === RedirectKind.HEREDOC ||
+      r.kind === RedirectKind.HERESTRING ||
+      r.kind === RedirectKind.AMBIGUOUS
+    )
+      continue
     if (typeof r.target === 'number' || r.targetNode === null) continue
     const target = r.targetNode as TSNodeLike
     words.push({ raw: String(r.target), text: literalWord(target, home) })

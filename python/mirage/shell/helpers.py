@@ -382,9 +382,19 @@ def _parse_file_redirect(child: tree_sitter.Node,
             break
 
     # `>&word` with a word rather than a number is bash's other spelling
-    # of `&>word`.
-    if op in _BOTH_OPERATORS or (op == NT.REDIRECT_STDERR and dup_fd is None
-                                 and target_node is not None):
+    # of `&>word`, bare or on descriptor 1 (`1>&word` sends both streams
+    # too, pinned on bash 5.2). On any other explicit descriptor bash
+    # refuses it as `word: ambiguous redirect`, before the command runs
+    # and before any file opens, so the parse keeps the word for the
+    # message rather than turning `3>&foo` into a both-streams file.
+    word_dup = (op == NT.REDIRECT_STDERR and dup_fd is None
+                and target_node is not None)
+    if word_dup and fd is not None and fd != FD_STDOUT:
+        return Redirect(fd=fd,
+                        target=target,
+                        target_node=target_node,
+                        kind=RedirectKind.AMBIGUOUS)
+    if op in _BOTH_OPERATORS or word_dup:
         return Redirect(fd=FD_BOTH,
                         target=target,
                         target_node=target_node,

@@ -19,7 +19,7 @@ import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from '../../../../s
 import { badDescriptorLine, unsupportedDescriptor } from '../../../../shell/descriptors.ts'
 import { type Redirect, RedirectKind } from '../../../../shell/types.ts'
 import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
-import type { PathSpec } from '../../../../types.ts'
+import { PathSpec } from '../../../../types.ts'
 import { getRedirects } from '../../../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../../../shell/types.ts'
 import type { Session } from '../../../session/session.ts'
@@ -189,6 +189,10 @@ async function install(
   redirects: Redirect[],
 ): Promise<Uint8Array | null> {
   for (const r of redirects) {
+    if (r.kind === RedirectKind.AMBIGUOUS) {
+      const word = r.target instanceof PathSpec ? r.target.rawPath : String(r.target)
+      return new TextEncoder().encode(`${word}: ambiguous redirect\n`)
+    }
     if (typeof r.target === 'number') {
       // Keyed on the descriptor claimed, not the operator's direction:
       // `2<&-` closes stderr and `0>&-` stdin, as in bash. A dup of a

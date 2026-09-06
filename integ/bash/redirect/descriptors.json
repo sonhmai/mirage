@@ -479,6 +479,35 @@
         "stdout": "rc=1\n1\nrc=1\n",
         "stderr": "0: Bad file descriptor\n1: Bad file descriptor\n"
       }
+    },
+    {
+      "id": "redirect_word_dup_on_another_descriptor_is_ambiguous",
+      "seq": 980115,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "touch /data/mk 3>&/data/foo; echo rc=$?; test -e /data/mk; echo $?; test -e /data/foo; echo $?; ( exec 3>&/data/foo ); echo rc=$?; ( echo out; echo err >&2 ) 1>&/data/both; cat /data/both; rm /data/both",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n1\n1\nrc=1\nout\nerr\n",
+        "stderr": "/data/foo: ambiguous redirect\n/data/foo: ambiguous redirect\n"
+      }
     }
   ]
 }

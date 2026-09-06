@@ -14,7 +14,7 @@
 
 import { FD_BOTH, FD_CLOSE, SHELL_FDS } from './constants.ts'
 import { ebadfStdin } from '../utils/errors.ts'
-import type { Redirect } from './types.ts'
+import { RedirectKind, type Redirect } from './types.ts'
 
 /**
  * The first descriptor a redirect list names that the shell has no table
@@ -26,6 +26,9 @@ import type { Redirect } from './types.ts'
  */
 export function unsupportedDescriptor(redirects: readonly Redirect[]): number | null {
   for (const r of redirects) {
+    // An ambiguous redirect (`3>&word`) is skipped: bash refuses it in its
+    // own words before it judges the descriptor, and so does the installer.
+    if (r.kind === RedirectKind.AMBIGUOUS) continue
     if (!SHELL_FDS.has(r.fd) && r.fd !== FD_BOTH) return r.fd
     if (typeof r.target === 'number' && !SHELL_FDS.has(r.target) && r.target !== FD_CLOSE) {
       return r.target

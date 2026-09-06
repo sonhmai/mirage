@@ -122,6 +122,12 @@ async def handle_redirect(
     while bash fails at open time and never runs it; the write error
     and exit 1 are reported either way.
     """
+    for r in redirects:
+        if r.kind == RedirectKind.AMBIGUOUS:
+            # bash's word: `3>&foo` is refused before any descriptor is
+            # judged or any file opened, and the command never runs.
+            return _shell_failure(
+                f"{_redirect_word(r)}: ambiguous redirect\n".encode())
     bad_fd = unsupported_descriptor(redirects)
     if bad_fd is not None:
         return _shell_failure(bad_descriptor_line(bad_fd))
@@ -359,6 +365,16 @@ def _closed_write_line(command: tree_sitter.Node) -> bytes:
     words = get_text(command).split()
     name = words[0] if words else "redirect"
     return f"{name}: write error: Bad file descriptor\n".encode()
+
+
+def _redirect_word(r: Redirect) -> str:
+    """The redirect's target as typed, for a refusal that names it.
+
+    Args:
+        r (Redirect): the redirect, its target expanded or not.
+    """
+    return r.target.raw_path if isinstance(r.target, PathSpec) else str(
+        r.target)
 
 
 def _redirect_failure(scope: PathSpec,

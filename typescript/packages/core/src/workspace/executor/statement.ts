@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readFailExitCode } from '../../commands/spec/usage.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
+import { materialize } from '../../io/types.ts'
+import { formatFsError } from '../../utils/errors.ts'
+import type { ExecutionNode } from '../types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -69,8 +73,28 @@ export async function finishStatement(
   io: IOResult,
   session: Session,
   node: TSNodeLike | null = null,
+  execNode: ExecutionNode | null = null,
 ): Promise<ByteSource | null> {
-  const result = await applyBarrier(stdout, io, BarrierPolicy.VALUE)
+  // The barrier is the first pull of a lazy stream, so a read that fails
+  // there (`cat` on a closed stdin, a size guard) is the statement's
+  // failure, in the command's own words, rather than an exception that
+  // escapes the body and kills the line; the program loop drains the
+  // same way.
+  let result: ByteSource | null
+  try {
+    result = await applyBarrier(stdout, io, BarrierPolicy.VALUE)
+  } catch (err) {
+    if (!(err instanceof Error) || (err as { code?: string }).code === undefined) throw err
+    const cmdName = execNode?.command?.split(' ')[0] ?? ''
+    const existing = await materialize(io.stderr)
+    const added = formatFsError(cmdName, err, execNode?.paths ?? [])
+    const merged = new Uint8Array(existing.byteLength + added.byteLength)
+    merged.set(existing, 0)
+    merged.set(added, existing.byteLength)
+    io.stderr = merged
+    io.exitCode = readFailExitCode(cmdName, err)
+    result = null
+  }
   recordStatus(session, io.exitCode, node !== null && pipelineTransparent(node))
   return result
 }

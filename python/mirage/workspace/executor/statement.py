@@ -14,11 +14,14 @@
 
 import tree_sitter
 
+from mirage.commands.spec.usage import read_fail_exit
 from mirage.io import IOResult
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.node_kind import pipeline_transparent
+from mirage.utils.errors import format_fs_error
 from mirage.workspace.session import Session
+from mirage.workspace.types import ExecutionNode
 
 
 def record_status(session: Session,
@@ -75,6 +78,7 @@ async def finish_statement(
     io: IOResult,
     session: Session,
     node: tree_sitter.Node | None = None,
+    exec_node: ExecutionNode | None = None,
 ) -> ByteSource | None:
     """Finalize a completed statement and seed $? for the next one.
 
@@ -85,6 +89,12 @@ async def finish_statement(
     case bodies, function bodies, && / || / ; lists) call this instead
     of hand-rolling the triple, so a new construct cannot forget it.
 
+    The barrier is the first pull of a lazy stream, so a read that
+    fails there (``cat`` on a closed stdin, a size guard) is the
+    statement's failure, in the command's own words, rather than an
+    exception that escapes the body and kills the line; the program
+    loop drains the same way.
+
     Args:
         stdout (ByteSource | None): the statement's possibly-lazy stdout.
         io (IOResult): the statement's result; exit_code may still be
@@ -93,8 +103,20 @@ async def finish_statement(
         node (tree_sitter.Node | None): the statement that finished,
             which decides whether it stamps ``PIPESTATUS`` itself; None
             (a caller without the node) stamps.
+        exec_node (ExecutionNode | None): the statement's record, whose
+            command names a failed read and whose operands respell its
+            path as typed.
     """
-    result = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+    try:
+        result = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+    except OSError as exc:
+        command = exec_node.command if exec_node is not None else ""
+        cmd_name = command.split()[0] if command else ""
+        paths = exec_node.paths if exec_node is not None else []
+        existing = await materialize(io.stderr) or b""
+        io.stderr = existing + format_fs_error(cmd_name, exc, paths)
+        io.exit_code = read_fail_exit(cmd_name, exc)
+        result = None
     record_status(session,
                   io.exit_code,
                   transparent=node is not None and pipeline_transparent(node))

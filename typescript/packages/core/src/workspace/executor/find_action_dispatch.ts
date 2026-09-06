@@ -28,6 +28,7 @@ import { SHELL_ONLY_BUILTINS } from '../lookup/constants.ts'
 import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { NamespaceView, StatPath } from '../../ops/types.ts'
+import type { Namespace } from '../mount/namespace/namespace.ts'
 import {
   EXEC_PLACEHOLDER,
   execActions,
@@ -56,6 +57,7 @@ export interface FindActionDoors {
   dispatch?: DispatchFn | null
   // Who the session is, for the owner and group columns of `-ls`.
   identity?: Identity | null
+  namespace?: Namespace | null
 }
 
 const enc = new TextEncoder()
@@ -68,14 +70,31 @@ const enc = new TextEncoder()
  * `xd/a.txty`); a batched run replaces its one bare `{}` with the matches,
  * one word each.
  */
-export function execLine(action: ExecAction, paths: readonly string[]): string {
+/**
+ * The argv one `-exec` run becomes, matches substituted: a per-match run
+ * substitutes every `{}` inside every word (`x{}y` is `xd/a.txty`), a
+ * batched run replaces its one bare `{}` with the matches, one word
+ * each. The head is substituted like any other word, which is what lets
+ * `-exec {} \;` run each match itself.
+ */
+export function execWords(action: ExecAction, paths: readonly string[]): string[] {
   const words: string[] = []
   for (const word of action.argv) {
     if (action.batch && word === EXEC_PLACEHOLDER) words.push(...paths)
     else if (!action.batch) words.push(word.replaceAll(EXEC_PLACEHOLDER, paths[0] ?? ''))
     else words.push(word)
   }
-  return shellJoin(words)
+  return words
+}
+
+/**
+ * The shell line one `-exec` run becomes. GNU execs the words directly,
+ * so every match must reach the command as exactly one argv word: the
+ * line is built with `shellJoin`, and a plain join would be re-parsed by
+ * the shell.
+ */
+export function execLine(action: ExecAction, paths: readonly string[]): string {
+  return shellJoin(execWords(action, paths))
 }
 
 /**
@@ -127,12 +146,16 @@ async function runExec(
   out: Uint8Array[],
   errors: Uint8Array[],
 ): Promise<boolean> {
-  const head = action.argv[0] ?? ''
+  // GNU substitutes the matches into the words and only then hands them
+  // to execvp, so the head looked up is the substituted one: `-exec {}
+  // \;` runs each match itself.
+  const words = execWords(action, paths)
+  const head = words[0] ?? action.argv[0] ?? ''
   if (await headMissing(head, registry, cwd, statPath)) {
     errors.push(enc.encode(`find: '${head}': No such file or directory\n`))
     return false
   }
-  const io = await executeFn(`( ${execLine(action, paths)} )`, { sessionId })
+  const io = await executeFn(`( ${shellJoin(words)} )`, { sessionId })
   if (io.stdout !== null) {
     const data = await materialize(io.stdout)
     if (data.byteLength > 0) out.push(data)
@@ -159,6 +182,7 @@ async function deleteRow(
   ns: NamespaceView | null,
   dispatch: DispatchFn | null,
   errors: Uint8Array[],
+  namespace: Namespace | null,
 ): Promise<boolean> {
   const path = ps.rawPath || ps.virtual
   const link = dispatch !== null && (ns?.links?.statAt(ps.virtual) ?? null) !== null
@@ -200,6 +224,14 @@ async function deleteRow(
       const why = line.slice(line.lastIndexOf(': ') + 2)
       errors.push(enc.encode(`find: cannot delete '${path}'${why ? `: ${why}` : ''}\n`))
       return false
+    }
+    if (namespace !== null) {
+      // The row's node meta (a chmod/chown overlay) goes with it and a
+      // directory's subtree purges, as the `rm` command path does in
+      // command_dispatch: a file later created at the same name must not
+      // inherit the removed one's mode.
+      await namespace.unlink(ps.virtual)
+      await namespace.purgeUnder(ps.virtual)
     }
     return true
   } catch (err) {
@@ -352,6 +384,7 @@ export async function applyFindActions(
   const statPath = doors.statPath ?? null
   const dispatch = doors.dispatch ?? null
   const identity = doors.identity ?? null
+  const namespace = doors.namespace ?? null
   if (matchedRuns === null)
     return [null, enc.encode('find: actions require structured matches\n'), 1]
   const matches = matchedRuns.flatMap((run) =>
@@ -405,7 +438,7 @@ export async function applyFindActions(
         // A structural row is skipped, not refused, the way Unix leaves
         // a mount point in place.
         if (structural(match, registry)) continue
-        if (!(await deleteRow(match, registry, cwd, ns, dispatch, errors))) {
+        if (!(await deleteRow(match, registry, cwd, ns, dispatch, errors, namespace))) {
           exitCode = 1
           break
         }

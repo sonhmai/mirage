@@ -13,14 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from typing import Any
 
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
-from mirage.shell.constants import FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN
+from mirage.shell.constants import (FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN,
+                                    FD_STDOUT)
 from mirage.shell.descriptors import (bad_descriptor_line,
                                       unsupported_descriptor)
+from mirage.shell.helpers import get_redirects
+from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
@@ -115,14 +119,16 @@ async def _install(dispatch: DispatchFn, session: Session,
         if isinstance(r.target, int):
             # Keyed on the descriptor claimed, not the operator's
             # direction: `2<&-` closes stderr and `0>&-` stdin, as in
-            # bash. A dup of a descriptor onto itself changes nothing,
-            # so `0<&0` keeps the file an earlier `exec <f` bound;
-            # another descriptor onto stdin restores the ambient input.
+            # bash.
             if r.fd == FD_STDIN:
-                if r.target == FD_CLOSE:
-                    session.exec_stdin = b""
-                elif r.target != FD_STDIN:
+                # A closed stdin, or a writing stream dup'd onto it
+                # (`0<&1`), has nothing to read: the next reader gets
+                # EBADF, as bash's does, until `exec < file` binds a
+                # file again. A dup of stdin onto itself keeps the file
+                # an earlier `exec <f` bound.
+                if r.target != FD_STDIN:
                     session.exec_stdin = None
+                    session.exec_stdin_unreadable = True
             elif r.target == FD_CLOSE:
                 _bind(session, r.fd, CLOSED, False)
             else:
@@ -137,6 +143,7 @@ async def _install(dispatch: DispatchFn, session: Session,
             except FS_ERRORS as exc:
                 return _error_line(scope.raw_path, exc)
             session.exec_stdin = await materialize(data) or b""
+            session.exec_stdin_unreadable = False
             continue
         path = scope.virtual
         try:
@@ -317,12 +324,32 @@ async def _route(
     return None, None, False
 
 
+def stdout_to_stderr(node: Any) -> bool:
+    """Whether a statement sends its own stdout to stderr (``>&2``).
+
+    What tells a writer's failed write from a lost diagnostic under an
+    unwritable stderr: bash's ``echo hi >&2`` reports 1 when the write
+    fails, while a program whose diagnostic could not be delivered keeps
+    its own status.
+
+    Args:
+        node (Any): the statement's tree-sitter node.
+    """
+    if node.type != NT.REDIRECTED_STATEMENT:
+        return False
+    _, redirects = get_redirects(node)
+    return any(
+        isinstance(r.target, int) and r.target == FD_STDERR and r.fd in (
+            FD_STDOUT, FD_BOTH) for r in redirects)
+
+
 async def divert_statement(
     dispatch: DispatchFn,
     session: Session,
     stdout: bytes | None,
     io: IOResult,
     command: str,
+    stdout_diverted: bool = False,
 ) -> bytes | None:
     """Send one statement's output where the shell's `exec` bindings point.
 
@@ -333,7 +360,9 @@ async def divert_statement(
     stdout), a closed one is dropped, and one bound to stdin fails with
     bash's `write error: Bad file descriptor`, which is reported on
     stderr through stderr's own binding and makes the statement's
-    status 1. Returns the stdout that should still bubble up, which is
+    status 1. An unwritable stderr fails only a statement whose own
+    output went there; a lost diagnostic leaves the status the command
+    earned. Returns the stdout that should still bubble up, which is
     None once nothing is left for the terminal.
 
     Args:
@@ -344,6 +373,9 @@ async def divert_statement(
             status are amended in place.
         command (str): the statement's recorded line; its first word
             names the writer in a write error.
+        stdout_diverted (bool): the statement sent its own stdout to
+            stderr (``>&2``), so an unwritable stderr is the writer's
+            failure.
     """
     out_parts: list[bytes] = []
     err_parts: list[bytes] = []
@@ -365,7 +397,13 @@ async def divert_statement(
                                             TO_STDERR)
         out_parts.extend(x for x in (out, ) if x)
         err_parts.extend(x for x in (err, ) if x)
-        if unwritable:
+        if unwritable and stdout_diverted and io.exit_code == 0:
+            # The statement's own output was what could not be written,
+            # so the write error is its failure (bash's `echo hi >&2`
+            # under `exec 2>&0` reports 1). A diagnostic that could not
+            # be delivered leaves the status alone: GNU find still exits
+            # 0 after `-exec nosuch`, ls keeps its 2 and cat its 1, since
+            # the failed write is of a message, not of the work.
             io.exit_code = 1
     io.stderr = b"".join(err_parts) or None
     return b"".join(out_parts) or None

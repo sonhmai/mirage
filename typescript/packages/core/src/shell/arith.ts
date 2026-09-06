@@ -375,25 +375,33 @@ class ArithEvaluator {
     try {
       return parseLiteral(text)
     } catch {
-      if (this.depth >= ARITH_MAX_DEPTH)
-        throw new ArithError(`expression recursion level exceeded (error token is "${text}")`)
-      // bash evaluates the stored text in the same context: an
-      // assignment it makes lands with the expression's own (`x='y=5';
-      // $((x))` leaves y at 5), a name it reads sees the pending updates,
-      // and its `RANDOM` seed reaches the reader. So the nested run shares
-      // this evaluator's record rather than starting a fresh one.
-      const nested = new ArithEvaluator(
-        this.env,
-        this.updates,
-        this.elemUpdates,
-        this.writes,
-        this.depth + 1,
-        this.elements,
-        this.readVar,
-        this.wroteVar,
-      )
-      return nested.run(new ArithParser(tokenize(text)).parse())
+      return this.nested(text)
     }
+  }
+
+  /**
+   * Evaluate text as an expression in this expression's record. bash
+   * evaluates a variable's stored text, and an indexed subscript, in the
+   * same context as the expression around them: an assignment they make
+   * lands with the expression's own (`x='y=5'; $((x))` leaves y at 5,
+   * `$((a[x=5] + x))` is 12), a name they read sees the pending updates,
+   * and a `RANDOM` seed reaches the reader. So the nested run shares this
+   * evaluator's record rather than starting a fresh one.
+   */
+  private nested(text: string): bigint {
+    if (this.depth >= ARITH_MAX_DEPTH)
+      throw new ArithError(`expression recursion level exceeded (error token is "${text}")`)
+    const nested = new ArithEvaluator(
+      this.env,
+      this.updates,
+      this.elemUpdates,
+      this.writes,
+      this.depth + 1,
+      this.elements,
+      this.readVar,
+      this.wroteVar,
+    )
+    return nested.run(new ArithParser(tokenize(text)).parse())
   }
 
   private lookup(name: string): bigint {
@@ -414,6 +422,16 @@ class ArithEvaluator {
   private elemKey(name: string, sub: string): string {
     if (this.elements === null) {
       throw new ArithError('syntax error: operand expected (error token is "[")')
+    }
+    if (this.elements.isAssoc !== undefined && !this.elements.isAssoc(name)) {
+      // An indexed subscript is arithmetic in this expression's own
+      // record (`nested`), so what it assigns the rest of the expression
+      // reads and the expression lands; the resolver only normalizes the
+      // index it is handed (a negative one counts from the extent). A
+      // literal index skips the run.
+      const trimmed = sub.trim()
+      const index = /^-?\d+$/.test(trimmed) ? BigInt(trimmed) : this.nested(sub)
+      return this.elements.resolve(name, index.toString(), { ...this.env, ...this.updates })
     }
     return this.elements.resolve(name, sub, { ...this.env, ...this.updates })
   }

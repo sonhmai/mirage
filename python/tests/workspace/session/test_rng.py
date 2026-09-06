@@ -336,6 +336,10 @@ async def test_arithmetic_random_assignment_seeds_within_the_expression(
         ('declare -a a=([x=2]=v); echo ${!a[@]} $x', '2 2\n'),
         ('a=([y=3]=v [y+1]=w); echo ${!a[@]} $y', '3 4 3\n'),
         ('unset a; a[i=2]+=x; echo ${!a[@]} $i', '2 2\n'),
+        # Inside an expression, the subscript's assignment is seen by the
+        # rest of the expression and lands with it.
+        ('a[5]=7; unset x; echo $((a[x=5] + x)); echo "$x"', '12\n5\n'),
+        ('a[5]=7; echo $((a[y=5]++ + y)) ${a[5]} $y', '12 8 5\n'),
     ])
 @pytest.mark.asyncio
 async def test_subscripts_and_offsets_land_their_assignments(command, stdout):

@@ -25,11 +25,13 @@ from mirage.policy.types import HandOff
 from mirage.runtime.types import DispatchFn
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
+from mirage.shell.descriptors import unreadable_stdin
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import NodeType as NT
-from mirage.workspace.executor.builtins.exec import divert_statement
+from mirage.workspace.executor.builtins.exec import (divert_statement,
+                                                     stdout_to_stderr)
 from mirage.workspace.executor.jobs import handle_background
 from mirage.workspace.executor.statement import (carry_status,
                                                  finish_statement,
@@ -292,7 +294,9 @@ async def handle_subshell(
                 continue
             i += 1
             child_stdin = stdin
-            if child_stdin is None and session.exec_stdin is not None:
+            if child_stdin is None and session.exec_stdin_unreadable:
+                child_stdin = unreadable_stdin()
+            elif child_stdin is None and session.exec_stdin is not None:
                 child_stdin = session.exec_stdin
             try:
                 stdout, io, last_exec = await execute_node(
@@ -311,14 +315,16 @@ async def handle_subshell(
                                           exit_code=sig.contained_code,
                                           stderr=sig.stderr)
                 break
-            stdout = await finish_statement(stdout, io, session, child)
+            stdout = await finish_statement(stdout, io, session, child,
+                                            last_exec)
             if dispatch is not None and (session.exec_stdout is not None
                                          or session.exec_stderr is not None):
                 materialized = await materialize(stdout)
                 before_divert = io.exit_code
                 stdout = await divert_statement(dispatch, session,
                                                 materialized, io,
-                                                last_exec.command or "")
+                                                last_exec.command or "",
+                                                stdout_to_stderr(child))
                 if io.exit_code != before_divert:
                     record_status(session, io.exit_code)
             if stdout is not None:

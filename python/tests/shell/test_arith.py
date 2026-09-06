@@ -132,7 +132,7 @@ def _fake_elements():
     def read(name, key):
         return store.get((name, key))
 
-    ops = ElementOps(resolve=resolve, read=read)
+    ops = ElementOps(resolve=resolve, read=read, is_assoc=lambda n: n == "m")
     cell.append(ops)
     return ops
 
@@ -217,3 +217,16 @@ def test_a_variable_evaluated_as_an_expression_shares_the_record():
     result = evaluate_arith("y=1, x, y", {"x": "y+=1"})
     assert result.value == 2
     assert [(w.name, w.value) for w in result.writes] == [("y", "2")]
+
+
+def test_an_indexed_subscript_evaluates_in_the_expression_record():
+    # bash: `a[5]=7; $((a[x=5] + x))` is 12 and leaves x at 5; the
+    # subscript's assignment is seen by the rest of the expression and
+    # recorded with it.
+    result = evaluate_arith("arr[x=1] + x", {}, elements=_fake_elements())
+    assert result.value == 21
+    assert [(w.name, w.key, w.value)
+            for w in result.writes] == [("x", None, "1")]
+    # An associative subscript stays a key, never an expression.
+    result = evaluate_arith("m[a] + 1", {}, elements=_fake_elements())
+    assert result.value == 8 and result.writes == ()

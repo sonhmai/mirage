@@ -27,6 +27,13 @@
 export interface ElementOps {
   resolve(name: string, subscript: string, env: Readonly<Record<string, string>>): string
   read(name: string, key: string): string | null
+  /**
+   * Whether a name holds an associative array, whose subscript is a key.
+   * Given, the evaluator evaluates an indexed subscript itself, in its own
+   * record, and hands `resolve` the index; absent, `resolve` evaluates the
+   * subscript text (a caller outside a session).
+   */
+  isAssoc?(name: string): boolean
 }
 
 /**

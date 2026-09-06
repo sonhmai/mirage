@@ -17,13 +17,14 @@ import { asyncChain, closeQuietly, mergeStdoutStderr } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import { divertStatement } from './builtins/exec/index.ts'
+import { divertStatement, stdoutToStderr } from './builtins/exec/index.ts'
 import { carryStatus, finishStatement, recordStatus } from './statement.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
+import { unreadableStdin } from '../../shell/descriptors.ts'
 import type { Session } from '../session/session.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
@@ -326,7 +327,8 @@ export async function handleSubshell(
       let io: IOResult
       let childExec: ExecutionNode
       try {
-        const childStdin = stdin ?? session.execStdin
+        const childStdin =
+          stdin ?? (session.execStdinUnreadable ? unreadableStdin() : session.execStdin)
         ;[stdout, io, childExec] = await executeNode(child, session, childStdin, callStack)
       } catch (err) {
         if (!(err instanceof ExitSignal)) throw err
@@ -344,11 +346,18 @@ export async function handleSubshell(
         })
         break
       }
-      stdout = await finishStatement(stdout, io, session, child)
+      stdout = await finishStatement(stdout, io, session, child, childExec)
       if (dispatch !== undefined && (session.execStdout !== null || session.execStderr !== null)) {
         const bytes = stdout === null ? null : await materialize(stdout)
         const beforeDivert = io.exitCode
-        stdout = await divertStatement(dispatch, session, bytes, io, childExec.command ?? '')
+        stdout = await divertStatement(
+          dispatch,
+          session,
+          bytes,
+          io,
+          childExec.command ?? '',
+          stdoutToStderr(child),
+        )
         if (io.exitCode !== beforeDivert) recordStatus(session, io.exitCode)
       }
       if (stdout !== null) allStdout.push(stdout)

@@ -15,11 +15,13 @@
 import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN } from '../../../../shell/constants.ts'
+import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from '../../../../shell/constants.ts'
 import { badDescriptorLine, unsupportedDescriptor } from '../../../../shell/descriptors.ts'
 import { type Redirect, RedirectKind } from '../../../../shell/types.ts'
 import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
 import type { PathSpec } from '../../../../types.ts'
+import { getRedirects } from '../../../../shell/helpers.ts'
+import { NodeType as NT, type TSNodeLike } from '../../../../shell/types.ts'
 import type { Session } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { createFile } from '../../create.ts'
@@ -122,6 +124,7 @@ function bindingsOf(session: Session): StreamBindings {
     execStderr: session.execStderr,
     execStderrAppend: session.execStderrAppend,
     execStdin: session.execStdin,
+    execStdinUnreadable: session.execStdinUnreadable,
   }
 }
 
@@ -189,8 +192,14 @@ async function install(
       // an earlier `exec <f` bound; another descriptor onto stdin
       // restores the ambient input.
       if (r.fd === FD_STDIN) {
-        if (r.target === FD_CLOSE) session.execStdin = new Uint8Array()
-        else if (r.target !== FD_STDIN) session.execStdin = null
+        // A closed stdin, or a writing stream dup'd onto it (`0<&1`), has
+        // nothing to read: the next reader gets EBADF, as bash's does,
+        // until `exec < file` binds a file again. A dup of stdin onto
+        // itself keeps the file an earlier `exec <f` bound.
+        if (r.target !== FD_STDIN) {
+          session.execStdin = null
+          session.execStdinUnreadable = true
+        }
       } else if (r.target === FD_CLOSE) {
         bind(session, r.fd, CLOSED, false)
       } else {
@@ -206,6 +215,7 @@ async function install(
       try {
         const [data] = await dispatch('read', scope)
         session.execStdin = await materialize(data as ByteSource)
+        session.execStdinUnreadable = false
       } catch (err) {
         if (!isFsError(err)) throw err
         return errorLine(scope.rawPath, err)
@@ -272,12 +282,25 @@ async function openTarget(
  * write error. Returns the stdout that should still bubble up (null once
  * nothing is left for the terminal).
  */
+/**
+ * Whether a statement sends its own stdout to stderr (`>&2`): what tells
+ * a writer's failed write from a lost diagnostic under an unwritable
+ * stderr. bash's `echo hi >&2` reports 1 when the write fails, while a
+ * program whose diagnostic could not be delivered keeps its own status.
+ */
+export function stdoutToStderr(node: TSNodeLike): boolean {
+  if (node.type !== NT.REDIRECTED_STATEMENT) return false
+  const [, redirects] = getRedirects(node)
+  return redirects.some((r) => r.target === FD_STDERR && (r.fd === FD_STDOUT || r.fd === FD_BOTH))
+}
+
 export async function divertStatement(
   dispatch: DispatchFn,
   session: Session,
   stdout: Uint8Array | null,
   io: IOResult,
   command: string,
+  stdoutDiverted = false,
 ): Promise<Uint8Array | null> {
   const outParts: Uint8Array[] = []
   const errParts: Uint8Array[] = []
@@ -314,7 +337,13 @@ export async function divertStatement(
     )
     if (out !== null) outParts.push(out)
     if (err !== null) errParts.push(err)
-    if (unwritable) io.exitCode = 1
+    // The statement's own output was what could not be written, so the
+    // write error is its failure (bash's `echo hi >&2` under `exec 2>&0`
+    // reports 1). A diagnostic that could not be delivered leaves the
+    // status alone: GNU find still exits 0 after `-exec nosuch`, ls keeps
+    // its 2 and cat its 1, since the failed write is of a message, not of
+    // the work.
+    if (unwritable && stdoutDiverted && io.exitCode === 0) io.exitCode = 1
   }
   io.stderr = errParts.length > 0 ? joinBytes(errParts) : null
   return outParts.length > 0 ? joinBytes(outParts) : null

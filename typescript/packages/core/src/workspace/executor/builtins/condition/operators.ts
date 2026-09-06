@@ -16,7 +16,7 @@ import { materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { FileStat } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
-import { resolvePath, resolveSymlinks } from '../../../../utils/path.ts'
+import { CycleError, resolvePath, resolveSymlinks } from '../../../../utils/path.ts'
 import { isoTimestamp } from '../../../../utils/dates.ts'
 import { resolvePathStat } from '../links/index.ts'
 import { toScope, scopePath } from '../scope.ts'
@@ -43,7 +43,17 @@ async function pathKind(
   ctx: CondContext,
   val: string | PathSpec,
 ): Promise<['dir' | 'file' | 'char' | null, FileStat | null]> {
-  const stat = await resolvePathStat(ctx.dispatch, operandScope(ctx, val))
+  let scope: PathSpec
+  try {
+    scope = operandScope(ctx, val)
+  } catch (err) {
+    // A link loop names nothing: stat fails with ELOOP and bash reads
+    // that as absent (`[ loop -ef loop ]` and `[ -e loop ]` are false),
+    // so a file test answers false rather than erroring.
+    if (err instanceof CycleError) return [null, null]
+    throw err
+  }
+  const stat = await resolvePathStat(ctx.dispatch, scope)
   if (stat === null) return [null, null]
   if (stat.type === FileType.DIRECTORY) return ['dir', stat]
   if (stat.type === FileType.CHAR_DEVICE) return ['char', stat]

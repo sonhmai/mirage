@@ -20,12 +20,14 @@ from mirage.io.stream import async_chain, materialize
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
+from mirage.shell.descriptors import unreadable_stdin
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import NodeType as NT
 from mirage.utils.errors import format_fs_error
-from mirage.workspace.executor.builtins.exec import divert_statement
+from mirage.workspace.executor.builtins.exec import (divert_statement,
+                                                     stdout_to_stderr)
 from mirage.workspace.executor.control import (BreakSignal, ContinueSignal,
                                                ReturnSignal)
 from mirage.workspace.executor.jobs import handle_background
@@ -147,7 +149,11 @@ async def _run_program(
             i += 2
         else:
             child_stdin = stdin
-            if child_stdin is None and session.exec_stdin is not None:
+            if child_stdin is None and session.exec_stdin_unreadable:
+                # `exec <&-` or `exec 0<&1` left nothing to read: a
+                # reader gets EBADF, as bash's does.
+                child_stdin = unreadable_stdin()
+            elif child_stdin is None and session.exec_stdin is not None:
                 # `exec < file` feeds the shell's stdin: a later `read`
                 # or `while read` sees it. The same bytes reach each
                 # statement, and the identity-keyed line buffer advances
@@ -234,7 +240,8 @@ async def _run_program(
             materialized = await materialize(stdout)
             before_divert = io.exit_code
             stdout = await divert_statement(dispatch, session, materialized,
-                                            io, last_exec.command or "")
+                                            io, last_exec.command or "",
+                                            stdout_to_stderr(child))
             if io.exit_code != before_divert:
                 # A write the binding refused is the statement's failure,
                 # which `$?` has to show.

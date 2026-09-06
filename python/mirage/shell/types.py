@@ -41,9 +41,15 @@ class ElementOps:
             assignments included, so ``i=2, a[i]`` reads the new ``i``.
         read (Callable[[str, str], str | None]): the element's stored
             text, None when the element is unset.
+        is_assoc (Callable[[str], bool] | None): whether a name holds an
+            associative array, whose subscript is a key. Given, the
+            evaluator evaluates an indexed subscript itself, in its own
+            record, and hands ``resolve`` the index; absent, ``resolve``
+            evaluates the subscript text (a caller outside a session).
     """
     resolve: Callable[[str, str, Mapping[str, str]], str]
     read: Callable[[str, str], str | None]
+    is_assoc: Callable[[str], bool] | None = None
 
 
 @dataclass(frozen=True, slots=True)

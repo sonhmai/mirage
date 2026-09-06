@@ -15,7 +15,7 @@
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import iso_timestamp
-from mirage.utils.path import resolve_path, resolve_symlinks
+from mirage.utils.path import CycleError, resolve_path, resolve_symlinks
 from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS, UNSUPPORTED_UNARY)
 from mirage.workspace.executor.builtins.condition.types import (CondContext,
@@ -52,7 +52,14 @@ async def path_kind(ctx: CondContext,
         ctx (CondContext): evaluation context.
         val (str | PathSpec): operand as typed or classified.
     """
-    stat = await resolve_path_stat(ctx.dispatch, operand_scope(ctx, val))
+    try:
+        scope = operand_scope(ctx, val)
+    except CycleError:
+        # A link loop names nothing: stat fails with ELOOP and bash reads
+        # that as absent (`[ loop -ef loop ]` and `[ -e loop ]` are
+        # false), so a file test answers false rather than erroring.
+        return None, None
+    stat = await resolve_path_stat(ctx.dispatch, scope)
     if stat is None:
         return None, None
     if stat.type == FileType.DIRECTORY:

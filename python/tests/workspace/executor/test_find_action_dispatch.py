@@ -685,3 +685,38 @@ async def test_exec_does_not_see_a_shell_function():
     assert await _run_line(
         ws, "f() { echo BAD; }; find d -maxdepth 0 -exec f {} \\;; echo rc=$?"
     ) == ("rc=0\n", "find: 'f': No such file or directory\n", 0)
+
+
+@pytest.mark.asyncio
+async def test_exec_head_is_substituted_before_the_lookup():
+    # GNU substitutes the match into the words and only then execs, so
+    # `-exec {} \;` runs each match itself rather than looking up `{}`.
+    ws = _ws()
+    try:
+        io = await ws.execute(
+            "mkdir -p /data/fh/s; printf 'echo ran\\n' > /data/fh/s/x; "
+            "chmod 700 /data/fh/s/x; cd /data/fh; "
+            "find s -type f -exec {} \\; ; echo rc=$?")
+        assert await io.stdout_str() == "ran\nrc=0\n"
+        assert await io.stderr_str() == ""
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_delete_drops_the_rows_node_meta():
+    # A chmod that lives in the namespace overlay goes with the row, as
+    # it does through `rm`, so a later file at the same name does not
+    # inherit the removed one's mode.
+    ws = _ws()
+    try:
+        await ws.execute("mkdir -p /data/m; touch /data/m/f /data/m/d")
+        await ws._namespace.set_attrs("/data/m/f", mode=0o600)
+        await ws._namespace.set_attrs("/data/m/d", mode=0o700)
+        assert ws._namespace.meta_for("/data/m/f") is not None
+        io = await ws.execute("find /data/m -name f -delete; echo rc=$?")
+        assert await io.stdout_str() == "rc=0\n"
+        assert ws._namespace.meta_for("/data/m/f") is None
+        assert ws._namespace.meta_for("/data/m/d") is not None
+    finally:
+        await ws.close()

@@ -30,4 +30,5 @@ TO_STDERR = "&2"
 # The session fields an `exec` redirect line binds, put back as one
 # unit when a later redirect on the line fails.
 EXEC_STREAM_FIELDS = ("exec_stdout", "exec_stdout_append", "exec_stderr",
-                      "exec_stderr_append", "exec_stdin")
+                      "exec_stderr_append", "exec_stdin",
+                      "exec_stdin_unreadable")

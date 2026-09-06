@@ -306,6 +306,10 @@ class SessionElements implements ElementOps {
     private readonly reader: RandomReader | null = null,
   ) {}
 
+  isAssoc(name: string): boolean {
+    return visibleAssocs(this.session)[name] !== undefined
+  }
+
   resolve(name: string, subscript: string, env: Readonly<Record<string, string>>): string {
     if (visibleAssocs(this.session)[name] !== undefined) {
       return stripKeyQuotes(subscript)

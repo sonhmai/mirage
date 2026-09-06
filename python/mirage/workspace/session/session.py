@@ -356,6 +356,7 @@ class Session:
     exec_stderr: str | None = None
     exec_stderr_append: bool = False
     exec_stdin: bytes | None = None
+    exec_stdin_unreadable: bool = False
     _exec_opened: set[str] = field(default_factory=set, repr=False)
     _parse_seq: int = field(default=0, repr=False)
     _parse_current: int = field(default=0, repr=False)

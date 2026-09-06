@@ -470,6 +470,14 @@ class _SessionElements:
                 raise ArithError(f"{name}[{subscript}]: bad array subscript")
         return str(idx)
 
+    def is_assoc(self, name: str) -> bool:
+        """Whether the name holds an associative array.
+
+        Args:
+            name (str): the array variable's name.
+        """
+        return name in visible_assocs(self._session)
+
     def read(self, name: str, key: str) -> str | None:
         """The element's stored text, None when unset.
 
@@ -502,7 +510,9 @@ def session_elements(session: Session,
             expression around it; None where nothing draws.
     """
     bound = _SessionElements(session, reader)
-    return ElementOps(resolve=bound.resolve, read=bound.read)
+    return ElementOps(resolve=bound.resolve,
+                      read=bound.read,
+                      is_assoc=bound.is_assoc)
 
 
 def seed_from(word: str, session: Session) -> int:

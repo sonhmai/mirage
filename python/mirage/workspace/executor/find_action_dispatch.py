@@ -34,18 +34,17 @@ from mirage.workspace.lookup.constants import SHELL_ONLY_BUILTINS
 from mirage.workspace.lookup.lookup import lookup
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.types import ExecuteLine
 
 
-def exec_line(action: ExecAction, paths: list[str]) -> str:
-    """The shell line one ``-exec`` run becomes.
+def exec_words(action: ExecAction, paths: list[str]) -> list[str]:
+    """The argv one ``-exec`` run becomes, matches substituted.
 
-    GNU execs the words directly, so every match must reach the command
-    as exactly one argv word: the line is built with ``shlex.join``, and
-    a plain join would be re-parsed by the shell. A per-match run
-    substitutes every ``{}`` inside every word (``x{}y`` is
-    ``xd/a.txty``); a batched run replaces its one bare ``{}`` with the
-    matches, one word each.
+    A per-match run substitutes every ``{}`` inside every word (``x{}y``
+    is ``xd/a.txty``); a batched run replaces its one bare ``{}`` with
+    the matches, one word each. The head is substituted like any other
+    word, which is what lets ``-exec {} \\;`` run each match itself.
 
     Args:
         action (ExecAction): the action.
@@ -59,7 +58,21 @@ def exec_line(action: ExecAction, paths: list[str]) -> str:
             words.append(word.replace(EXEC_PLACEHOLDER, paths[0]))
         else:
             words.append(word)
-    return shlex.join(words)
+    return words
+
+
+def exec_line(action: ExecAction, paths: list[str]) -> str:
+    """The shell line one ``-exec`` run becomes.
+
+    GNU execs the words directly, so every match must reach the command
+    as exactly one argv word: the line is built with ``shlex.join``, and
+    a plain join would be re-parsed by the shell.
+
+    Args:
+        action (ExecAction): the action.
+        paths (list[str]): the match, or every match for a batched run.
+    """
+    return shlex.join(exec_words(action, paths))
 
 
 async def _head_missing(head: str, registry: MountRegistry, cwd: str,
@@ -122,12 +135,15 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
         out (list[bytes]): where the run's stdout is appended.
         errors (list[bytes]): where its stderr is appended.
     """
-    head = action.argv[0]
+    # GNU substitutes the matches into the words and only then hands
+    # them to execvp, so the head looked up is the substituted one:
+    # `-exec {} \;` runs each match itself.
+    words = exec_words(action, paths)
+    head = words[0] if words else action.argv[0]
     if await _head_missing(head, registry, cwd, stat_path):
         errors.append(f"find: '{head}': No such file or directory\n".encode())
         return False
-    io = await execute_fn(f"( {exec_line(action, paths)} )",
-                          session_id=session_id)
+    io = await execute_fn(f"( {shlex.join(words)} )", session_id=session_id)
     if io.stdout is not None:
         data = await materialize(io.stdout)
         if data:
@@ -141,7 +157,7 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
 
 async def _delete(ps: PathSpec, registry: MountRegistry, cwd: str,
                   ns: NamespaceView | None, dispatch: DispatchFn | None,
-                  errors: list[bytes]) -> bool:
+                  errors: list[bytes], namespace: Namespace | None) -> bool:
     """Delete one accepted row; returns whether it succeeded.
 
     A symlink row came from the namespace, which no backend can see, so
@@ -161,6 +177,8 @@ async def _delete(ps: PathSpec, registry: MountRegistry, cwd: str,
             unlinked through; None outside a workspace, where there is
             no namespace to hold one.
         errors (list[bytes]): where a failure's line is appended.
+        namespace (Namespace | None): the node table a removed row's
+            meta is dropped from; None outside a workspace.
     """
     path = ps.raw_path or ps.virtual
     link = (dispatch is not None and ns is not None and ns.links is not None
@@ -209,6 +227,13 @@ async def _delete(ps: PathSpec, registry: MountRegistry, cwd: str,
         errors.append(f"find: cannot delete '{path}'"
                       f"{': ' + why if why else ''}\n".encode())
         return False
+    if namespace is not None:
+        # The row's node meta (a chmod/chown overlay) goes with it and a
+        # directory's subtree purges, as the `rm` command path does in
+        # command_dispatch: a file later created at the same name must
+        # not inherit the removed one's mode.
+        await namespace.unlink(ps.virtual)
+        await namespace.purge_under(ps.virtual)
     return True
 
 
@@ -321,6 +346,7 @@ async def _apply_find_actions(
     stat_path: StatPath | None = None,
     dispatch: DispatchFn | None = None,
     identity: Identity | None = None,
+    namespace: Namespace | None = None,
 ) -> tuple[ByteSource | None, bytes, int]:
     """Apply find's actions (-exec / -delete / -print0 / -ls) to its rows.
 
@@ -423,7 +449,7 @@ async def _apply_find_actions(
                 if _structural(match, registry):
                     continue
                 if not await _delete(match, registry, cwd, ns, dispatch,
-                                     errors):
+                                     errors, namespace):
                     exit_code = 1
                     break
             else:

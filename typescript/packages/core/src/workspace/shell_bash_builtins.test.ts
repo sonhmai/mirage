@@ -445,7 +445,7 @@ const CASES: [string, string, string, string, number][] = [
     'exec_stdin_dup_onto_itself_keeps_the_bound_file',
     "printf 'l1\\nl2\\n' > /data/in; ( exec < /data/in; exec 0<&0; read a; exec 0>&0; read b; echo $a-$b; exec <&-; read c; echo rc=$? )",
     'l1-l2\nrc=1\n',
-    '',
+    'bash: read: read error: 0: Bad file descriptor\n',
     0,
   ],
   [

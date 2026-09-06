@@ -376,20 +376,29 @@ class ArithEvaluator:
         try:
             return _parse_literal(raw)
         except (ValueError, ArithError):
-            if self.depth >= ARITH_MAX_DEPTH:
-                raise ArithError(
-                    f"expression recursion level exceeded (error token is "
-                    f'"{raw}")') from None
-            # bash evaluates the stored text in the same context: an
-            # assignment it makes lands with the expression's own
-            # (`x='y=5'; $((x))` leaves y at 5), a name it reads sees
-            # the pending updates, and its `RANDOM` seed reaches the
-            # reader. So the nested run shares this evaluator's record
-            # rather than starting a fresh one.
-            nested = ArithEvaluator(self.env, self.updates, self.elem_updates,
-                                    self.writes, self.depth + 1, self.elements,
-                                    self.read_var, self.wrote_var)
-            return nested.run(ArithParser(_tokenize(raw)).parse())
+            return self._nested(raw)
+
+    def _nested(self, raw: str) -> int:
+        """Evaluate text as an expression in this expression's record.
+
+        bash evaluates a variable's stored text, and an indexed
+        subscript, in the same context as the expression around them:
+        an assignment they make lands with the expression's own
+        (``x='y=5'; $((x))`` leaves y at 5, ``$((a[x=5] + x))`` is 12),
+        a name they read sees the pending updates, and a ``RANDOM`` seed
+        reaches the reader. So the nested run shares this evaluator's
+        record rather than starting a fresh one.
+
+        Args:
+            raw (str): the text to evaluate.
+        """
+        if self.depth >= ARITH_MAX_DEPTH:
+            raise ArithError(f"expression recursion level exceeded (error "
+                             f'token is "{raw}")')
+        nested = ArithEvaluator(self.env, self.updates, self.elem_updates,
+                                self.writes, self.depth + 1, self.elements,
+                                self.read_var, self.wrote_var)
+        return nested.run(ArithParser(_tokenize(raw)).parse())
 
     def lookup(self, name: str) -> int:
         # A dynamic name is asked first: the reader has been told of every
@@ -415,8 +424,19 @@ class ArithEvaluator:
         if self.elements is None:
             raise ArithError('syntax error: operand expected (error token '
                              'is "[")')
-        merged = self._merged_env()
-        return self.elements.resolve(name, subscript, merged)
+        is_assoc = self.elements.is_assoc
+        if is_assoc is not None and not is_assoc(name):
+            # An indexed subscript is arithmetic in this expression's
+            # own record (`_nested`), so what it assigns the rest of the
+            # expression reads and the expression lands; the resolver
+            # only normalizes the index it is handed (a negative one
+            # counts from the extent). A literal index skips the run.
+            try:
+                index = int(subscript.strip())
+            except ValueError:
+                index = self._nested(subscript)
+            return self.elements.resolve(name, str(index), self._merged_env())
+        return self.elements.resolve(name, subscript, self._merged_env())
 
     def key_of(self, target: tuple[Any, ...]) -> str | None:
         """The canonical element key of a target, None for a scalar.

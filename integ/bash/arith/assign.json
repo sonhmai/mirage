@@ -305,6 +305,40 @@
         "stdout": "c 26794\nbc 1 2\n17772 42\n3 3\n0 2 1\n1 2 1 2\n0 10791\n3 4 3\nq 1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "arith_subscript_assignments_are_seen_by_the_expression",
+      "seq": 450,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unset za zx zy; za[5]=7; echo $((za[zx=5] + zx)); echo \"$zx\"; echo $((za[zy=5]++ + zy)) ${za[5]} $zy; unset za zx zy",
+      "expect": {
+        "exit": 0,
+        "stdout": "12\n5\n12 8 5\n",
+        "stderr": ""
+      }
     }
   ]
 }

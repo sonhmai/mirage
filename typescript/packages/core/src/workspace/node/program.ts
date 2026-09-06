@@ -27,11 +27,12 @@ import { readFailExitCode } from '../../commands/spec/usage.ts'
 import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
 import { ReturnSignal } from '../executor/command.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
-import { divertStatement } from '../executor/builtins/exec/index.ts'
+import { divertStatement, stdoutToStderr } from '../executor/builtins/exec/index.ts'
 import { handleBackground } from '../executor/jobs.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
+import { unreadableStdin } from '../../shell/descriptors.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 
@@ -197,7 +198,10 @@ async function runProgram(
         // `while read` sees it. The same bytes reach each statement, and
         // the identity-keyed line buffer advances a sequence of reads
         // through them.
-        const childStdin = stdin ?? session.execStdin
+        // `exec <&-` or `exec 0<&1` left nothing to read: a reader gets
+        // EBADF, as bash's does.
+        const childStdin =
+          stdin ?? (session.execStdinUnreadable ? unreadableStdin() : session.execStdin)
         ;[s, ioResult, execNode] = await recurse(child, session, childStdin, callStack)
       } catch (err) {
         if (err instanceof ExitSignal) {
@@ -287,7 +291,14 @@ async function runProgram(
     if (dispatch !== undefined && (session.execStdout !== null || session.execStderr !== null)) {
       const bytes = stdout === null ? null : await materialize(stdout)
       const beforeDivert = io.exitCode
-      stdout = await divertStatement(dispatch, session, bytes, io, lastExec.command ?? '')
+      stdout = await divertStatement(
+        dispatch,
+        session,
+        bytes,
+        io,
+        lastExec.command ?? '',
+        stdoutToStderr(child),
+      )
       // A write the binding refused is the statement's failure, which
       // `$?` has to show.
       if (io.exitCode !== beforeDivert) recordStatus(session, io.exitCode)

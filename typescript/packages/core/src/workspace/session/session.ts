@@ -64,6 +64,7 @@ export interface ChildShellState {
   execStderr: string | null
   execStderrAppend: boolean
   execStdin: Uint8Array | null
+  execStdinUnreadable: boolean
   execOpened: Set<string>
   randomState: number | null
   randomSeed: string | null
@@ -459,6 +460,7 @@ export class Session {
   execStderr: string | null = null
   execStderrAppend = false
   execStdin: Uint8Array | null = null
+  execStdinUnreadable = false
   execOpened = new Set<string>()
   localFrames: Map<string, ShellVar | null>[] = []
   mountModes: ReadonlyMap<string, MountMode> | null
@@ -571,6 +573,7 @@ export class Session {
     forked.execStderr = this.execStderr
     forked.execStderrAppend = this.execStderrAppend
     forked.execStdin = this.execStdin
+    forked.execStdinUnreadable = this.execStdinUnreadable
     forked.execOpened = new Set(this.execOpened)
     return forked
   }
@@ -660,6 +663,7 @@ export class Session {
       execStderr: this.execStderr,
       execStderrAppend: this.execStderrAppend,
       execStdin: this.execStdin,
+      execStdinUnreadable: this.execStdinUnreadable,
       execOpened: new Set(this.execOpened),
       randomState: this.randomState,
       randomSeed: this.randomSeed,
@@ -703,6 +707,7 @@ export class Session {
     this.execStderr = state.execStderr
     this.execStderrAppend = state.execStderrAppend
     this.execStdin = state.execStdin
+    this.execStdinUnreadable = state.execStdinUnreadable
     this.randomState = state.randomState
     this.randomSeed = state.randomSeed
     this.randomLast = state.randomLast

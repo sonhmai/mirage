@@ -137,6 +137,9 @@ function fakeElements(): ElementOps {
     ['arr 1', '20'],
   ])
   const ops: ElementOps = {
+    isAssoc(name: string) {
+      return name === 'm'
+    },
     resolve(name, subscript, env) {
       if (name === 'm') return subscript.replace(/^["']|["']$/g, '')
       return evaluateArith(subscript, env, 0, ops).value.toString()
@@ -250,5 +253,20 @@ describe('a variable evaluated as an expression', () => {
     const second = evaluateArith('y=1, x, y', { x: 'y+=1' })
     expect(second.value).toBe(2n)
     expect(second.writes.map((w) => [w.name, w.value])).toEqual([['y', '2']])
+  })
+})
+
+describe('an indexed subscript', () => {
+  it('evaluates in the record of the expression around it', () => {
+    // bash: `a[5]=7; $((a[x=5] + x))` is 12 and leaves x at 5; the
+    // subscript's assignment is seen by the rest of the expression and
+    // recorded with it.
+    const result = evaluateArith('arr[x=1] + x', {}, 0, fakeElements())
+    expect(result.value).toBe(21n)
+    expect(result.writes.map((w) => [w.name, w.key, w.value])).toEqual([['x', null, '1']])
+    // An associative subscript stays a key, never an expression.
+    const assoc = evaluateArith('m[a] + 1', {}, 0, fakeElements())
+    expect(assoc.value).toBe(8n)
+    expect(assoc.writes).toEqual([])
   })
 })

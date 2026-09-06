@@ -58,15 +58,15 @@ export async function handleTest(
   } catch (exc) {
     if (!(exc instanceof CondError)) throw exc
     const stderr = new TextEncoder().encode(exc.message + '\n')
-    if (name === '[[') {
+    if (name === '[[' && exc.fatal) {
       // A bad [[ ]] operator is a bash PARSE error: the whole input
       // line dies, not just this command.
       throw new ExitSignal(2, stderr, null, 2)
     }
     return [
       null,
-      new IOResult({ exitCode: 2, stderr }),
-      new ExecutionNode({ command: 'test', exitCode: 2, stderr }),
+      new IOResult({ exitCode: exc.exitCode, stderr }),
+      new ExecutionNode({ command: 'test', exitCode: exc.exitCode, stderr }),
     ]
   }
   const code = result ? 0 : 1

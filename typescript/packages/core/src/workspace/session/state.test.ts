@@ -397,3 +397,23 @@ describe('managed variables through the session door', () => {
     expect('TOKEN' in session.vars).toBe(false)
   })
 })
+
+describe('a failing coercion', () => {
+  it('lands what it assigned before the error', async () => {
+    // bash: `declare -i n; x='y=5,1/0'; n=x` refuses the assignment but
+    // leaves y at 5, and a RANDOM seed in the expression seeds.
+    const [view, s] = makeView()
+    s.vars[RANDOM] = makeVar('1')
+    seedVar(s, 'n', '0')
+    setAttr(s, 'n', VarAttr.Integer)
+    seedVar(s, 'x', 'y=5,1/0')
+    await expect(view.set('n', 'x')).rejects.toBeInstanceOf(ArithError)
+    expect(s.vars.y?.value).toBe('5')
+    // The refused assignment left n as it was.
+    expect(s.env.n).toBe('0')
+    seedVar(s, 'x', 'RANDOM=42,1/0')
+    await expect(view.set('n', 'x')).rejects.toBeInstanceOf(ArithError)
+    const drawn = s.vars[RANDOM].value
+    expect(nextRandom(s, typeof drawn === 'string' ? drawn : undefined)).toBe(17772)
+  })
+})

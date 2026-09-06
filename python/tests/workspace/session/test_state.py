@@ -28,8 +28,9 @@ from mirage.workspace.session.session import vars_from_env
 from mirage.workspace.session.state import (element_index, env_snapshot,
                                             next_random, seed_var,
                                             session_elements, session_view,
-                                            set_attr, strip_key_quotes,
-                                            subscript_index, visible_env)
+                                            set_attr, set_var,
+                                            strip_key_quotes, subscript_index,
+                                            visible_env)
 
 
 class DenySecrets(Policy):
@@ -434,3 +435,24 @@ def test_profile_reads_the_session_profile():
     assert view.profile() is None
     session.profile = "admin"
     assert view.profile() == "admin"
+
+
+def test_a_failing_coercion_lands_what_it_assigned():
+    # bash: `declare -i n; x='y=5,1/0'; n=x` refuses the assignment but
+    # leaves y at 5, and a RANDOM seed in the expression seeds.
+    session = Session(session_id="s", cwd="/")
+    session.vars["RANDOM"] = ShellVar("1")
+    set_attr(session, "n", VarAttr.INTEGER)
+    seed_var(session, "x", "y=5,1/0")
+
+    async def run():
+        with pytest.raises(ArithError):
+            await set_var(session, None, "n", "x")
+        assert session.vars["y"].value == "5"
+        assert "n" not in session.env
+        seed_var(session, "x", "RANDOM=42,1/0")
+        with pytest.raises(ArithError):
+            await set_var(session, None, "n", "x")
+        assert next_random(session, session.vars["RANDOM"].value) == 17772
+
+    asyncio.run(run())

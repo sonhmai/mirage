@@ -65,13 +65,26 @@ class CondOr:
 class CondError(Exception):
     """A test/[/[[ usage error: bash prints the message and returns 2.
 
+    A ``[[`` grammar error is a parse error that kills the line; an
+    arithmetic error inside a numeric operand (``[[ 0 -eq 1/0 ]]``) is
+    not: bash prints it and the test answers 1, the line going on, so it
+    carries its own status and is never fatal.
+
     Args:
         message (str): diagnostic without trailing newline.
+        exit_code (int): the status the test answers with.
+        fatal (bool): whether a ``[[`` reports it as a parse error that
+            ends the line.
     """
 
-    def __init__(self, message: str) -> None:
+    def __init__(self,
+                 message: str,
+                 exit_code: int = 2,
+                 fatal: bool = True) -> None:
         super().__init__(message)
         self.message = message
+        self.exit_code = exit_code
+        self.fatal = fatal
 
 
 @dataclass(frozen=True, slots=True)

@@ -125,8 +125,17 @@ async def _install(dispatch: DispatchFn, session: Session,
                 # (`0<&1`), has nothing to read: the next reader gets
                 # EBADF, as bash's does, until `exec < file` binds a
                 # file again. A dup of stdin onto itself keeps the file
-                # an earlier `exec <f` bound.
-                if r.target != FD_STDIN:
+                # an earlier `exec <f` bound, and so does a dup from a
+                # descriptor that itself holds stdin's read end
+                # (`exec 1<&0; exec 0<&1`), which bash reads from as
+                # before. Not modelled: a stdin rebound between the two
+                # dups, which bash's fd 1 would still hold the old end of.
+                reads = r.target == FD_STDIN or (
+                    r.target != FD_CLOSE
+                    and _identity(session, r.target)[0] == TO_STDIN)
+                if reads:
+                    session.exec_stdin_unreadable = False
+                else:
                     session.exec_stdin = None
                     session.exec_stdin_unreadable = True
             elif r.target == FD_CLOSE:

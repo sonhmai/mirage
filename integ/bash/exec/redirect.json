@@ -408,6 +408,41 @@
         "stdout": "rc=0\nrc=2\nrc=1\nrc=1\n/data/dv/f\nrc=0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "exec_dup_from_a_reading_descriptor_keeps_stdin_readable",
+      "seq": 940112,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'l1\\nl2\\n' > /data/fin; printf 'm1\\nm2\\n' > /data/fin2; ( exec < /data/fin; exec 1<&0; exec 0<&1; read a; echo \"a=$a\" >&2 ); ( exec < /data/fin2; exec 2<&0; exec 0<&2; read a; echo \"a=$a\" ); rm /data/fin /data/fin2",
+      "expect": {
+        "exit": 0,
+        "stdout": "a=m1\n",
+        "stderr": "a=l1\n"
+      },
+      "note": "Two files on purpose: mirage's stdin line buffer is keyed on the bound bytes, so a second `exec < f` of the same file in one line resumes after the first subshell's read where bash reopens at the top; what the case pins is that a dup from a descriptor holding stdin's read end keeps stdin readable."
     }
   ]
 }

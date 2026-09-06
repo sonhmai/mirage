@@ -195,8 +195,17 @@ async function install(
         // A closed stdin, or a writing stream dup'd onto it (`0<&1`), has
         // nothing to read: the next reader gets EBADF, as bash's does,
         // until `exec < file` binds a file again. A dup of stdin onto
-        // itself keeps the file an earlier `exec <f` bound.
-        if (r.target !== FD_STDIN) {
+        // itself keeps the file an earlier `exec <f` bound, and so does a
+        // dup from a descriptor that itself holds stdin's read end (`exec
+        // 1<&0; exec 0<&1`), which bash reads from as before. Not
+        // modelled: a stdin rebound between the two dups, which bash's fd
+        // 1 would still hold the old end of.
+        const reads =
+          r.target === FD_STDIN ||
+          (r.target !== FD_CLOSE && identity(session, r.target)[0] === TO_STDIN)
+        if (reads) {
+          session.execStdinUnreadable = false
+        } else {
           session.execStdin = null
           session.execStdinUnreadable = true
         }

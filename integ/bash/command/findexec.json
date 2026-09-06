@@ -2027,6 +2027,40 @@
         "stdout": "ran\nrc=0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "find_exec_runs_a_program_a_function_shadows",
+      "seq": 981538,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fs; printf 'content\\n' > /data/fs/f; cd /data/fs; cat() { echo BAD; }; find . -type f -exec cat {} \\; ; echo rc=$?; unset -f cat; cd / && rm -r /data/fs",
+      "expect": {
+        "exit": 0,
+        "stdout": "content\nrc=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

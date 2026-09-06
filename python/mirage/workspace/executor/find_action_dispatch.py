@@ -27,11 +27,11 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, StatPath
 from mirage.policy import pre_ops_gate
 from mirage.runtime.types import DispatchFn
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
 from mirage.utils.errors import fs_strerror
 from mirage.utils.path import resolve_path
 from mirage.workspace.lookup.constants import SHELL_ONLY_BUILTINS
-from mirage.workspace.lookup.lookup import lookup
+from mirage.workspace.lookup.lookup import lookup_all
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -75,9 +75,10 @@ def exec_line(action: ExecAction, paths: list[str]) -> str:
     return shlex.join(exec_words(action, paths))
 
 
-async def _head_missing(head: str, registry: MountRegistry, cwd: str,
-                        stat_path: StatPath | None) -> bool:
-    """Whether ``execvp`` would fail to find an ``-exec`` head word.
+async def _head_state(head: str, registry: MountRegistry, cwd: str,
+                      stat_path: StatPath | None) -> tuple[bool, bool]:
+    """Whether ``execvp`` would fail to find an ``-exec`` head word, and
+    whether a shell function shadows the program it would find.
 
     A head carrying a slash is a file the loader runs, which no
     builtin, function or CLI can claim, so it is statted where the
@@ -88,7 +89,11 @@ async def _head_missing(head: str, registry: MountRegistry, cwd: str,
     defined, so ``f(){ :; }; find d -exec f {} \\;`` and
     ``find d -exec cd {} \\;`` report ``No such file or directory``
     per match while ``-exec echo`` or ``-exec sh -c`` runs
-    (``SHELL_ONLY_BUILTINS`` names the shell's own).
+    (``SHELL_ONLY_BUILTINS`` names the shell's own). Every layer is
+    asked, not the winner: ``execvp`` never sees the function
+    ``cat(){ ...; }`` defines, so ``-exec cat`` still finds the
+    program, and the run bypasses the function the way ``command``
+    does.
 
     Args:
         head (str): the first word of the action.
@@ -99,14 +104,15 @@ async def _head_missing(head: str, registry: MountRegistry, cwd: str,
     """
     if "/" in head:
         return (stat_path is not None
-                and await stat_path(resolve_path(head, cwd)) is None)
+                and await stat_path(resolve_path(head, cwd)) is None), False
     sess = get_current_session()
     if sess is None:
-        return False
-    consumer = lookup(head, sess, registry)
-    if consumer is Consumer.SESSION:
-        return head in SHELL_ONLY_BUILTINS
-    return consumer in (Consumer.UNKNOWN, Consumer.FUNCTION)
+        return False, False
+    layers = lookup_all(head, sess, registry)
+    program = any(layer is not Consumer.FUNCTION and (
+        layer is not Consumer.SESSION or head not in SHELL_ONLY_BUILTINS)
+                  for layer in layers)
+    return not program, Consumer.FUNCTION in layers
 
 
 async def _run_exec(execute_fn: ExecuteLine, session_id: str,
@@ -140,10 +146,14 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
     # `-exec {} \;` runs each match itself.
     words = exec_words(action, paths)
     head = words[0] if words else action.argv[0]
-    if await _head_missing(head, registry, cwd, stat_path):
+    missing, shadowed = await _head_state(head, registry, cwd, stat_path)
+    if missing:
         errors.append(f"find: '{head}': No such file or directory\n".encode())
         return False
-    io = await execute_fn(f"( {shlex.join(words)} )", session_id=session_id)
+    # A function of the head's name is invisible to execvp, so the line
+    # runs the program past it, as `command` does.
+    line = ("command " if shadowed else "") + shlex.join(words)
+    io = await execute_fn(f"( {line} )", session_id=session_id)
     if io.stdout is not None:
         data = await materialize(io.stdout)
         if data:
@@ -157,7 +167,8 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
 
 async def _delete(ps: PathSpec, registry: MountRegistry, cwd: str,
                   ns: NamespaceView | None, dispatch: DispatchFn | None,
-                  errors: list[bytes], namespace: Namespace | None) -> bool:
+                  errors: list[bytes], namespace: Namespace | None,
+                  stat_path: StatPath | None) -> bool:
     """Delete one accepted row; returns whether it succeeded.
 
     A symlink row came from the namespace, which no backend can see, so
@@ -179,6 +190,8 @@ async def _delete(ps: PathSpec, registry: MountRegistry, cwd: str,
         errors (list[bytes]): where a failure's line is appended.
         namespace (Namespace | None): the node table a removed row's
             meta is dropped from; None outside a workspace.
+        stat_path (StatPath | None): dispatcher stat, which tells a
+            directory row (admitted as ``rmdir``) from a file (``unlink``).
     """
     path = ps.raw_path or ps.virtual
     link = (dispatch is not None and ns is not None and ns.links is not None
@@ -201,8 +214,14 @@ async def _delete(ps: PathSpec, registry: MountRegistry, cwd: str,
         # are suspended for the call, so the deletion admits exactly
         # once. -d so a directory emptied by the rows before it in -depth
         # order is removable, matching GNU -delete's rmdir behavior.
+        # Admitted as the op the row's removal is: a directory row is an
+        # rmdir, so a rule that refuses rmdir and allows unlink judges
+        # `find emptydir -delete` as it judges `rmdir emptydir`.
+        st = await stat_path(ps.virtual) if stat_path is not None else None
+        op = ("rmdir" if st is not None and st.type == FileType.DIRECTORY else
+              "unlink")
         sess = get_current_session()
-        await pre_ops_gate(registry.policies, "unlink", ps, True, mount.prefix,
+        await pre_ops_gate(registry.policies, op, ps, True, mount.prefix,
                            sess.session_id if sess is not None else "")
         token = suspend_op_policies()
         try:
@@ -449,7 +468,7 @@ async def _apply_find_actions(
                 if _structural(match, registry):
                     continue
                 if not await _delete(match, registry, cwd, ns, dispatch,
-                                     errors, namespace):
+                                     errors, namespace, stat_path):
                     exit_code = 1
                     break
             else:

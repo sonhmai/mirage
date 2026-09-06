@@ -16,15 +16,25 @@ import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { MountMode } from '../../types.ts'
+import type { Action, OpsContext, Policy } from '../../policy/index.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
-async function shellWs(): Promise<Workspace> {
+class NoRmdir implements Policy {
+  preOps(ctx: OpsContext): Action | null {
+    return ctx.op === 'rmdir' ? { kind: 'deny', reason: 'no rmdir' } : null
+  }
+}
+
+async function shellWs(policies: Policy[] = []): Promise<Workspace> {
   const parser = await getTestParser()
   const ops = new OpsRegistry()
   const root = new RAMResource()
   ops.registerResource(root)
-  const ws = new Workspace({ '/': root }, { mode: MountMode.WRITE, ops, shellParser: parser })
+  const ws = new Workspace(
+    { '/': root },
+    { mode: MountMode.WRITE, ops, shellParser: parser, policies },
+  )
   ws.createSession('s')
   return ws
 }
@@ -60,6 +70,38 @@ describe('find actions', () => {
       expect(r.stdoutText).toBe('rc=0\n')
       expect(ws.namespace.metaFor('/data/m/f')).toBeNull()
       expect(ws.namespace.metaFor('/data/m/d')).not.toBeNull()
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('runs a program a function shadows', async () => {
+    // execvp never sees a shell function, so `cat(){ ...; }` neither
+    // hides the program from find nor runs in its place.
+    const ws = await shellWs()
+    try {
+      const r = await ws.execute(
+        "mkdir -p /data/sh; printf 'content\\n' > /data/sh/f; cd /data/sh; cat() { echo BAD; }; find . -type f -exec cat {} \\; ; echo rc=$?",
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe('content\nrc=0\n')
+      expect(r.stderrText).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('admits a directory deletion as rmdir', async () => {
+    // A rule that refuses rmdir and allows unlink judges `find emptydir
+    // -delete` as it judges `rmdir emptydir`.
+    const ws = await shellWs([new NoRmdir()])
+    try {
+      const r = await ws.execute(
+        'mkdir -p /data/rd/e; touch /data/rd/f; find /data/rd/f -delete; echo rc=$?; find /data/rd/e -delete; echo rc=$?; test -d /data/rd/e; echo $?',
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe('rc=0\nrc=1\n0\n')
+      expect(r.stderrText).toContain("find: cannot delete '/data/rd/e': no rmdir")
     } finally {
       await ws.close()
     }

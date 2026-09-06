@@ -98,6 +98,8 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
         reader = random_reader(ctx.session)
         values = []
         for operand in (node.left, node.right):
+            error: ArithError | None = None
+            value = 0
             try:
                 result = evaluate_arith(operand,
                                         visible_env(ctx.session),
@@ -105,17 +107,27 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
                                             ctx.session, reader),
                                         read_var=reader.read,
                                         wrote_var=reader.wrote)
-            except ArithError:
-                raise CondError(
-                    "mirage: syntax error in conditional expression")
-            for write in result.writes:
+                writes, value = result.writes, result.value
+            except ArithError as exc:
+                # bash bound what the operand assigned before it failed
+                # (`y='x=6,1/0'; [[ 0 -eq y ]]` leaves x at 6, and a
+                # RANDOM seed in it is drawn from); they land, and the
+                # reader settles, before the error reports.
+                error, writes = exc, exc.writes
+            for write in writes:
                 status = await assign_element(ctx.session, ctx.view,
                                               write.name, write.key,
                                               write.value)
                 if status != "ok":
                     raise CondError(f"{ctx.name}: {write.name}: {status}")
             reader.settle()
-            values.append(result.value)
+            if error is not None:
+                # bash: `[[: 1/0: division by 0`, status 1, and the line
+                # goes on; only a grammar error is fatal.
+                raise CondError(f"bash: {ctx.name}: {operand}: {error}",
+                                exit_code=1,
+                                fatal=False)
+            values.append(value)
         return compare(values[0], values[1])
     if node.op in FILE_PAIR_BINARY:
         return await apply_file_pair(ctx, node.op, node.left, node.right)

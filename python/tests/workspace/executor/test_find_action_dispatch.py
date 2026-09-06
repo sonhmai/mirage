@@ -23,6 +23,7 @@ import re
 
 import pytest
 
+from mirage.policy import Deny, Policy
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
@@ -718,5 +719,50 @@ async def test_delete_drops_the_rows_node_meta():
         assert await io.stdout_str() == "rc=0\n"
         assert ws._namespace.meta_for("/data/m/f") is None
         assert ws._namespace.meta_for("/data/m/d") is not None
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_exec_runs_a_program_a_function_shadows():
+    # execvp never sees a shell function, so `cat(){ ...; }` neither
+    # hides the program from find nor runs in its place.
+    ws = _ws()
+    try:
+        io = await ws.execute(
+            "mkdir -p /data/sh; printf 'content\\n' > /data/sh/f; "
+            "cd /data/sh; "
+            "cat() { echo BAD; }; "
+            "find . -type f -exec cat {} \\; ; "
+            "echo rc=$?")
+        assert await io.stdout_str() == "content\nrc=0\n"
+        assert await io.stderr_str() == ""
+    finally:
+        await ws.close()
+
+
+class _NoRmdir(Policy):
+
+    async def pre_ops(self, ctx):
+        if ctx.op == "rmdir":
+            return Deny(reason="no rmdir")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_delete_admits_a_directory_as_rmdir():
+    # A rule that refuses rmdir and allows unlink judges `find emptydir
+    # -delete` as it judges `rmdir emptydir`.
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   policies=[_NoRmdir()])
+    try:
+        io = await ws.execute(
+            "mkdir -p /data/rd/e; touch /data/rd/f; "
+            "find /data/rd/f -delete; echo rc=$?; "
+            "find /data/rd/e -delete; echo rc=$?; test -d /data/rd/e; echo $?")
+        assert await io.stdout_str() == "rc=0\nrc=1\n0\n"
+        assert "find: cannot delete '/data/rd/e': no rmdir" in (
+            await io.stderr_str())
     finally:
         await ws.close()

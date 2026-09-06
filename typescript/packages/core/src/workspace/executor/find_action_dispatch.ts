@@ -25,9 +25,10 @@ import { preOpsGate } from '../../policy/policies.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { SHELL_ONLY_BUILTINS } from '../lookup/constants.ts'
-import { lookup } from '../lookup/lookup.ts'
+import { lookupAll } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { NamespaceView, StatPath } from '../../ops/types.ts'
+import { FileType } from '../../types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import {
   EXEC_PLACEHOLDER,
@@ -98,20 +99,21 @@ export function execLine(action: ExecAction, paths: readonly string[]): string {
 }
 
 /**
- * Whether `execvp` would fail to find an `-exec` head word. A head
- * carrying a slash is a file the loader runs, which no builtin, function
- * or CLI can claim, so it is statted where the line would read it; any
- * other head is looked up by name across the layers dispatch consults.
- * Outside a workspace there is no stat and the loader answers for itself.
+ * Whether `execvp` would fail to find an `-exec` head word, and whether
+ * a shell function shadows the program it would find. A head carrying a
+ * slash is a file the loader runs, which no builtin, function or CLI can
+ * claim, so it is statted where the line would read it; any other head
+ * is looked up by name across the layers dispatch consults. Outside a
+ * workspace there is no stat and the loader answers for itself.
  */
-async function headMissing(
+async function headState(
   head: string,
   registry: MountRegistry,
   cwd: string,
   statPath: StatPath | null,
-): Promise<boolean> {
+): Promise<[boolean, boolean]> {
   if (head.includes('/')) {
-    return statPath !== null && (await statPath(resolvePath(head, cwd))) === null
+    return [statPath !== null && (await statPath(resolvePath(head, cwd))) === null, false]
   }
   const sess = getCurrentSession()
   // A shell function is not found either, nor a builtin that is the
@@ -119,11 +121,17 @@ async function headMissing(
   // and nothing the shell defined, so `f(){ :; }; find d -exec f {} \;`
   // and `find d -exec cd {} \;` report `No such file or directory` per
   // match while `-exec echo` or `-exec sh -c` runs (SHELL_ONLY_BUILTINS
-  // names the shell's own).
-  if (sess === null) return false
-  const consumer = lookup(head, sess, registry)
-  if (consumer === Consumer.SESSION) return SHELL_ONLY_BUILTINS.has(head)
-  return consumer === Consumer.UNKNOWN || consumer === Consumer.FUNCTION
+  // names the shell's own). Every layer is asked, not the winner: execvp
+  // never sees the function `cat(){ ...; }` defines, so `-exec cat` still
+  // finds the program, and the run bypasses the function the way
+  // `command` does.
+  if (sess === null) return [false, false]
+  const layers = lookupAll(head, sess, registry)
+  const program = layers.some(
+    (layer) =>
+      layer !== Consumer.FUNCTION && (layer !== Consumer.SESSION || !SHELL_ONLY_BUILTINS.has(head)),
+  )
+  return [!program, layers.includes(Consumer.FUNCTION)]
 }
 
 /**
@@ -151,11 +159,15 @@ async function runExec(
   // \;` runs each match itself.
   const words = execWords(action, paths)
   const head = words[0] ?? action.argv[0] ?? ''
-  if (await headMissing(head, registry, cwd, statPath)) {
+  const [missing, shadowed] = await headState(head, registry, cwd, statPath)
+  if (missing) {
     errors.push(enc.encode(`find: '${head}': No such file or directory\n`))
     return false
   }
-  const io = await executeFn(`( ${shellJoin(words)} )`, { sessionId })
+  // A function of the head's name is invisible to execvp, so the line
+  // runs the program past it, as `command` does.
+  const line = (shadowed ? 'command ' : '') + shellJoin(words)
+  const io = await executeFn(`( ${line} )`, { sessionId })
   if (io.stdout !== null) {
     const data = await materialize(io.stdout)
     if (data.byteLength > 0) out.push(data)
@@ -183,6 +195,7 @@ async function deleteRow(
   dispatch: DispatchFn | null,
   errors: Uint8Array[],
   namespace: Namespace | null,
+  statPath: StatPath | null,
 ): Promise<boolean> {
   const path = ps.rawPath || ps.virtual
   const link = dispatch !== null && (ns?.links?.statAt(ps.virtual) ?? null) !== null
@@ -205,9 +218,14 @@ async function deleteRow(
     // call, so the deletion admits exactly once. -d so a directory
     // emptied by the rows before it in -depth order is removable,
     // matching GNU -delete's rmdir behavior.
+    // Admitted as the op the row's removal is: a directory row is an
+    // rmdir, so a rule that refuses rmdir and allows unlink judges `find
+    // emptydir -delete` as it judges `rmdir emptydir`.
+    const st = statPath === null ? null : await statPath(ps.virtual)
+    const op = st !== null && st.type === FileType.DIRECTORY ? 'rmdir' : 'unlink'
     await preOpsGate(
       registry.policies,
-      'unlink',
+      op,
       ps,
       true,
       mount.prefix,
@@ -438,7 +456,7 @@ export async function applyFindActions(
         // A structural row is skipped, not refused, the way Unix leaves
         // a mount point in place.
         if (structural(match, registry)) continue
-        if (!(await deleteRow(match, registry, cwd, ns, dispatch, errors, namespace))) {
+        if (!(await deleteRow(match, registry, cwd, ns, dispatch, errors, namespace, statPath))) {
           exitCode = 1
           break
         }

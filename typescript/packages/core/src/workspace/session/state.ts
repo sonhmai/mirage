@@ -643,10 +643,18 @@ async function setVar(
   // value that will land: `declare -l profile; profile=ADMIN` stores `admin`,
   // and a rule refusing `admin` must see that, not the raw text.
   const coercion = new IntegerCoercion(session)
-  const shaped =
-    existing !== undefined && existing.attrs.size > 0
-      ? coerceValue(value, existing.attrs, coercion.run)
-      : value
+  let shaped: ShellValue = value
+  if (existing !== undefined && existing.attrs.size > 0) {
+    try {
+      shaped = coerceValue(value, existing.attrs, coercion.run)
+    } catch (err) {
+      // bash bound what the expression assigned before it failed
+      // (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a RANDOM
+      // seed in it seeds); they land, gated, before the refusal reports.
+      if (err instanceof ArithError) await landCoercion(session, policies, coercion)
+      throw err
+    }
+  }
   const rendered =
     typeof shaped === 'string'
       ? shaped

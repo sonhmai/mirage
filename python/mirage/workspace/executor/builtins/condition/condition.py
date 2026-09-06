@@ -63,14 +63,15 @@ async def handle_test(
             result = await eval_cond(ctx, args)
     except CondError as err:
         stderr = (err.message + "\n").encode()
-        if name == "[[":
+        if name == "[[" and err.fatal:
             # A bad [[ ]] operator is a bash PARSE error: the whole
             # input line dies, not just this command.
             raise ExitSignal(2, stderr=stderr, contained_code=2)
-        return None, IOResult(exit_code=2,
-                              stderr=stderr), ExecutionNode(command="test",
-                                                            exit_code=2,
-                                                            stderr=stderr)
+        return None, IOResult(exit_code=err.exit_code,
+                              stderr=stderr), ExecutionNode(
+                                  command="test",
+                                  exit_code=err.exit_code,
+                                  stderr=stderr)
     code = 0 if result else 1
     return None, IOResult(exit_code=code), ExecutionNode(command="test",
                                                          exit_code=code)

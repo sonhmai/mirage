@@ -14,7 +14,7 @@
 
 import { randomReader, seedVar, sessionElements } from '../../../session/state.ts'
 import { evaluateArith } from '../../../../shell/arith.ts'
-import type { ArithResult } from '../../../../shell/types.ts'
+import type { ArithResult, ArithWrite } from '../../../../shell/types.ts'
 import { assignElement } from '../../../session/elements.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { makeArray } from '../../../../shell/array.ts'
@@ -90,9 +90,11 @@ async function evalCondBinary(
     const reader = randomReader(ctx.session)
     const values: bigint[] = []
     for (const operand of [node.left, node.right]) {
-      let result: ArithResult
+      let error: ArithError | null = null
+      let value = 0n
+      let writes: readonly ArithWrite[]
       try {
-        result = evaluateArith(
+        const result: ArithResult = evaluateArith(
           operand,
           visibleEnv(ctx.session),
           0,
@@ -100,11 +102,18 @@ async function evalCondBinary(
           reader.read,
           reader.wrote,
         )
+        writes = result.writes
+        value = result.value
       } catch (exc) {
         if (!(exc instanceof ArithError)) throw exc
-        throw new CondError('mirage: syntax error in conditional expression')
+        // bash bound what the operand assigned before it failed
+        // (`y='x=6,1/0'; [[ 0 -eq y ]]` leaves x at 6, and a RANDOM seed
+        // in it is drawn from); they land, and the reader settles, before
+        // the error reports.
+        error = exc
+        writes = exc.writes
       }
-      for (const write of result.writes) {
+      for (const write of writes) {
         const status = await assignElement(
           ctx.session,
           ctx.view ?? null,
@@ -115,7 +124,11 @@ async function evalCondBinary(
         if (status !== 'ok') throw new CondError(`${ctx.name}: ${write.name}: ${status}`)
       }
       reader.settle()
-      values.push(result.value)
+      // bash: `[[: 1/0: division by 0`, status 1, and the line goes on;
+      // only a grammar error is fatal.
+      if (error !== null)
+        throw new CondError(`bash: ${ctx.name}: ${operand}: ${error.message}`, 1, false)
+      values.push(value)
     }
     return compare(values[0] ?? 0n, values[1] ?? 0n)
   }

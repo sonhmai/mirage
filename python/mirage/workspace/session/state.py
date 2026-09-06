@@ -793,7 +793,15 @@ async def set_var(session: Session,
     # rule refusing `admin` must see that, not the raw text.
     coercion = _IntegerCoercion(session)
     if existing is not None and existing.attrs:
-        value = coerce_value(value, existing.attrs, coercion)
+        try:
+            value = coerce_value(value, existing.attrs, coercion)
+        except ArithError:
+            # bash bound what the expression assigned before it failed
+            # (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a
+            # RANDOM seed in it seeds); they land, gated, before the
+            # refusal reports.
+            await _land_coercion(session, policies, coercion)
+            raise
     if isinstance(value, str):
         rendered = value
     elif isinstance(value, dict):

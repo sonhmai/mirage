@@ -340,6 +340,12 @@ async def test_arithmetic_random_assignment_seeds_within_the_expression(
         # rest of the expression and lands with it.
         ('a[5]=7; unset x; echo $((a[x=5] + x)); echo "$x"', '12\n5\n'),
         ('a[5]=7; echo $((a[y=5]++ + y)) ${a[5]} $y', '12 8 5\n'),
+        # A failing operand or coercion lands what it assigned before the
+        # error, RANDOM's seed included.
+        ('y="x=6,1/0"; [[ 0 -eq y ]] 2>/dev/null; echo rc=$? "x=$x"',
+         'rc=1 x=6\n'),
+        ('RANDOM=1; y="RANDOM=42,1/0"; [[ 0 -eq y ]] 2>/dev/null; '
+         'echo rc=$? $RANDOM', 'rc=1 17772\n'),
     ])
 @pytest.mark.asyncio
 async def test_subscripts_and_offsets_land_their_assignments(command, stdout):

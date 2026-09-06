@@ -239,3 +239,16 @@ describe('compound assignment', () => {
     expect(result.value).toBe(-9022n)
   })
 })
+
+describe('a variable evaluated as an expression', () => {
+  it('shares the record of the expression around it', () => {
+    // bash: `x='y=5'; $((x))` leaves y at 5, and the nested read sees
+    // the pending updates of the expression around it.
+    const first = evaluateArith('x, y + 1', { x: 'y=5' })
+    expect(first.value).toBe(6n)
+    expect(first.writes.map((w) => [w.name, w.value])).toEqual([['y', '5']])
+    const second = evaluateArith('y=1, x, y', { x: 'y+=1' })
+    expect(second.value).toBe(2n)
+    expect(second.writes.map((w) => [w.name, w.value])).toEqual([['y', '2']])
+  })
+})

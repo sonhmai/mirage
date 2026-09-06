@@ -244,6 +244,14 @@ it.each([
   ['RANDOM=1; [[ RANDOM=42 -eq RANDOM ]]; echo $? $RANDOM', '1 26794\n'],
   ['RANDOM=1; [[ RANDOM=42 -eq 42 ]]; echo $? $RANDOM', '0 17772\n'],
   ['x=1; [[ x=5 -eq 5 ]]; echo $? $x', '0 5\n'],
+  // The left operand's assignments land before the right reads, and a
+  // variable holding an expression lands what it assigns.
+  ['unset x; [[ x=5 -eq x ]]; echo $? $x', '0 5\n'],
+  ['x=1; [[ x+=4 -eq x ]]; echo $? $x', '0 5\n'],
+  ['x="RANDOM=42"; RANDOM=1; echo $((x,RANDOM)) $RANDOM', '17772 26794\n'],
+  ['x="y=5"; echo $((x)) $y', '5 5\n'],
+  ['x="a[2]=7"; echo $((x)) ${a[2]}', '7 7\n'],
+  ['x="y=1, y+=1"; echo $((x + y)) $y', '4 2\n'],
 ])('seeds RANDOM within the expression that assigns it: %s', async (command, stdout) => {
   const { ws } = await makeIntegrationWS()
   try {

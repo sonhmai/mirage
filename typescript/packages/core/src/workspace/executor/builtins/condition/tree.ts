@@ -82,46 +82,42 @@ async function evalCondBinary(
     // [[ evaluates numeric operands as arithmetic: variables resolve,
     // expressions compute, bare unset words are 0. The visible env,
     // so a hidden name reads as unset here too.
-    let left: ArithResult
-    let right: ArithResult
-    const reader = randomReader(ctx.session)
-    try {
-      const elements = sessionElements(ctx.session, reader)
-      left = evaluateArith(
-        node.left,
-        visibleEnv(ctx.session),
-        0,
-        elements,
-        reader.read,
-        reader.wrote,
-      )
-      right = evaluateArith(
-        node.right,
-        visibleEnv(ctx.session),
-        0,
-        elements,
-        reader.read,
-        reader.wrote,
-      )
-    } catch (exc) {
-      if (!(exc instanceof ArithError)) throw exc
-      throw new CondError('mirage: syntax error in conditional expression')
-    }
-    // An assignment inside an operand lands as `(( ))`'s do, through the
-    // gated door, RANDOM's seed included (`[[ RANDOM=42 -eq RANDOM ]]`
+    // bash evaluates the left operand, binds what it assigned, then
+    // evaluates the right (`[[ x=5 -eq x ]]` is true and leaves x at 5),
+    // so each operand lands its assignments through the gated door before
+    // the next reads, RANDOM's seed included (`[[ RANDOM=42 -eq RANDOM ]]`
     // seeds, then draws).
-    for (const write of [...left.writes, ...right.writes]) {
-      const status = await assignElement(
-        ctx.session,
-        ctx.view ?? null,
-        write.name,
-        write.key,
-        write.value,
-      )
-      if (status !== 'ok') throw new CondError(`${ctx.name}: ${write.name}: ${status}`)
+    const reader = randomReader(ctx.session)
+    const values: bigint[] = []
+    for (const operand of [node.left, node.right]) {
+      let result: ArithResult
+      try {
+        result = evaluateArith(
+          operand,
+          visibleEnv(ctx.session),
+          0,
+          sessionElements(ctx.session, reader),
+          reader.read,
+          reader.wrote,
+        )
+      } catch (exc) {
+        if (!(exc instanceof ArithError)) throw exc
+        throw new CondError('mirage: syntax error in conditional expression')
+      }
+      for (const write of result.writes) {
+        const status = await assignElement(
+          ctx.session,
+          ctx.view ?? null,
+          write.name,
+          write.key,
+          write.value,
+        )
+        if (status !== 'ok') throw new CondError(`${ctx.name}: ${write.name}: ${status}`)
+      }
+      reader.settle()
+      values.push(result.value)
     }
-    reader.settle()
-    return compare(left.value, right.value)
+    return compare(values[0] ?? 0n, values[1] ?? 0n)
   }
   if (FILE_PAIR_BINARY.has(node.op)) return applyFilePair(ctx, node.op, node.left, node.right)
   throw new CondError('mirage: conditional binary operator expected')

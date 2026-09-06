@@ -377,15 +377,22 @@ class ArithEvaluator {
     } catch {
       if (this.depth >= ARITH_MAX_DEPTH)
         throw new ArithError(`expression recursion level exceeded (error token is "${text}")`)
-      const { value } = evaluateArith(
-        text,
-        { ...this.env, ...this.updates },
+      // bash evaluates the stored text in the same context: an
+      // assignment it makes lands with the expression's own (`x='y=5';
+      // $((x))` leaves y at 5), a name it reads sees the pending updates,
+      // and its `RANDOM` seed reaches the reader. So the nested run shares
+      // this evaluator's record rather than starting a fresh one.
+      const nested = new ArithEvaluator(
+        this.env,
+        this.updates,
+        this.elemUpdates,
+        this.writes,
         this.depth + 1,
         this.elements,
         this.readVar,
         this.wroteVar,
       )
-      return value
+      return nested.run(new ArithParser(tokenize(text)).parse())
     }
   }
 

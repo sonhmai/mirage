@@ -90,31 +90,33 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
         # [[ evaluates numeric operands as arithmetic: variables
         # resolve, expressions compute, bare unset words are 0. The
         # visible env, so a hidden name reads as unset here too.
-        try:
-            reader = random_reader(ctx.session)
-            elements = session_elements(ctx.session, reader)
-            left = evaluate_arith(node.left,
-                                  visible_env(ctx.session),
-                                  elements=elements,
-                                  read_var=reader.read,
-                                  wrote_var=reader.wrote)
-            right = evaluate_arith(node.right,
-                                   visible_env(ctx.session),
-                                   elements=elements,
-                                   read_var=reader.read,
-                                   wrote_var=reader.wrote)
-        except ArithError:
-            raise CondError("mirage: syntax error in conditional expression")
-        # An assignment inside an operand lands as `(( ))`'s do, through
-        # the gated door, RANDOM's seed included (`[[ RANDOM=42 -eq
-        # RANDOM ]]` seeds, then draws).
-        for write in (*left.writes, *right.writes):
-            status = await assign_element(ctx.session, ctx.view, write.name,
-                                          write.key, write.value)
-            if status != "ok":
-                raise CondError(f"{ctx.name}: {write.name}: {status}")
-        reader.settle()
-        return compare(left.value, right.value)
+        # bash evaluates the left operand, binds what it assigned, then
+        # evaluates the right (`[[ x=5 -eq x ]]` is true and leaves x at
+        # 5), so each operand lands its assignments through the gated
+        # door before the next reads, RANDOM's seed included
+        # (`[[ RANDOM=42 -eq RANDOM ]]` seeds, then draws).
+        reader = random_reader(ctx.session)
+        values = []
+        for operand in (node.left, node.right):
+            try:
+                result = evaluate_arith(operand,
+                                        visible_env(ctx.session),
+                                        elements=session_elements(
+                                            ctx.session, reader),
+                                        read_var=reader.read,
+                                        wrote_var=reader.wrote)
+            except ArithError:
+                raise CondError(
+                    "mirage: syntax error in conditional expression")
+            for write in result.writes:
+                status = await assign_element(ctx.session, ctx.view,
+                                              write.name, write.key,
+                                              write.value)
+                if status != "ok":
+                    raise CondError(f"{ctx.name}: {write.name}: {status}")
+            reader.settle()
+            values.append(result.value)
+        return compare(values[0], values[1])
     if node.op in FILE_PAIR_BINARY:
         return await apply_file_pair(ctx, node.op, node.left, node.right)
     raise CondError("mirage: conditional binary operator expected")

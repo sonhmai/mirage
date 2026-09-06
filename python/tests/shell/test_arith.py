@@ -206,3 +206,14 @@ def test_compound_assignment_reads_the_target_before_the_right_side():
     draws = iter(["17772", "26794"])
     result = evaluate_arith("D-=D", {}, read_var=lambda n: next(draws))
     assert result.value == -9022
+
+
+def test_a_variable_evaluated_as_an_expression_shares_the_record():
+    # bash: `x='y=5'; $((x))` leaves y at 5, and the nested read sees the
+    # pending updates of the expression around it.
+    result = evaluate_arith("x, y + 1", {"x": "y=5"})
+    assert result.value == 6
+    assert [(w.name, w.value) for w in result.writes] == [("y", "5")]
+    result = evaluate_arith("y=1, x, y", {"x": "y+=1"})
+    assert result.value == 2
+    assert [(w.name, w.value) for w in result.writes] == [("y", "2")]

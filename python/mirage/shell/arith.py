@@ -380,13 +380,16 @@ class ArithEvaluator:
                 raise ArithError(
                     f"expression recursion level exceeded (error token is "
                     f'"{raw}")') from None
-            result = evaluate_arith(raw,
-                                    self._merged_env(),
-                                    depth=self.depth + 1,
-                                    elements=self.elements,
-                                    read_var=self.read_var,
-                                    wrote_var=self.wrote_var)
-            return result.value
+            # bash evaluates the stored text in the same context: an
+            # assignment it makes lands with the expression's own
+            # (`x='y=5'; $((x))` leaves y at 5), a name it reads sees
+            # the pending updates, and its `RANDOM` seed reaches the
+            # reader. So the nested run shares this evaluator's record
+            # rather than starting a fresh one.
+            nested = ArithEvaluator(self.env, self.updates, self.elem_updates,
+                                    self.writes, self.depth + 1, self.elements,
+                                    self.read_var, self.wrote_var)
+            return nested.run(ArithParser(_tokenize(raw)).parse())
 
     def lookup(self, name: str) -> int:
         # A dynamic name is asked first: the reader has been told of every

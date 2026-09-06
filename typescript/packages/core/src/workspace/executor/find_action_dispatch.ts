@@ -155,17 +155,26 @@ async function headState(
  * child as its stdin, and the first read drains it.
  */
 class SharedStdin implements AsyncIterable<Uint8Array> {
-  constructor(private data: Uint8Array) {}
+  private source: ByteSource | null
 
+  constructor(source: ByteSource) {
+    this.source = source
+  }
+
+  // The source is read only on the first iteration: find itself never
+  // reads its stdin, so a walk with no reading child (`yes | find d
+  // -maxdepth 0`) must not wait on it.
   [Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
-    const data = this.data
-    this.data = new Uint8Array()
-    let done = data.byteLength === 0
+    const source = this.source
+    this.source = null
+    let done = source === null
     return {
-      next: () => {
-        if (done) return Promise.resolve({ done: true, value: undefined })
+      next: async () => {
+        if (done || source === null) return { done: true, value: undefined }
         done = true
-        return Promise.resolve({ done: false, value: data })
+        const data = await materialize(source)
+        if (data.byteLength === 0) return { done: true, value: undefined }
+        return { done: false, value: data }
       },
     }
   }
@@ -433,9 +442,7 @@ export async function applyFindActions(
   const identity = doors.identity ?? null
   const namespace = doors.namespace ?? null
   const once =
-    doors.stdin === undefined || doors.stdin === null
-      ? null
-      : new SharedStdin(await materialize(doors.stdin))
+    doors.stdin === undefined || doors.stdin === null ? null : new SharedStdin(doors.stdin)
   if (matchedRuns === null)
     return [null, enc.encode('find: actions require structured matches\n'), 1]
   const matches = matchedRuns.flatMap((run) =>

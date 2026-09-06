@@ -106,8 +106,13 @@ async def _out(ws: Workspace, line: str) -> str:
         ("false | true; echo ${PIPESTATUS[@]}; echo ${PIPESTATUS[@]}",
          "1 0\n0"),
         ("set -o pipefail; false | true; echo $? ${PIPESTATUS[@]}", "1 1 0"),
-        # A fresh shell starts with the one-segment status 0.
-        ("echo \"[${PIPESTATUS[@]}]\"", "[0]"),
+        # A fresh shell's PIPESTATUS is empty (pinned on bash 5.2), and a
+        # loop that never iterates stamps 0 only into that empty record.
+        ("echo \"[${PIPESTATUS[@]}]\"", "[]"),
+        ("for x in; do :; done; echo \"[${PIPESTATUS[@]}]\"", "[0]"),
+        ("false; for x in; do :; done; echo ${PIPESTATUS[@]}", "1"),
+        ("false | true; for x in; do :; done; echo ${PIPESTATUS[@]}", "1 0"),
+        ("f() { :; }; echo \"[${PIPESTATUS[@]}]\"", "[]"),
         ("! false | true; echo $? ${PIPESTATUS[@]}", "1 1 0"),
         ("f() { false | true; }; f; echo ${PIPESTATUS[@]}", "0"),
         ("false | true; { true; false; } | echo ${PIPESTATUS[*]}", "1 0"),

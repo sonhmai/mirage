@@ -122,22 +122,28 @@ class _SharedStdin:
     GNU's children inherit find's stdin descriptor, so its offset moves
     only when a child reads: ``-exec true \\; -exec cat \\;`` leaves the
     bytes for cat, while two cats see them once. The same object rides
-    into every child as its stdin, and the first read drains it.
+    into every child as its stdin, and the first read drains it. The
+    source is read only then: find itself never reads its stdin, so a
+    walk with no reading child (``yes | find d -maxdepth 0``) must not
+    wait on it.
 
     Args:
-        data (bytes): find's materialized input.
+        source (ByteSource): find's own input, unread.
     """
 
-    __slots__ = ("_data", )
+    __slots__ = ("_source", )
 
-    def __init__(self, data: bytes) -> None:
-        self._data = data
+    def __init__(self, source: ByteSource) -> None:
+        self._source: ByteSource | None = source
 
     def __aiter__(self) -> AsyncIterator[bytes]:
         return self._drain()
 
     async def _drain(self) -> AsyncIterator[bytes]:
-        data, self._data = self._data, b""
+        source, self._source = self._source, None
+        if source is None:
+            return
+        data = await materialize(source)
         if data:
             yield data
 
@@ -455,8 +461,7 @@ async def _apply_find_actions(
             reader, and a child that never reads leaves it for the next);
             None keeps the ambient stdin for every child.
     """
-    once = (_SharedStdin(await materialize(stdin))
-            if stdin is not None else None)
+    once = _SharedStdin(stdin) if stdin is not None else None
     expr = parse_find_expression(list(texts))
     reorders = expr.depth_first and expr.printf is None
     if stdout is None or not (_has_actions(expr) or reorders):

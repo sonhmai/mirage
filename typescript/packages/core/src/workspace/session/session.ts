@@ -385,9 +385,9 @@ export class Session {
   // pipeline, where a simple command is a one-segment pipeline. Written
   // only through `recordStatus` (`executor/statement.ts`), the one door
   // `$?` goes through as well, so the two can never disagree.
-  // A fresh shell starts with the one-segment status `0`, as bash
-  // does, so the first `${PIPESTATUS[*]}` expands to `0`.
-  pipeStatus: readonly number[] = [0]
+  // Empty in a fresh shell, as bash's is: the first `${PIPESTATUS[*]}`
+  // expands to nothing until a statement records one.
+  pipeStatus: readonly number[] = []
   // A pipeline's per-segment statuses, parked by `handlePipe` for the
   // statement boundary that closes it to claim. Null between them.
   pipeStatusPending: readonly number[] | null = null

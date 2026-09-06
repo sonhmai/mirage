@@ -808,6 +808,11 @@ async function executeNodeBody(
         registry.policies,
       )
     }
+    // bash: a loop that never iterates leaves `${PIPESTATUS[*]}` as it
+    // stood, except in a shell that has recorded nothing yet, where it
+    // stamps the loop's own 0 (pinned on bash 5.2: fresh `for x in; do :;
+    // done` then `<0>`, `false; for ...` then `<1>`).
+    if (resolved.length === 0 && session.pipeStatus.length === 0) recordStatus(session, 0)
     return handleFor(stream, variable, resolved, body, session, stdin, callStack, registry.policies)
   }
 

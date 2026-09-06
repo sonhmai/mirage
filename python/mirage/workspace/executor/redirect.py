@@ -136,11 +136,24 @@ async def handle_redirect(
     inputs: list[ByteSource | None | _Unreadable] = [
         stdin, _Unreadable.TOKEN, _Unreadable.TOKEN
     ]
+    # A descriptor an earlier redirect closed is not merely write-only:
+    # a later dup from it is bash's `0: Bad file descriptor`, and the
+    # command never runs (`touch marker 0<&- 1<&0` creates nothing). A
+    # dup of a closed descriptor onto itself stays the no-op it is.
+    closed: set[int] = set()
     for r in redirects:
         if isinstance(r.target, int):
-            inputs[r.fd] = (_Unreadable.TOKEN
-                            if r.target == FD_CLOSE else inputs[r.target])
+            if r.target == FD_CLOSE:
+                closed.add(r.fd)
+                inputs[r.fd] = _Unreadable.TOKEN
+                continue
+            if r.target in closed and r.target != r.fd:
+                return _shell_failure(bad_descriptor_line(r.target))
+            inputs[r.fd] = inputs[r.target]
+            closed.discard(r.fd)
             continue
+        for fd in ([FD_STDOUT, FD_STDERR] if r.fd == FD_BOTH else [r.fd]):
+            closed.discard(fd)
         if r.kind == RedirectKind.STDIN:
             scope = _ensure_scope(r.target)
             try:

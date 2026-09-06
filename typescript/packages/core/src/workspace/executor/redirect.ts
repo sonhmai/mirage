@@ -114,12 +114,27 @@ export async function handleRedirect(
   // as a source that fails on its first read, as in bash (`cat 0<&1`,
   // `cat <&-`), while one that never reads is untouched (`true 0<&1`).
   const inputs: (ByteSource | null | typeof UNREADABLE)[] = [stdin, UNREADABLE, UNREADABLE]
+  // A descriptor an earlier redirect closed is not merely write-only: a
+  // later dup from it is bash's `0: Bad file descriptor`, and the command
+  // never runs (`touch marker 0<&- 1<&0` creates nothing). A dup of a
+  // closed descriptor onto itself stays the no-op it is.
+  const closed = new Set<number>()
 
   for (const r of redirects) {
     if (typeof r.target === 'number') {
-      inputs[r.fd] = r.target === FD_CLOSE ? UNREADABLE : (inputs[r.target] ?? null)
+      if (r.target === FD_CLOSE) {
+        closed.add(r.fd)
+        inputs[r.fd] = UNREADABLE
+        continue
+      }
+      if (closed.has(r.target) && r.target !== r.fd) {
+        return shellFailure(badDescriptorLine(r.target))
+      }
+      inputs[r.fd] = inputs[r.target] ?? null
+      closed.delete(r.fd)
       continue
     }
+    for (const fd of r.fd === FD_BOTH ? [FD_STDOUT, FD_STDERR] : [r.fd]) closed.delete(fd)
     if (r.kind === RedirectKind.STDIN) {
       const scope = ensureScope(r.target)
       let data: unknown

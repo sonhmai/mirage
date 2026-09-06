@@ -115,11 +115,36 @@ async def _head_state(head: str, registry: MountRegistry, cwd: str,
     return not program, Consumer.FUNCTION in layers
 
 
+class _StdinOnce:
+    """find's own input, handed to the first ``-exec`` child that runs.
+
+    GNU's children inherit find's stdin, and a pipe feeds one reader:
+    the first child that reads takes it, the ones after read EOF. A
+    child of a find with no input of its own (None) keeps the ambient
+    stdin.
+
+    Args:
+        data (bytes | None): find's materialized input, None for none.
+    """
+
+    __slots__ = ("_data", )
+
+    def __init__(self, data: bytes | None) -> None:
+        self._data = data
+
+    def take(self) -> bytes | None:
+        """The input for the next child."""
+        data = self._data
+        if data is not None:
+            self._data = b""
+        return data
+
+
 async def _run_exec(execute_fn: ExecuteLine, session_id: str,
                     registry: MountRegistry, cwd: str,
                     stat_path: StatPath | None, action: ExecAction,
-                    paths: list[str], out: list[bytes],
-                    errors: list[bytes]) -> bool:
+                    paths: list[str], out: list[bytes], errors: list[bytes],
+                    stdin: _StdinOnce) -> bool:
     """Run one ``-exec`` invocation, collecting its streams.
 
     A command that cannot be found is GNU's ``find: 'cmd': No such file
@@ -140,6 +165,7 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
         paths (list[str]): the match, or every match for a batched run.
         out (list[bytes]): where the run's stdout is appended.
         errors (list[bytes]): where its stderr is appended.
+        stdin (_StdinOnce): find's own input, taken by the first child.
     """
     # GNU substitutes the matches into the words and only then hands
     # them to execvp, so the head looked up is the substituted one:
@@ -153,7 +179,9 @@ async def _run_exec(execute_fn: ExecuteLine, session_id: str,
     # A function of the head's name is invisible to execvp, so the line
     # runs the program past it, as `command` does.
     line = ("command " if shadowed else "") + shlex.join(words)
-    io = await execute_fn(f"( {line} )", session_id=session_id)
+    io = await execute_fn(f"( {line} )",
+                          session_id=session_id,
+                          stdin=stdin.take())
     if io.stdout is not None:
         data = await materialize(io.stdout)
         if data:
@@ -366,6 +394,7 @@ async def _apply_find_actions(
     dispatch: DispatchFn | None = None,
     identity: Identity | None = None,
     namespace: Namespace | None = None,
+    stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, bytes, int]:
     """Apply find's actions (-exec / -delete / -print0 / -ls) to its rows.
 
@@ -420,7 +449,12 @@ async def _apply_find_actions(
     Returns:
         The rows to print, the stderr to append, and the exit status the
         actions impose (0 when they impose none, even with stderr).
+        stdin (ByteSource | None): find's own input, which the first
+            ``-exec`` child to run inherits as GNU's does (a pipe feeds
+            one reader), the later ones reading EOF; None keeps the
+            ambient stdin for every child.
     """
+    once = _StdinOnce(await materialize(stdin) if stdin is not None else None)
     expr = parse_find_expression(list(texts))
     reorders = expr.depth_first and expr.printf is None
     if stdout is None or not (_has_actions(expr) or reorders):
@@ -450,7 +484,8 @@ async def _apply_find_actions(
                     continue
                 assert execute_fn is not None
                 if not await _run_exec(execute_fn, session_id, registry, cwd,
-                                       stat_path, action, [path], out, errors):
+                                       stat_path, action, [path], out, errors,
+                                       once):
                     break
             elif action.kind == "ls":
                 before = len(errors)
@@ -481,7 +516,7 @@ async def _apply_find_actions(
             continue
         assert execute_fn is not None
         if not await _run_exec(execute_fn, session_id, registry, cwd,
-                               stat_path, action, paths, out, errors):
+                               stat_path, action, paths, out, errors, once):
             exit_code = 1
     body = b"".join(out)
     return (body if body else None), b"".join(errors), exit_code

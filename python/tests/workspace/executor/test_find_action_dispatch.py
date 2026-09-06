@@ -766,3 +766,20 @@ async def test_delete_admits_a_directory_as_rmdir():
             await io.stderr_str())
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_exec_children_inherit_finds_stdin():
+    # GNU's children inherit find's stdin, and a pipe feeds one reader:
+    # the first child takes it and the next reads EOF.
+    ws = _ws()
+    try:
+        io = await ws.execute(
+            "mkdir -p /data/fi/d; touch /data/fi/d/a /data/fi/d/b; "
+            "cd /data/fi; printf x | find d -maxdepth 0 -exec cat \\; ; "
+            "echo rc=$?; printf y | find d -type f -exec cat \\; ; "
+            "echo rc=$?")
+        assert await io.stdout_str() == "xrc=0\nyrc=0\n"
+        assert await io.stderr_str() == ""
+    finally:
+        await ws.close()

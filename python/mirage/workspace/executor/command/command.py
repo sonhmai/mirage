@@ -77,17 +77,17 @@ JOB_HANDLERS = {
 }
 
 
-async def _finish_find(
-        stdout: ByteSource | None,
-        io: IOResult,
-        texts: list[str],
-        registry: MountRegistry,
-        session: Session,
-        execute_fn: ExecuteLine | None,
-        ns: NamespaceView | None,
-        stat_path: StatPath | None,
-        dispatch: DispatchFn,
-        namespace: Namespace | None = None) -> ByteSource | None:
+async def _finish_find(stdout: ByteSource | None,
+                       io: IOResult,
+                       texts: list[str],
+                       registry: MountRegistry,
+                       session: Session,
+                       execute_fn: ExecuteLine | None,
+                       ns: NamespaceView | None,
+                       stat_path: StatPath | None,
+                       dispatch: DispatchFn,
+                       namespace: Namespace | None = None,
+                       stdin: ByteSource | None = None) -> ByteSource | None:
     """Apply find's actions once, at the command boundary.
 
     Every runner below this point (one mount, a fan-out over nested
@@ -110,6 +110,8 @@ async def _finish_find(
             deleted through.
         namespace (Namespace | None): the node table a deleted row's
             meta is dropped from.
+        stdin (ByteSource | None): find's own input, for its ``-exec``
+            children.
     """
     stdout, action_err, action_exit = await _apply_find_actions(
         stdout,
@@ -123,7 +125,8 @@ async def _finish_find(
         stat_path=stat_path,
         dispatch=dispatch,
         identity=identity_from(ns, session_view(session, registry.policies)),
-        namespace=namespace)
+        namespace=namespace,
+        stdin=stdin)
     if action_err:
         existing = await materialize(io.stderr) if io.stderr else b""
         io.stderr = existing + action_err
@@ -345,7 +348,8 @@ async def handle_command(
                                         cross_ns,
                                         cross_stat,
                                         dispatch,
-                                        namespace=namespace)
+                                        namespace=namespace,
+                                        stdin=stdin)
         if cross_parsed.warnings:
             warn = "".join(f"{cmd_name}: {w}\n"
                            for w in cross_parsed.warnings).encode()
@@ -457,7 +461,8 @@ async def handle_command(
                                         single_ns,
                                         single_stat,
                                         dispatch,
-                                        namespace=namespace)
+                                        namespace=namespace,
+                                        stdin=stdin)
             node.exit_code = io.exit_code
             node.stderr = await materialize(io.stderr) if io.stderr else b""
         if warn_bytes:
@@ -487,7 +492,8 @@ async def handle_command(
                                     single_ns,
                                     single_stat,
                                     dispatch,
-                                    namespace=namespace)
+                                    namespace=namespace,
+                                    stdin=stdin)
 
     if warn_bytes:
         existing = await materialize(io.stderr) if io.stderr else b""

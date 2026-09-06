@@ -106,4 +106,20 @@ describe('find actions', () => {
       await ws.close()
     }
   })
+
+  it("hands find's stdin to its -exec children", async () => {
+    // GNU's children inherit find's stdin, and a pipe feeds one reader:
+    // the first child takes it and the next reads EOF.
+    const ws = await shellWs()
+    try {
+      const r = await ws.execute(
+        'mkdir -p /data/fi/d; touch /data/fi/d/a /data/fi/d/b; cd /data/fi; printf x | find d -maxdepth 0 -exec cat \\; ; echo rc=$?; printf y | find d -type f -exec cat \\; ; echo rc=$?',
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe('xrc=0\nyrc=0\n')
+      expect(r.stderrText).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
 })

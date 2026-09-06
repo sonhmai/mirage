@@ -59,6 +59,9 @@ export interface FindActionDoors {
   // Who the session is, for the owner and group columns of `-ls`.
   identity?: Identity | null
   namespace?: Namespace | null
+  // find's own input, which the first `-exec` child to run inherits as
+  // GNU's does (a pipe feeds one reader), the later ones reading EOF.
+  stdin?: ByteSource | null
 }
 
 const enc = new TextEncoder()
@@ -143,6 +146,22 @@ async function headState(
  * exits 127 keeps its own stderr and is just a failed run. Returns
  * whether the run succeeded, which is the action's truth value.
  */
+/**
+ * find's own input, handed to the first `-exec` child that runs. GNU's
+ * children inherit find's stdin, and a pipe feeds one reader: the first
+ * child that reads takes it, the ones after read EOF. A child of a find
+ * with no input of its own (null) keeps the ambient stdin.
+ */
+class StdinOnce {
+  constructor(private data: Uint8Array | null) {}
+
+  take(): Uint8Array | null {
+    const data = this.data
+    if (data !== null) this.data = new Uint8Array()
+    return data
+  }
+}
+
 async function runExec(
   executeFn: ExecuteFn,
   sessionId: string,
@@ -153,6 +172,7 @@ async function runExec(
   paths: readonly string[],
   out: Uint8Array[],
   errors: Uint8Array[],
+  stdin: StdinOnce,
 ): Promise<boolean> {
   // GNU substitutes the matches into the words and only then hands them
   // to execvp, so the head looked up is the substituted one: `-exec {}
@@ -167,7 +187,7 @@ async function runExec(
   // A function of the head's name is invisible to execvp, so the line
   // runs the program past it, as `command` does.
   const line = (shadowed ? 'command ' : '') + shellJoin(words)
-  const io = await executeFn(`( ${line} )`, { sessionId })
+  const io = await executeFn(`( ${line} )`, { sessionId, stdin: stdin.take() })
   if (io.stdout !== null) {
     const data = await materialize(io.stdout)
     if (data.byteLength > 0) out.push(data)
@@ -403,6 +423,9 @@ export async function applyFindActions(
   const dispatch = doors.dispatch ?? null
   const identity = doors.identity ?? null
   const namespace = doors.namespace ?? null
+  const once = new StdinOnce(
+    doors.stdin === undefined || doors.stdin === null ? null : await materialize(doors.stdin),
+  )
   if (matchedRuns === null)
     return [null, enc.encode('find: actions require structured matches\n'), 1]
   const matches = matchedRuns.flatMap((run) =>
@@ -439,6 +462,7 @@ export async function applyFindActions(
             [path],
             out,
             errors,
+            once,
           ))
         )
           break
@@ -468,7 +492,20 @@ export async function applyFindActions(
   for (const [position, action] of actions.entries()) {
     const paths = batches.get(position)
     if (action.kind !== 'exec' || paths === undefined || executeFn === undefined) continue
-    if (!(await runExec(executeFn, sessionId, registry, cwd, statPath, action, paths, out, errors)))
+    if (
+      !(await runExec(
+        executeFn,
+        sessionId,
+        registry,
+        cwd,
+        statPath,
+        action,
+        paths,
+        out,
+        errors,
+        once,
+      ))
+    )
       exitCode = 1
   }
   const body = concat(out)

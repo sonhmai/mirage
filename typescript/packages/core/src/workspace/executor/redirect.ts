@@ -144,8 +144,11 @@ export async function handleRedirect(
         inputs[r.fd] = text as ByteSource
       }
     } else {
+      // An output redirect opens its target for writing only, so the
+      // descriptor stays unreadable: `cat 1>out 0<&1` reads from out's
+      // write end and fails with EBADF, as bash's does.
       for (const fd of r.fd === FD_BOTH ? [FD_STDOUT, FD_STDERR] : [r.fd]) {
-        inputs[fd] = new Uint8Array()
+        inputs[fd] = UNREADABLE
       }
     }
   }

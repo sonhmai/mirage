@@ -163,8 +163,11 @@ async def handle_redirect(
                 inputs[r.fd] = text
 
         else:
+            # An output redirect opens its target for writing only, so
+            # the descriptor stays unreadable: `cat 1>out 0<&1` reads
+            # from out's write end and fails with EBADF, as bash's does.
             for fd in ([FD_STDOUT, FD_STDERR] if r.fd == FD_BOTH else [r.fd]):
-                inputs[fd] = b""
+                inputs[fd] = _Unreadable.TOKEN
 
     # Before the command, because bash decides an open before it forks:
     # `set -C; touch marker > existing` creates no marker at all. Running

@@ -110,6 +110,7 @@ async function finishFind(
   statPath: StatPath,
   dispatch: DispatchFn,
   namespace: Namespace | null,
+  stdin: ByteSource | null,
 ): Promise<ByteSource | null> {
   const [newStdout, actionErr, actionExit] = await applyFindActions(
     stdout,
@@ -125,6 +126,7 @@ async function finishFind(
       dispatch,
       identity: identityFrom(ns, sessionView(session, registry.policies)),
       namespace,
+      stdin,
     },
   )
   if (actionErr.length > 0) {
@@ -382,6 +384,7 @@ export async function handleCommand(
         csStat,
         dispatch,
         namespace ?? null,
+        stdin,
       )
       csExec.exitCode = csIo.exitCode
       csExec.stderr = await materialize(csIo.stderr)
@@ -525,6 +528,7 @@ export async function handleCommand(
         singleStat,
         dispatch,
         namespace ?? null,
+        stdin,
       )
       fanNode.exitCode = fanIo.exitCode
       fanNode.stderr = await materialize(fanIo.stderr)
@@ -565,6 +569,7 @@ export async function handleCommand(
       singleStat,
       dispatch,
       namespace ?? null,
+      stdin,
     )
   }
   if (warnBytes !== null) {

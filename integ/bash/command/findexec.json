@@ -2061,6 +2061,40 @@
         "stdout": "content\nrc=0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "find_exec_children_inherit_finds_stdin",
+      "seq": 981539,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fi/d; touch /data/fi/d/a /data/fi/d/b; cd /data/fi; printf x | find d -maxdepth 0 -exec cat \\; ; echo rc=$?; printf y | find d -type f -exec cat \\; ; echo rc=$?; cd / && rm -r /data/fi",
+      "expect": {
+        "exit": 0,
+        "stdout": "xrc=0\nyrc=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

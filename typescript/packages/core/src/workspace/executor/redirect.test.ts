@@ -601,6 +601,8 @@ describe('descriptor zero duplication', () => {
     ['echo x 0>&1 1>&0', 'x\n', '', 0],
     ['echo x 1>&0 0>&1', '', 'echo: write error: Bad file descriptor\n', 1],
     ['echo x 1>&0 2>&1', '', '', 1],
+    // An output redirect leaves its descriptor write-only.
+    ['cat 1>/data/out 0<&1; wc -c < /data/out', '0\n', 'cat: -: Bad file descriptor\n', 0],
     ['echo x 1>&0 2>/data/err; cat /data/err', 'echo: write error: Bad file descriptor\n', '', 0],
     ['echo x 0>/data/out 1>&0; cat /data/out', 'x\n', '', 0],
     ['cat </data/a.txt 1<&0 0<&1 1>/data/out; cat /data/out', 'a', '', 0],

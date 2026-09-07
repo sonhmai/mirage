@@ -278,15 +278,23 @@ async def test_cancel_during_cache_fill_aborts():
     ws = Workspace({"/data": RAMResource()})
     cancel = asyncio.Event()
 
+    real_apply_io = ws.apply_io
+
     async def slow_apply_io(io, records=None, is_cacheable=None):
+        if io.exit_code != 0:
+            await real_apply_io(io, records=records, is_cacheable=is_cacheable)
+            return
         cancel.set()
         await asyncio.Event().wait()
 
     ws.apply_io = slow_apply_io
     try:
+        await ws.execute("false")
+        session = ws.get_session(ws.default_session_id)
         with pytest.raises(MirageAbortError):
             await ws.execute("echo hi", cancel=cancel)
         events = await ws.observer.command_events()
         assert events[-1]["exit_code"] == 130
+        assert session.last_exit_code == 1
     finally:
         await ws.close()

@@ -33,7 +33,8 @@ from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
                                 parse, syntax_error_result)
 from mirage.types import Refusal
 from mirage.workspace.abort import MirageAbortError, run_cancellable
-from mirage.workspace.executor.statement import record_status
+from mirage.workspace.executor.statement import (record_status, restore_status,
+                                                 snapshot_status)
 from mirage.workspace.node import provision_node, run_command_tree
 from mirage.workspace.node.admission import (admit_line, is_pending,
                                              is_pending_refusal)
@@ -254,6 +255,7 @@ async def execute_line(
 
     session_token = set_current_session(effective_session,
                                         owner=ws._session_mgr)
+    status_before = snapshot_status(session)
     try:
         ast = parse(command)
         # Syntax gates before policy, mirroring the TS order and
@@ -481,6 +483,8 @@ async def execute_line(
         record_status(session, io.exit_code)
         return io
     except (MirageAbortError, asyncio.CancelledError):
+        # An aborted invocation is the caller's outcome, not the shell's.
+        restore_status(session, status_before)
         io = IOResult(exit_code=130, stderr=b"execute aborted\n")
         raise
     except (ContentDriftError, RouteError) as exc:

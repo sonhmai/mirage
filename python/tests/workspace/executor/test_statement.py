@@ -16,7 +16,9 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.workspace.executor.statement import (assignment_status,
-                                                 finish_statement)
+                                                 finish_statement,
+                                                 restore_status,
+                                                 snapshot_status)
 from mirage.workspace.session import Session
 
 
@@ -67,3 +69,17 @@ def test_assignment_status_tracks_substitutions():
     session._cmdsub_status = 5
     assert assignment_status(session, seq) == 5
     assert assignment_status(session, session._cmdsub_seq) == 0
+
+
+def test_restore_status_puts_back_the_captured_shell_status():
+    session = Session(session_id="t")
+    session.last_exit_code = 3
+    session.pipe_status = (0, 3)
+    before = snapshot_status(session)
+    session.last_exit_code = 0
+    session.pipe_status = (0, )
+    session._pipe_status_pending = (1, )
+    restore_status(session, before)
+    assert session.last_exit_code == 3
+    assert session.pipe_status == (0, 3)
+    assert session._pipe_status_pending is None

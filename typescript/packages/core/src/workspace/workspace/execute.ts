@@ -36,7 +36,7 @@ import { RouteDeny, type RouteDecision } from '../../runtime/routing/index.ts'
 import { refusalOf, renderDeny, type Deny, type HandOff } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { recordStatus } from '../executor/statement.ts'
+import { recordStatus, restoreStatus, snapshotStatus } from '../executor/statement.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -471,6 +471,7 @@ async function runParsedLine(
       return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
     }
   }
+  const statusBefore = snapshotStatus(targetSession)
   let held = false
   let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
   let executionFailure: { error: unknown } | undefined
@@ -660,6 +661,8 @@ async function runParsedLine(
   } catch (err) {
     if (killed?.aborted === true) {
       // The command finished; the abort landed on the cache fill or the drain.
+      // An aborted invocation is the caller's outcome, not the shell's.
+      restoreStatus(targetSession, statusBefore)
       executionFailure = { error: err }
       io.exitCode = 130
       stdoutBytes = new Uint8Array()

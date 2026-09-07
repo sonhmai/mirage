@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import dataclass
+
 import tree_sitter
 
 from mirage.commands.spec.usage import read_fail_exit
@@ -55,6 +57,39 @@ def record_status(session: Session,
         session.pipe_status = pending
     elif not transparent:
         session.pipe_status = (code, )
+
+
+@dataclass(frozen=True, slots=True)
+class StatusSnapshot:
+    last_exit_code: int
+    pipe_status: tuple[int, ...]
+    pipe_status_pending: tuple[int, ...] | None
+
+
+def snapshot_status(session: Session) -> StatusSnapshot:
+    """Capture ``$?`` and ``${PIPESTATUS[@]}`` before a line runs.
+
+    Args:
+        session (Session): shell session whose status is captured.
+    """
+    return StatusSnapshot(session.last_exit_code, session.pipe_status,
+                          session._pipe_status_pending)
+
+
+def restore_status(session: Session, snapshot: StatusSnapshot) -> None:
+    """Put back the status a line found, for a line the caller aborted.
+
+    Statements inside the line may already have stamped their own
+    status before the abort landed, and an aborted invocation is the
+    caller's outcome, not the shell's.
+
+    Args:
+        session (Session): shell session receiving the status.
+        snapshot (StatusSnapshot): what ``snapshot_status`` captured.
+    """
+    session.last_exit_code = snapshot.last_exit_code
+    session.pipe_status = snapshot.pipe_status
+    session._pipe_status_pending = snapshot.pipe_status_pending
 
 
 def carry_status(session: Session) -> None:

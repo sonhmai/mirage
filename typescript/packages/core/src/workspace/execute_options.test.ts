@@ -308,6 +308,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
 
   it('aborts while the file cache is being filled', async () => {
     const ws = await makeWs()
+    await ws.execute('false')
     const controller = new AbortController()
     const dispatcher = (ws as unknown as { dispatcher: { applyIo: () => Promise<void> } })
       .dispatcher
@@ -320,6 +321,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     })
     const events = await ws.observer.commandEvents()
     expect(events.at(-1)?.exit_code).toBe(130)
+    expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
     await ws.close()
   })
 })

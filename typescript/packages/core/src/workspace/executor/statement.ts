@@ -52,6 +52,33 @@ export function recordStatus(session: Session, code: number, transparent = false
  * `true | false && true` keeps `0 1`. The list is not a pipeline of its
  * own, so without this its boundary would stamp the aggregate `1`.
  */
+export interface StatusSnapshot {
+  lastExitCode: number
+  pipeStatus: readonly number[]
+  pipeStatusPending: readonly number[] | null
+}
+
+/** Capture `$?` and `${PIPESTATUS[@]}` before a line runs. */
+export function snapshotStatus(session: Session): StatusSnapshot {
+  return {
+    lastExitCode: session.lastExitCode,
+    pipeStatus: session.pipeStatus,
+    pipeStatusPending: session.pipeStatusPending,
+  }
+}
+
+/**
+ * Put back the status a line found, for a line the caller aborted.
+ * Statements inside the line may already have stamped their own status
+ * before the abort landed, and an aborted invocation is the caller's
+ * outcome, not the shell's.
+ */
+export function restoreStatus(session: Session, snapshot: StatusSnapshot): void {
+  session.lastExitCode = snapshot.lastExitCode
+  session.pipeStatus = snapshot.pipeStatus
+  session.pipeStatusPending = snapshot.pipeStatusPending
+}
+
 export function carryStatus(session: Session): void {
   session.pipeStatusPending = session.pipeStatus
 }

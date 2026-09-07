@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../io/types.ts'
 import { Session } from '../session/session.ts'
-import { assignmentStatus, finishStatement } from './statement.ts'
+import { assignmentStatus, finishStatement, restoreStatus, snapshotStatus } from './statement.ts'
 
 const decode = (b: Uint8Array | null): string => new TextDecoder().decode(b ?? new Uint8Array())
 
@@ -68,5 +68,21 @@ describe('assignmentStatus', () => {
     session.cmdsubStatus = 5
     expect(assignmentStatus(session, seq)).toBe(5)
     expect(assignmentStatus(session, session.cmdsubSeq)).toBe(0)
+  })
+})
+
+describe('snapshotStatus / restoreStatus', () => {
+  it('puts back the captured shell status', () => {
+    const session = new Session({ sessionId: 't' })
+    session.lastExitCode = 3
+    session.pipeStatus = [0, 3]
+    const before = snapshotStatus(session)
+    session.lastExitCode = 0
+    session.pipeStatus = [0]
+    session.pipeStatusPending = [1]
+    restoreStatus(session, before)
+    expect(session.lastExitCode).toBe(3)
+    expect(session.pipeStatus).toEqual([0, 3])
+    expect(session.pipeStatusPending).toBeNull()
   })
 })

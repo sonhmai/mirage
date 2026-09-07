@@ -146,6 +146,9 @@ it.each(['mapfile values', 'read -N 131072 value'])(
         ws.execute(command, { stdin: source(), signal: controller.signal }),
       ).rejects.toMatchObject({ name: 'AbortError' })
       expect(closed).toBe(true)
+      const events = await ws.observer.commandEvents()
+      expect(events).toHaveLength(1)
+      expect(events[0]?.exit_code).toBe(130)
     } finally {
       clearTimeout(timer)
       await ws.close()
@@ -171,4 +174,150 @@ it('uses the current read signal when reusing buffered stdin', async () => {
   current.abort()
   await expect(reader.readUntil(10, current.signal)).rejects.toMatchObject({ name: 'AbortError' })
   expect(closed).toBe(true)
+})
+
+it('discards cacheable input when a chunk checkpoint aborts', async () => {
+  const { CachableAsyncIterator } = await import('./cachable_iterator.ts')
+  const { chunks } = await import('./cooperative.ts')
+  let closed = false
+  async function* source() {
+    try {
+      yield new Uint8Array(100_000)
+    } finally {
+      closed = true
+    }
+  }
+  const input = new CachableAsyncIterator(source())
+  const controller = new AbortController()
+  await expect(
+    (async () => {
+      for await (const part of chunks(input, controller.signal)) {
+        expect(part.length).toBeGreaterThan(0)
+        controller.abort()
+      }
+    })(),
+  ).rejects.toMatchObject({ name: 'AbortError' })
+  expect(closed).toBe(true)
+  expect(input.bufferedChunks).toHaveLength(0)
+})
+
+it.each(['mapfile values', 'read -N 131072 value', 'cat | wc -l'])(
+  'discards cacheable stdin on %s cancellation',
+  async (command) => {
+    const { Workspace } = await import('../workspace/workspace/workspace.ts')
+    const { getTestParser } = await import('../workspace/fixtures/workspace_fixture.ts')
+    const { CachableAsyncIterator } = await import('./cachable_iterator.ts')
+    const ws = new Workspace({}, { shellParser: await getTestParser() })
+    const controller = new AbortController()
+    let closed = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    async function* source() {
+      try {
+        timer = setTimeout(() => {
+          controller.abort()
+        }, 0)
+        yield ENC.encode('line\n'.repeat(command.startsWith('cat') ? 4_000_000 : 200_000))
+      } finally {
+        closed = true
+      }
+    }
+    const input = new CachableAsyncIterator(source())
+    try {
+      await expect(
+        ws.execute(command, { stdin: input, signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' })
+      expect(closed).toBe(true)
+      expect(input.bufferedChunks).toHaveLength(0)
+    } finally {
+      clearTimeout(timer)
+      await ws.close()
+    }
+  },
+)
+
+it('never caches partial content after a producer fails', async () => {
+  const { CachableAsyncIterator } = await import('./cachable_iterator.ts')
+  const { applyIo } = await import('../cache/file/io.ts')
+  const { IOResult } = await import('./types.ts')
+  async function* source() {
+    yield ENC.encode('partial')
+    throw new Error('read failed')
+  }
+  const input = new CachableAsyncIterator(source())
+  await input.next()
+  await expect(input.next()).rejects.toThrow('read failed')
+  const cache = new RAMFileCacheStore()
+  await applyIo(cache, new IOResult({ reads: { '/bad': input }, cache: ['/bad'] }))
+  expect(await cache.get('/bad')).toBeNull()
+  expect(cache.drainTasks.size).toBe(0)
+})
+
+it('discards hidden cache reads when a value barrier fails', async () => {
+  const { CachableAsyncIterator } = await import('./cachable_iterator.ts')
+  const { IOResult } = await import('./types.ts')
+  const { applyBarrier, BarrierPolicy } = await import('../shell/barrier.ts')
+  let closed = false
+  async function* source() {
+    try {
+      yield ENC.encode('partial')
+    } finally {
+      closed = true
+    }
+  }
+  const input = new CachableAsyncIterator(source())
+  async function* output() {
+    const step = await input.next()
+    if (!step.done) yield step.value
+    throw new Error('consumer failed')
+  }
+  const io = new IOResult({ reads: { '/remote': input }, cache: ['/remote'] })
+  await expect(applyBarrier(output(), io, BarrierPolicy.VALUE)).rejects.toThrow('consumer failed')
+  expect(closed).toBe(true)
+  expect(input.bufferedChunks).toHaveLength(0)
+})
+
+it.each(['timeout', 'read failure'])('records %s while finalizing a shell reader', async (kind) => {
+  const { Workspace } = await import('../workspace/workspace/workspace.ts')
+  const { getTestParser } = await import('../workspace/fixtures/workspace_fixture.ts')
+  const { CommandTimeoutError } = await import('../commands/errors.ts')
+  const ws = new Workspace({}, { shellParser: await getTestParser() })
+  async function* source() {
+    yield ENC.encode('partial\n')
+    throw kind === 'timeout' ? new CommandTimeoutError('mapfile', 1) : new Error('read failed')
+  }
+  try {
+    const result = await ws.execute('mapfile values', { stdin: source() })
+    const code = kind === 'timeout' ? 124 : 1
+    expect(result.exitCode).toBe(code)
+    const events = await ws.observer.commandEvents()
+    expect(events).toHaveLength(1)
+    expect(events[0]?.exit_code).toBe(code)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('preserves a caller-supplied abort reason and records cancellation', async () => {
+  const { Workspace } = await import('../workspace/workspace/workspace.ts')
+  const { getTestParser } = await import('../workspace/fixtures/workspace_fixture.ts')
+  const ws = new Workspace({}, { shellParser: await getTestParser() })
+  const controller = new AbortController()
+  const reason = new Error('caller stopped the run')
+  let timer: ReturnType<typeof setTimeout> | undefined
+  async function* source() {
+    timer = setTimeout(() => {
+      controller.abort(reason)
+    }, 0)
+    yield ENC.encode('line\n'.repeat(200_000))
+  }
+  try {
+    await expect(
+      ws.execute('mapfile values', { stdin: source(), signal: controller.signal }),
+    ).rejects.toBe(reason)
+    const events = await ws.observer.commandEvents()
+    expect(events[0]?.exit_code).toBe(130)
+  } finally {
+    clearTimeout(timer)
+    await ws.close()
+  }
 })

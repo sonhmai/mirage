@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.cooperative import Checkpoint, chunks
 
 
@@ -43,6 +44,7 @@ def char_width(data: bytes) -> int:
 class AsyncLineIterator:
 
     def __init__(self, source: AsyncIterator[bytes]) -> None:
+        self._input = source
         self._source = chunks(source)
         self._checkpoint = Checkpoint()
         self._buf = b""
@@ -99,6 +101,10 @@ class AsyncLineIterator:
                     self._exhausted = True
         except BaseException:
             await self._source.aclose()
+            if isinstance(self._input, CachableAsyncIterator):
+                await self._input.discard()
+            self._buf = b""
+            self._exhausted = True
             raise
 
     async def read_chars(self, count: int,
@@ -155,4 +161,8 @@ class AsyncLineIterator:
             return bytes(out), True
         except BaseException:
             await self._source.aclose()
+            if isinstance(self._input, CachableAsyncIterator):
+                await self._input.discard()
+            self._buf = b""
+            self._exhausted = True
             raise

@@ -47,7 +47,7 @@ import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { Session } from '../session/session.ts'
-import type { ExecutionNode } from '../types.ts'
+import { ExecutionNode } from '../types.ts'
 import { failureResult, isControlFlowError } from './failure.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { cliEnvNames, fillEnv, fillNames, guestBound, lineNodes } from './fill.ts'
@@ -472,6 +472,7 @@ async function runParsedLine(
   }
   let held = false
   let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
+  let executionFailure: { error: unknown } | undefined
   try {
     if (lineRuntime?.runLine !== undefined) {
       // A whole line is a command like any other: the same visibility and
@@ -597,8 +598,19 @@ async function runParsedLine(
       )
       if (filled !== null) return filled
     }
-    const runBody = (): Promise<[ByteSource | null, IOResult, ExecutionNode]> =>
-      runCommandTree(deps, rootNode, effectiveSession, stdin)
+    const runBody = async (): Promise<[ByteSource | null, IOResult, ExecutionNode]> => {
+      try {
+        const result = await runCommandTree(deps, rootNode, effectiveSession, stdin)
+        killed?.throwIfAborted()
+        return result
+      } catch (error) {
+        // Return through the recording scope so completed op records survive a throw.
+        executionFailure = { error }
+        const failed = failureResult(error)
+        if (killed?.aborted === true) failed.exitCode = 130
+        return [null, new IOResult(failed), new ExecutionNode({ command, ...failed })]
+      }
+    }
     try {
       execResult = isLine ? await runWithRecording(runBody) : [await runBody(), []]
       // A record a nested line earned is the line's to report when its
@@ -636,7 +648,7 @@ async function runParsedLine(
   recordStatus(targetSession, io.exitCode, true)
   let stdoutBytes: Uint8Array
   try {
-    await env.dispatcher.applyIo(io, opRecords, cacheable)
+    if (executionFailure === undefined) await env.dispatcher.applyIo(io, opRecords, cacheable)
     stdoutBytes = materialized === null ? new Uint8Array() : await materialize(materialized)
   } catch (err) {
     // Lazy reads can fail while draining (e.g. head/tail that open the
@@ -675,5 +687,11 @@ async function runParsedLine(
     )
   }
 
+  if (
+    executionFailure !== undefined &&
+    (isControlFlowError(executionFailure.error) || killed?.aborted === true)
+  ) {
+    throw executionFailure.error
+  }
   return new ExecuteResult(stdoutBytes, stderrBytes, io.exitCode, io.refusal)
 }

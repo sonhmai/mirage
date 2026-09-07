@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CachableAsyncIterator } from './cachable_iterator.ts'
 import { Checkpoint, chunks } from './cooperative.ts'
 
 const NEWLINE = 0x0a
@@ -23,12 +24,14 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   private readonly checkpoint = new Checkpoint()
   private linesSinceCheck = 0
 
-  constructor(source: AsyncIterable<Uint8Array> | AsyncIterator<Uint8Array>) {
-    const s = source as AsyncIterable<Uint8Array>
+  constructor(private readonly input: AsyncIterable<Uint8Array> | AsyncIterator<Uint8Array>) {
+    const s = this.input as AsyncIterable<Uint8Array>
     if (typeof s[Symbol.asyncIterator] === 'function') {
       this.source = chunks(s)
     } else {
-      this.source = chunks({ [Symbol.asyncIterator]: () => source as AsyncIterator<Uint8Array> })
+      this.source = chunks({
+        [Symbol.asyncIterator]: () => this.input as AsyncIterator<Uint8Array>,
+      })
     }
   }
 
@@ -70,6 +73,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     this.exhausted = true
     this.buf = new Uint8Array(0)
     await this.source.return?.()
+    if (this.input instanceof CachableAsyncIterator) await this.input.discard()
   }
 
   private async readDelimited(

@@ -116,3 +116,149 @@ async def test_cancelled_read_chars_closes_source():
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(reader.read_chars(1_000_000, None), 0.001)
     assert closed
+
+
+@pytest.mark.asyncio
+async def test_aborted_execution_records_failure():
+    from mirage import Workspace
+    from mirage.resource.ram import RAMResource
+    from mirage.workspace.abort import MirageAbortError
+    ws = Workspace({"/data": RAMResource()})
+    cancel = asyncio.Event()
+
+    async def source():
+        asyncio.get_running_loop().call_later(.001, cancel.set)
+        yield b"line\n" * 500_000
+
+    try:
+        with pytest.raises(MirageAbortError):
+            await ws.execute("wc -l", stdin=source(), cancel=cancel)
+        events = await ws.observer.command_events()
+        assert len(events) == 1
+        assert events[0]["exit_code"] == 130
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_discards_cacheable_input():
+    from mirage.io import CachableAsyncIterator
+    from mirage.io.cooperative import chunks
+    closed = False
+
+    async def source():
+        nonlocal closed
+        try:
+            yield b"x" * 100_000
+        finally:
+            closed = True
+
+    wrapped = CachableAsyncIterator(source())
+    stream = chunks(wrapped)
+    await anext(stream)
+    with pytest.raises(asyncio.CancelledError):
+        await stream.athrow(asyncio.CancelledError())
+    assert closed
+    assert wrapped.buffered_chunks == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["abort", "timeout", "early"])
+async def test_pipeline_cache_lifecycle(failure):
+    from mirage.io import CachableAsyncIterator, IOResult
+    from mirage.io.stream import async_chain
+    from mirage.workspace.executor.pipes import handle_pipe
+    from mirage.workspace.session import Session
+    from mirage.workspace.types import ExecutionNode
+    closed = False
+
+    async def source():
+        nonlocal closed
+        try:
+            yield b"first"
+            yield b"rest"
+        finally:
+            closed = True
+
+    stream = CachableAsyncIterator(source())
+
+    async def execute(cmd, session, stdin, call_stack):
+        if cmd == "cat":
+            return async_chain(stream), IOResult(
+                reads={"/remote": stream},
+                cache=["/remote"]), ExecutionNode(command="cat")
+        await anext(stdin)
+        if failure == "abort":
+            raise asyncio.CancelledError()
+        if failure == "timeout":
+            raise CommandTimeoutError("wc", 1)
+        return b"first", IOResult(), ExecutionNode(command="head")
+
+    run = handle_pipe(execute, ["cat", "wc"], [], Session(session_id="test"))
+    if failure == "early":
+        await run
+        assert not closed
+        assert await stream.drain() == b"firstrest"
+    else:
+        with pytest.raises(asyncio.CancelledError if failure ==
+                           "abort" else CommandTimeoutError):
+            await run
+        assert stream.buffered_chunks == []
+    assert closed
+
+
+@pytest.mark.asyncio
+async def test_value_barrier_discards_hidden_cache_read():
+    from mirage.io import CachableAsyncIterator, IOResult
+    from mirage.shell.barrier import BarrierPolicy, apply_barrier
+    closed = False
+
+    async def source():
+        nonlocal closed
+        try:
+            yield b"partial"
+        finally:
+            closed = True
+
+    stream = CachableAsyncIterator(source())
+
+    async def output():
+        yield await anext(stream)
+        raise RuntimeError("consumer failed")
+
+    io = IOResult(reads={"/remote": stream}, cache=["/remote"])
+    with pytest.raises(RuntimeError, match="consumer failed"):
+        await apply_barrier(output(), io, BarrierPolicy.VALUE)
+    assert closed
+    assert stream.buffered_chunks == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["read_until", "read_chars"])
+async def test_line_reader_discards_cache_on_cancel(method, monkeypatch):
+    from mirage.io import CachableAsyncIterator
+    closed = False
+
+    async def source():
+        nonlocal closed
+        try:
+            yield b"line\n" * 200_000
+        finally:
+            closed = True
+
+    stream = CachableAsyncIterator(source())
+    reader = AsyncLineIterator(stream)
+    # Prime the buffer so cancellation happens in the reader, outside chunks().
+    await reader.read_chars(1, None)
+
+    async def cancelled_checkpoint():
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(reader._checkpoint, "run", cancelled_checkpoint)
+    with pytest.raises(asyncio.CancelledError):
+        if method == "read_until":
+            await reader.read_until(b"\n")
+        else:
+            await reader.read_chars(100, None)
+    assert closed
+    assert stream.buffered_chunks == []

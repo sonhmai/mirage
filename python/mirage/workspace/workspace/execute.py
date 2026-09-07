@@ -478,9 +478,13 @@ async def execute_line(
         io = failure_result(exc, command)
         record_status(session, io.exit_code)
         return io
-    except (MirageAbortError, ContentDriftError, RouteError):
-        # The caller's problem, not the line's: an abort it requested,
-        # drift it must reconcile, a policy it misconfigured.
+    except (MirageAbortError, asyncio.CancelledError):
+        io = IOResult(exit_code=130, stderr=b"execute aborted\n")
+        record_status(session, io.exit_code)
+        raise
+    except (ContentDriftError, RouteError) as exc:
+        io = failure_result(exc, command)
+        # Drift and invalid routing remain the caller's errors.
         raise
     except Exception as exc:
         # The fold is a failed command like any other (a SecretsError

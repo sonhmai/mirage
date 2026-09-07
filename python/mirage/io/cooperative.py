@@ -35,7 +35,11 @@ async def chunks(
             for offset in range(0, len(data), CHUNK_SIZE):
                 await checkpoint.run()
                 yield data[offset:offset + CHUNK_SIZE]
-    except BaseException:
+    except BaseException as exc:
+        from mirage.io.cachable_iterator import CachableAsyncIterator
+        if isinstance(source, CachableAsyncIterator) and not isinstance(
+                exc, GeneratorExit):
+            await source.discard()
         close = getattr(source, "aclose", None)
         if close is not None:
             await close()

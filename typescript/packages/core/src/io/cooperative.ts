@@ -1,3 +1,5 @@
+import { CachableAsyncIterator } from './cachable_iterator.ts'
+
 /** Bound CPU work between opportunities for timers and cancellation. */
 export const CHUNK_SIZE = 16 * 1024
 
@@ -34,11 +36,16 @@ export async function* chunks(
     }
     return
   }
-  for await (const data of source) {
-    for (let offset = 0; offset < data.byteLength; offset += CHUNK_SIZE) {
-      const pending = checkpoint.run()
-      if (pending !== undefined) await pending
-      yield data.subarray(offset, offset + CHUNK_SIZE)
+  try {
+    for await (const data of source) {
+      for (let offset = 0; offset < data.byteLength; offset += CHUNK_SIZE) {
+        const pending = checkpoint.run()
+        if (pending !== undefined) await pending
+        yield data.subarray(offset, offset + CHUNK_SIZE)
+      }
     }
+  } catch (error) {
+    if (source instanceof CachableAsyncIterator) await source.discard()
+    throw error
   }
 }

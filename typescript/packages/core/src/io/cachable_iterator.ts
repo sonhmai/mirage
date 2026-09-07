@@ -18,6 +18,7 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
   private source: AsyncIterator<Uint8Array>
   private readonly buffer: Uint8Array[] = []
   private exhaustedFlag = false
+  private discardedFlag = false
   private readonly checkpoint = new Checkpoint()
 
   constructor(source: AsyncIterable<Uint8Array>) {
@@ -33,6 +34,10 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
     this.source = fn({ [Symbol.asyncIterator]: () => inner })[Symbol.asyncIterator]()
   }
 
+  get discarded(): boolean {
+    return this.discardedFlag
+  }
+
   get exhausted(): boolean {
     return this.exhaustedFlag
   }
@@ -46,6 +51,7 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
   }
 
   async next(): Promise<IteratorResult<Uint8Array>> {
+    if (this.exhaustedFlag) return { done: true, value: undefined }
     try {
       const pending = this.checkpoint.run()
       if (pending !== undefined) await pending
@@ -57,12 +63,13 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
       this.buffer.push(result.value)
       return { done: false, value: result.value }
     } catch (err) {
-      this.exhaustedFlag = true
+      await this.discard()
       throw err
     }
   }
 
   async drain(): Promise<Uint8Array> {
+    if (this.exhaustedFlag) return concat(this.buffer)
     try {
       for (;;) {
         const pending = this.checkpoint.run()
@@ -72,7 +79,7 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
         this.buffer.push(result.value)
       }
     } catch (error) {
-      await this.closeAndDiscard()
+      await this.discard()
       throw error
     } finally {
       this.exhaustedFlag = true
@@ -81,11 +88,12 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
   }
 
   async drainBounded(maxBytes: number): Promise<Uint8Array | null> {
+    if (this.discardedFlag) return null
     let total = 0
     for (const c of this.buffer) total += c.byteLength
     try {
       if (total > maxBytes) {
-        await this.closeAndDiscard()
+        await this.discard()
         return null
       }
       for (;;) {
@@ -96,12 +104,12 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
         this.buffer.push(result.value)
         total += result.value.byteLength
         if (total > maxBytes) {
-          await this.closeAndDiscard()
+          await this.discard()
           return null
         }
       }
     } catch (error) {
-      await this.closeAndDiscard()
+      await this.discard()
       throw error
     } finally {
       this.exhaustedFlag = true
@@ -109,9 +117,17 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
     return concat(this.buffer)
   }
 
-  private async closeAndDiscard(): Promise<void> {
+  // Explicit failure cleanup; no return(), so normal early consumers can still drain.
+  async discard(): Promise<void> {
+    if (this.discardedFlag) return
+    this.discardedFlag = true
+    this.exhaustedFlag = true
     this.buffer.length = 0
-    await this.source.return?.(undefined)
+    try {
+      await this.source.return?.(undefined)
+    } catch {
+      // Failed content is already discarded; preserve the consumer's error.
+    }
   }
 }
 

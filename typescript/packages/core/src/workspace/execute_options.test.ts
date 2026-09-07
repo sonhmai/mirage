@@ -24,7 +24,7 @@ import { Runtime } from '../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
 import type { RunResult } from '../runtime/types.ts'
 import { MountMode, ResourceName } from '../types.ts'
-import { Channel, JobConsole, RAMConsoleStore } from '../shell/console/index.ts'
+import { Channel, type ConsoleChunk, JobConsole, RAMConsoleStore } from '../shell/console/index.ts'
 import { getTestParser, stdoutStr } from './fixtures/workspace_fixture.ts'
 import type { ExecuteResult } from './workspace/workspace.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -546,6 +546,24 @@ describe('execute({ sink }): streaming output to a console', () => {
     await expect(
       ws.execute('case x', { sink: console_, signal: AbortSignal.timeout(50) }),
     ).rejects.toMatchObject({ name: 'AbortError' })
+    await ws.close()
+  })
+
+  it('answers an abort that lands on the sink drain with the abort', async () => {
+    class Slow extends RAMConsoleStore {
+      override async append(channel: Channel, data: Uint8Array): Promise<ConsoleChunk> {
+        await new Promise((resolve) => setTimeout(resolve, 120))
+        return super.append(channel, data)
+      }
+    }
+    const ws = await makeWs()
+    await ws.execute('false')
+    // The syntax gate stamps 2 and answers with bytes in hand; the abort
+    // lands on their drain, which settles inside the grace.
+    await expect(
+      ws.execute('case x', { sink: new JobConsole(new Slow()), signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
     await ws.close()
   })
 

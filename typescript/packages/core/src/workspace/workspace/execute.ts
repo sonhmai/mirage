@@ -36,7 +36,12 @@ import { RouteDeny, type RouteDecision } from '../../runtime/routing/index.ts'
 import { refusalOf, renderDeny, type Deny, type HandOff } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { recordStatus, restoreStatus, snapshotStatus } from '../executor/statement.ts'
+import {
+  recordStatus,
+  restoreStatus,
+  snapshotStatus,
+  type StatusSnapshot,
+} from '../executor/statement.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -137,16 +142,19 @@ async function deniedResult(
   const refusal = refusalOf(deny)
   recordStatus(session, exitCode)
   if (options.record !== false) {
-    await env.observer.logExecution(
-      command,
-      new IOResult({ exitCode, stderr: msg, refusal }),
-      [],
-      options.agentId ?? env.agentId ?? '',
-      session.sessionId,
-      options.cwd ?? session.cwd,
+    await joinOrAbort(
+      env.observer.logExecution(
+        command,
+        new IOResult({ exitCode, stderr: msg, refusal }),
+        [],
+        options.agentId ?? env.agentId ?? '',
+        session.sessionId,
+        options.cwd ?? session.cwd,
+      ),
+      options.signal,
     )
   }
-  await env.sessions.flush()
+  await joinOrAbort(env.sessions.flush(), options.signal)
   return new ExecuteResult(new Uint8Array(), msg, exitCode, refusal)
 }
 
@@ -182,14 +190,37 @@ export async function executeLine(
   command: string,
   options: ExecuteOptions,
 ): Promise<ExecuteResult | ProvisionResult> {
-  const result = await runLine(env, command, options)
-  const sink = options.sink
+  const frame: LineFrame = { session: null, statusBefore: null }
+  let result = await runLine(env, command, options, frame)
   // A provision run answers with a plan, not output, so it has nothing
-  // to stream.
-  if (sink === undefined || !(result instanceof ExecuteResult)) return result
-  // The drain is the one await after the tree, and a stalled store would
-  // hold `execute` open past an abort; it joins under the same grace.
-  return joinOrAbort(drainToSink(sink, result), options.signal)
+  // to stream. The drain is the last await of the line, and a stalled
+  // store would hold `execute` open past an abort; it joins under the
+  // same grace as the tree.
+  const sink = options.sink
+  if (sink !== undefined && result instanceof ExecuteResult) {
+    result = await joinOrAbort(drainToSink(sink, result), options.signal)
+  }
+  // Once the caller aborted, the line's answer is the abort whichever
+  // await it landed on, tree, record, flush or drain, and `$?` is what
+  // the line found. Checked here, after the last of them, so no path
+  // can forget it.
+  if (hasAborted(options.signal)) {
+    if (frame.session !== null && frame.statusBefore !== null) {
+      restoreStatus(frame.session, frame.statusBefore)
+    }
+    throw makeAbortError(options.signal)
+  }
+  return result
+}
+
+/**
+ * What `executeLine` needs from the line to answer an abort: the shell
+ * it ran on and the status that shell had before it, filled as soon as
+ * the line knows them and before anything stamps.
+ */
+interface LineFrame {
+  session: Session | null
+  statusBefore: StatusSnapshot | null
 }
 
 /**
@@ -203,6 +234,7 @@ async function runLine(
   env: ExecuteEnv,
   command: string,
   options: ExecuteOptions,
+  frame: LineFrame,
 ): Promise<ExecuteResult | ProvisionResult> {
   if (options.signal?.aborted === true) {
     throw makeAbortError(options.signal)
@@ -252,6 +284,8 @@ async function runLine(
     ambient !== null && (options.sessionId === undefined || options.sessionId === ambient.sessionId)
       ? ambient
       : env.sessions.get(options.sessionId ?? env.sessions.defaultId)
+  frame.session = targetSession
+  frame.statusBefore = snapshotStatus(targetSession)
   let routingDecision: RouteDecision | null
   try {
     routingDecision = await abortable(
@@ -349,10 +383,8 @@ async function runLine(
   // either), a whole-line runtime, and the tree. Python binds the
   // effective session the same way before it parses.
   const effectiveSession = forkForCall(targetSession, options.cwd, options.env)
-  const statusBefore = snapshotStatus(targetSession)
-  let result: ExecuteResult | ProvisionResult
   try {
-    result = await runWithSession(
+    return await runWithSession(
       effectiveSession,
       () =>
         runParsedLine(
@@ -377,14 +409,6 @@ async function runLine(
     // the background instead of holding an aborted caller.
     await joinOrAbort(env.sessions.flush(), options.signal)
   }
-  // A flush that lands inside the grace still answers the abort: once the
-  // caller aborted, the line's answer is the abort and `$?` is what it
-  // found.
-  if (hasAborted(options.signal)) {
-    restoreStatus(targetSession, statusBefore)
-    throw makeAbortError(options.signal)
-  }
-  return result
 }
 
 /** The state a line runs against, loaded before it is parsed. */

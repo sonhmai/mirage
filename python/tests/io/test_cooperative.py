@@ -129,13 +129,19 @@ async def test_aborted_execution_records_failure():
     async def source():
         asyncio.get_running_loop().call_later(.001, cancel.set)
         yield b"line\n" * 500_000
+        # Keep the command unfinished even if the fast scan beats the timer.
+        await asyncio.Event().wait()
 
     try:
+        await ws.execute("false")
+        session = ws.get_session(ws.default_session_id)
+        assert session.last_exit_code == 1
         with pytest.raises(MirageAbortError):
             await ws.execute("wc -l", stdin=source(), cancel=cancel)
         events = await ws.observer.command_events()
-        assert len(events) == 1
-        assert events[0]["exit_code"] == 130
+        assert len(events) == 2
+        assert events[-1]["exit_code"] == 130
+        assert session.last_exit_code == 1
     finally:
         await ws.close()
 

@@ -301,6 +301,8 @@ describe('execute({ signal }): mid-flight cancellation', () => {
       name: 'AbortError',
     })
     expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(0)
+    const events = await ws.observer.commandEvents()
+    expect(events.at(-1)?.exit_code).toBe(130)
     await ws.close()
   })
 })

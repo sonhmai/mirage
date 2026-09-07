@@ -643,9 +643,13 @@ async function runParsedLine(
     else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
   }
   const [[materialized, io], opRecords] = execResult
+  const callerError =
+    executionFailure !== undefined &&
+    (isControlFlowError(executionFailure.error) || killed?.aborted === true)
   // The program loop stamped each statement; the line as a whole is a
   // wrapper around them, like a group.
-  recordStatus(targetSession, io.exitCode, true)
+  // A rejected invocation records its outcome without changing shell status.
+  if (!callerError) recordStatus(targetSession, io.exitCode, true)
   let stdoutBytes: Uint8Array
   try {
     if (executionFailure === undefined) await env.dispatcher.applyIo(io, opRecords, cacheable)
@@ -687,10 +691,7 @@ async function runParsedLine(
     )
   }
 
-  if (
-    executionFailure !== undefined &&
-    (isControlFlowError(executionFailure.error) || killed?.aborted === true)
-  ) {
+  if (callerError && executionFailure !== undefined) {
     throw executionFailure.error
   }
   return new ExecuteResult(stdoutBytes, stderrBytes, io.exitCode, io.refusal)

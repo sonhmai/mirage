@@ -480,7 +480,6 @@ async def execute_line(
         return io
     except (MirageAbortError, asyncio.CancelledError):
         io = IOResult(exit_code=130, stderr=b"execute aborted\n")
-        record_status(session, io.exit_code)
         raise
     except (ContentDriftError, RouteError) as exc:
         io = failure_result(exc, command)

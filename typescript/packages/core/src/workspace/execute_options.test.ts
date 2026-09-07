@@ -15,6 +15,9 @@
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
+import { Runtime } from '../runtime/base.ts'
+import { LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
+import type { RunResult } from '../runtime/types.ts'
 import { MountMode } from '../types.ts'
 import { Channel, JobConsole } from '../shell/console/index.ts'
 import { getTestParser, stdoutStr } from './fixtures/workspace_fixture.ts'
@@ -303,6 +306,42 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(0)
     const events = await ws.observer.commandEvents()
     expect(events.at(-1)?.exit_code).toBe(130)
+    await ws.close()
+  })
+
+  it('undoes a status stamped by a statement before the abort', async () => {
+    const ws = await makeWs()
+    await ws.execute('false')
+    await expect(
+      ws.execute('true; sleep 5', { signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
+    await ws.close()
+  })
+
+  it('aborts a whole-line runtime that never answers', async () => {
+    class Hanging extends Runtime implements LineExecutor {
+      readonly name = 'hanging'
+      readonly [LINE_EXECUTOR] = true as const
+      constructor() {
+        super({ captures: ['hangcmd'] })
+      }
+      runLine(): Promise<RunResult> {
+        return new Promise<never>(() => undefined)
+      }
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [new Hanging(), 'vfs'] },
+    )
+    await expect(
+      ws.execute('hangcmd now', { signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+    })
     await ws.close()
   })
 

@@ -522,14 +522,17 @@ async function runParsedLine(
         const filled = await fillManaged([rootNode], true, new Set(), false)
         if (filled !== null) return filled
       }
-      const result = await runWholeLine(
-        lineRuntime,
-        command,
-        stdin,
-        effectiveSession,
-        env.registry.allMounts(),
-        env.registry.policies,
-        () => env.invalidateAllAfterRemote(),
+      const result = await abortable(
+        runWholeLine(
+          lineRuntime,
+          command,
+          stdin,
+          effectiveSession,
+          env.registry.allMounts(),
+          env.registry.policies,
+          () => env.invalidateAllAfterRemote(),
+        ),
+        killed,
       )
       recordStatus(targetSession, result.exitCode)
       if (isLine) {
@@ -705,6 +708,9 @@ async function runParsedLine(
   }
 
   if (executionFailure !== undefined && (callerError || killed?.aborted === true)) {
+    // Statements before the abort may have stamped; an aborted
+    // invocation is the caller's outcome, not the shell's.
+    if (killed?.aborted === true) restoreStatus(targetSession, statusBefore)
     throw executionFailure.error
   }
   return new ExecuteResult(stdoutBytes, stderrBytes, io.exitCode, io.refusal)

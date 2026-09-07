@@ -11,12 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { abortable } from '../workspace/abort.ts'
 import { CachableAsyncIterator } from './cachable_iterator.ts'
 import { Checkpoint } from './checkpoint.ts'
 
 export const CHUNK_SIZE = 16 * 1024
 
-/** Split even a single RAM/cache blob; for-await closes producers on abort. */
+/** Split even a single RAM/cache blob; an abort closes the producer and wins over a stalled pull. */
 export async function* chunks(
   source: Uint8Array | AsyncIterable<Uint8Array>,
   signal?: AbortSignal,
@@ -30,8 +31,22 @@ export async function* chunks(
     }
     return
   }
+  // Pulled by hand rather than for-await: a pull that stays pending (a
+  // stalled body) has to lose the race to the abort, which for-await
+  // cannot express.
+  const iterator = source[Symbol.asyncIterator]()
+  let finished = false
+  let pulling = false
   try {
-    for await (const data of source) {
+    for (;;) {
+      pulling = true
+      const result = await abortable(iterator.next(), signal)
+      pulling = false
+      if (result.done === true) {
+        finished = true
+        break
+      }
+      const data = result.value
       for (let offset = 0; offset < data.byteLength; offset += CHUNK_SIZE) {
         const pending = checkpoint.run()
         if (pending !== undefined) await pending
@@ -41,5 +56,17 @@ export async function* chunks(
   } catch (error) {
     if (source instanceof CachableAsyncIterator) await source.discard()
     throw error
+  } finally {
+    // What for-await did implicitly: close a producer left mid-stream,
+    // whether the consumer stopped early or an abort landed. A return
+    // queued behind a pull that never settles would hang, so that one
+    // is not awaited.
+    if (!finished && !(source instanceof CachableAsyncIterator)) {
+      const closing = iterator.return?.()
+      if (closing !== undefined) {
+        if (pulling) void closing.catch(() => undefined)
+        else await closing
+      }
+    }
   }
 }

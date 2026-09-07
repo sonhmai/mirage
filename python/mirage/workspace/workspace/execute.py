@@ -335,10 +335,12 @@ async def execute_line(
                     if whole_names:
                         await fill_env(effective_session, whole_names, await
                                        ws._secret_sources())
-                io = await run_whole_line(
-                    line_runtime, command, stdin, effective_session,
-                    ws._registry.mounts(), ws._registry.policies,
-                    ws._dispatcher.invalidate_all_after_remote)
+                io = await run_cancellable(
+                    run_whole_line(line_runtime, command, stdin,
+                                   effective_session, ws._registry.mounts(),
+                                   ws._registry.policies,
+                                   ws._dispatcher.invalidate_all_after_remote),
+                    cancel)
                 record_status(session, io.exit_code)
                 return io
             # The line is the unit a rule judges, so every command in it is

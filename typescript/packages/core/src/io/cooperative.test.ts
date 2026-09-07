@@ -2,6 +2,7 @@
 import { RAMFileCacheStore } from '../cache/file/ram.ts'
 import { describe, expect, it } from 'vitest'
 import { AsyncLineIterator } from './async_line_iterator.ts'
+import { chunks } from './cooperative.ts'
 import { wcGeneric } from '../commands/builtin/generic/wc.ts'
 
 const ENC = new TextEncoder()
@@ -320,4 +321,26 @@ it('preserves a caller-supplied abort reason and records cancellation', async ()
     clearTimeout(timer)
     await ws.close()
   }
+})
+
+describe('chunks under a stalled source', () => {
+  it('lets the abort win over a pull that never settles', async () => {
+    let closed = false
+    const stalled: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<Uint8Array>>(() => undefined),
+        return: () => {
+          closed = true
+          return Promise.resolve({ done: true as const, value: undefined })
+        },
+      }),
+    }
+    const controller = new AbortController()
+    setTimeout(() => {
+      controller.abort()
+    }, 20)
+    const reader = chunks(stalled, controller.signal)
+    await expect(reader.next()).rejects.toMatchObject({ name: 'AbortError' })
+    expect(closed).toBe(true)
+  })
 })

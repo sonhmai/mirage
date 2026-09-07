@@ -298,3 +298,31 @@ async def test_cancel_during_cache_fill_aborts():
         assert session.last_exit_code == 1
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_reaches_a_whole_line_runtime():
+    from mirage import LineExecutorMixin, Runtime, Workspace
+    from mirage.resource.ram import RAMResource
+    from mirage.types import MountMode
+    from mirage.workspace.abort import MirageAbortError
+
+    class Hanging(Runtime, LineExecutorMixin):
+        name = "hanging"
+        captures = ("hangcmd", )
+
+        async def run_line(self, line, stdin, env, cwd):
+            await asyncio.Event().wait()
+
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[Hanging(), "vfs"])
+    cancel = asyncio.Event()
+    asyncio.get_running_loop().call_later(.01, cancel.set)
+    try:
+        with pytest.raises(MirageAbortError):
+            await ws.execute("hangcmd now", cancel=cancel)
+        events = await ws.observer.command_events()
+        assert events[-1]["exit_code"] == 130
+    finally:
+        await ws.close()

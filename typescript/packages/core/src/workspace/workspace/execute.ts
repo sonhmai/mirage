@@ -29,7 +29,7 @@ import {
 } from '../../shell/parse/index.ts'
 import type { ProvisionResult } from '../../provision/types.ts'
 import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
-import { makeAbortError, mergeSignals } from '../abort.ts'
+import { hasAborted, makeAbortError, mergeSignals } from '../abort.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { RouteDeny, type RouteDecision } from '../../runtime/routing/index.ts'
@@ -349,8 +349,10 @@ async function runLine(
   // either), a whole-line runtime, and the tree. Python binds the
   // effective session the same way before it parses.
   const effectiveSession = forkForCall(targetSession, options.cwd, options.env)
+  const statusBefore = snapshotStatus(targetSession)
+  let result: ExecuteResult | ProvisionResult
   try {
-    return await runWithSession(
+    result = await runWithSession(
       effectiveSession,
       () =>
         runParsedLine(
@@ -375,6 +377,14 @@ async function runLine(
     // the background instead of holding an aborted caller.
     await joinOrAbort(env.sessions.flush(), options.signal)
   }
+  // A flush that lands inside the grace still answers the abort: once the
+  // caller aborted, the line's answer is the abort and `$?` is what it
+  // found.
+  if (hasAborted(options.signal)) {
+    restoreStatus(targetSession, statusBefore)
+    throw makeAbortError(options.signal)
+  }
+  return result
 }
 
 /** The state a line runs against, loaded before it is parsed. */
@@ -748,6 +758,11 @@ async function runParsedLine(
       ),
       killed,
     )
+  }
+  // The line finished and the abort landed on the record: the answer is
+  // still the abort, as it is for one that lands on the drain.
+  if (executionFailure === undefined && killed?.aborted === true) {
+    executionFailure = { error: makeAbortError(killed) }
   }
 
   if (executionFailure !== undefined && (callerError || killed?.aborted === true)) {

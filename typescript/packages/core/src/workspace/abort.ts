@@ -28,6 +28,14 @@ export function makeAbortError(signal?: AbortSignal): DOMException {
 }
 
 /** Fold two optional abort signals into one; either aborting aborts. */
+/**
+ * Whether the signal has fired. A call rather than a property read, so a
+ * check that comes after an earlier one is not narrowed away as stale.
+ */
+export function hasAborted(signal?: AbortSignal): boolean {
+  return signal?.aborted === true
+}
+
 export function mergeSignals(
   a: AbortSignal | null | undefined,
   b: AbortSignal | null | undefined,

@@ -93,7 +93,13 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
       if (this.pulling) void closing.catch(() => undefined)
       else await closing
     }
-    if (this.input instanceof CachableAsyncIterator) await this.input.discard()
+    // The discard closes the same producer, so behind a stalled pull it
+    // is not awaited either; `discard` never rejects.
+    if (this.input instanceof CachableAsyncIterator) {
+      const discarding = this.input.discard()
+      if (this.pulling) void discarding
+      else await discarding
+    }
   }
 
   private async pull(signal?: AbortSignal): Promise<IteratorResult<Uint8Array>> {

@@ -371,6 +371,34 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     })
   })
 
+  it('answers an abort that lands on the session flush with the abort', async () => {
+    // The line finished; the flush of its status is what the abort lands
+    // on, and it settles inside the grace. The answer is still the abort,
+    // and `$?` is what the line found.
+    class Slow extends RAMSessionStore {
+      override async casSet(
+        sessionId: string,
+        fields: SessionFields,
+        expectedGeneration: number,
+      ): Promise<boolean> {
+        await new Promise((resolve) => setTimeout(resolve, 120))
+        return super.casSet(sessionId, fields, expectedGeneration)
+      }
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, sessionStore: new Slow() },
+    )
+    await ws.execute('false')
+    // An env write is durable, so this line has a flush to land on.
+    await expect(
+      ws.execute('export MARK=1', { signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
+    await ws.close()
+  })
+
   it('aborts a whole-line runtime that never answers', async () => {
     class Hanging extends Runtime implements LineExecutor {
       readonly name = 'hanging'

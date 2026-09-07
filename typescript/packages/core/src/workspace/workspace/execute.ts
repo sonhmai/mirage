@@ -187,7 +187,9 @@ export async function executeLine(
   // A provision run answers with a plan, not output, so it has nothing
   // to stream.
   if (sink === undefined || !(result instanceof ExecuteResult)) return result
-  return drainToSink(sink, result)
+  // The drain is the one await after the tree, and a stalled store would
+  // hold `execute` open past an abort; it joins under the same grace.
+  return joinOrAbort(drainToSink(sink, result), options.signal)
 }
 
 /**

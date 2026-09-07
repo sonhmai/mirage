@@ -49,17 +49,28 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   }
 
   async readline(signal?: AbortSignal): Promise<Uint8Array | null> {
-    // Amortize clock reads on short-line workloads; chunk pulls also check.
-    if (++this.linesSinceCheck >= 64) {
-      this.linesSinceCheck = 0
-      const pending = this.checkpoint.run()
-      if (pending !== undefined) await pending
-    }
-    const idx = this.buf.indexOf(NEWLINE)
-    if (idx >= 0) {
-      const line = this.buf.subarray(0, idx)
-      this.buf = this.buf.subarray(idx + 1)
-      return line
+    try {
+      // A buffered line is handed out without a pull, so the signal is
+      // checked here as well, on both sides of the yield.
+      signal?.throwIfAborted()
+      // Amortize clock reads on short-line workloads; chunk pulls also check.
+      if (++this.linesSinceCheck >= 64) {
+        this.linesSinceCheck = 0
+        const pending = this.checkpoint.run()
+        if (pending !== undefined) {
+          await pending
+          signal?.throwIfAborted()
+        }
+      }
+      const idx = this.buf.indexOf(NEWLINE)
+      if (idx >= 0) {
+        const line = this.buf.subarray(0, idx)
+        this.buf = this.buf.subarray(idx + 1)
+        return line
+      }
+    } catch (error) {
+      await this.close()
+      throw error
     }
     const [line, found] = await this.readDelimited(NEWLINE, signal)
     return found || line.byteLength > 0 ? line : null

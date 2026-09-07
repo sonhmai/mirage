@@ -132,4 +132,21 @@ describe('AsyncLineIterator under a stalled source', () => {
       name: 'AbortError',
     })
   })
+
+  it('does not hand out a buffered line once the read signal fired', async () => {
+    // One chunk holding more lines than the amortized yield interval, so
+    // every read after the first is answered from the buffer with no pull.
+    const lines = Array.from({ length: 200 }, (_, i) => `line${String(i)}\n`).join('')
+    const reader = new AsyncLineIterator(new Blob([lines]).stream())
+    const controller = new AbortController()
+    for (let i = 0; i < 63; i++) expect(await reader.readline(controller.signal)).not.toBeNull()
+    // Let the checkpoint budget lapse so the 64th read yields, and fire
+    // the signal while it is parked on that yield.
+    await new Promise((resolve) => setTimeout(resolve, 15))
+    const pending = reader.readline(controller.signal)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    // A signal already fired is refused before the buffer is consulted.
+    await expect(reader.readline(controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+  })
 })

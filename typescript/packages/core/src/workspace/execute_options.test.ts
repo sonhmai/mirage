@@ -19,7 +19,7 @@ import { Runtime } from '../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
 import type { RunResult } from '../runtime/types.ts'
 import { MountMode } from '../types.ts'
-import { Channel, JobConsole } from '../shell/console/index.ts'
+import { Channel, JobConsole, RAMConsoleStore } from '../shell/console/index.ts'
 import { getTestParser, stdoutStr } from './fixtures/workspace_fixture.ts'
 import type { ExecuteResult } from './workspace/workspace.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -452,6 +452,22 @@ describe('execute({ sink }): streaming output to a console', () => {
     expect(stdoutStr(result)).toBe('')
     expect(DEC.decode(result.stderr)).toBe('')
     expect(DEC.decode(await console_.snapshot(Channel.STDERR))).toContain('syntax error')
+    await ws.close()
+  })
+
+  it('releases the caller when the sink store stalls on a buffered result', async () => {
+    class Stalled extends RAMConsoleStore {
+      override append(): Promise<never> {
+        return new Promise<never>(() => undefined)
+      }
+    }
+    const ws = await makeWs()
+    const console_ = new JobConsole(new Stalled())
+    // The syntax gate answers with bytes in hand, so the only await left
+    // after the tree is the drain into the store.
+    await expect(
+      ws.execute('case x', { sink: console_, signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
     await ws.close()
   })
 

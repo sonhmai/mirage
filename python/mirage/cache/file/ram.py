@@ -67,8 +67,10 @@ class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
                   data: bytes,
                   fingerprint: str | None = None,
                   ttl: int | None = None) -> None:
+        # Captured before waiting on the lock: bytes read before an
+        # invalidation are stale even when the lock was granted after it.
+        version = self._invalidation_version
         async with self._lock_for(key):
-            version = self._invalidation_version
             if fingerprint is None:
                 fingerprint = await default_fingerprint_async(data)
             if version != self._invalidation_version:
@@ -92,11 +94,11 @@ class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
                   data: bytes,
                   fingerprint: str | None = None,
                   ttl: int | None = None) -> bool:
+        version = self._invalidation_version
         async with self._lock_for(key):
             existing = self._entries.get(key)
             if existing is not None and not existing.expired:
                 return False
-            version = self._invalidation_version
             if fingerprint is None:
                 fingerprint = await default_fingerprint_async(data)
             if version != self._invalidation_version:

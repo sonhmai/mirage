@@ -88,10 +88,11 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
     data: Uint8Array,
     options: { fingerprint?: string | null; ttl?: number | null } = {},
   ): Promise<void> {
+    // Captured before waiting on the lock: bytes read before an
+    // invalidation are stale even when the lock was granted after it.
+    const version = this.invalidationVersion
     await this.lock.withLock(key, async () => {
-      const version = this.invalidationVersion
       const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
-      // An invalidation during hashing must not resurrect stale content.
       if (version !== this.invalidationVersion) return
       const existing = this.entries.get(key)
       if (existing !== undefined) {
@@ -117,10 +118,10 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
     data: Uint8Array,
     options: { fingerprint?: string | null; ttl?: number | null } = {},
   ): Promise<boolean> {
+    const version = this.invalidationVersion
     const placed = await this.lock.withLock(key, async () => {
       const existing = this.entries.get(key)
       if (existing !== undefined && !existing.expired) return Promise.resolve(false)
-      const version = this.invalidationVersion
       const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
       if (version !== this.invalidationVersion) return false
       if (existing !== undefined) {

@@ -148,3 +148,23 @@ async def test_clear_during_fingerprint_discards_pending_write(operation):
     await pending
     assert await cache.get("/large") is None
     assert cache.cache_size == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["set", "add"])
+async def test_writer_waiting_on_the_lock_sees_an_earlier_invalidation(
+        operation):
+    # Both writers hold bytes read before the clear; the second only gets
+    # the lock after the clear, so a version read under the lock would
+    # look current and let it install stale content.
+    cache = RAMFileCacheStore()
+    first = asyncio.create_task(
+        getattr(cache, operation)("/large", b"x" * 20_000_000))
+    await asyncio.sleep(0.001)
+    second = asyncio.create_task(
+        getattr(cache, operation)("/large", b"y" * 20_000_000))
+    await asyncio.sleep(0.001)
+    await cache.clear()
+    await asyncio.gather(first, second)
+    assert await cache.get("/large") is None
+    assert cache.cache_size == 0

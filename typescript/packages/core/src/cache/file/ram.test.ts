@@ -135,3 +135,24 @@ describe('RAMFileCacheStore', () => {
     expect(await c.get('/d/a.txt')).toBeNull()
   })
 })
+
+describe('RAMFileCacheStore: a writer waiting on the lock', () => {
+  const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+  it.each(['set', 'add'] as const)(
+    '%s sees an invalidation that landed while it waited',
+    async (operation) => {
+      // Both writers hold bytes read before the clear; the second only gets
+      // the lock after the clear, so a version read under the lock would
+      // look current and let it install stale content.
+      const cache = new RAMFileCacheStore()
+      const first = cache[operation]('/large', new Uint8Array(4_000_000).fill(0x78))
+      await sleep(2)
+      const second = cache[operation]('/large', new Uint8Array(4_000_000).fill(0x79))
+      await sleep(2)
+      await cache.clear()
+      await Promise.all([first, second])
+      expect(await cache.get('/large')).toBeNull()
+    },
+  )
+})

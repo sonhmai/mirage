@@ -186,3 +186,18 @@ describe('handlePs', () => {
     expect((out as Uint8Array).byteLength).toBe(0)
   })
 })
+
+describe('handleWait with an invocation signal', () => {
+  it('releases the caller on abort and leaves the job running', async () => {
+    const jt = new JobTable()
+    const jobAbort = new AbortController()
+    jt.submit({ command: 'a', run: pendingRun(jobAbort), abort: jobAbort, cwd: '/' })
+    const controller = new AbortController()
+    const waiting = handleWait(jt, ['wait'], null, null, controller.signal)
+    controller.abort()
+    await expect(waiting).rejects.toMatchObject({ name: 'AbortError' })
+    expect(jt.listJobs()[0]?.status).toBe(JobStatus.RUNNING)
+    jobAbort.abort()
+    await jt.waitAll()
+  })
+})

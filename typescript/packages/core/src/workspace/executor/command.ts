@@ -82,6 +82,7 @@ const JOB_HANDLERS: Record<
     textParts: string[],
     session: Session | null,
     view: SessionView | null,
+    signal?: AbortSignal,
   ) => JobHandlerResult | Promise<JobHandlerResult>
 > = {
   wait: handleWait,
@@ -113,6 +114,7 @@ async function finishFind(
   namespace: Namespace | null,
   stdin: ByteSource | null,
   starts: readonly PathSpec[],
+  signal: AbortSignal | undefined,
 ): Promise<ByteSource | null> {
   const [newStdout, actionErr, actionExit] = await applyFindActions(
     stdout,
@@ -130,6 +132,7 @@ async function finishFind(
       namespace,
       stdin,
       starts,
+      ...(signal !== undefined ? { signal } : {}),
     },
   )
   if (actionErr.length > 0) {
@@ -171,7 +174,13 @@ export async function handleCommand(
     const textParts = parts.map((p) => (typeof p === 'string' ? p : p.virtual))
     const handler = JOB_HANDLERS[cmdName]
     if (handler !== undefined) {
-      return handler(jobTable, textParts, session, sessionView(session, registry.policies))
+      return handler(
+        jobTable,
+        textParts,
+        session,
+        sessionView(session, registry.policies),
+        mergeSignals(signal, session.abortSignal),
+      )
     }
   }
 
@@ -399,6 +408,7 @@ export async function handleCommand(
         namespace ?? null,
         stdin,
         csScopes,
+        mergeSignals(signal, session.abortSignal),
       )
       csExec.exitCode = csIo.exitCode
       csExec.stderr = await materialize(csIo.stderr)
@@ -545,6 +555,7 @@ export async function handleCommand(
         namespace ?? null,
         stdin,
         paths,
+        mergeSignals(signal, session.abortSignal),
       )
       fanNode.exitCode = fanIo.exitCode
       fanNode.stderr = await materialize(fanIo.stderr)
@@ -588,6 +599,7 @@ export async function handleCommand(
       namespace ?? null,
       stdin,
       paths,
+      mergeSignals(signal, session.abortSignal),
     )
   }
   if (warnBytes !== null) {

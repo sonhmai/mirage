@@ -29,7 +29,7 @@ import { Consumer, JOB_BUILTINS, dereferences, lookup } from '../lookup/index.ts
 import { type Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import type { Session } from '../session/session.ts'
-import { mergeSignals } from '../abort.ts'
+import { abortable, mergeSignals } from '../abort.ts'
 import { ExecutionNode } from '../types.ts'
 import { strategyFor } from '../../commands/builtin/generic/crossmount/detect.ts'
 import type { Cmd } from '../../commands/builtin/generic/crossmount/types.ts'
@@ -206,19 +206,24 @@ export async function handleCommand(
   // leaf and a command handler see one plane alike.
   const cliInstall = registry.clis.get(cmdName)
   if (cliInstall !== null) {
-    return handleCli(
-      cliInstall,
-      parts,
-      session,
-      stdin,
-      {
-        entries: registry.runtimeEntries,
-        dispatch,
-        statPath: (path: string) => pathStat(dispatch, path, null),
-        ns: namespaceViewOf(registry, namespace ?? null, dispatch),
-        sessionView: sessionView(session, registry.policies),
-      },
-      () => dropServiceCaches(registry, cliInstall.spec.serves),
+    // A leaf that waits on its service keeps running; the caller's abort
+    // releases the invocation, as it does for `wait`.
+    return abortable(
+      handleCli(
+        cliInstall,
+        parts,
+        session,
+        stdin,
+        {
+          entries: registry.runtimeEntries,
+          dispatch,
+          statPath: (path: string) => pathStat(dispatch, path, null),
+          ns: namespaceViewOf(registry, namespace ?? null, dispatch),
+          sessionView: sessionView(session, registry.policies),
+        },
+        () => dropServiceCaches(registry, cliInstall.spec.serves),
+      ),
+      mergeSignals(signal, session.abortSignal),
     )
   }
 

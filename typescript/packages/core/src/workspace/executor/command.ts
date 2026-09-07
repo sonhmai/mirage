@@ -20,11 +20,12 @@ import type { Resource } from '../../resource/base.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { PathSpec } from '../../types.ts'
+import { identityFrom } from '../../commands/builtin/utils/identity.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { makeStorageKey } from '../mount/storage.ts'
-import { Consumer, JOB_BUILTINS, lookup } from '../lookup/index.ts'
+import { Consumer, JOB_BUILTINS, dereferences, lookup } from '../lookup/index.ts'
 import { type Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import type { Session } from '../session/session.ts'
@@ -39,7 +40,13 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/index.ts'
 import { fanOutTraversal, runWithFanout, shouldFanOut } from './fanout.ts'
-import { findExprTail, parseFindExpression } from '../../commands/builtin/find_parse.ts'
+import {
+  findExprTail,
+  parseFindExpression,
+  type FindExpr,
+} from '../../commands/builtin/find_parse.ts'
+import { resolveNewerRefs } from './find_refs.ts'
+import type { ExecuteFn } from '../expand/node.ts'
 import { FindParseError } from '../../commands/errors.ts'
 import { maybeWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { resolveProducer, resolveLimit } from '../../policy/index.ts'
@@ -50,7 +57,8 @@ import { versionRequest } from '../../commands/config.ts'
 import { handleCli } from './command/cli.ts'
 import { pathStat } from './builtins/links/index.ts'
 import { dropServiceCaches, namespaceViewOf } from './command/run.ts'
-import type { SessionView } from '../../ops/types.ts'
+import type { NamespaceView, SessionView, StatPath } from '../../ops/types.ts'
+import { applyFindActions } from './find_action_dispatch.ts'
 import { sessionView } from '../session/state.ts'
 import { optionError, parseFlags } from './command/flags.ts'
 import { executeShellFunction } from './command/functions.ts'
@@ -60,7 +68,7 @@ import {
   mergeScopes,
   pathFlagScopes,
 } from './command/routing.ts'
-import { runOnMount, type RunOnMountCtx } from './command/run.ts'
+import { findStartPoints, runOnMount, type RunOnMountCtx } from './command/run.ts'
 import type { Result } from './command/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
@@ -84,6 +92,54 @@ const JOB_HANDLERS: Record<
   ps: handlePs,
 }
 
+/**
+ * Apply find's actions once, at the command boundary. Every runner below
+ * this point (one mount, a fan-out over nested mounts, one native run per
+ * cross-mount operand) only selects rows and hands them back as
+ * `io.matchedRuns`; the actions run here over all of them together, so
+ * a batched `-exec {} +` is one invocation across every start point, as
+ * GNU's is, and a per-match action runs in start-point order.
+ */
+async function finishFind(
+  stdout: ByteSource | null,
+  io: IOResult,
+  texts: readonly string[],
+  registry: MountRegistry,
+  session: Session,
+  executeFn: ExecuteFn | undefined,
+  ns: NamespaceView | undefined,
+  statPath: StatPath,
+  dispatch: DispatchFn,
+  namespace: Namespace | null,
+  stdin: ByteSource | null,
+  starts: readonly PathSpec[],
+): Promise<ByteSource | null> {
+  const [newStdout, actionErr, actionExit] = await applyFindActions(
+    stdout,
+    io.matchedRuns,
+    texts,
+    registry,
+    session.cwd,
+    {
+      ...(executeFn !== undefined ? { executeFn } : {}),
+      sessionId: session.sessionId,
+      ns: ns ?? null,
+      statPath,
+      dispatch,
+      identity: identityFrom(ns, sessionView(session, registry.policies)),
+      namespace,
+      stdin,
+      starts,
+    },
+  )
+  if (actionErr.length > 0) {
+    const existing = await materialize(io.stderr)
+    io.stderr = concatBytes([existing, actionErr])
+  }
+  if (io.exitCode === 0) io.exitCode = actionExit
+  return newStdout
+}
+
 export async function handleCommand(
   executeNode: ExecuteNodeFn,
   dispatch: DispatchFn,
@@ -97,6 +153,7 @@ export async function handleCommand(
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
   routingDecision?: RouteDecision,
+  executeFn?: ExecuteFn,
   signal?: AbortSignal,
 ): Promise<Result> {
   if (parts.length === 0) {
@@ -209,8 +266,9 @@ export async function handleCommand(
   let findExprTokens: string[] | null = null
   if (cmdName === 'find') {
     findExprTokens = findExprTail(rawArgv)
+    let findExpr: FindExpr
     try {
-      parseFindExpression(findExprTokens)
+      findExpr = parseFindExpression(findExprTokens)
     } catch (err) {
       if (err instanceof FindParseError) {
         const errBytes = new TextEncoder().encode(`${err.message}\n`)
@@ -221,6 +279,27 @@ export async function handleCommand(
         ]
       }
       throw err
+    }
+    if (findExpr.newer.length > 0) {
+      // Every -newer reference is statted through the dispatcher here,
+      // once, before any backend parses the expression.
+      const [rewritten, refErr] = await resolveNewerRefs(
+        findExprTokens,
+        findExpr.newer,
+        registry,
+        session.cwd,
+        (path: string) => pathStat(dispatch, path, null),
+        namespace ?? null,
+        dereferences(cmdName, parts),
+      )
+      if (refErr !== null) {
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: refErr }),
+          new ExecutionNode({ command: cmdStr, stderr: refErr, exitCode: 1 }),
+        ]
+      }
+      findExprTokens = rewritten
     }
   }
 
@@ -274,6 +353,7 @@ export async function handleCommand(
       ...(ensureOpen !== undefined ? { ensureOpen } : {}),
       ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
       ...(routingDecision !== undefined ? { routingDecision } : {}),
+      ...(executeFn !== undefined ? { executeFn } : {}),
     }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
@@ -281,16 +361,17 @@ export async function handleCommand(
     // A per-operand native run is single-mount by construction, so a
     // traversal operand holding nested mounts has to fan out inside it,
     // exactly as the same operand would on a line of its own.
+    const csStat: StatPath = (path: string) => pathStat(dispatch, path, null)
     const runOperand = runWithFanout(
       runSingle,
       registry,
       session.cwd,
       csNs,
       ensureOpen,
-      (path: string) => pathStat(dispatch, path, null),
+      csStat,
       mergeSignals(signal, session.abortSignal),
     )
-    const [csStdout, csIo, csExec] = await handleCrossMount(
+    const [csStdout0, csIo, csExec] = await handleCrossMount(
       cmdName,
       csScopes,
       csTexts,
@@ -303,6 +384,25 @@ export async function handleCommand(
       csNs,
       sessionView(session, registry.policies),
     )
+    let csStdout = csStdout0
+    if (cmdName === 'find') {
+      csStdout = await finishFind(
+        csStdout,
+        csIo,
+        csTexts,
+        registry,
+        session,
+        executeFn,
+        csNs,
+        csStat,
+        dispatch,
+        namespace ?? null,
+        stdin,
+        csScopes,
+      )
+      csExec.exitCode = csIo.exitCode
+      csExec.stderr = await materialize(csIo.stderr)
+    }
     if (csParsed.warnings.length > 0) {
       const csWarn = new TextEncoder().encode(
         csParsed.warnings.map((w) => `${cmdName}: ${w}\n`).join(''),
@@ -374,7 +474,7 @@ export async function handleCommand(
     ]
   }
   const parsedLine = parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
-  const { paths, flagKwargs, warnings: parseWarnings } = parsedLine
+  const { paths: parsedPaths, flagKwargs, warnings: parseWarnings } = parsedLine
   const textsRaw = parsedLine.texts
   const refusal = optionError(cmdName, parsedLine)
   if (refusal !== null) {
@@ -386,6 +486,12 @@ export async function handleCommand(
     ]
   }
   const texts = findExprTokens ?? textsRaw
+  // The start points are the path words before the expression; the
+  // spec's rest slot would otherwise read an -exec word as one.
+  const paths =
+    findExprTokens !== null
+      ? findStartPoints(parts.slice(1), findExprTokens, mount.specFor(cmdName), session.cwd)
+      : parsedPaths
   if (findExprTokens !== null) {
     // `multiple: true` on find value-flags makes parseToKwargs emit arrays;
     // bespoke backend wrappers read these as scalars. Migrated backends read
@@ -406,8 +512,10 @@ export async function handleCommand(
     await ensureOpen(mount.resource)
   }
 
+  const singleNs = namespaceViewOf(registry, namespace ?? null, dispatch)
+  const singleStat: StatPath = (path: string) => pathStat(dispatch, path, null)
   if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
-    const [fanOut, fanIo, fanNode] = await fanOutTraversal(
+    const [fanOut0, fanIo, fanNode] = await fanOutTraversal(
       cmdName,
       paths,
       texts,
@@ -418,10 +526,29 @@ export async function handleCommand(
       cmdStr,
       stdin,
       ensureOpen,
-      namespaceViewOf(registry, namespace ?? null, dispatch),
-      (path: string) => pathStat(dispatch, path, null),
+      singleNs,
+      singleStat,
       mergeSignals(signal, session.abortSignal),
     )
+    let fanOut = fanOut0
+    if (cmdName === 'find') {
+      fanOut = await finishFind(
+        fanOut,
+        fanIo,
+        texts,
+        registry,
+        session,
+        executeFn,
+        singleNs,
+        singleStat,
+        dispatch,
+        namespace ?? null,
+        stdin,
+        paths,
+      )
+      fanNode.exitCode = fanIo.exitCode
+      fanNode.stderr = await materialize(fanIo.stderr)
+    }
     if (warnBytes !== null) {
       const existing = await materialize(fanIo.stderr)
       fanIo.stderr = concatBytes([warnBytes, existing])
@@ -439,6 +566,7 @@ export async function handleCommand(
     ...(ensureOpen !== undefined ? { ensureOpen } : {}),
     ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
     ...(routingDecision !== undefined ? { routingDecision } : {}),
+    ...(executeFn !== undefined ? { executeFn } : {}),
   }
   const [rawStdout, io] = await runOnMount(runCtx, cmdName, paths, texts, flagKwargs, {
     stdin,
@@ -446,6 +574,22 @@ export async function handleCommand(
     resolveHint: routingScopes[0] ?? null,
   })
   let stdout = rawStdout
+  if (cmdName === 'find') {
+    stdout = await finishFind(
+      stdout,
+      io,
+      texts,
+      registry,
+      session,
+      executeFn,
+      singleNs,
+      singleStat,
+      dispatch,
+      namespace ?? null,
+      stdin,
+      paths,
+    )
+  }
   if (warnBytes !== null) {
     const existing = await materialize(io.stderr)
     io.stderr = concatBytes([warnBytes, existing])

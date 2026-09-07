@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Producer, Refusal } from '../types.ts'
-import { chunks } from './cooperative.ts'
+import type { PathSpec, Producer, Refusal } from '../types.ts'
 import { CachableAsyncIterator } from './cachable_iterator.ts'
+import { chunks } from './cooperative.ts'
 
 export type ByteSource = Uint8Array | AsyncIterable<Uint8Array>
 
@@ -71,10 +71,16 @@ export interface IOResultInit {
   cache?: string[]
   producer?: Producer | null
   mutated?: boolean | null
+  matchedRuns?: PathSpec[][] | null
   refusal?: Refusal | null
 }
 
 export class IOResult {
+  // Structured selection before display rendering, for later actions:
+  // one list of rows per start point, in operand order, so a nested or
+  // repeated start point stays its own traversal (GNU walks each to
+  // completion before the next).
+  matchedRuns: PathSpec[][] | null
   stdout: ByteSource | null
   stderr: ByteSource | null
   private _exitCode: number
@@ -102,6 +108,7 @@ export class IOResult {
   streamSource: IOResult | null
 
   constructor(init: IOResultInit = {}) {
+    this.matchedRuns = init.matchedRuns ?? null
     this.stdout = init.stdout ?? null
     this.stderr = init.stderr ?? null
     this._exitCode = init.exitCode ?? 0
@@ -163,6 +170,7 @@ export class IOResult {
     // firing at drain time) is still visible.
     const result = new IOResult({
       stdout: other.stdout,
+      matchedRuns: other.matchedRuns,
       stderr: mergedStderr,
       reads: { ...this.reads, ...other.reads },
       writes: { ...this.writes, ...other.writes },

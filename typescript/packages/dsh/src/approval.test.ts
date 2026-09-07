@@ -172,22 +172,20 @@ describe('an asked line with an approval channel', () => {
     expect(asked[0]?.reason).toBe('deletes are reviewed: rm /data/notes.txt')
   })
 
-  it('spends an inline refusal on that line and asks again on each retry', async () => {
+  it('does not re-prompt the retry of a line just refused, then asks afresh', async () => {
     const { shell, asked } = await world(ASK_RM, 'rejected')
     const first = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(first.exitCode).toBe(126)
     expect(asked).toHaveLength(1)
-    // The inline ONCE answer was spent by the line that asked for it.
-    // Each subsequent invocation needs its own answer, even for the same line.
+    // Keep a refusal for the immediate retry, then spend it.
     const retry = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(retry.exitCode).toBe(126)
-    expect(asked).toHaveLength(2)
+    expect(asked).toHaveLength(1)
     const third = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(third.exitCode).toBe(126)
-    expect(asked).toHaveLength(3)
-    // All questions were the same line, so they quote one identity.
+    expect(asked).toHaveLength(2)
+    // Both questions were the same line, so they quote one identity.
     expect(asked[0]?.callId).toBe(asked[1]?.callId)
-    expect(asked[1]?.callId).toBe(asked[2]?.callId)
   })
 
   it('grants once and never for the session, so the next line asks again', async () => {

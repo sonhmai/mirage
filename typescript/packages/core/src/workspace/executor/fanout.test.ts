@@ -601,6 +601,7 @@ describe('traversal cancellation', () => {
             undefined,
             undefined,
             undefined,
+            undefined,
             source === 'caller' ? controller.signal : undefined,
           ),
         ).rejects.toMatchObject({ name: 'AbortError' })

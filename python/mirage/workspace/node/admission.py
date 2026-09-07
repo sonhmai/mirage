@@ -21,9 +21,10 @@ from typing import Any
 from mirage.commands.spec.types import ValueType
 from mirage.context.session_context import session_path_allowed
 from mirage.io.types import ByteSource
-from mirage.policy import (Abandoned, AdmissionRules, Ask, CommandContext,
-                           CommandRule, Deny, Pending, PolicyDenied, Scope,
-                           ask_rule, refusal_of, render_deny, render_pending)
+from mirage.policy import (Abandoned, AdmissionRules, Ask, Claimant,
+                           CommandContext, CommandRule, Deny, HandOff, Pending,
+                           PolicyDenied, Scope, ask_rule, refusal_of,
+                           render_deny, render_pending)
 from mirage.policy.match import (Outcome, has_rules, io_refusal, reads_args,
                                  scopes_paths)
 from mirage.runtime.routing import command_nodes
@@ -55,6 +56,9 @@ from mirage.workspace.lookup import (SHELL_NAMES, SLASH_KEEPS_LAST, WordPolicy,
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.inner_lines import Word, inner_lines
+from mirage.workspace.node.occurrence import (Frame, argv_frame, line_frame,
+                                              occurrence_in, root_frame,
+                                              whole_occurrence)
 from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir
 
@@ -320,6 +324,7 @@ async def admit(
     stdin: ByteSource | None = None,
     redirects: Sequence[PathSpec] = (),
     cancel: asyncio.Event | None = None,
+    claimant: Claimant | None = None,
 ) -> Refused | Admitted:
     """The command plane's admission of one command: visibility, then
     the policy chain, then the decision ledger.
@@ -354,6 +359,16 @@ async def admit(
             only so a question put to a host cannot outlive the run
             that raised it. Nothing else here waits on anything outside
             mirage.
+        claimant (Claimant | None): the command and its line, None
+            outside a line. On a line, every grant behind the command
+            is claimed on the line's hand-off for that occurrence,
+            whether a pass that judges the line before it runs
+            (``prejudge_line``, ``admit_line``) or the gate that runs
+            it is reading, and spent when the line ends, so one
+            question covers one run rather than one reader; a reader
+            outside a line spends what it matched. A refusal needs no
+            such care -- the record refuses the agent's retry from the
+            ledger either way.
     """
     gated = await gate(name, args, operands, session, registry, namespace,
                        agent_id, stdin, redirects)
@@ -364,8 +379,8 @@ async def admit(
     # the ledger answers it from the session's records or the host, so
     # an answer never re-opens a deny.
     action: Deny | Pending | Abandoned | None = (
-        await registry.decisions.resolve(ctx, asked, cancel) if isinstance(
-            asked, Ask) else asked)
+        await registry.decisions.resolve(ctx, asked, cancel, claimant)
+        if isinstance(asked, Ask) else asked)
     # The ledger stopped waiting on a host because this run was killed
     # while it was deciding. That is the kill landing late, not a ruling,
     # so it joins every other abandoned wait rather than being rendered
@@ -388,6 +403,25 @@ async def admit(
     err, code = (render_pending(name, action)
                  if isinstance(action, Pending) else render_deny(name, action))
     return Refused(err, code, refusal_of(action))
+
+
+def is_pending_refusal(refusal: Refusal | None) -> bool:
+    """Whether a record is a question the host has not answered yet,
+    which holds the line for its retry rather than ending it.
+
+    Args:
+        refusal (Refusal | None): the record a result carries.
+    """
+    return refusal is not None and refusal.kind == "pending"
+
+
+def is_pending(refused: Refused) -> bool:
+    """Whether a refusal is a question the host has not answered yet.
+
+    Args:
+        refused (Refused): what the gate refused with.
+    """
+    return is_pending_refusal(refused.refusal)
 
 
 def _refuse(name: str, reason: str) -> Refused:
@@ -425,7 +459,7 @@ def _word_hints(
     if not spec:
         return None, None
     extra: list[ValueType | None] = ["str"] * (consumed - 1)
-    word_kinds = extra + spec_word_kinds(spec, line[consumed:])
+    word_kinds = extra + spec_word_kinds(spec, line[consumed:], joined)
     bases = spec_word_bases(spec, line[consumed:], session.cwd)
     head: list[str | None] = [None] * (consumed - 1)
     word_bases = None if bases is None else head + bases
@@ -484,6 +518,7 @@ async def _admit_words(
     rules: AdmissionRules | None,
     redirect_words: tuple[Word, ...] = (),
     cancel: asyncio.Event | None = None,
+    claimant: Claimant | None = None,
 ) -> Refused | None:
     """Admit one command of a whole line on the words the gate read,
     then whatever lines the command runs in turn.
@@ -501,6 +536,8 @@ async def _admit_words(
         redirect_words (tuple[Word, ...]): the statement's redirect
             targets, as the gate reads them.
         cancel (asyncio.Event | None): the run's kill channel.
+        claimant (Claimant | None): the command and its line, as
+            ``admit`` takes it; the lines it runs stand under it.
     """
     head = words[0]
     if head.text is None and has_rules(rules):
@@ -518,7 +555,8 @@ async def _admit_words(
                          namespace,
                          agent_id,
                          redirects=redirects,
-                         cancel=cancel)
+                         cancel=cancel,
+                         claimant=claimant)
     if isinstance(action, Refused):
         return action
     if action.scoped:
@@ -545,17 +583,28 @@ async def _admit_words(
                 return _refuse(name, "runs lines the gate cannot read")
             continue
         if inner.line is not None:
+            frame = (line_frame(inner.line, claimant.occurrence)
+                     if claimant is not None else None)
             refusal = await admit_line(parse(inner.line), session, registry,
-                                       namespace, agent_id, cancel)
+                                       namespace, agent_id, cancel,
+                                       claimant.line if claimant else None,
+                                       frame, inner.open)
         else:
-            refusal = await _admit_words(list(inner.argv),
+            argv = list(inner.argv)
+            within = (Claimant(
+                claimant.line,
+                whole_occurrence(
+                    argv_frame([w.value for w in argv], claimant.occurrence)))
+                      if claimant is not None else None)
+            refusal = await _admit_words(argv,
                                          inner.open,
                                          session,
                                          registry,
                                          namespace,
                                          agent_id,
                                          rules,
-                                         cancel=cancel)
+                                         cancel=cancel,
+                                         claimant=within)
         if refusal is not None:
             return refusal
     return None
@@ -568,6 +617,9 @@ async def admit_line(
     namespace: Namespace | None,
     agent_id: str = "",
     cancel: asyncio.Event | None = None,
+    handed: HandOff | None = None,
+    frame: Frame | None = None,
+    open_: bool = False,
 ) -> Refused | None:
     """Admit every command of a line a runtime takes whole.
 
@@ -596,6 +648,14 @@ async def admit_line(
     refused on this account: the words are admitted as typed, which is
     all a coded policy ever saw.
 
+    No gate follows this pass: the runtime runs the line whole, so
+    every grant it matches is claimed on the line's hand-off exactly as
+    any reader on a line claims, and the executor's sweep spends them
+    when the line ends. A line held on a question still waiting keeps
+    its earlier answers standing for the retry, exactly as the
+    compound-line pass does, where spending them here asked the human
+    again for each on every retry.
+
     Args:
         ast (Any): the parsed tree-sitter root node.
         session (Session): the session running the line.
@@ -604,9 +664,19 @@ async def admit_line(
         namespace (Namespace | None): the link table.
         agent_id (str): the agent the line is attributed to.
         cancel (asyncio.Event | None): the run's kill channel.
+        handed (HandOff | None): the line's hand-off, None outside a
+            line (a bare admission with no run behind it).
+        frame (Frame | None): the scope the line is read in, for a line
+            a word runs; None reads ``ast`` as the line itself.
+        open_ (bool): whether the runtime appends operands the gate
+            cannot read to the line (``mapfile -C``'s callback, which
+            runs with the index and the record after it), as
+            ``_admit_words`` takes it for each of its commands.
     """
     rules = session.commands
     home = home_dir(session)
+    if frame is None:
+        frame = root_frame(ast, handed.origin if handed is not None else None)
     for node in command_nodes(ast):
         _, parts = split_env_prefix(get_parts(node))
         words = [
@@ -614,16 +684,18 @@ async def admit_line(
         ]
         if not words:
             continue
-        refusal = await _admit_words(words,
-                                     False,
-                                     session,
-                                     registry,
-                                     namespace,
-                                     agent_id,
-                                     rules,
-                                     redirect_words=statement_redirects(
-                                         node, home),
-                                     cancel=cancel)
+        refusal = await _admit_words(
+            words,
+            open_,
+            session,
+            registry,
+            namespace,
+            agent_id,
+            rules,
+            redirect_words=statement_redirects(node, home),
+            cancel=cancel,
+            claimant=Claimant(handed, occurrence_in(node, frame))
+            if handed is not None else None)
         if refusal is not None:
             return refusal
     return None
@@ -665,5 +737,6 @@ def statement_redirects(node: Any, home: str | None) -> tuple[Word, ...]:
     return tuple(
         Word(str(r.target), literal_word(r.target_node, home))
         for r in redirects
-        if r.kind not in (RedirectKind.HEREDOC, RedirectKind.HERESTRING)
+        if r.kind not in (RedirectKind.HEREDOC, RedirectKind.HERESTRING,
+                          RedirectKind.AMBIGUOUS)
         and not isinstance(r.target, int) and r.target_node is not None)

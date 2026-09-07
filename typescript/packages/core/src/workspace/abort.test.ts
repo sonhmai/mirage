@@ -24,6 +24,19 @@ describe('abortable', () => {
     await expect(abortable(Promise.resolve(7), new AbortController().signal)).resolves.toBe(7)
   })
 
+  it('keeps a listener on a promise it abandons to an already-aborted signal', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const late = new Promise<never>((_resolve, reject) => {
+      setTimeout(() => {
+        reject(new Error('settled after the caller left'))
+      }, 10)
+    })
+    await expect(abortable(late, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    // Vitest reports an unhandled rejection as a run error; this wait gives it the chance.
+    await new Promise<void>((resolve) => setTimeout(resolve, 40))
+  })
+
   it('rejects as an abort as soon as the signal fires', async () => {
     const controller = new AbortController()
     const pending = abortable(never(), controller.signal)

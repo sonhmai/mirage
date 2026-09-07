@@ -58,7 +58,12 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 /** Settle with `promise`, or reject as an abort as soon as `signal` fires. */
 export function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (signal === undefined) return promise
-  if (signal.aborted) return Promise.reject(makeAbortError(signal))
+  if (signal.aborted) {
+    // The promise is still ours to settle; a later rejection with no
+    // listener would surface as an unhandled error.
+    void promise.catch(() => undefined)
+    return Promise.reject(makeAbortError(signal))
+  }
   return new Promise<T>((resolve, reject) => {
     const onAbort = (): void => {
       reject(makeAbortError(signal))

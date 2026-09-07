@@ -12,8 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export function makeAbortError(): DOMException {
-  return new DOMException('execute aborted', 'AbortError')
+/**
+ * The one error an aborted invocation rejects with. A signal's own reason
+ * rides along as `cause` (a caller's `abort(x)`, a timeout's TimeoutError)
+ * so every gate keys on one name and the caller still sees why.
+ */
+export function makeAbortError(signal?: AbortSignal): DOMException {
+  const reason: unknown = signal?.aborted === true ? signal.reason : undefined
+  if (reason instanceof DOMException && reason.name === 'AbortError') return reason
+  const error = new DOMException('execute aborted', 'AbortError')
+  if (reason !== undefined) {
+    Object.defineProperty(error, 'cause', { value: reason, configurable: true, writable: true })
+  }
+  return error
 }
 
 /** Fold two optional abort signals into one; either aborting aborts. */
@@ -47,14 +58,49 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 /** Settle with `promise`, or reject as an abort as soon as `signal` fires. */
 export function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (signal === undefined) return promise
-  if (signal.aborted) return Promise.reject(makeAbortError())
+  if (signal.aborted) return Promise.reject(makeAbortError(signal))
   return new Promise<T>((resolve, reject) => {
     const onAbort = (): void => {
-      reject(makeAbortError())
+      reject(makeAbortError(signal))
     }
     signal.addEventListener('abort', onAbort, { once: true })
     promise.then(resolve, reject).finally(() => {
       signal.removeEventListener('abort', onAbort)
     })
   })
+}
+
+/** How long a cancelled tree gets to unwind before the caller is released anyway. */
+export const ABORT_JOIN_MS = 250
+
+/**
+ * The twin of Python's `run_cancellable`: cancel, then join. A cancelled
+ * asyncio task unwinds at its next await, so Python joins it fully. A JS
+ * promise cannot be cancelled, so once `signal` fires the tree is given
+ * `graceMs` to reach a checkpoint, close its producers and settle with
+ * its own error (which keeps the caller's abort reason); a leaf that is
+ * blocked past that is left running and the caller is released.
+ */
+export async function joinOrAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+  graceMs = ABORT_JOIN_MS,
+): Promise<T> {
+  if (signal === undefined) return promise
+  try {
+    return await abortable(promise, signal)
+  } catch (error) {
+    if (!signal.aborted) throw error
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const grace = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(makeAbortError(signal))
+      }, graceMs)
+    })
+    try {
+      return await Promise.race([promise, grace])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
 }

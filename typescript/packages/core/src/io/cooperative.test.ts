@@ -314,7 +314,7 @@ it('preserves a caller-supplied abort reason and records cancellation', async ()
   try {
     await expect(
       ws.execute('mapfile values', { stdin: source(), signal: controller.signal }),
-    ).rejects.toBe(reason)
+    ).rejects.toMatchObject({ name: 'AbortError', cause: reason })
     const events = await ws.observer.commandEvents()
     expect(events[0]?.exit_code).toBe(130)
   } finally {
@@ -343,4 +343,28 @@ describe('chunks under a stalled source', () => {
     await expect(reader.next()).rejects.toMatchObject({ name: 'AbortError' })
     expect(closed).toBe(true)
   })
+})
+
+it('answers a timeout signal with an AbortError that carries the timeout', async () => {
+  const { Workspace } = await import('../workspace/workspace/workspace.ts')
+  const { getTestParser } = await import('../workspace/fixtures/workspace_fixture.ts')
+  const ws = new Workspace({}, { shellParser: await getTestParser() })
+  async function* source() {
+    for (let i = 0; i < 50; i++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5))
+      yield ENC.encode('line\n'.repeat(20_000))
+    }
+  }
+  try {
+    const failure = await ws
+      .execute('mapfile values', { stdin: source(), signal: AbortSignal.timeout(30) })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      )
+    expect(failure).toMatchObject({ name: 'AbortError' })
+    expect((failure as { cause?: unknown }).cause).toMatchObject({ name: 'TimeoutError' })
+  } finally {
+    await ws.close()
+  }
 })

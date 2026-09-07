@@ -1,0 +1,73 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { describe, expect, it } from 'vitest'
+import { abortable, joinOrAbort } from './abort.ts'
+
+function never(): Promise<never> {
+  return new Promise<never>(() => undefined)
+}
+
+describe('abortable', () => {
+  it('settles with the promise when the signal stays quiet', async () => {
+    await expect(abortable(Promise.resolve(7), new AbortController().signal)).resolves.toBe(7)
+  })
+
+  it('rejects as an abort as soon as the signal fires', async () => {
+    const controller = new AbortController()
+    const pending = abortable(never(), controller.signal)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  })
+})
+
+describe('joinOrAbort', () => {
+  it('lets a responsive tree report its own error within the grace', async () => {
+    const controller = new AbortController()
+    const reason = new Error('caller stopped the run')
+    const tree = new Promise<never>((_resolve, reject) => {
+      controller.signal.addEventListener('abort', () => {
+        setTimeout(() => {
+          reject(reason)
+        }, 20)
+      })
+    })
+    const pending = joinOrAbort(tree, controller.signal, 200)
+    controller.abort(reason)
+    await expect(pending).rejects.toBe(reason)
+  })
+
+  it('takes a tree that finishes inside the grace as its result', async () => {
+    const controller = new AbortController()
+    const tree = new Promise<string>((resolve) => {
+      controller.signal.addEventListener('abort', () => {
+        setTimeout(() => {
+          resolve('done')
+        }, 20)
+      })
+    })
+    const pending = joinOrAbort(tree, controller.signal, 200)
+    controller.abort()
+    await expect(pending).resolves.toBe('done')
+  })
+
+  it('releases the caller once a stalled tree outlives the grace', async () => {
+    const controller = new AbortController()
+    const t0 = Date.now()
+    const pending = joinOrAbort(never(), controller.signal, 30)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(Date.now() - t0).toBeLessThan(500)
+  })
+})

@@ -508,6 +508,7 @@ export async function handleFg(
   parts: string[],
   _session: Session | null = null,
   _view: SessionView | null = null,
+  signal?: AbortSignal,
 ): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
   let jobId: number
@@ -535,7 +536,7 @@ export async function handleFg(
       ]
     }
   }
-  const job = await jobTable.wait(jobId)
+  const job = await abortable(jobTable.wait(jobId), signal)
   const header = new TextEncoder().encode(job.command + '\n')
   const body = await job.console.snapshot(Channel.STDOUT)
   const stderr = await job.console.snapshot(Channel.STDERR)

@@ -48,7 +48,7 @@ import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
-import { abortable } from '../abort.ts'
+import { abortable, joinOrAbort } from '../abort.ts'
 import { failureResult, isControlFlowError } from './failure.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { cliEnvNames, fillEnv, fillNames, guestBound, lineNodes } from './fill.ts'
@@ -605,14 +605,25 @@ async function runParsedLine(
     }
     const runBody = async (): Promise<[ByteSource | null, IOResult, ExecutionNode]> => {
       try {
-        const result = await runCommandTree(deps, rootNode, effectiveSession, stdin)
-        killed?.throwIfAborted()
+        // The one cancellation seam, the twin of Python's run_cancellable:
+        // a responsive tree unwinds at its checkpoints and reports its own
+        // error; a leaf blocked past the grace is left behind and the
+        // caller is released here. Leaf checks below this point exist to
+        // stop side effects and free producers, not to release the caller.
+        const result = await joinOrAbort(
+          runCommandTree(deps, rootNode, effectiveSession, stdin),
+          killed,
+        )
+        if (killed?.aborted === true) throw makeAbortError(killed)
         return result
       } catch (error) {
-        // Return through the recording scope so completed op records survive a throw.
-        executionFailure = { error }
-        const failed = failureResult(error)
-        if (killed?.aborted === true) failed.exitCode = 130
+        // Return through the recording scope so completed op records survive
+        // a throw. Once the caller aborted, the line's answer is the abort,
+        // whatever a leaf threw while unwinding.
+        const aborted = killed?.aborted === true
+        executionFailure = { error: aborted ? makeAbortError(killed) : error }
+        const failed = failureResult(executionFailure.error)
+        if (aborted) failed.exitCode = 130
         return [null, new IOResult(failed), new ExecutionNode({ command, ...failed })]
       }
     }
@@ -660,13 +671,14 @@ async function runParsedLine(
     if (executionFailure === undefined) {
       await abortable(env.dispatcher.applyIo(io, opRecords, cacheable), killed)
     }
-    stdoutBytes = materialized === null ? new Uint8Array() : await materialize(materialized)
+    stdoutBytes =
+      materialized === null ? new Uint8Array() : await abortable(materialize(materialized), killed)
   } catch (err) {
     if (killed?.aborted === true) {
       // The command finished; the abort landed on the cache fill or the drain.
       // An aborted invocation is the caller's outcome, not the shell's.
       restoreStatus(targetSession, statusBefore)
-      executionFailure = { error: err }
+      executionFailure = { error: makeAbortError(killed) }
       io.exitCode = 130
       stdoutBytes = new Uint8Array()
     } else {

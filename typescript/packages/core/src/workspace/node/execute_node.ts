@@ -352,6 +352,13 @@ export async function executeNode(
   session.diagnostics = []
   try {
     const [stdout, io, execNode] = await executeNodeBody(deps, node, session, stdin, callStack)
+    // A statement that settles after the caller aborted is an orphan: its
+    // status must not reach the shell the caller was already released from.
+    if (deps.signal?.aborted === true || session.abortSignal?.aborted === true) {
+      throw makeAbortError(
+        deps.signal?.aborted === true ? deps.signal : (session.abortSignal ?? undefined),
+      )
+    }
     if (session.diagnostics.length > 0) {
       const err = diagnosticStderr(node, session)
       const existing = await io.materializeStderr()
@@ -437,7 +444,9 @@ async function executeNodeBody(
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
   }
   if (deps.signal?.aborted === true || session.abortSignal?.aborted === true) {
-    throw makeAbortError()
+    throw makeAbortError(
+      deps.signal?.aborted === true ? deps.signal : (session.abortSignal ?? undefined),
+    )
   }
   session.errexitImmune = false
 

@@ -121,3 +121,54 @@ it.each(['set', 'add'] as const)(
     expect(cache.cacheSize).toBe(0)
   },
 )
+
+it.each(['mapfile values', 'read -N 131072 value'])(
+  'aborts %s while consuming ready stdin and closes the producer',
+  async (command) => {
+    const { Workspace } = await import('../workspace/workspace/workspace.ts')
+    const { getTestParser } = await import('../workspace/fixtures/workspace_fixture.ts')
+    const ws = new Workspace({}, { shellParser: await getTestParser() })
+    const controller = new AbortController()
+    let closed = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    async function* source(): AsyncIterable<Uint8Array> {
+      try {
+        timer = setTimeout(() => {
+          controller.abort()
+        }, 0)
+        yield ENC.encode('line\n'.repeat(200_000))
+      } finally {
+        closed = true
+      }
+    }
+    try {
+      await expect(
+        ws.execute(command, { stdin: source(), signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' })
+      expect(closed).toBe(true)
+    } finally {
+      clearTimeout(timer)
+      await ws.close()
+    }
+  },
+)
+
+it('uses the current read signal when reusing buffered stdin', async () => {
+  let closed = false
+  async function* source(): AsyncIterable<Uint8Array> {
+    try {
+      yield ENC.encode('first\nsecond\nthird\n')
+    } finally {
+      closed = true
+    }
+  }
+  const reader = new AsyncLineIterator(source())
+  const previous = new AbortController()
+  expect(new TextDecoder().decode((await reader.readUntil(10, previous.signal))[0])).toBe('first')
+  previous.abort()
+  const current = new AbortController()
+  expect(new TextDecoder().decode((await reader.readUntil(10, current.signal))[0])).toBe('second')
+  current.abort()
+  await expect(reader.readUntil(10, current.signal)).rejects.toMatchObject({ name: 'AbortError' })
+  expect(closed).toBe(true)
+})

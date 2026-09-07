@@ -59,12 +59,28 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     return found || line.byteLength > 0 ? line : null
   }
 
-  private async readDelimited(delim: number): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
+  // The stdin buffer survives individual builtins; cancellation belongs to each read.
+  private check(signal?: AbortSignal): Promise<void> | undefined {
+    signal?.throwIfAborted()
+    const pending = this.checkpoint.run()
+    if (pending !== undefined) return pending.then(() => signal?.throwIfAborted())
+  }
+
+  private async close(): Promise<void> {
+    this.exhausted = true
+    this.buf = new Uint8Array(0)
+    await this.source.return?.()
+  }
+
+  private async readDelimited(
+    delim: number,
+    signal?: AbortSignal,
+  ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
     const parts: Uint8Array[] = []
     try {
-      const pending = this.checkpoint.run()
-      if (pending !== undefined) await pending
       for (;;) {
+        const pending = this.check(signal)
+        if (pending !== undefined) await pending
         const idx = this.buf.indexOf(delim)
         if (idx >= 0) {
           const tail = this.buf.subarray(0, idx)
@@ -79,7 +95,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         else this.buf = copyOf(result.value)
       }
     } catch (error) {
-      await this.source.return?.()
+      await this.close()
       throw error
     }
   }
@@ -89,8 +105,11 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
    * whether the delimiter was found (false means EOF, which `read`/
    * `mapfile` report as status 1).
    */
-  async readUntil(delim: number): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
-    const [data, found] = await this.readDelimited(delim)
+  async readUntil(
+    delim: number,
+    signal?: AbortSignal,
+  ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
+    const [data, found] = await this.readDelimited(delim, signal)
     return [copyOf(data), found]
   }
 
@@ -109,31 +128,37 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   async readChars(
     count: number,
     delim: number | null,
+    signal?: AbortSignal,
   ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
-    let out: Uint8Array<ArrayBuffer> = new Uint8Array(0)
-    let taken = 0
-    while (taken < count) {
-      const pending = this.checkpoint.run()
-      if (pending !== undefined) await pending
-      // One pull can split a character across chunks, so top the buffer
-      // up to the widest one before reading its first byte as a whole.
-      if (this.buf.byteLength < 4 && !this.exhausted) {
-        const result = await this.source.next()
-        if (result.done === true) this.exhausted = true
-        else this.buf = concat2(this.buf, result.value)
-        continue
+    try {
+      let out: Uint8Array<ArrayBuffer> = new Uint8Array(0)
+      let taken = 0
+      while (taken < count) {
+        const pending = this.check(signal)
+        if (pending !== undefined) await pending
+        // One pull can split a character across chunks, so top the buffer
+        // up to the widest one before reading its first byte as a whole.
+        if (this.buf.byteLength < 4 && !this.exhausted) {
+          const result = await this.source.next()
+          if (result.done === true) this.exhausted = true
+          else this.buf = concat2(this.buf, result.value)
+          continue
+        }
+        if (this.buf.byteLength === 0) return [copyOf(out), false]
+        if (delim !== null && this.buf[0] === delim) {
+          this.buf = this.buf.subarray(1)
+          return [copyOf(out), true]
+        }
+        const width = charWidth(this.buf)
+        out = concat2(out, this.buf.subarray(0, width))
+        this.buf = this.buf.subarray(width)
+        taken++
       }
-      if (this.buf.byteLength === 0) return [copyOf(out), false]
-      if (delim !== null && this.buf[0] === delim) {
-        this.buf = this.buf.subarray(1)
-        return [copyOf(out), true]
-      }
-      const width = charWidth(this.buf)
-      out = concat2(out, this.buf.subarray(0, width))
-      this.buf = this.buf.subarray(width)
-      taken++
+      return [copyOf(out), true]
+    } catch (error) {
+      await this.close()
+      throw error
     }
-    return [copyOf(out), true]
   }
 }
 

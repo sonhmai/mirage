@@ -47,6 +47,11 @@ export async function* chunks(
         break
       }
       const data = result.value
+      // Once per pull as well as per chunk: a run of empty chunks that
+      // resolve at once would otherwise never reach a checkpoint, and a
+      // microtask chain with no yield starves the timer an abort rides.
+      const pulled = checkpoint.run()
+      if (pulled !== undefined) await pulled
       for (let offset = 0; offset < data.byteLength; offset += CHUNK_SIZE) {
         const pending = checkpoint.run()
         if (pending !== undefined) await pending

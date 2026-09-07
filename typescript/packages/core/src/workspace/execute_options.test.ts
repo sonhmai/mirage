@@ -463,6 +463,21 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     ).rejects.toMatchObject({ name: 'AbortError' })
   })
 
+  it('keeps the abort of one line out of another on the same session', async () => {
+    // The status door reads the signal of the line that produced the
+    // statement, so an aborted sibling cannot make this line throw or
+    // stop early.
+    const ws = await makeWs()
+    const kept = ws.execute('sleep 0.4; echo kept')
+    await expect(ws.execute('sleep 5', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    const result = await kept
+    expect(result.exitCode).toBe(0)
+    expect(stdoutStr(result).trim()).toBe('kept')
+    await ws.close()
+  })
+
   it('aborts a whole-line runtime that never answers', async () => {
     class Hanging extends Runtime implements LineExecutor {
       readonly name = 'hanging'

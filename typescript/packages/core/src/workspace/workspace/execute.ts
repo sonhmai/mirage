@@ -29,7 +29,7 @@ import {
 } from '../../shell/parse/index.ts'
 import type { ProvisionResult } from '../../provision/types.ts'
 import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
-import { hasAborted, makeAbortError, mergeSignals } from '../abort.ts'
+import { hasAborted, makeAbortError, mergeSignals, runWithLineAbort } from '../abort.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { RouteDeny, type RouteDecision } from '../../runtime/routing/index.ts'
@@ -388,23 +388,28 @@ async function runLine(
   // effective session the same way before it parses.
   const effectiveSession = forkForCall(targetSession, options.cwd, options.env)
   try {
-    return await runWithSession(
-      effectiveSession,
-      () =>
-        runParsedLine(
-          env,
-          command,
-          options,
-          rootNode,
-          deps,
-          targetSession,
-          effectiveSession,
-          stdin,
-          (line) => parser.parse(line),
-          nested,
-          handed,
-        ),
-      env.sessions,
+    // The line's signal, the caller's folded with the session's kill
+    // channel, rides the async context so the status door can refuse an
+    // orphan of this line and no other.
+    return await runWithLineAbort(mergeSignals(options.signal, effectiveSession.abortSignal), () =>
+      runWithSession(
+        effectiveSession,
+        () =>
+          runParsedLine(
+            env,
+            command,
+            options,
+            rootNode,
+            deps,
+            targetSession,
+            effectiveSession,
+            stdin,
+            (line) => parser.parse(line),
+            nested,
+            handed,
+          ),
+        env.sessions,
+      ),
     )
   } finally {
     // Durable session fields (cwd, env, grants) flush at the end of
@@ -530,14 +535,6 @@ async function runParsedLine(
   let held = false
   let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
   let executionFailure: { error: unknown } | undefined
-  // Bound for the line so the status door can refuse an orphan. A nested
-  // line rebinds and puts the outer one back; an aborted line leaves its
-  // binding in place, since the orphan it left behind settles after this
-  // returns and must still find it. The next line on the shell replaces
-  // that leftover rather than treating it as an outer line.
-  const outerLineAbort =
-    effectiveSession.lineAbort?.aborted === true ? null : effectiveSession.lineAbort
-  effectiveSession.lineAbort = killed ?? null
   try {
     if (lineRuntime?.runLine !== undefined) {
       // A whole line is a command like any other: the same visibility and
@@ -729,7 +726,6 @@ async function runParsedLine(
       env.registry.decisions.handUp(effectiveSession.sessionId, handed)
     else
       await joinOrAbort(env.registry.decisions.revoke(effectiveSession.sessionId, handed), killed)
-    if (killed?.aborted !== true) effectiveSession.lineAbort = outerLineAbort
   }
   const [[materialized, io], opRecords] = execResult
   const callerError =

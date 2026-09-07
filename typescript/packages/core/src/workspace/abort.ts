@@ -17,6 +17,28 @@
  * rides along as `cause` (a caller's `abort(x)`, a timeout's TimeoutError)
  * so every gate keys on one name and the caller still sees why.
  */
+import { createAsyncContext } from '../utils/async_context.ts'
+
+/**
+ * The signal of the line the current task is running, bound by `execute`
+ * for the line's duration and read at the status door. It rides the async
+ * context rather than the session, so two lines on one session each see
+ * their own, and a statement that settles after its caller was released
+ * still reads the signal of the line that produced it.
+ */
+const lineAbortContext = createAsyncContext<{ signal: AbortSignal | undefined }>()
+
+export function runWithLineAbort<T>(
+  signal: AbortSignal | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return Promise.resolve(lineAbortContext.run({ signal }, fn))
+}
+
+export function currentLineAbort(): AbortSignal | undefined {
+  return lineAbortContext.getStore()?.signal
+}
+
 export function makeAbortError(signal?: AbortSignal): DOMException {
   const reason: unknown = signal?.aborted === true ? signal.reason : undefined
   if (reason instanceof DOMException && reason.name === 'AbortError') return reason

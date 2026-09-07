@@ -30,6 +30,10 @@ async def chunks(
         return
     try:
         async for data in source:
+            # Once per pull as well as per chunk: a run of empty chunks
+            # never enters the inner loop, and a task that never awaits a
+            # real suspension point cannot be cancelled.
+            await checkpoint.run()
             for offset in range(0, len(data), CHUNK_SIZE):
                 await checkpoint.run()
                 yield data[offset:offset + CHUNK_SIZE]

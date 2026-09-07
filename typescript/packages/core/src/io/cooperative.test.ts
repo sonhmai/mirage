@@ -344,6 +344,33 @@ describe('chunks under a stalled source', () => {
     expect(closed).toBe(true)
   })
 
+  it('lets the abort win over a source that yields only empty chunks', async () => {
+    // Every pull resolves at once with no bytes, so the per-chunk
+    // checkpoint never runs; without one per pull the microtask chain
+    // starves the timer that fires the abort.
+    let pulls = 0
+    const empties: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => {
+          pulls++
+          return Promise.resolve(
+            pulls > 2_000_000
+              ? { done: false as const, value: new TextEncoder().encode('late') }
+              : { done: false as const, value: new Uint8Array(0) },
+          )
+        },
+      }),
+    }
+    const controller = new AbortController()
+    setTimeout(() => {
+      controller.abort()
+    }, 20)
+    const reader = chunks(empties, controller.signal)
+    await expect(reader.next()).rejects.toMatchObject({ name: 'AbortError' })
+    // Landed during the run, not after it had been pulled to its end.
+    expect(pulls).toBeLessThan(2_000_000)
+  })
+
   it('does not wait for a cache discard queued behind the stalled pull', async () => {
     const { CachableAsyncIterator } = await import('./cachable_iterator.ts')
     // An async generator queues `return()` behind its pending `next()`, so

@@ -46,6 +46,29 @@ async def test_readline_allows_timer_progress():
 
 
 @pytest.mark.asyncio
+async def test_empty_chunks_allow_timer_progress():
+    from mirage.io.cooperative import chunks
+    fired = asyncio.Event()
+    produced = 0
+
+    async def source():
+        nonlocal produced
+        while produced < 200_000 and not fired.is_set():
+            produced += 1
+            yield b""
+        yield b"late"
+
+    timer = asyncio.get_running_loop().call_later(.001, fired.set)
+    try:
+        assert [c async for c in chunks(source())] == [b"late"]
+        # Without a checkpoint per pull the loop never suspends, the
+        # timer never runs, and every empty chunk is produced.
+        assert produced < 200_000
+    finally:
+        timer.cancel()
+
+
+@pytest.mark.asyncio
 async def test_caller_cancel_joins_producer():
     from mirage.workspace.abort import MirageAbortError, run_cancellable
 

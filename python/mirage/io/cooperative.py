@@ -1,24 +1,22 @@
-"""Bound CPU work between opportunities for timers and task cancellation."""
-
-import asyncio
-import time
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 from collections.abc import AsyncGenerator, AsyncIterator
 
+from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.checkpoint import Checkpoint
+
 CHUNK_SIZE = 16 * 1024
-
-
-class Checkpoint:
-    """A per-consumer time budget; small reads do not schedule a timer."""
-
-    def __init__(self) -> None:
-        self._next_yield = time.monotonic() + .01
-
-    async def run(self) -> None:
-        if time.monotonic() < self._next_yield:
-            return
-        # A positive delay lets due timers run before this task resumes.
-        await asyncio.sleep(.000001)
-        self._next_yield = time.monotonic() + .01
 
 
 async def chunks(
@@ -36,7 +34,6 @@ async def chunks(
                 await checkpoint.run()
                 yield data[offset:offset + CHUNK_SIZE]
     except BaseException as exc:
-        from mirage.io.cachable_iterator import CachableAsyncIterator
         if isinstance(source, CachableAsyncIterator) and not isinstance(
                 exc, GeneratorExit):
             await source.discard()

@@ -464,7 +464,9 @@ async def execute_line(
         # The program loop stamped each statement; the line as a whole
         # is a wrapper around them, like a group.
         record_status(session, io.exit_code, transparent=True)
-        await ws.apply_io(io, records=scope.records, is_cacheable=cacheable)
+        await run_cancellable(
+            ws.apply_io(io, records=scope.records, is_cacheable=cacheable),
+            cancel)
         return io
     except CommandTimeoutError as exc:
         logger.debug("command %r timed out after %ss", exc.command,

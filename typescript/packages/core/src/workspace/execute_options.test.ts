@@ -305,6 +305,23 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     expect(events.at(-1)?.exit_code).toBe(130)
     await ws.close()
   })
+
+  it('aborts while the file cache is being filled', async () => {
+    const ws = await makeWs()
+    const controller = new AbortController()
+    const dispatcher = (ws as unknown as { dispatcher: { applyIo: () => Promise<void> } })
+      .dispatcher
+    dispatcher.applyIo = async () => {
+      controller.abort()
+      await new Promise<never>(() => undefined)
+    }
+    await expect(ws.execute('echo hi', { signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    const events = await ws.observer.commandEvents()
+    expect(events.at(-1)?.exit_code).toBe(130)
+    await ws.close()
+  })
 })
 
 describe('execute(): agent harness pattern', () => {

@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CachableAsyncIterator } from './cachable_iterator.ts'
-import { Checkpoint, chunks } from './cooperative.ts'
+import { Checkpoint } from './checkpoint.ts'
+import { chunks } from './cooperative.ts'
 
 const NEWLINE = 0x0a
 

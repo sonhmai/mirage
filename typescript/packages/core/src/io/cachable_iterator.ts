@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Checkpoint } from './cooperative.ts'
+import { Checkpoint } from './checkpoint.ts'
 
 export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> {
   private source: AsyncIterator<Uint8Array>

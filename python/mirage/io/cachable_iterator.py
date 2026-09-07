@@ -12,9 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import AsyncIterator
 
-from mirage.io.cooperative import Checkpoint
+from mirage.io.checkpoint import Checkpoint
+
+logger = logging.getLogger(__name__)
 
 
 class CachableAsyncIterator:
@@ -133,9 +136,9 @@ class CachableAsyncIterator:
         self._buffer.clear()
         try:
             await self._close_source()
-        except Exception:
-            # Failed content is discarded; preserve the consumer's error.
-            pass
+        except Exception as exc:
+            # The consumer's own error is the one to report.
+            logger.debug("discarded source closer failed: %s", exc)
 
     async def _close_source(self) -> None:
         """Close the underlying source iterator if it supports aclose.

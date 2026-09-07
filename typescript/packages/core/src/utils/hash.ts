@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Checkpoint } from '../io/cooperative.ts'
+import { Checkpoint } from '../io/checkpoint.ts'
 import { toHex } from './hex.ts'
 
 async function sha256(bytes: Uint8Array): Promise<Uint8Array> {

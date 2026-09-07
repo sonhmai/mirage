@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { Checkpoint } from '@struktoai/mirage-core/io/cooperative'
+import { Checkpoint } from '@struktoai/mirage-core/io/checkpoint'
 import { registerFingerprintHasher } from '@struktoai/mirage-core/cache/file/utils'
 
 export async function nativeFingerprint(data: Uint8Array): Promise<string> {

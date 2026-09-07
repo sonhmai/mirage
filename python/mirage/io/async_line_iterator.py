@@ -15,7 +15,8 @@
 from collections.abc import AsyncIterator
 
 from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.cooperative import Checkpoint, chunks
+from mirage.io.checkpoint import Checkpoint
+from mirage.io.cooperative import chunks
 
 
 def char_width(data: bytes) -> int:

@@ -268,3 +268,25 @@ async def test_line_reader_discards_cache_on_cancel(method, monkeypatch):
             await reader.read_chars(100, None)
     assert closed
     assert stream.buffered_chunks == []
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_cache_fill_aborts():
+    from mirage import Workspace
+    from mirage.resource.ram import RAMResource
+    from mirage.workspace.abort import MirageAbortError
+    ws = Workspace({"/data": RAMResource()})
+    cancel = asyncio.Event()
+
+    async def slow_apply_io(io, records=None, is_cacheable=None):
+        cancel.set()
+        await asyncio.Event().wait()
+
+    ws.apply_io = slow_apply_io
+    try:
+        with pytest.raises(MirageAbortError):
+            await ws.execute("echo hi", cancel=cancel)
+        events = await ws.observer.command_events()
+        assert events[-1]["exit_code"] == 130
+    finally:
+        await ws.close()

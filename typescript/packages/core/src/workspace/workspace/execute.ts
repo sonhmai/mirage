@@ -48,6 +48,7 @@ import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
+import { abortable } from '../abort.ts'
 import { failureResult, isControlFlowError } from './failure.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { cliEnvNames, fillEnv, fillNames, guestBound, lineNodes } from './fill.ts'
@@ -652,24 +653,33 @@ async function runParsedLine(
   if (!callerError) recordStatus(targetSession, io.exitCode, true)
   let stdoutBytes: Uint8Array
   try {
-    if (executionFailure === undefined) await env.dispatcher.applyIo(io, opRecords, cacheable)
+    if (executionFailure === undefined) {
+      await abortable(env.dispatcher.applyIo(io, opRecords, cacheable), killed)
+    }
     stdoutBytes = materialized === null ? new Uint8Array() : await materialize(materialized)
   } catch (err) {
-    // Lazy reads can fail while draining (e.g. head/tail that open the
-    // stream mid-pipeline, or a backend size guard thrown on the first
-    // pull); surface that as a failed command, not a crash. The command
-    // name is the first token of the pipeline's failing stage; for a bare
-    // command it is simply the command.
-    const strerror = gnuStrerror((err as { code?: string }).code)
-    const cmdName = commandName(command) || command
-    io.exitCode = 1
-    io.stderr = new TextEncoder().encode(
-      strerror !== null
-        ? `${cmdName}: ${errorVirtualPath(err)}: ${strerror}\n`
-        : `${err instanceof Error ? err.message : String(err)}\n`,
-    )
-    recordStatus(targetSession, 1)
-    stdoutBytes = new Uint8Array()
+    if (killed?.aborted === true) {
+      // The command finished; the abort landed on the cache fill or the drain.
+      executionFailure = { error: err }
+      io.exitCode = 130
+      stdoutBytes = new Uint8Array()
+    } else {
+      // Lazy reads can fail while draining (e.g. head/tail that open the
+      // stream mid-pipeline, or a backend size guard thrown on the first
+      // pull); surface that as a failed command, not a crash. The command
+      // name is the first token of the pipeline's failing stage; for a bare
+      // command it is simply the command.
+      const strerror = gnuStrerror((err as { code?: string }).code)
+      const cmdName = commandName(command) || command
+      io.exitCode = 1
+      io.stderr = new TextEncoder().encode(
+        strerror !== null
+          ? `${cmdName}: ${errorVirtualPath(err)}: ${strerror}\n`
+          : `${err instanceof Error ? err.message : String(err)}\n`,
+      )
+      recordStatus(targetSession, 1)
+      stdoutBytes = new Uint8Array()
+    }
   }
   const stderrBytes = await materialize(io.stderr)
 
@@ -691,7 +701,7 @@ async function runParsedLine(
     )
   }
 
-  if (callerError && executionFailure !== undefined) {
+  if (executionFailure !== undefined && (callerError || killed?.aborted === true)) {
     throw executionFailure.error
   }
   return new ExecuteResult(stdoutBytes, stderrBytes, io.exitCode, io.refusal)

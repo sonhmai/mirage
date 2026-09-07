@@ -111,3 +111,25 @@ describe('readChars counts characters, not bytes', () => {
     expect(await short.readChars(5, null).then(([d, ok]) => [decode(d), ok])).toEqual(['ab', false])
   })
 })
+
+describe('AsyncLineIterator under a stalled source', () => {
+  it('lets the read signal win over a pull that never settles', async () => {
+    const stalled: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<Uint8Array>>(() => undefined),
+      }),
+    }
+    const reader = new AsyncLineIterator(stalled)
+    const controller = new AbortController()
+    setTimeout(() => {
+      controller.abort()
+    }, 20)
+    await expect(reader.readUntil(0x0a, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    // A fresh reader, since an aborted read closes its own.
+    await expect(new AsyncLineIterator(stalled).readline(controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+  })
+})

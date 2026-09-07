@@ -44,7 +44,7 @@ import { readFailExitCode } from '../../../commands/spec/usage.ts'
 import { formatFsError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
-import { mergeSignals } from '../../abort.ts'
+import { makeAbortError, mergeSignals } from '../../abort.ts'
 import type { Flags } from './types.ts'
 import { parseFlags } from './flags.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
@@ -297,6 +297,10 @@ export async function runOnMount(
   if (denial !== null) return [null, denial]
 
   const signal = mergeSignals(ctx.signal, session.abortSignal)
+  // A leaf that resumes here after the caller aborted (ensureOpen took
+  // longer than the grace) must not reach a mount handler: eager write
+  // handlers do not read the signal, and a cancelled `rm` must not run.
+  if (signal?.aborted === true) throw makeAbortError(signal)
   try {
     const [initialStdout, io] = await mount.executeCmd(cmdName, paths, texts, flags, {
       stdin: opts.stdin ?? null,

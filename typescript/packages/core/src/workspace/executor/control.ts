@@ -511,6 +511,7 @@ export async function handleSelect(
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   policies: Policies | null = null,
+  signal?: AbortSignal,
 ): Promise<Result> {
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
@@ -528,7 +529,8 @@ export async function handleSelect(
     for (let i = 0; i < MAX_WHILE; i++) {
       if (session.shellOptions.noexec === true) break
       mergedIo = await mergedIo.merge(new IOResult({ stderr: new TextEncoder().encode('#? ') }))
-      const lineBytes = session.stdinBuffer !== null ? await session.stdinBuffer.readline() : null
+      const lineBytes =
+        session.stdinBuffer !== null ? await session.stdinBuffer.readline(signal) : null
       if (lineBytes === null) {
         // bash terminates the prompt line with a newline when the
         // choice read hits EOF.

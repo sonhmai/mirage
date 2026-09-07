@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { abortable } from '../workspace/abort.ts'
 import { CachableAsyncIterator } from './cachable_iterator.ts'
 import { Checkpoint } from './checkpoint.ts'
 import { chunks } from './cooperative.ts'
@@ -24,6 +25,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   private exhausted = false
   private readonly checkpoint = new Checkpoint()
   private linesSinceCheck = 0
+  private pulling = false
 
   constructor(private readonly input: AsyncIterable<Uint8Array> | AsyncIterator<Uint8Array>) {
     const s = this.input as AsyncIterable<Uint8Array>
@@ -46,7 +48,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     return { done: false, value: line }
   }
 
-  async readline(): Promise<Uint8Array | null> {
+  async readline(signal?: AbortSignal): Promise<Uint8Array | null> {
     // Amortize clock reads on short-line workloads; chunk pulls also check.
     if (++this.linesSinceCheck >= 64) {
       this.linesSinceCheck = 0
@@ -59,7 +61,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
       this.buf = this.buf.subarray(idx + 1)
       return line
     }
-    const [line, found] = await this.readDelimited(NEWLINE)
+    const [line, found] = await this.readDelimited(NEWLINE, signal)
     return found || line.byteLength > 0 ? line : null
   }
 
@@ -73,8 +75,23 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   private async close(): Promise<void> {
     this.exhausted = true
     this.buf = new Uint8Array(0)
-    await this.source.return?.()
+    // A return queued behind a pull that never settles would hang the
+    // abort itself; that one is not awaited.
+    const closing = this.source.return?.()
+    if (closing !== undefined) {
+      if (this.pulling) void closing.catch(() => undefined)
+      else await closing
+    }
     if (this.input instanceof CachableAsyncIterator) await this.input.discard()
+  }
+
+  private async pull(signal?: AbortSignal): Promise<IteratorResult<Uint8Array>> {
+    // Left set when the pull fails: close() reads it to know the source
+    // is still busy with the pull the abort abandoned.
+    this.pulling = true
+    const result = await abortable(this.source.next(), signal)
+    this.pulling = false
+    return result
   }
 
   private async readDelimited(
@@ -95,7 +112,9 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         if (this.buf.byteLength > 0) parts.push(this.buf)
         this.buf = new Uint8Array(0)
         if (this.exhausted) return [join(parts), false]
-        const result = await this.source.next()
+        // Raced, not just checked between pulls: a stalled stdin must lose
+        // to the read's own signal, or the reader outlives the caller.
+        const result = await this.pull(signal)
         if (result.done === true) this.exhausted = true
         else this.buf = copyOf(result.value)
       }
@@ -144,7 +163,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         // One pull can split a character across chunks, so top the buffer
         // up to the widest one before reading its first byte as a whole.
         if (this.buf.byteLength < 4 && !this.exhausted) {
-          const result = await this.source.next()
+          const result = await this.pull(signal)
           if (result.done === true) this.exhausted = true
           else this.buf = concat2(this.buf, result.value)
           continue

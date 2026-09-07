@@ -17,7 +17,7 @@ import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
-import { makeAbortError } from '../abort.ts'
+import { makeAbortError, mergeSignals } from '../abort.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { assignmentStatus, finishStatement, recordStatus } from '../executor/statement.ts'
@@ -815,6 +815,7 @@ async function executeNodeBody(
         stdin,
         callStack,
         registry.policies,
+        mergeSignals(deps.signal, session.abortSignal),
       )
     }
     return handleFor(stream, variable, resolved, body, session, stdin, callStack, registry.policies)

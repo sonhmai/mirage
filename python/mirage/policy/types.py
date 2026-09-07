@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, ClassVar, Protocol
 
@@ -293,6 +293,116 @@ class Decision:
     outcome: Outcome | None = None
     scope: Scope = Scope.ONCE
     note: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Occurrence:
+    """Where one command stands: the text it was parsed from, its span
+    in that text, and the occurrence of the node that text was evaluated
+    from, so the commands of a nested line stand under the word that
+    ran them.
+
+    The pass computes one from the line's parse and the gate from the
+    node it runs, by one rule (``workspace/node/occurrence``), and the
+    ledger only compares them: a grant a pass claims is bound to the
+    occurrence it judged, and offered to a reader at that occurrence
+    alone. So a word that expands at run time into the same command as
+    a literal spelling elsewhere on the line (``$S && cat secret``)
+    cannot run on the literal's nod, and one body evaluated under two
+    words (``eval 'cat s'; eval 'cat s'``) is two occurrences.
+
+    Args:
+        parent (Occurrence | None): the node whose text this command
+            was parsed from, None for a typed line.
+        source (str): the text the command was parsed from.
+        start (int): the command's first byte in that text.
+        end (int): the byte after its last.
+    """
+
+    parent: "Occurrence | None"
+    source: str
+    start: int
+    end: int
+
+
+@dataclass(frozen=True, slots=True)
+class Claim:
+    """One grant a reader of a line matched, and the occurrence it
+    matched it for.
+
+    Args:
+        occurrence (Occurrence): the command the grant answers.
+        decision (Decision): the settled ONCE record.
+    """
+
+    occurrence: Occurrence
+    decision: Decision
+
+
+@dataclass(eq=False, slots=True)
+class HandOff:
+    """The ONCE grants a line's readers matched to its commands, for the
+    line's end to spend.
+
+    One per line, made by the executor and filled by ``Decisions.resolve``
+    as a pass or a gate admits a command: every grant it matches, whether
+    the host gave it inline just now or out of band before the line, is
+    claimed here instead of spent, bound to the occurrence it was
+    judged for. A claimed grant is on offer to that occurrence alone,
+    so two spellings of one command on a line each need a nod of their
+    own, and invisible to every other line of the session while this
+    one lives, so two lines judged at once cannot both run on one nod.
+    Nothing spends a claim while the line runs: a gate the run reaches
+    again at the same place (a loop body) runs on the same nod, and
+    every claim, reached or not, is spent when the line ends
+    (``Decisions.revoke``). A background job the line launches holds a
+    copy of the claims made for the commands inside it on a hand-off
+    of its own (``Decisions.split``), since its gates run after the
+    line has returned and it ends on its own clock; a grant is spent
+    when the last hand-off holding it ends. Compared by identity,
+    because the hand-off is the line.
+
+    A line the executor evaluates from inside another (``$( )``,
+    ``eval``, ``source``, ``xargs``, the line an alias invocation
+    rewrites to) is a line of its own with a hand-off of its own,
+    linked to the outer line's through ``parent`` and standing under
+    the node that ran it through ``origin``: the outer pass reads into
+    the words it runs, so the grants it claimed for them are the inner
+    line's to run on, at the occurrences the outer pass computed for
+    them, and what the inner line's own gates claim is handed to the
+    outer line when it ends (``Decisions.hand_up``), for the next
+    evaluation from the same node to run on and the typed line's end
+    to spend.
+
+    Args:
+        claimed (list[Claim]): the grants matched so far, in the order
+            the commands were judged.
+        parent (HandOff | None): the hand-off of the line this one was
+            evaluated from, None for a typed line.
+        origin (Occurrence | None): the node this line's text was
+            evaluated from, None for a typed line.
+    """
+
+    claimed: list[Claim] = field(default_factory=list)
+    parent: "HandOff | None" = None
+    origin: Occurrence | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Claimant:
+    """Who reads the ledger: one command of one line.
+
+    A judging pass and the gate that runs the line name themselves the
+    same way, so a grant the pass claimed for a command is found by the
+    gate for that command and by no other reader.
+
+    Args:
+        line (HandOff): the line's hand-off.
+        occurrence (Occurrence): the command's place on it.
+    """
+
+    line: HandOff
+    occurrence: Occurrence
 
 
 @dataclass(frozen=True, slots=True)

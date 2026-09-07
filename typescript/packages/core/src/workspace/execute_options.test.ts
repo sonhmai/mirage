@@ -372,6 +372,37 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     })
   })
 
+  it('restores the status when a stalled flush outlives the grace', async () => {
+    // The line stamped its status and then its flush never settles: the
+    // caller is released after the grace, and `$?` is what the line found.
+    class Stalled extends RAMSessionStore {
+      stall = false
+      override casSet(
+        sessionId: string,
+        fields: SessionFields,
+        expectedGeneration: number,
+      ): Promise<boolean> {
+        if (this.stall) return new Promise<never>(() => undefined)
+        return super.casSet(sessionId, fields, expectedGeneration)
+      }
+    }
+    const store = new Stalled()
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, sessionStore: store },
+    )
+    // The first line persists the fresh session; after it, status is not
+    // a durable field, so only the env write below has a flush to stall.
+    await ws.execute('false')
+    store.stall = true
+    const session = ws.sessionManager.get(ws.sessionManager.defaultId)
+    await expect(
+      ws.execute('export MARK=1', { signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(session.lastExitCode).toBe(1)
+  })
+
   it('answers an abort that lands on the session flush with the abort', async () => {
     // The line finished; the flush of its status is what the abort lands
     // on, and it settles inside the grace. The answer is still the abort,

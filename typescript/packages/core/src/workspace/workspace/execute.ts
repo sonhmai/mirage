@@ -191,26 +191,30 @@ export async function executeLine(
   options: ExecuteOptions,
 ): Promise<ExecuteResult | ProvisionResult> {
   const frame: LineFrame = { session: null, statusBefore: null }
-  let result = await runLine(env, command, options, frame)
-  // A provision run answers with a plan, not output, so it has nothing
-  // to stream. The drain is the last await of the line, and a stalled
-  // store would hold `execute` open past an abort; it joins under the
-  // same grace as the tree.
-  const sink = options.sink
-  if (sink !== undefined && result instanceof ExecuteResult) {
-    result = await joinOrAbort(drainToSink(sink, result), options.signal)
-  }
-  // Once the caller aborted, the line's answer is the abort whichever
-  // await it landed on, tree, record, flush or drain, and `$?` is what
-  // the line found. Checked here, after the last of them, so no path
-  // can forget it.
-  if (hasAborted(options.signal)) {
+  try {
+    let result = await runLine(env, command, options, frame)
+    // A provision run answers with a plan, not output, so it has nothing
+    // to stream. The drain is the last await of the line, and a stalled
+    // store would hold `execute` open past an abort; it joins under the
+    // same grace as the tree.
+    const sink = options.sink
+    if (sink !== undefined && result instanceof ExecuteResult) {
+      result = await joinOrAbort(drainToSink(sink, result), options.signal)
+    }
+    if (hasAborted(options.signal)) throw makeAbortError(options.signal)
+    return result
+  } catch (error) {
+    // Once the caller aborted, the line's answer is the abort whichever
+    // await it landed on, tree, record, flush or drain, whether that
+    // await settled inside the grace or was left behind, and `$?` is
+    // what the line found. One place, after the last of them, so no
+    // path can forget it.
+    if (!hasAborted(options.signal)) throw error
     if (frame.session !== null && frame.statusBefore !== null) {
       restoreStatus(frame.session, frame.statusBefore)
     }
     throw makeAbortError(options.signal)
   }
-  return result
 }
 
 /**

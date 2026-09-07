@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { RegisteredCommand } from '../commands/config.ts'
 import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
+import { RAMObserverStore } from '../observe/store.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMSessionStore } from './session/ram.ts'
 import type { SessionFields } from './session/store.ts'
@@ -397,6 +398,38 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     ).rejects.toMatchObject({ name: 'AbortError' })
     expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
     await ws.close()
+  })
+
+  it('releases the caller when the history store stalls after a whole-line runtime', async () => {
+    class Answers extends Runtime implements LineExecutor {
+      readonly name = 'answers'
+      readonly [LINE_EXECUTOR] = true as const
+      constructor() {
+        super({ captures: ['anscmd'] })
+      }
+      runLine(): Promise<RunResult> {
+        return Promise.resolve({ stdout: ENC.encode('ok\n'), stderr: null, exitCode: 0 })
+      }
+    }
+    class Stalled extends RAMObserverStore {
+      override append(): Promise<never> {
+        return new Promise<never>(() => undefined)
+      }
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new Answers(), 'vfs'],
+        observe: new Stalled(),
+      },
+    )
+    // The runtime answered; the record of the line is what stalls.
+    await expect(
+      ws.execute('anscmd now', { signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
   })
 
   it('aborts a whole-line runtime that never answers', async () => {

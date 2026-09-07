@@ -555,17 +555,20 @@ async function runParsedLine(
         held = isPending(refused)
         recordStatus(targetSession, refused.exitCode)
         if (isLine) {
-          await env.observer.logExecution(
-            command,
-            new IOResult({
-              exitCode: refused.exitCode,
-              stderr: refused.stderr,
-              refusal: refused.refusal,
-            }),
-            [],
-            callAgentId,
-            targetSession.sessionId,
-            effectiveSession.cwd,
+          await joinOrAbort(
+            env.observer.logExecution(
+              command,
+              new IOResult({
+                exitCode: refused.exitCode,
+                stderr: refused.stderr,
+                refusal: refused.refusal,
+              }),
+              [],
+              callAgentId,
+              targetSession.sessionId,
+              effectiveSession.cwd,
+            ),
+            killed,
           )
         }
         return new ExecuteResult(
@@ -601,13 +604,18 @@ async function runParsedLine(
           refusal: result.refusal,
           ...(result.stderr !== null ? { stderr: result.stderr } : {}),
         })
-        await env.observer.logExecution(
-          command,
-          lineIo,
-          [],
-          callAgentId,
-          targetSession.sessionId,
-          effectiveSession.cwd,
+        // Joined like the tree's record: a stalled store releases the
+        // caller, a fast one records before history is read.
+        await joinOrAbort(
+          env.observer.logExecution(
+            command,
+            lineIo,
+            [],
+            callAgentId,
+            targetSession.sessionId,
+            effectiveSession.cwd,
+          ),
+          killed,
         )
       }
       return new ExecuteResult(
@@ -715,7 +723,8 @@ async function runParsedLine(
     // next evaluation from the same node and to spend at its own end.
     else if (handed.parent !== null)
       env.registry.decisions.handUp(effectiveSession.sessionId, handed)
-    else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
+    else
+      await joinOrAbort(env.registry.decisions.revoke(effectiveSession.sessionId, handed), killed)
     if (killed?.aborted !== true) effectiveSession.lineAbort = outerLineAbort
   }
   const [[materialized, io], opRecords] = execResult

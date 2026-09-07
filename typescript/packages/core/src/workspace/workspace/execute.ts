@@ -205,16 +205,13 @@ async function runLine(
   options: ExecuteOptions,
 ): Promise<ExecuteResult | ProvisionResult> {
   if (options.signal?.aborted === true) {
-    throw makeAbortError()
+    throw makeAbortError(options.signal)
   }
-  await env.namespace.ensureLoaded()
-  await env.meta.ensure()
-  await env.sessions.ensureLoaded()
-  if (env.drift.pending) {
-    await env.drift.drain(env.registry, (p) => env.statFn(p))
-  }
+  // Loads nothing the shell observes, so a stalled state store loses to
+  // the signal at once rather than holding the caller.
+  await abortable(preflight(env), options.signal)
   const stdin = options.stdin ?? null
-  const parser = await env.parser()
+  const parser = await abortable(env.parser(), options.signal)
   const root = parser.parse(command)
   // tree-sitter accepts an unclosed backtick as a complete command, so
   // the region is scanned separately.
@@ -230,12 +227,15 @@ async function runLine(
     // and agent ride into the walk's admission gate, so a command
     // denied to the actual caller cannot have its backend costs
     // exposed under the default session's identity.
-    return env.provision(command, {
-      ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
-      ...(options.agentId !== undefined ? { agentId: options.agentId } : {}),
-      ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-      ...(options.env !== undefined ? { env: options.env } : {}),
-    })
+    return abortable(
+      env.provision(command, {
+        ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+        ...(options.agentId !== undefined ? { agentId: options.agentId } : {}),
+        ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+        ...(options.env !== undefined ? { env: options.env } : {}),
+      }),
+      options.signal,
+    )
   }
   const rootNode = root as unknown as TSNodeLike
   // A re-entrant execute (the evaluator's $(), eval, source, xargs, or
@@ -254,7 +254,10 @@ async function runLine(
       : env.sessions.get(options.sessionId ?? env.sessions.defaultId)
   let routingDecision: RouteDecision | null
   try {
-    routingDecision = await env.router.decide(rootNode, command, options, targetSession)
+    routingDecision = await abortable(
+      env.router.decide(rootNode, command, options, targetSession),
+      options.signal,
+    )
   } catch (caught) {
     if (caught instanceof RouteDeny) {
       return deniedResult(env, command, options, targetSession, caught.reason)
@@ -367,8 +370,20 @@ async function runLine(
     )
   } finally {
     // Durable session fields (cwd, env, grants) flush at the end of
-    // every execute, success or failure, mirroring Python's finally.
-    await env.sessions.flush()
+    // every execute, success or failure, mirroring Python's finally. It
+    // joins under the grace like the tree: a stalled store finishes in
+    // the background instead of holding an aborted caller.
+    await joinOrAbort(env.sessions.flush(), options.signal)
+  }
+}
+
+/** The state a line runs against, loaded before it is parsed. */
+async function preflight(env: ExecuteEnv): Promise<void> {
+  await env.namespace.ensureLoaded()
+  await env.meta.ensure()
+  await env.sessions.ensureLoaded()
+  if (env.drift.pending) {
+    await env.drift.drain(env.registry, (p) => env.statFn(p))
   }
 }
 
@@ -477,6 +492,14 @@ async function runParsedLine(
   let held = false
   let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
   let executionFailure: { error: unknown } | undefined
+  // Bound for the line so the status door can refuse an orphan. A nested
+  // line rebinds and puts the outer one back; an aborted line leaves its
+  // binding in place, since the orphan it left behind settles after this
+  // returns and must still find it. The next line on the shell replaces
+  // that leftover rather than treating it as an outer line.
+  const outerLineAbort =
+    effectiveSession.lineAbort?.aborted === true ? null : effectiveSession.lineAbort
+  effectiveSession.lineAbort = killed ?? null
   try {
     if (lineRuntime?.runLine !== undefined) {
       // A whole line is a command like any other: the same visibility and
@@ -659,6 +682,7 @@ async function runParsedLine(
     else if (handed.parent !== null)
       env.registry.decisions.handUp(effectiveSession.sessionId, handed)
     else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
+    if (killed?.aborted !== true) effectiveSession.lineAbort = outerLineAbort
   }
   const [[materialized, io], opRecords] = execResult
   const callerError =
@@ -711,13 +735,18 @@ async function runParsedLine(
   env.records.push(...opRecords)
   if (isLine) {
     io.stdout = stdoutBytes
-    await env.observer.logExecution(
-      command,
-      io,
-      opRecords,
-      callAgentId,
-      targetSession.sessionId,
-      effectiveSession.cwd,
+    // Joined, not raced: a fast store still records the line before the
+    // caller reads history, and a stalled one releases the caller.
+    await joinOrAbort(
+      env.observer.logExecution(
+        command,
+        io,
+        opRecords,
+        callAgentId,
+        targetSession.sessionId,
+        effectiveSession.cwd,
+      ),
+      killed,
     )
   }
 

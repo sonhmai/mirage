@@ -21,6 +21,7 @@ import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { Session } from '../session/session.ts'
+import { makeAbortError } from '../abort.ts'
 
 /**
  * Record a finished statement's exit status: `$?` and `${PIPESTATUS[@]}`
@@ -37,6 +38,10 @@ import type { Session } from '../session/session.ts'
  * (`{ false | true; }` keeps `1 0`).
  */
 export function recordStatus(session: Session, code: number, transparent = false): void {
+  // A statement that settles after the caller was released is an orphan.
+  // Its status is nobody's `$?`, and the throw ends the loop that would
+  // otherwise run the next statement on a shell nobody is waiting on.
+  if (session.lineAbort?.aborted === true) throw makeAbortError(session.lineAbort)
   session.lastExitCode = code
   const pending = session.pipeStatusPending
   session.pipeStatusPending = null

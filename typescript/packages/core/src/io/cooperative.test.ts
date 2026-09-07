@@ -343,6 +343,24 @@ describe('chunks under a stalled source', () => {
     await expect(reader.next()).rejects.toMatchObject({ name: 'AbortError' })
     expect(closed).toBe(true)
   })
+
+  it('does not wait for a cache discard queued behind the stalled pull', async () => {
+    const { CachableAsyncIterator } = await import('./cachable_iterator.ts')
+    // An async generator queues `return()` behind its pending `next()`, so
+    // the discard of the cache wrapper can only settle once the pull does.
+    async function* stalled(): AsyncGenerator<Uint8Array> {
+      await new Promise<never>(() => undefined)
+      yield new Uint8Array(0)
+    }
+    const input = new CachableAsyncIterator(stalled())
+    const controller = new AbortController()
+    setTimeout(() => {
+      controller.abort()
+    }, 20)
+    const reader = chunks(input, controller.signal)
+    await expect(reader.next()).rejects.toMatchObject({ name: 'AbortError' })
+    expect(input.discarded).toBe(true)
+  })
 })
 
 it('answers a timeout signal with an AbortError that carries the timeout', async () => {

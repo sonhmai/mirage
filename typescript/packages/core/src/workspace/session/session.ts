@@ -433,6 +433,14 @@ export class Session {
   // one channel. Python needs no equivalent: kill cancels the asyncio
   // task and cancellation is ambient.
   abortSignal: AbortSignal | null = null
+  // The signal of the line this shell is running: the caller's, folded
+  // with the kill channel above. `execute` binds it for the line and the
+  // status door reads it, so a statement that settles after the caller
+  // was released cannot stamp `$?`. An aborted binding stays until the
+  // next line rebinds, because the orphan settles in that gap. Transient
+  // like `abortSignal`; fork() does not carry it, because a background
+  // job outlives the line that launched it.
+  lineAbort: AbortSignal | null = null
   // Command-substitution tracking for assignment statements: how many
   // substitutions have run in this session, and the status of the
   // most recent one. An assignment statement snapshots the count

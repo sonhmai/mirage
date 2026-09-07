@@ -54,7 +54,14 @@ export async function* chunks(
       }
     }
   } catch (error) {
-    if (source instanceof CachableAsyncIterator) await source.discard()
+    // The discard closes the producer as well, and behind a pull that
+    // never settles that close would hang the abort; it is not awaited
+    // then. `discard` never rejects.
+    if (source instanceof CachableAsyncIterator) {
+      const discarding = source.discard()
+      if (pulling) void discarding
+      else await discarding
+    }
     throw error
   } finally {
     // What for-await did implicitly: close a producer left mid-stream,

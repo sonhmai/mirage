@@ -13,12 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { RegisteredCommand } from '../commands/config.ts'
+import { CommandSpec, Operand } from '../commands/spec/types.ts'
+import { IOResult } from '../io/types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
+import { RAMSessionStore } from './session/ram.ts'
+import type { SessionFields } from './session/store.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { Runtime } from '../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
 import type { RunResult } from '../runtime/types.ts'
-import { MountMode } from '../types.ts'
+import { MountMode, ResourceName } from '../types.ts'
 import { Channel, JobConsole, RAMConsoleStore } from '../shell/console/index.ts'
 import { getTestParser, stdoutStr } from './fixtures/workspace_fixture.ts'
 import type { ExecuteResult } from './workspace/workspace.ts'
@@ -319,6 +324,51 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     })
     expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
     await ws.close()
+  })
+
+  it('refuses the status of a statement that settles after the release', async () => {
+    // The leaf returns at once with a lazy stream that ignores the signal
+    // and yields past the grace, so the drain settles on a shell the
+    // caller was already released from.
+    const ws = await makeWs()
+    const late = new RegisteredCommand({
+      name: 'latecmd',
+      spec: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
+      resource: ResourceName.RAM,
+      fn: () => [
+        (async function* () {
+          await new Promise((resolve) => setTimeout(resolve, 450))
+          yield ENC.encode('late\n')
+        })(),
+        new IOResult(),
+      ],
+    })
+    ws.registry.mountForPrefix('/ram').register(late)
+    await ws.execute('false')
+    const session = ws.sessionManager.get(ws.sessionManager.defaultId)
+    await expect(
+      ws.execute('latecmd /ram/x', { signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(session.lastExitCode).toBe(1)
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(session.lastExitCode).toBe(1)
+    await ws.close()
+  })
+
+  it('releases the caller when the session store stalls before the line runs', async () => {
+    class Stalled extends RAMSessionStore {
+      override load(): Promise<Map<string, SessionFields>> {
+        return new Promise<never>(() => undefined)
+      }
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, sessionStore: new Stalled() },
+    )
+    await expect(ws.execute('echo hi', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
   })
 
   it('aborts a whole-line runtime that never answers', async () => {

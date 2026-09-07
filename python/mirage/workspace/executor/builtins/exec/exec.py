@@ -190,9 +190,12 @@ async def _install(dispatch: DispatchFn, session: Session,
                 # transient `<&1`.
                 _bind(session, r.fd, OPEN_FOR_READING + scope.virtual, False)
                 continue
+            # fd 0 holds the file's read end, and says so: a dup from it
+            # (`exec 1<&0`) keeps the file even after `exec 0<&-`, as
+            # bash's copied descriptor does.
             session.exec_stdin = await materialize(data) or b""
             session.exec_stdin_unreadable = False
-            session.exec_stdin_identity = None
+            session.exec_stdin_identity = OPEN_FOR_READING + scope.virtual
             continue
         path = scope.virtual
         try:

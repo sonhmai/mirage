@@ -538,6 +538,36 @@
         "stderr": "1: Bad file descriptor\nrc=1\ne=1\n"
       },
       "note": "bash 5.2: a descriptor `exec` closed for the shell refuses a later dup from it before the command runs. In a subshell so the battery's shared session keeps its streams."
+    },
+    {
+      "id": "redirect_self_dup_keeps_a_closed_descriptor_closed",
+      "seq": 980117,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "touch /data/sdm 1>&- 1>&1 2>&1; echo rc=$? >&2; test -e /data/sdm; echo e=$? >&2",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "1: Bad file descriptor\nrc=1\ne=1\n"
+      },
+      "note": "bash 5.2: a self-dup is a no-op, so a descriptor closed earlier on the line stays closed and the later dup from it is refused before the command runs."
     }
   ]
 }

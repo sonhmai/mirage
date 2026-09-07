@@ -2158,13 +2158,13 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/dl; touch /data/dl/f /data/dl/g; cd /data; find dl/f -delete -ls | sed -E 's/.* //'; echo rc=$?; find dl -name g -size -1k -delete -ls | sed -E 's/.* //'; echo rc=$?; find dl -type d -delete -ls | sed -E 's/.* //'; echo rc=$?; test -e dl; echo e=$?; cd /",
+      "command": "mkdir -p /data/dl; touch /data/dl/f /data/dl/g; cd /data; find dl/f -delete -ls | sed -E 's/.* //'; echo rc=$?; find dl -name g -size -1k -delete -ls | sed -E 's/.* //'; echo rc=$?; test -e dl/f -o -e dl/g; echo e=$?; cd / && rm -rf /data/dl",
       "expect": {
         "exit": 0,
-        "stdout": "dl/f\nrc=0\ndl/g\nrc=0\ndl\nrc=0\ne=1\n",
+        "stdout": "dl/f\nrc=0\ndl/g\nrc=0\ne=1\n",
         "stderr": ""
       },
-      "note": "GNU findutils 4.9 on debian:stable-slim: -ls renders the stat find already holds. GNU stats a start point when it opens the walk and any other row only for a test that needs the inode (-size, -mtime, -newer, -empty), so these three list the row -delete removed, while `find d -type f -delete -ls` reports it gone (pinned in the unit tests). rc is sed's, since the pipe hides find's."
+      "note": "GNU findutils 4.9 on debian:stable-slim: -ls renders the stat find already holds. GNU stats a start point when it opens the walk and any other row only for a test that needs the inode (-size, -mtime, -newer, -empty), so both list the row -delete removed (a start-point directory lists too, in the unit tests; hf keeps no marker for an emptied directory, so that step stays out of the shared battery), while `find d -type f -delete -ls` reports it gone (pinned in the unit tests). rc is sed's, since the pipe hides find's."
     }
   ]
 }

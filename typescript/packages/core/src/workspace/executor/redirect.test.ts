@@ -597,6 +597,26 @@ describe('handleRedirect unwritable > target', () => {
 describe('descriptor zero duplication', () => {
   it.each([
     ['echo x 1>&0', '', 'echo: write error: Bad file descriptor\n', 1],
+    // A self-dup never reopens a closed descriptor, transient or
+    // persistent; a file redirect on it does.
+    [
+      'touch /data/marker 1>&- 1>&1 2>&1; echo rc=$? >&2; test -e /data/marker; echo e=$? >&2',
+      '',
+      '1: Bad file descriptor\nrc=1\ne=1\n',
+      0,
+    ],
+    [
+      'exec 1>&-; touch /data/marker 1>&1 2>&1; echo rc=$? >&2; test -e /data/marker; echo e=$? >&2',
+      '',
+      '1: Bad file descriptor\nrc=1\ne=1\n',
+      0,
+    ],
+    [
+      'touch /data/marker 1>&- 1>&1 >/data/f 2>&1; echo rc=$? >&2; test -e /data/marker; echo e=$? >&2',
+      '',
+      'rc=0\ne=0\n',
+      0,
+    ],
     ['echo x 2>&0 1>&2', '', '', 1],
     ['echo x 0>&1 1>&0', 'x\n', '', 0],
     ['echo x 1>&0 0>&1', '', 'echo: write error: Bad file descriptor\n', 1],
@@ -701,6 +721,17 @@ describe('descriptor identities survive dups', () => {
   // transient `>&0`, appending as bash's shared offset does.
   it.each([
     ['printf x >/data/f; exec 1</data/f; exec 0<&1; cat >&2', '', 'x', 0],
+    // A stream aliased onto stdin's read end reads what stdin reads, and
+    // keeps the file a `exec <f` bound even after `exec 0<&-`.
+    ['printf x >/data/f; exec </data/f; exec 1<&0; cat <&1 >&2; echo rc=$? >&2', '', 'xrc=0\n', 0],
+    [
+      'printf x >/data/f; exec </data/f; exec 1<&0; exec 0<&-; cat <&1 >&2; echo rc=$? >&2',
+      '',
+      'xrc=0\n',
+      0,
+    ],
+    ['printf x >/data/f; exec </data/f; exec 2<&0; cat <&2 >&2', '', '', 1],
+    ['printf x | { exec 1<&0; cat <&1 >&2; }; echo rc=$? >&2', '', 'xrc=0\n', 0],
     ['printf xy >/data/f; exec 1</data/f; exec 0<&1; exec 1>&-; cat >&2', '', 'xy', 0],
     ['printf x >/data/f; exec 1</data/f; exec 0<&1; exec 1>&2; cat', '', 'x', 0],
     ['printf x >/data/f; exec 2</data/f; exec 0<&2; cat >&2', '', '', 1],

@@ -40,6 +40,7 @@ import {
   CLOSED as EXEC_CLOSED,
   OPEN_FOR_READING,
   TO_STDERR as EXEC_TO_STDERR,
+  TO_STDIN as EXEC_TO_STDIN,
   TO_STDOUT as EXEC_TO_STDOUT,
 } from './builtins/exec/constants.ts'
 import { readOpenSource } from './builtins/exec/exec.ts'
@@ -130,13 +131,16 @@ export async function handleRedirect(
   // `cat <&-`), while one that never reads is untouched (`true 0<&1`).
   const inputs: (ByteSource | null | typeof UNREADABLE)[] = [stdin, UNREADABLE, UNREADABLE]
   // A stream `exec 1<f` opened for reading answers a read through it
-  // (`cat <&1`) with the file, from its start.
+  // (`cat <&1`) with the file, from its start, and one `exec 1<&0` aliased
+  // onto stdin's own read end reads what stdin reads.
   for (const [fd, binding] of [
     [FD_STDOUT, session.execStdout],
     [FD_STDERR, session.execStderr],
   ] as [number, string | null][]) {
     if (binding?.startsWith(OPEN_FOR_READING)) {
       inputs[fd] = await readOpenSource(dispatch, binding)
+    } else if (binding === EXEC_TO_STDIN) {
+      inputs[fd] = inputs[FD_STDIN] ?? null
     }
   }
   // A descriptor an earlier redirect closed, or an `exec` closed for the
@@ -154,9 +158,10 @@ export async function handleRedirect(
         inputs[r.fd] = UNREADABLE
         continue
       }
-      if (closed.has(r.target) && r.target !== r.fd) {
-        return shellFailure(badDescriptorLine(r.target))
-      }
+      // A self-dup changes nothing: a closed descriptor stays closed, so
+      // `touch m 1>&- 1>&1 2>&1` is still refused.
+      if (r.target === r.fd) continue
+      if (closed.has(r.target)) return shellFailure(badDescriptorLine(r.target))
       inputs[r.fd] = inputs[r.target] ?? null
       closed.delete(r.fd)
       continue

@@ -255,25 +255,40 @@ async def test_a_stream_bound_to_stdin_cannot_be_written():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("command,stdout,stderr,code", [
-    ('printf x >/data/f; exec 1</data/f; exec 0<&1; cat >&2', '', 'x', 0),
-    ('printf xy >/data/f; exec 1</data/f; exec 0<&1; exec 1>&-; cat >&2', '',
-     'xy', 0),
-    ('printf x >/data/f; exec 1</data/f; exec 0<&1; exec 1>&2; cat', '', 'x',
-     0),
-    ('printf x >/data/f; exec 2</data/f; exec 0<&2; cat >&2', '', '', 1),
-    ('printf x >/data/f; exec 1</data/f; cat <&1 >&2; echo rc=$? >&2', '',
-     'xrc=0\n', 0),
-    ('exec 0>/data/f; echo x >&0; echo y >&0; cat /data/f', 'x\ny\n', '', 0),
-    ('exec 0>/data/f; { echo a; echo b; } >&0; cat /data/f', 'a\nb\n', '', 0),
-    ('exec 0>/data/f; echo x >&0; exec 0<&-; cat /data/f', 'x\n', '', 0),
-    ('exec 0>/data/f; echo x >&0; exec 1>&0; echo y; exec 1>&2; '
-     'cat /data/f >&2', '', 'x\ny\n', 0),
-    ('exec 0>/data/f; echo x 1>&0 2>&0; cat /data/f', 'x\n', '', 0),
-    ('exec 0<&1; echo x >&0', 'x\n', '', 0),
-    ('echo x >&0; echo rc=$?', 'rc=1\n',
-     'echo: write error: Bad file descriptor\n', 0),
-])
+@pytest.mark.parametrize(
+    "command,stdout,stderr,code",
+    [
+        ('printf x >/data/f; exec 1</data/f; exec 0<&1; cat >&2', '', 'x', 0),
+        # A stream aliased onto stdin's read end reads what stdin reads, and
+        # keeps the file a `exec <f` bound even after `exec 0<&-`.
+        ('printf x >/data/f; exec </data/f; exec 1<&0; cat <&1 >&2; '
+         'echo rc=$? >&2', '', 'xrc=0\n', 0),
+        ('printf x >/data/f; exec </data/f; exec 1<&0; exec 0<&-;'
+         'cat <&1 >&2; '
+         'echo rc=$? >&2', '', 'xrc=0\n', 0),
+        ('printf x >/data/f; exec </data/f; exec 2<&0; cat <&2 >&2', '', '',
+         1),
+        ('printf x | { exec 1<&0; cat <&1 >&2; }; echo rc=$? >&2', '',
+         'xrc=0\n', 0),
+        ('printf xy >/data/f; exec 1</data/f; exec 0<&1; exec 1>&-; cat >&2',
+         '', 'xy', 0),
+        ('printf x >/data/f; exec 1</data/f; exec 0<&1; exec 1>&2; cat', '',
+         'x', 0),
+        ('printf x >/data/f; exec 2</data/f; exec 0<&2; cat >&2', '', '', 1),
+        ('printf x >/data/f; exec 1</data/f; cat <&1 >&2; echo rc=$? >&2', '',
+         'xrc=0\n', 0),
+        ('exec 0>/data/f; echo x >&0; echo y >&0; cat /data/f', 'x\ny\n', '',
+         0),
+        ('exec 0>/data/f; { echo a; echo b; } >&0; cat /data/f', 'a\nb\n', '',
+         0),
+        ('exec 0>/data/f; echo x >&0; exec 0<&-; cat /data/f', 'x\n', '', 0),
+        ('exec 0>/data/f; echo x >&0; exec 1>&0; echo y; exec 1>&2; '
+         'cat /data/f >&2', '', 'x\ny\n', 0),
+        ('exec 0>/data/f; echo x 1>&0 2>&0; cat /data/f', 'x\n', '', 0),
+        ('exec 0<&1; echo x >&0', 'x\n', '', 0),
+        ('echo x >&0; echo rc=$?', 'rc=1\n',
+         'echo: write error: Bad file descriptor\n', 0),
+    ])
 async def test_descriptor_identities_survive_dups(command, stdout, stderr,
                                                   code):
     # bash 5.2 on debian:stable-slim with stdin from /dev/null: a stream

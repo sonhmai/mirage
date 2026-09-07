@@ -282,9 +282,12 @@ async function install(
         bind(session, r.fd, OPEN_FOR_READING + scope.virtual, false)
         continue
       }
+      // fd 0 holds the file's read end, and says so: a dup from it (`exec
+      // 1<&0`) keeps the file even after `exec 0<&-`, as bash's copied
+      // descriptor does.
       session.execStdin = await materialize(data as ByteSource)
       session.execStdinUnreadable = false
-      session.execStdinIdentity = null
+      session.execStdinIdentity = OPEN_FOR_READING + scope.virtual
       continue
     }
     const path = scope.virtual

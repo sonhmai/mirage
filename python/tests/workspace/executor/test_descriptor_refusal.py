@@ -123,6 +123,16 @@ async def test_self_dups_change_nothing():
     "line,out,err,code",
     [
         ('echo x 1>&0', '', 'echo: write error: Bad file descriptor\n', 1),
+        # A self-dup never reopens a closed descriptor, transient or
+        # persistent; a file redirect on it does.
+        ('touch /data/marker 1>&- 1>&1 2>&1; echo rc=$? >&2; '
+         'test -e /data/marker; echo e=$? >&2', '',
+         '1: Bad file descriptor\nrc=1\ne=1\n', 0),
+        ('exec 1>&-; touch /data/marker 1>&1 2>&1; echo rc=$? >&2; '
+         'test -e /data/marker; echo e=$? >&2', '',
+         '1: Bad file descriptor\nrc=1\ne=1\n', 0),
+        ('touch /data/marker 1>&- 1>&1 >/data/f 2>&1; echo rc=$? >&2; '
+         'test -e /data/marker; echo e=$? >&2', '', 'rc=0\ne=0\n', 0),
         ('echo x 2>&0 1>&2', '', '', 1),
         ('echo x 0>&1 1>&0', 'x\n', '', 0),
         ('echo x 1>&0 0>&1', '', 'echo: write error: Bad file descriptor\n',

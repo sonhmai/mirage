@@ -16,7 +16,8 @@ import asyncio
 
 import pytest
 
-from mirage.workspace.abort import MirageAbortError, run_cancellable
+from mirage.workspace.abort import (ABORT_JOIN_SECONDS, MirageAbortError,
+                                    run_cancellable)
 
 
 @pytest.mark.asyncio
@@ -67,3 +68,30 @@ async def test_a_stalled_task_is_cancelled_and_joined():
     with pytest.raises(MirageAbortError):
         await run_cancellable(body(), cancel)
     assert unwound == [True]
+
+
+@pytest.mark.asyncio
+async def test_an_epilogue_that_outlives_the_grace_is_cancelled_too():
+    # The first cancel lands on the body; the task's finally then awaits
+    # something that never settles. The caller is still released, after
+    # the grace, and the task is done when it is.
+    cancel = asyncio.Event()
+    steps: list[str] = []
+
+    async def body() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            steps.append("epilogue")
+            try:
+                await asyncio.Event().wait()
+            finally:
+                steps.append("released")
+
+    asyncio.get_running_loop().call_later(0.01, cancel.set)
+    started = asyncio.get_running_loop().time()
+    with pytest.raises(MirageAbortError):
+        await run_cancellable(body(), cancel)
+    elapsed = asyncio.get_running_loop().time() - started
+    assert steps == ["epilogue", "released"]
+    assert ABORT_JOIN_SECONDS <= elapsed < ABORT_JOIN_SECONDS + 1

@@ -46,6 +46,10 @@ async def cancellable_sleep(
 
 _T = TypeVar("_T")
 
+# How long a cancelled line's epilogue gets before it is cancelled too;
+# the twin of TypeScript's ABORT_JOIN_MS.
+ABORT_JOIN_SECONDS = 0.25
+
 
 async def run_cancellable(coro: Coroutine[Any, Any, _T],
                           cancel: asyncio.Event | None) -> _T:
@@ -62,6 +66,13 @@ async def run_cancellable(coro: Coroutine[Any, Any, _T],
     over a task that finished in the same tick, the recheck TypeScript
     makes after the last await of ``executeLine``.
 
+    The cancel is delivered once, at the await the body is in. The
+    line's ``finally`` then flushes the session and records the line,
+    fresh awaits a store that has gone away can hold forever. So the
+    epilogue gets ``ABORT_JOIN_SECONDS``, the grace TypeScript gives a
+    cancelled tree, and is cancelled too when it outlives it; the join
+    still completes, and the caller is released.
+
     Args:
         coro (Coroutine): the work to run, a whole line or a subtree.
         cancel (asyncio.Event | None): the caller's abort event; None
@@ -75,6 +86,9 @@ async def run_cancellable(coro: Coroutine[Any, Any, _T],
         await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
         if cancel.is_set():
             task.cancel()
+            done, _ = await asyncio.wait({task}, timeout=ABORT_JOIN_SECONDS)
+            if not done:
+                task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             raise MirageAbortError()
         return await task

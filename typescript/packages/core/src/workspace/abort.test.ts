@@ -13,7 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { abortable, joinOrAbort, makeAbortError } from './abort.ts'
+import { IOResult } from '../io/types.ts'
+import type { DispatchFn } from '../runtime/types.ts'
+import { PathSpec } from '../types.ts'
+import { abortable, guardDispatch, joinOrAbort, makeAbortError } from './abort.ts'
 
 function never(): Promise<never> {
   return new Promise<never>(() => undefined)
@@ -101,5 +104,41 @@ describe('makeAbortError', () => {
     const error = makeAbortError(controller.signal)
     expect(error.name).toBe('AbortError')
     expect((error as { cause?: unknown }).cause).toBe(controller.signal.reason)
+  })
+})
+
+describe('guardDispatch', () => {
+  const path = PathSpec.fromStrPath('/x')
+
+  function recording(seen: string[]): DispatchFn {
+    return (op) => {
+      seen.push(op)
+      return Promise.resolve([null, new IOResult()])
+    }
+  }
+
+  it('forwards an op while the signal is quiet', async () => {
+    const seen: string[] = []
+    const guarded = guardDispatch(recording(seen), new AbortController().signal)
+    await guarded('stat', path)
+    expect(seen).toEqual(['stat'])
+  })
+
+  it('refuses to start an op once the signal fired', async () => {
+    const seen: string[] = []
+    const controller = new AbortController()
+    const guarded = guardDispatch(recording(seen), controller.signal)
+    controller.abort(new Error('released'))
+    await expect(guarded('unlink', path)).rejects.toMatchObject({
+      name: 'AbortError',
+      cause: { message: 'released' },
+    })
+    expect(seen).toEqual([])
+  })
+
+  it('is the dispatch itself without a signal', () => {
+    const seen: string[] = []
+    const inner = recording(seen)
+    expect(guardDispatch(inner, undefined)).toBe(inner)
   })
 })

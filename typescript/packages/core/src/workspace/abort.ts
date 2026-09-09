@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DispatchFn } from '../runtime/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { Session } from './session/session.ts'
 
@@ -138,6 +139,24 @@ export function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise
       signal.removeEventListener('abort', onAbort)
     })
   })
+}
+
+/**
+ * A dispatch that refuses to start an op once `signal` has fired. A
+ * cancelled asyncio task unwinds at its next await, so a Python handler
+ * that loops over operands (`rm link1 link2`, `chmod`, `touch`) never
+ * reaches the next one. A JS handler resumes after the await that was in
+ * flight when the caller was released and would begin the next write.
+ * Refusing at the op door, the one seam every handler's I/O goes through,
+ * stops it there without threading the signal through each handler. An
+ * op already in flight settles on its own.
+ */
+export function guardDispatch(dispatch: DispatchFn, signal: AbortSignal | undefined): DispatchFn {
+  if (signal === undefined) return dispatch
+  return (op, path, args, kwargs, report) => {
+    if (signal.aborted) return Promise.reject(makeAbortError(signal))
+    return dispatch(op, path, args, kwargs, report)
+  }
 }
 
 /** How long a cancelled tree gets to unwind before the caller is released anyway. */

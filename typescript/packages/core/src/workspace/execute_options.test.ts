@@ -18,6 +18,7 @@ import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMObserverStore } from '../observe/store.ts'
 import { OpsRegistry } from '../ops/registry.ts'
+import type { Action, OpsContext } from '../policy/index.ts'
 import { RAMSessionStore } from './session/ram.ts'
 import type { SessionFields } from './session/store.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
@@ -478,6 +479,52 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     const result = await kept
     expect(result.exitCode).toBe(0)
     expect(stdoutStr(result).trim()).toBe('kept')
+    await ws.close()
+  })
+
+  it('starts no further op after the release of a namespace-routed line', async () => {
+    // `rm l1 l2` on two links: the first unlink is held at the op door
+    // past the grace, so the caller is released. The held unlink then
+    // completes and the handler resumes; the second operand must not
+    // reach the door. Python's cancelled task never gets there.
+    const parser = await getTestParser()
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    const seen: string[] = []
+    const held: { armed: boolean; release: () => void } = { armed: false, release: () => undefined }
+    const first = new Promise<void>((resolve) => {
+      held.release = resolve
+    })
+    const ws = new Workspace(
+      { '/ram/': ram },
+      {
+        mode: MountMode.WRITE,
+        ops: registry,
+        shellParser: parser,
+        policies: [
+          {
+            preOps: async (ctx: OpsContext): Promise<Action | null> => {
+              if (!held.armed || ctx.op !== 'unlink') return null
+              seen.push(ctx.path.virtual)
+              if (seen.length === 1) await first
+              return null
+            },
+          },
+        ],
+      },
+    )
+    await ws.execute('echo a > /ram/a; echo b > /ram/b; ln -s /ram/a /ram/l1; ln -s /ram/b /ram/l2')
+    held.armed = true
+    const controller = new AbortController()
+    const run = ws.execute('rm /ram/l1 /ram/l2', { signal: controller.signal })
+    while (seen.length === 0) await new Promise((resolve) => setTimeout(resolve, 5))
+    controller.abort()
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+    held.release()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(seen).toEqual(['/ram/l1'])
+    expect(stdoutStr(await ws.execute('readlink /ram/l2'))).toBe('/ram/b\n')
     await ws.close()
   })
 

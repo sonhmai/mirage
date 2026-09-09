@@ -26,6 +26,7 @@ import {
   type StatOp,
   resolveGlobOf,
   supports,
+  withAbortGuard,
   withDirGuard,
   withPathGuards,
   withPolicyGuard,
@@ -186,19 +187,25 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // coded preOps deny fires before a warm serve, the dispatcher's
     // own order at the op door; the invocation's mount prefix rides
     // into its wrap-time scope for readers drained after the gate
-    // scopes return.
+    // scopes return. The abort guard sits outermost: once the
+    // invocation's signal has fired no slot starts, so a handler the
+    // caller was released from begins no further read or write
+    // between its operands.
     const fn: CommandFn = (accessor, paths, texts, opts) => {
-      const guarded = withDirGuard(
-        withPolicyGuard(
-          finish(
-            withPathGuards(
-              opts.ns?.childMounts === undefined
-                ? raw
-                : { ...raw, globChildren: opts.ns.childMounts },
+      const guarded = withAbortGuard(
+        withDirGuard(
+          withPolicyGuard(
+            finish(
+              withPathGuards(
+                opts.ns?.childMounts === undefined
+                  ? raw
+                  : { ...raw, globChildren: opts.ns.childMounts },
+              ),
             ),
+            opts.mountPrefix,
           ),
-          opts.mountPrefix,
         ),
+        opts.signal,
       )
       return b.fn(
         {

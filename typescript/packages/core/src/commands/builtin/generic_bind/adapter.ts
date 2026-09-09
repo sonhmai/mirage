@@ -25,6 +25,7 @@ import {
   readonlyBelow,
 } from '../../../context/session_context.ts'
 import { preOpsGate, type Policies } from '../../../policy/policies.ts'
+import { hasAborted, makeAbortError } from '../../../workspace/abort.ts'
 import { moveReveals } from '../../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../../utils/remnants.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
@@ -945,6 +946,63 @@ export function withPolicyGuard<A extends Accessor = Accessor>(
         await policyAdmit(p, 'dir_copy', dst, true)
       }
       return dc(accessor, src, dst)
+    }
+  }
+  return guarded
+}
+
+/** `fn`, refused with the line's abort instead of started once `signal` has fired. */
+function refusedAfterAbort<T extends unknown[], R>(
+  signal: AbortSignal,
+  fn: (...args: T) => Promise<R>,
+): (...args: T) => Promise<R> {
+  return (...args) => (hasAborted(signal) ? Promise.reject(makeAbortError(signal)) : fn(...args))
+}
+
+/**
+ * Return `ops` whose backend slots refuse to start once the invocation's
+ * signal has fired.
+ *
+ * The twin of the dispatch door's guard for mount commands: a handler
+ * that loops over operands (`rm a b`, `cp -r`, `mkdir -p`) awaits a slot
+ * once per operand, and a JS promise cannot be cancelled, so after the
+ * caller was released the handler resumes on the await that was in
+ * flight and would begin the next read or write. Refusing at the slot,
+ * the one seam every generic-bound handler's I/O goes through, stops it
+ * there without each handler reading the signal. A slot already in
+ * flight settles on its own; `readStream` is left alone because the
+ * reader it returns is guarded as it is drained (`guardInput`), and the
+ * presence facts (stat, exists, find, du) cost no write and are not
+ * refused, as the policy guard leaves them. Python needs nothing here:
+ * its cancelled task never reaches the next operand.
+ */
+export function withAbortGuard<A extends Accessor = Accessor>(
+  ops: CommandIO<A>,
+  signal: AbortSignal | undefined,
+): CommandIO<A> {
+  if (signal === undefined) return ops
+  const guarded: CommandIO<A> = {
+    ...ops,
+    readdir: refusedAfterAbort(signal, ops.readdir),
+    readBytes: refusedAfterAbort(signal, ops.readBytes),
+  }
+  if (ops.readRange !== undefined) guarded.readRange = refusedAfterAbort(signal, ops.readRange)
+  if (ops.write !== undefined) guarded.write = refusedAfterAbort(signal, ops.write)
+  if (ops.mkdir !== undefined) guarded.mkdir = refusedAfterAbort(signal, ops.mkdir)
+  if (ops.append !== undefined) guarded.append = refusedAfterAbort(signal, ops.append)
+  if (ops.create !== undefined) guarded.create = refusedAfterAbort(signal, ops.create)
+  if (ops.unlink !== undefined) guarded.unlink = refusedAfterAbort(signal, ops.unlink)
+  if (ops.rmdir !== undefined) guarded.rmdir = refusedAfterAbort(signal, ops.rmdir)
+  if (ops.rmR !== undefined) guarded.rmR = refusedAfterAbort(signal, ops.rmR)
+  if (ops.truncate !== undefined) guarded.truncate = refusedAfterAbort(signal, ops.truncate)
+  if (ops.rename !== undefined) guarded.rename = refusedAfterAbort(signal, ops.rename)
+  if (ops.copy !== undefined) guarded.copy = refusedAfterAbort(signal, ops.copy)
+  if (ops.dirCopy !== undefined) guarded.dirCopy = refusedAfterAbort(signal, ops.dirCopy)
+  const sa = ops.setAttrs
+  if (sa !== undefined) {
+    guarded.setAttrs = (accessor: A, path: PathSpec, ...rest: unknown[]) => {
+      if (hasAborted(signal)) throw makeAbortError(signal)
+      return sa(accessor, path, ...rest)
     }
   }
   return guarded

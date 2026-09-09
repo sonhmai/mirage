@@ -528,6 +528,52 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     await ws.close()
   })
 
+  it('starts no further backend write after the release of a mount command', async () => {
+    // The same shape for a generic-bound command: `rm a b` on two files,
+    // the first unlink held at the slot's policy gate past the grace.
+    // The handler resumes after the release; the second file must keep
+    // its bytes.
+    const parser = await getTestParser()
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    const seen: string[] = []
+    const held: { armed: boolean; release: () => void } = { armed: false, release: () => undefined }
+    const first = new Promise<void>((resolve) => {
+      held.release = resolve
+    })
+    const ws = new Workspace(
+      { '/ram/': ram },
+      {
+        mode: MountMode.WRITE,
+        ops: registry,
+        shellParser: parser,
+        policies: [
+          {
+            preOps: async (ctx: OpsContext): Promise<Action | null> => {
+              if (!held.armed || ctx.op !== 'unlink') return null
+              seen.push(ctx.path.virtual)
+              if (seen.length === 1) await first
+              return null
+            },
+          },
+        ],
+      },
+    )
+    await ws.execute('echo a > /ram/a; echo b > /ram/b')
+    held.armed = true
+    const controller = new AbortController()
+    const run = ws.execute('rm /ram/a /ram/b', { signal: controller.signal })
+    while (seen.length === 0) await new Promise((resolve) => setTimeout(resolve, 5))
+    controller.abort()
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+    held.release()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(seen).toEqual(['/ram/a'])
+    expect(stdoutStr(await ws.execute('cat /ram/b'))).toBe('b\n')
+    await ws.close()
+  })
+
   it('aborts a whole-line runtime that never answers', async () => {
     class Hanging extends Runtime implements LineExecutor {
       readonly name = 'hanging'

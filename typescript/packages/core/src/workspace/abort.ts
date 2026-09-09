@@ -74,7 +74,9 @@ export function abortedLine(session: Session): AbortSignal | undefined {
  */
 export function makeAbortError(signal?: AbortSignal): DOMException {
   const reason: unknown = signal?.aborted === true ? signal.reason : undefined
-  if (reason instanceof DOMException && reason.name === 'AbortError') return reason
+  // Always a fresh wrapper, even when the reason is itself an AbortError
+  // (a plain `abort()`): the contract is one name and the reason under
+  // `cause`, and a caller reading `cause` must find it on every path.
   const error = new DOMException('execute aborted', 'AbortError')
   if (reason !== undefined) {
     Object.defineProperty(error, 'cause', { value: reason, configurable: true, writable: true })

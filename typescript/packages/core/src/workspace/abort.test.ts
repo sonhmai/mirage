@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { abortable, joinOrAbort } from './abort.ts'
+import { abortable, joinOrAbort, makeAbortError } from './abort.ts'
 
 function never(): Promise<never> {
   return new Promise<never>(() => undefined)
@@ -82,5 +82,24 @@ describe('joinOrAbort', () => {
     controller.abort()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
     expect(Date.now() - t0).toBeLessThan(500)
+  })
+})
+
+describe('makeAbortError', () => {
+  it('carries the reason as the cause for a plain abort() too', () => {
+    const controller = new AbortController()
+    controller.abort()
+    const error = makeAbortError(controller.signal)
+    expect(error.name).toBe('AbortError')
+    expect(error).not.toBe(controller.signal.reason)
+    expect((error as { cause?: unknown }).cause).toBe(controller.signal.reason)
+  })
+
+  it('carries a custom reason as the cause', () => {
+    const controller = new AbortController()
+    controller.abort(new Error('stop'))
+    const error = makeAbortError(controller.signal)
+    expect(error.name).toBe('AbortError')
+    expect((error as { cause?: unknown }).cause).toBe(controller.signal.reason)
   })
 })

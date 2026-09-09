@@ -370,6 +370,9 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     await expect(ws.execute('echo hi', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
       name: 'AbortError',
     })
+    // A line is recorded once it has been parsed; one that never got past
+    // the loading of workspace state leaves no history entry, as in Python.
+    expect(await ws.observer.commandEvents()).toEqual([])
   })
 
   it('restores the status when a stalled flush outlives the grace', async () => {

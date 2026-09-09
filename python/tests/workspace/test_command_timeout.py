@@ -25,6 +25,7 @@ from mirage.resource.ram import RAMResource
 from mirage.runtime.python import LocalRuntime
 from mirage.shell.console import Channel
 from mirage.types import Limit, OnExceed
+from mirage.workspace.session.ram import RAMSessionStore
 
 
 async def _slow_provision(*args, **kwargs):
@@ -108,14 +109,66 @@ async def test_mount_override_beats_command_default():
     assert resolved.timeout_seconds == 999.0
 
 
+class _SuspendingStore(RAMSessionStore):
+    """A session store whose write suspends, as a persistent one does."""
+
+    async def cas_set(self, session_id, fields, expected_generation):
+        await asyncio.sleep(0.02)
+        return await super().cas_set(session_id, fields, expected_generation)
+
+
 @pytest.mark.asyncio
-async def test_timeout_sets_shared_cancel_event(restore_defaults):
+async def test_timeout_answers_124_when_the_session_store_suspends(
+        restore_defaults):
+    # The timeout is the line's answer, not an abort of the invocation:
+    # the caller's event stays untouched, the line flushes and is
+    # recorded, and `$?` is 124.
+    sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.05)
+    ws = Workspace({"/data": RAMResource()},
+                   mode=MountMode.WRITE,
+                   session_store=_SuspendingStore())
+    cancel = asyncio.Event()
+    r = await ws.execute("export MARK=1; sleep 1", cancel=cancel)
+    assert r.exit_code == 124
+    assert not cancel.is_set()
+    status = await ws.execute("echo $?", cancel=cancel)
+    assert (await status.stdout_str()) == "124\n"
+    commands = [e["command"] for e in await ws.observer.command_events()]
+    assert "export MARK=1; sleep 1" in commands
+
+
+@pytest.mark.asyncio
+async def test_timeout_leaves_the_event_for_the_next_line(restore_defaults):
     sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.05)
     ws = _ws()
     cancel = asyncio.Event()
-    r = await ws.execute("sleep 1", cancel=cancel)
+    assert (await ws.execute("sleep 1", cancel=cancel)).exit_code == 124
+    r = await ws.execute("echo next", cancel=cancel)
+    assert r.exit_code == 0
+    assert (await r.stdout_str()) == "next\n"
+
+
+@pytest.mark.asyncio
+async def test_nested_timeout_does_not_abort_the_outer_line(restore_defaults):
+    sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.05)
+    ws = _ws()
+    r = await ws.execute("x=$(sleep 1); echo after", cancel=asyncio.Event())
+    assert r.exit_code == 0
+    assert (await r.stdout_str()) == "after\n"
+
+
+@pytest.mark.asyncio
+async def test_foreground_timeout_leaves_a_background_job_alone(
+        restore_defaults):
+    sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.3)
+    ws = _ws()
+    r = await ws.execute("{ sleep 0.2; sleep 0.2; echo bg-done; } & sleep 1",
+                         cancel=asyncio.Event())
     assert r.exit_code == 124
-    assert cancel.is_set()
+    await ws.job_table.wait(1)
+    job = ws.job_table.get(1)
+    assert job.exit_code == 0
+    assert (await job.console.snapshot(Channel.STDOUT)) == b"bg-done\n"
 
 
 @pytest.mark.asyncio

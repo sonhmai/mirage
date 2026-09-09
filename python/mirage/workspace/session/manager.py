@@ -374,7 +374,15 @@ class SessionManager:
             expected = session.generation
             session.generation = expected + 1
             fields = session.to_dict()
-            if await self._store.cas_set(sid, fields, expected):
+            try:
+                placed = await self._store.cas_set(sid, fields, expected)
+            except asyncio.CancelledError:
+                # A cancelled write never reached the store; keep the
+                # generation the store knows, or every later flush of
+                # this session conflicts with a writer that never was.
+                session.generation = expected
+                raise
+            if placed:
                 # Deep copy: to_dict() returns nested dicts the caller
                 # may go on to mutate, and the baseline this is compared
                 # against must stay frozen at what was written.

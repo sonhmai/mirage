@@ -50,9 +50,10 @@ from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
                           JsonValue, MountBackend, MountMode, PathSpec,
                           parse_mount_mode)
 from mirage.utils.ids import new_session_id, new_workspace_id
-from mirage.workspace.abort import run_cancellable
+from mirage.workspace.abort import MirageAbortError, run_cancellable
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher import Dispatcher
+from mirage.workspace.executor.statement import restore_status
 from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -88,7 +89,7 @@ from mirage.workspace.workspace.mounts import (check_resource, install_mounts,
                                                normalize_resources,
                                                prepare_added_mount)
 from mirage.workspace.workspace.mounts import unmount as unmount_prefix
-from mirage.workspace.workspace.types import ResourceMount
+from mirage.workspace.workspace.types import LineFrame, ResourceMount
 from mirage.workspace.workspace.watch import WatchDelegate, WatchManager
 
 logger = logging.getLogger(__name__)
@@ -1225,11 +1226,23 @@ class Workspace:
                 inner line spends the grants the outer line's pass
                 claimed for it.
         """
-        # The whole line is one task, so a cancel set while a store is
-        # still loading, a secret is still fetching or the tree is still
-        # running lands on that await, and the line is joined before the
-        # abort is raised.
-        return await run_cancellable(
-            execute_line(self, command, session_id, stdin, provision, agent_id,
-                         cwd, env, cancel, record, runtime, routing_decision,
-                         handed), cancel)
+        # The one cancellation seam: the whole line is one task, so a
+        # cancel set while a store is still loading, a secret is still
+        # fetching, the tree is still running or the flush is still
+        # writing lands on that await, and the line is joined before the
+        # abort is raised. The event is the caller's and the line never
+        # sets it.
+        frame = LineFrame()
+        try:
+            return await run_cancellable(
+                execute_line(self, command, session_id, stdin, provision,
+                             agent_id, cwd, env, cancel, record, runtime,
+                             routing_decision, handed, frame), cancel)
+        except MirageAbortError:
+            # An aborted invocation is the caller's outcome, not the
+            # shell's: `$?` goes back to what the line found, whichever
+            # await the abort landed on. Here, after the last of them, so
+            # no path can forget it.
+            if frame.session is not None and frame.status_before is not None:
+                restore_status(frame.session, frame.status_before)
+            raise

@@ -808,3 +808,34 @@ async def test_session_close_waits_for_profile_persistence(
         await asyncio.gather(updating, return_exceptions=True)
         if closing is not None:
             await closing
+
+
+class _StallableStore(RAMSessionStore):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stall = False
+
+    async def cas_set(self, session_id, fields, expected_generation):
+        if self.stall:
+            await asyncio.Event().wait()
+        return await super().cas_set(session_id, fields, expected_generation)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_cas_set_rolls_back_the_generation():
+    # A write the cancel interrupted never reached the store, so the
+    # session keeps the generation the store knows and the next flush
+    # goes through instead of conflicting with a writer that never was.
+    store = _StallableStore()
+    mgr = SessionManager("default", store=store)
+    store.stall = True
+    flushing = asyncio.create_task(mgr.flush())
+    await asyncio.sleep(0.01)
+    flushing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await flushing
+    assert mgr.get("default").generation == 0
+    store.stall = False
+    await mgr.flush()
+    assert mgr.get("default").generation == 1

@@ -17,7 +17,9 @@ from typing import TypeAlias
 
 from mirage.resource.base import BaseResource
 from mirage.types import Limit, MountBackend, MountMode
+from mirage.workspace.executor.statement import StatusSnapshot
 from mirage.workspace.mount.spec import Mount
+from mirage.workspace.session.session import Session
 
 ResourceMount: TypeAlias = (BaseResource | Mount
                             | tuple[BaseResource, MountMode]
@@ -39,3 +41,20 @@ class MountSpec:
     backend: MountBackend = MountBackend.VFS
     mountpoint: str | None = None
     command_limits: dict[str, Limit] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class LineFrame:
+    """What ``Workspace.execute`` needs from the line to answer an abort:
+    the shell it ran on and the status that shell had before it, filled
+    by ``execute_line`` as soon as it knows them and before anything
+    stamps. Per call, never on the session, so two lines on one session
+    each keep their own.
+
+    Attributes:
+        session (Session | None): the shell the line stamps on.
+        status_before (StatusSnapshot | None): ``$?`` and
+            ``${PIPESTATUS[@]}`` as the line found them.
+    """
+    session: Session | None = None
+    status_before: StatusSnapshot | None = None

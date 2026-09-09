@@ -57,9 +57,10 @@ async def run_cancellable(coro: Coroutine[Any, Any, _T],
     joined before the abort is reported, so nothing of the line is
     still running when the caller hears back.
 
-    A task that finished on its own reports its own outcome even when
-    the event is set by then: a line sets the shared event itself when
-    one of its commands times out, and still answers with exit 124.
+    The event is the caller's alone; nothing in the line sets it. So an
+    event found set here is always the caller's abort, and it wins even
+    over a task that finished in the same tick, the recheck TypeScript
+    makes after the last await of ``executeLine``.
 
     Args:
         coro (Coroutine): the work to run, a whole line or a subtree.
@@ -72,7 +73,7 @@ async def run_cancellable(coro: Coroutine[Any, Any, _T],
     waiter = asyncio.create_task(cancel.wait())
     try:
         await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
-        if not task.done():
+        if cancel.is_set():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             raise MirageAbortError()

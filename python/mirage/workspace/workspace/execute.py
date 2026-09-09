@@ -32,9 +32,8 @@ from mirage.runtime.routing import RouteDecision, RouteDeny, RouteError
 from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
                                 parse, syntax_error_result)
 from mirage.types import Refusal
-from mirage.workspace.abort import MirageAbortError, run_cancellable
-from mirage.workspace.executor.statement import (record_status, restore_status,
-                                                 snapshot_status)
+from mirage.workspace.abort import MirageAbortError
+from mirage.workspace.executor.statement import record_status, snapshot_status
 from mirage.workspace.node import provision_node, run_command_tree
 from mirage.workspace.node.admission import (admit_line, is_pending,
                                              is_pending_refusal)
@@ -49,6 +48,7 @@ from mirage.workspace.workspace.fill import (cli_env_names, fill_env,
                                              fill_names, guest_bound,
                                              line_nodes)
 from mirage.workspace.workspace.line import run_whole_line
+from mirage.workspace.workspace.types import LineFrame
 from mirage.workspace.workspace.utils import command_name, fork_for_call
 
 if TYPE_CHECKING:
@@ -194,6 +194,7 @@ async def execute_line(
     runtime: str | None,
     routing_decision: RouteDecision | None,
     handed: HandOff | None = None,
+    frame: LineFrame | None = None,
 ) -> IOResult | ProvisionResult:
     """The body of ``Workspace.execute``; see its docstring for the
     argument contract.
@@ -210,6 +211,9 @@ async def execute_line(
         handed (HandOff | None): the hand-off the line runs on, made by
             ``recurse`` for a nested evaluation; None for a typed line,
             which gets one of its own.
+        frame (LineFrame | None): filled with the session and its
+            status before the line, for ``Workspace.execute`` to restore
+            ``$?`` from when the caller aborts.
     """
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
@@ -256,8 +260,12 @@ async def execute_line(
     session_token = set_current_session(effective_session,
                                         owner=ws._session_mgr)
     # Taken before any statement stamps, so a cancelled line can put
-    # `$?` back to what it found.
-    status_before = snapshot_status(session)
+    # `$?` back to what it found. Restored at the seam in
+    # ``Workspace.execute``, after the last await of the line, so an
+    # abort that lands on the flush or the record is covered too.
+    if frame is not None:
+        frame.session = session
+        frame.status_before = snapshot_status(session)
     try:
         ast = parse(command)
         # Syntax gates before policy, mirroring the TS order and
@@ -337,12 +345,10 @@ async def execute_line(
                     if whole_names:
                         await fill_env(effective_session, whole_names, await
                                        ws._secret_sources())
-                io = await run_cancellable(
-                    run_whole_line(line_runtime, command, stdin,
-                                   effective_session, ws._registry.mounts(),
-                                   ws._registry.policies,
-                                   ws._dispatcher.invalidate_all_after_remote),
-                    cancel)
+                io = await run_whole_line(
+                    line_runtime, command, stdin, effective_session,
+                    ws._registry.mounts(), ws._registry.policies,
+                    ws._dispatcher.invalidate_all_after_remote)
                 record_status(session, io.exit_code)
                 return io
             # The line is the unit a rule judges, so every command in it is
@@ -429,21 +435,23 @@ async def execute_line(
                         sources = await ws._secret_sources()
                         await fill_env(effective_session, names, sources)
                         names = plan_names(nodes)
-            io, _ = await run_cancellable(
-                run_command_tree(
-                    ws.dispatch,
-                    ws._registry,
-                    ws._namespace,
-                    ws.job_table,
-                    exec_recursion,
-                    agent or "",
-                    ast,
-                    effective_session,
-                    stdin,
-                    cancel,
-                    routing_decision=decision,
-                    handed=handed,
-                ), cancel)
+            # No seam of its own: the whole line is one task under
+            # ``Workspace.execute``, and a cancel lands on whichever await
+            # the tree is in.
+            io, _ = await run_command_tree(
+                ws.dispatch,
+                ws._registry,
+                ws._namespace,
+                ws.job_table,
+                exec_recursion,
+                agent or "",
+                ast,
+                effective_session,
+                stdin,
+                cancel,
+                routing_decision=decision,
+                handed=handed,
+            )
             # A record a nested line earned is the line's to report when
             # its own tree earned none (see NestedRefusal).
             if io.refusal is None:
@@ -470,15 +478,14 @@ async def execute_line(
         # The program loop stamped each statement; the line as a whole
         # is a wrapper around them, like a group.
         record_status(session, io.exit_code, transparent=True)
-        await run_cancellable(
-            ws.apply_io(io, records=scope.records, is_cacheable=cacheable),
-            cancel)
+        await ws.apply_io(io, records=scope.records, is_cacheable=cacheable)
         return io
     except CommandTimeoutError as exc:
+        # The caller's event is read, never written: a timeout is this
+        # line's answer (exit 124), not an abort of the invocation, and
+        # nothing below is still running once the tree has raised.
         logger.debug("command %r timed out after %ss", exc.command,
                      exc.seconds)
-        if cancel is not None:
-            cancel.set()
         io = failure_result(exc, command)
         record_status(session, io.exit_code)
         return io
@@ -487,8 +494,8 @@ async def execute_line(
         record_status(session, io.exit_code)
         return io
     except (MirageAbortError, asyncio.CancelledError):
-        # An aborted invocation is the caller's outcome, not the shell's.
-        restore_status(session, status_before)
+        # An aborted invocation is the caller's outcome, not the shell's;
+        # the record says so, and ``Workspace.execute`` restores `$?`.
         io = IOResult(exit_code=130, stderr=b"execute aborted\n")
         raise
     except (ContentDriftError, RouteError) as exc:

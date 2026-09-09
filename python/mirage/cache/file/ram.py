@@ -120,6 +120,11 @@ class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
 
     async def remove(self, key: str) -> None:
         async with self._lock_for(key):
+            # Advanced here, when the removal takes effect, not when it
+            # was called: a writer queued behind it captured its
+            # generation before this ran, and only a later generation
+            # tells it its bytes predate the removal.
+            self._invalidation_version += 1
             task = self._drain_tasks.pop(key, None)
             if task:
                 task.cancel()

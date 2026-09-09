@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage import MountMode, Workspace
@@ -20,6 +22,16 @@ from mirage.commands.spec import CommandSpec
 from mirage.io.types import IOResult
 from mirage.policy import Action, CommandContext, Deny, Policy
 from mirage.resource.ram import RAMResource
+from mirage.workspace.abort import MirageAbortError
+from mirage.workspace.session.ram import RAMSessionStore
+from mirage.workspace.session.store import SessionFields
+
+
+class _StalledSessionStore(RAMSessionStore):
+
+    async def load(self) -> dict[str, SessionFields]:
+        await asyncio.Event().wait()
+        return {}
 
 
 def _register(ws: Workspace, prefix: str, fn) -> None:
@@ -295,3 +307,19 @@ async def test_a_negated_pipeline_keeps_its_refusal():
     assert io.exit_code == 0
     assert io.refusal is not None
     assert io.refusal.reason == "secrets stay put"
+
+
+@pytest.mark.asyncio
+async def test_cancel_releases_a_line_stalled_before_it_runs():
+    # The session store never answers its load, so the line is stuck
+    # before its first gate; the caller's event still has to release it.
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   session_store=_StalledSessionStore())
+    cancel = asyncio.Event()
+    timer = asyncio.get_running_loop().call_later(0.05, cancel.set)
+    try:
+        with pytest.raises(MirageAbortError):
+            await ws.execute("echo hi", cancel=cancel)
+    finally:
+        timer.cancel()

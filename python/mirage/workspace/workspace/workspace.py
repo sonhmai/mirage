@@ -50,6 +50,7 @@ from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
                           JsonValue, MountBackend, MountMode, PathSpec,
                           parse_mount_mode)
 from mirage.utils.ids import new_session_id, new_workspace_id
+from mirage.workspace.abort import run_cancellable
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.file_prompt import build_file_prompt
@@ -1224,6 +1225,11 @@ class Workspace:
                 inner line spends the grants the outer line's pass
                 claimed for it.
         """
-        return await execute_line(self, command, session_id, stdin, provision,
-                                  agent_id, cwd, env, cancel, record, runtime,
-                                  routing_decision, handed)
+        # The whole line is one task, so a cancel set while a store is
+        # still loading, a secret is still fetching or the tree is still
+        # running lands on that await, and the line is joined before the
+        # abort is raised.
+        return await run_cancellable(
+            execute_line(self, command, session_id, stdin, provision, agent_id,
+                         cwd, env, cancel, record, runtime, routing_decision,
+                         handed), cancel)

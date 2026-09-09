@@ -49,14 +49,30 @@ _T = TypeVar("_T")
 
 async def run_cancellable(coro: Coroutine[Any, Any, _T],
                           cancel: asyncio.Event | None) -> _T:
-    """Cancel and join the command task before reporting a caller abort."""
+    """Run ``coro`` as a task the caller's event can cancel, and join it.
+
+    The task is the cancellation seam: a cancelled asyncio task unwinds
+    at its next await, whatever it was awaiting, so every await inside
+    ``coro`` observes the event without being handed it. The task is
+    joined before the abort is reported, so nothing of the line is
+    still running when the caller hears back.
+
+    A task that finished on its own reports its own outcome even when
+    the event is set by then: a line sets the shared event itself when
+    one of its commands times out, and still answers with exit 124.
+
+    Args:
+        coro (Coroutine): the work to run, a whole line or a subtree.
+        cancel (asyncio.Event | None): the caller's abort event; None
+            runs ``coro`` inline.
+    """
     if cancel is None:
         return await coro
     task = asyncio.ensure_future(coro)
     waiter = asyncio.create_task(cancel.wait())
     try:
         await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
-        if cancel.is_set():
+        if not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             raise MirageAbortError()

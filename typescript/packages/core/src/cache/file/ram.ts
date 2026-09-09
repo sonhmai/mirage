@@ -167,6 +167,11 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
   remove(key: string): Promise<void> {
     this.drainTasks.delete(key)
     return this.lock.withLock(key, () => {
+      // Advanced here, when the removal takes effect, not when it was
+      // called: a writer queued behind it captured its generation before
+      // this ran, and only a later generation tells it its bytes predate
+      // the removal.
+      this.invalidationVersion++
       const entry = this.entries.get(key)
       if (entry !== undefined) {
         this.size -= entry.size

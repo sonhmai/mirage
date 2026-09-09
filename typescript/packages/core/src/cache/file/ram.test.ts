@@ -155,4 +155,21 @@ describe('RAMFileCacheStore: a writer waiting on the lock', () => {
       expect(await cache.get('/large')).toBeNull()
     },
   )
+
+  it.each(['set', 'add'] as const)(
+    '%s queued behind a removal of its key is discarded',
+    async (operation) => {
+      // The removal runs between the first writer's fingerprint and the
+      // second writer's turn. The second holds bytes read before the
+      // removal, so it must not repopulate the key that was just dropped.
+      const cache = new RAMFileCacheStore()
+      const first = cache[operation]('/large', new Uint8Array(4_000_000).fill(0x78))
+      await sleep(2)
+      const removal = cache.remove('/large')
+      await sleep(2)
+      const second = cache[operation]('/large', new Uint8Array(4_000_000).fill(0x79))
+      await Promise.all([first, removal, second])
+      expect(await cache.get('/large')).toBeNull()
+    },
+  )
 })

@@ -519,8 +519,8 @@ async function runParsedLine(
         // unreadable dotenv or a config the source refuses, which is
         // the same treatment an unreachable store gets. Memoized, so
         // the loop's later passes cost one await.
-        const sources = await env.secretSources()
-        await fillEnv(effectiveSession, names, sources)
+        const sources = await abortable(env.secretSources(), killed)
+        await fillEnv(effectiveSession, names, sources, killed)
         names = fillNames(effectiveSession, planNodes, planWhole, planCli, writesGated)
       }
       return null

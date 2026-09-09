@@ -168,3 +168,22 @@ async def test_writer_waiting_on_the_lock_sees_an_earlier_invalidation(
     await asyncio.gather(first, second)
     assert await cache.get("/large") is None
     assert cache.cache_size == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["set", "add"])
+async def test_writer_queued_behind_a_removal_is_discarded(operation):
+    # The removal runs between the first writer's fingerprint and the
+    # second writer's turn. The second holds bytes read before the
+    # removal, so it must not repopulate the key that was just dropped.
+    cache = RAMFileCacheStore()
+    first = asyncio.create_task(
+        getattr(cache, operation)("/large", b"x" * 20_000_000))
+    await asyncio.sleep(0.001)
+    removal = asyncio.create_task(cache.remove("/large"))
+    await asyncio.sleep(0.001)
+    second = asyncio.create_task(
+        getattr(cache, operation)("/large", b"y" * 20_000_000))
+    await asyncio.gather(first, removal, second)
+    assert await cache.get("/large") is None
+    assert cache.cache_size == 0

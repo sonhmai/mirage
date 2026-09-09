@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 
 import pytest
 
+from mirage.workspace import abort as abort_module
 from mirage.workspace.abort import (ABORT_JOIN_SECONDS, MirageAbortError,
                                     run_cancellable)
 
@@ -95,3 +97,59 @@ async def test_an_epilogue_that_outlives_the_grace_is_cancelled_too():
     elapsed = asyncio.get_running_loop().time() - started
     assert steps == ["epilogue", "released"]
     assert ABORT_JOIN_SECONDS <= elapsed < ABORT_JOIN_SECONDS + 1
+
+
+@pytest.mark.asyncio
+async def test_an_externally_cancelled_caller_gets_the_same_grace():
+    # The event was never set: the abort arrives as a cancel on this
+    # frame, from a wait_for. The line still gets both deliveries and
+    # the grace between them, so the epilogue is not the thing that
+    # holds the caller.
+    cancel = asyncio.Event()
+    steps: list[str] = []
+
+    async def body() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            steps.append("epilogue")
+            try:
+                await asyncio.Event().wait()
+            finally:
+                steps.append("released")
+
+    started = asyncio.get_running_loop().time()
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(run_cancellable(body(), cancel), 0.01)
+    elapsed = asyncio.get_running_loop().time() - started
+    assert steps == ["epilogue", "released"]
+    assert ABORT_JOIN_SECONDS <= elapsed < ABORT_JOIN_SECONDS + 1
+
+
+@pytest.mark.asyncio
+async def test_a_body_that_swallows_both_cancels_is_joined_and_warned(
+        monkeypatch, caplog):
+    # Neither cancel can be forced through a body that swallows them,
+    # which is asyncio's own limit too. The caller waits for the body to
+    # return, and the wait is named in the log rather than silent.
+    monkeypatch.setattr(abort_module, "ABORT_STALL_WARN_SECONDS", 0.05)
+    cancel = asyncio.Event()
+    steps: list[str] = []
+
+    async def body() -> None:
+        for _ in range(2):
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                # The bad handler this test exists to describe.
+                pass
+        await asyncio.sleep(0.2)
+        steps.append("returned")
+
+    asyncio.get_running_loop().call_later(0.01, cancel.set)
+    with caplog.at_level(logging.WARNING, logger="mirage.workspace.abort"):
+        with pytest.raises(MirageAbortError):
+            await run_cancellable(body(), cancel)
+    assert steps == ["returned"]
+    assert any("not letting CancelledError propagate" in r.getMessage()
+               for r in caplog.records)

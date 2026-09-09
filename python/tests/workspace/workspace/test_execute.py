@@ -23,7 +23,7 @@ from mirage.io.types import IOResult
 from mirage.observe.store import RAMObserverStore
 from mirage.policy import Action, CommandContext, Deny, Policy
 from mirage.resource.ram import RAMResource
-from mirage.workspace.abort import MirageAbortError
+from mirage.workspace.abort import ABORT_JOIN_SECONDS, MirageAbortError
 from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.store import SessionFields
 
@@ -422,6 +422,26 @@ async def test_abort_of_a_running_line_is_not_held_by_a_dead_history_store():
             await asyncio.wait_for(ws.execute("sleep 5", cancel=cancel), 2)
     finally:
         timer.cancel()
+    assert session.last_exit_code == 7
+
+
+@pytest.mark.asyncio
+async def test_a_wait_for_timeout_is_not_held_by_a_dead_history_store():
+    # The event is never set: the caller is cancelled from outside, by a
+    # wait_for. The line still gets both cancels and the grace between
+    # them, so the dead store does not hold the caller, and `$?` is what
+    # the line found rather than what it stamped.
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   observe=_StalledObserverStore())
+    session = ws._session_mgr.get(ws._session_mgr.default_id)
+    session.last_exit_code = 7
+    started = asyncio.get_running_loop().time()
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(
+            ws.execute("false; echo hi", cancel=asyncio.Event()), 0.05)
+    elapsed = asyncio.get_running_loop().time() - started
+    assert elapsed < ABORT_JOIN_SECONDS + 1
     assert session.last_exit_code == 7
 
 

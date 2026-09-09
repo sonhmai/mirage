@@ -1203,9 +1203,12 @@ class Workspace:
                 clone, so `export` inside the command does not leak back
                 to the persistent session.
             cancel: Optional asyncio.Event used to abort execution
-                mid-flight. When set, the executor raises MirageAbortError
-                at the next gate (entry to each node) and races inside
-                blocking sleeps so cancellation is observed promptly.
+                mid-flight. The whole line runs as one task, so setting
+                the event cancels it at whatever await it is in; the task
+                is joined before MirageAbortError is raised, and `$?` is
+                restored to what the line found. The event is the
+                caller's alone: the line never sets it, so a command
+                timeout is exit 124, not an abort.
             record: When False, run without logging a history entry or
                 opening a recording context; ops emitted by the command
                 flow into the caller's recorder. Used by the executor's
@@ -1238,11 +1241,12 @@ class Workspace:
                 execute_line(self, command, session_id, stdin, provision,
                              agent_id, cwd, env, cancel, record, runtime,
                              routing_decision, handed, frame), cancel)
-        except MirageAbortError:
-            # An aborted invocation is the caller's outcome, not the
-            # shell's: `$?` goes back to what the line found, whichever
-            # await the abort landed on. Here, after the last of them, so
-            # no path can forget it.
+        except (MirageAbortError, asyncio.CancelledError):
+            # An abandoned invocation is the caller's outcome, not the
+            # shell's, whether it arrived on the event or as a cancel
+            # from outside: `$?` goes back to what the line found,
+            # whichever await it landed on. Here, after the last of them,
+            # so no path can forget it.
             if frame.session is not None and frame.status_before is not None:
                 restore_status(frame.session, frame.status_before)
             raise

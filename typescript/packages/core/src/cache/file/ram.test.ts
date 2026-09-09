@@ -172,4 +172,21 @@ describe('RAMFileCacheStore: a writer waiting on the lock', () => {
       expect(await cache.get('/large')).toBeNull()
     },
   )
+
+  it.each(['set', 'add'] as const)(
+    '%s of one key survives the removal of another key while it hashes',
+    async (operation) => {
+      const cache = new RAMFileCacheStore()
+      const data = new Uint8Array(4_000_000).fill(0x78)
+      const fill = cache[operation]('/large', data)
+      await sleep(2)
+      await cache.remove('/other')
+      await fill
+      // Compared by length and a byte, not deep equality: a 4 MB deep
+      // compare alone outlives the test budget.
+      const kept = await cache.get('/large')
+      expect(kept?.byteLength).toBe(data.byteLength)
+      expect(kept?.[0]).toBe(0x78)
+    },
+  )
 })

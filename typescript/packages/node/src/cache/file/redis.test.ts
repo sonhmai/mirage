@@ -92,6 +92,35 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     },
   )
 
+  it.each(['set', 'add'] as const)(
+    '%s of one key survives the removal of another key while it hashes',
+    async (method) => {
+      let entered!: () => void
+      let release!: () => void
+      const hashing = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      registerFingerprintHasher(async (data) => {
+        entered()
+        await gate
+        return nativeFingerprint(data)
+      })
+      const pending = cache[method]('pending', new Uint8Array([7, 7]))
+      try {
+        await hashing
+        await cache.remove('other')
+      } finally {
+        release()
+        await pending
+        registerFingerprintHasher(nativeFingerprint)
+      }
+      expect(await cache.get('pending')).toEqual(new Uint8Array([7, 7]))
+    },
+  )
+
   it('set + get round-trips binary data', async () => {
     const bytes = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff, 0x10])
     await cache.set('key1', bytes)

@@ -14,6 +14,7 @@
 
 import { RAMResource } from '../../resource/ram/ram.ts'
 import type { PathSpec } from '../../types.ts'
+import { Generations } from '../generation.ts'
 import { KeyLock } from '../lock.ts'
 import { CacheEntry } from './entry.ts'
 import { type FileCache, validateMaxDrainBytes } from './mixin.ts'
@@ -24,7 +25,7 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
   private readonly lock = new KeyLock()
   private readonly limit: number
   private size = 0
-  private invalidationVersion = 0
+  private readonly generations = new Generations()
   private maxDrainBytesValue: number | null = null
   // Promises cannot be cancelled; clearing the map makes the drain's
   // completion check fail so the result is discarded instead.
@@ -88,28 +89,32 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
     data: Uint8Array,
     options: { fingerprint?: string | null; ttl?: number | null } = {},
   ): Promise<void> {
-    // Captured before waiting on the lock: bytes read before an
+    // Stamped before waiting on the lock: bytes read before an
     // invalidation are stale even when the lock was granted after it.
-    const version = this.invalidationVersion
-    await this.lock.withLock(key, async () => {
-      const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
-      if (version !== this.invalidationVersion) return
-      const existing = this.entries.get(key)
-      if (existing !== undefined) {
-        this.size -= existing.size
-        this.entries.delete(key)
-      }
-      const entry = new CacheEntry({
-        size: data.byteLength,
-        cachedAt: Math.floor(Date.now() / 1000),
-        fingerprint: fp,
-        ttl: options.ttl ?? null,
+    const stamp = this.generations.enter(key)
+    try {
+      await this.lock.withLock(key, async () => {
+        const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
+        if (this.generations.stale(key, stamp)) return
+        const existing = this.entries.get(key)
+        if (existing !== undefined) {
+          this.size -= existing.size
+          this.entries.delete(key)
+        }
+        const entry = new CacheEntry({
+          size: data.byteLength,
+          cachedAt: Math.floor(Date.now() / 1000),
+          fingerprint: fp,
+          ttl: options.ttl ?? null,
+        })
+        this.entries.set(key, entry)
+        this.store.files.set(key, data)
+        this.size += entry.size
+        return Promise.resolve()
       })
-      this.entries.set(key, entry)
-      this.store.files.set(key, data)
-      this.size += entry.size
-      return Promise.resolve()
-    })
+    } finally {
+      this.generations.leave(key)
+    }
     await this.evict()
   }
 
@@ -118,33 +123,40 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
     data: Uint8Array,
     options: { fingerprint?: string | null; ttl?: number | null } = {},
   ): Promise<boolean> {
-    const version = this.invalidationVersion
-    const placed = await this.lock.withLock(key, async () => {
-      const existing = this.entries.get(key)
-      if (existing !== undefined && !existing.expired) return Promise.resolve(false)
-      const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
-      if (version !== this.invalidationVersion) return false
-      if (existing !== undefined) {
-        this.size -= existing.size
-        this.entries.delete(key)
-      }
-      const entry = new CacheEntry({
-        size: data.byteLength,
-        cachedAt: Math.floor(Date.now() / 1000),
-        fingerprint: fp,
-        ttl: options.ttl ?? null,
+    const stamp = this.generations.enter(key)
+    let placed: boolean
+    try {
+      placed = await this.lock.withLock(key, async () => {
+        const existing = this.entries.get(key)
+        if (existing !== undefined && !existing.expired) return Promise.resolve(false)
+        const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
+        if (this.generations.stale(key, stamp)) return false
+        if (existing !== undefined) {
+          this.size -= existing.size
+          this.entries.delete(key)
+        }
+        const entry = new CacheEntry({
+          size: data.byteLength,
+          cachedAt: Math.floor(Date.now() / 1000),
+          fingerprint: fp,
+          ttl: options.ttl ?? null,
+        })
+        this.entries.set(key, entry)
+        this.store.files.set(key, data)
+        this.size += entry.size
+        return Promise.resolve(true)
       })
-      this.entries.set(key, entry)
-      this.store.files.set(key, data)
-      this.size += entry.size
-      return Promise.resolve(true)
-    })
+    } finally {
+      this.generations.leave(key)
+    }
     if (placed) await this.evict()
     return placed
   }
 
   async evictPrefix(prefix: string): Promise<void> {
-    this.invalidationVersion++
+    // Store-wide: a fill in flight under the prefix has no entry yet, so
+    // its key cannot be enumerated below.
+    this.generations.bumpAll()
     // A pending fill may not have installed an entry yet.
     const keys = [...new Set([...this.entries.keys(), ...this.drainTasks.keys()])].filter((k) =>
       k.startsWith(prefix),
@@ -153,8 +165,8 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
   }
 
   evictPaths(paths: Iterable<string>): void {
-    this.invalidationVersion++
     for (const key of paths) {
+      this.generations.bump(key)
       const entry = this.entries.get(key)
       if (entry !== undefined) {
         this.size -= entry.size
@@ -168,10 +180,11 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
     this.drainTasks.delete(key)
     return this.lock.withLock(key, () => {
       // Advanced here, when the removal takes effect, not when it was
-      // called: a writer queued behind it captured its generation before
-      // this ran, and only a later generation tells it its bytes predate
-      // the removal.
-      this.invalidationVersion++
+      // called: a writer queued behind it took its stamp before this ran,
+      // and only a later generation tells it its bytes predate the
+      // removal. Per key: a fill of another key still hashing is not this
+      // removal's business.
+      this.generations.bump(key)
       const entry = this.entries.get(key)
       if (entry !== undefined) {
         this.size -= entry.size
@@ -196,7 +209,7 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
   }
 
   clear(): Promise<void> {
-    this.invalidationVersion++
+    this.generations.bumpAll()
     this.drainTasks.clear()
     this.entries.clear()
     this.store.files.clear()

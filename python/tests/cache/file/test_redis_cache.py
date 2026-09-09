@@ -234,3 +234,29 @@ async def test_fill_invalidated_during_hashing(cache, monkeypatch, method,
     assert not await cache.is_fresh("/pending", default_fingerprint(b"old"))
     await cache.set("/pending", b"new")
     assert await cache.get("/pending") == b"new"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["set", "add"])
+async def test_fill_survives_removal_of_another_key_during_hashing(
+        cache, monkeypatch, method):
+    from mirage.cache.file import redis as redis_cache
+    from mirage.cache.file.utils import default_fingerprint
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def paused_hash(data):
+        entered.set()
+        await release.wait()
+        return default_fingerprint(data)
+
+    monkeypatch.setattr(redis_cache, "default_fingerprint_async", paused_hash)
+    pending = asyncio.create_task(getattr(cache, method)("/pending", b"kept"))
+    try:
+        await entered.wait()
+        await cache.remove("/other")
+    finally:
+        release.set()
+        await pending
+    assert await cache.get("/pending") == b"kept"

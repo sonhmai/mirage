@@ -187,3 +187,15 @@ async def test_writer_queued_behind_a_removal_is_discarded(operation):
     await asyncio.gather(first, removal, second)
     assert await cache.get("/large") is None
     assert cache.cache_size == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["set", "add"])
+async def test_a_fill_survives_the_removal_of_another_key(operation):
+    cache = RAMFileCacheStore()
+    data = b"x" * 20_000_000
+    fill = asyncio.create_task(getattr(cache, operation)("/large", data))
+    await asyncio.sleep(0.001)
+    await cache.remove("/other")
+    await fill
+    assert await cache.get("/large") == data

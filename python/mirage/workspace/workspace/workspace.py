@@ -77,7 +77,7 @@ from mirage.workspace.store import WorkspaceStateStore
 from mirage.workspace.workspace.build import (resolve_control_stores,
                                               wire_runtime_world)
 from mirage.workspace.workspace.cache import build_file_cache
-from mirage.workspace.workspace.execute import execute_line
+from mirage.workspace.workspace.execute import LineFrame, execute_line
 from mirage.workspace.workspace.guard import reject_config_script
 from mirage.workspace.workspace.kernel_mounts import KernelMounts
 from mirage.workspace.workspace.lifecycle import (close_async, patch_process,
@@ -89,7 +89,7 @@ from mirage.workspace.workspace.mounts import (check_resource, install_mounts,
                                                normalize_resources,
                                                prepare_added_mount)
 from mirage.workspace.workspace.mounts import unmount as unmount_prefix
-from mirage.workspace.workspace.types import LineFrame, ResourceMount
+from mirage.workspace.workspace.types import ResourceMount
 from mirage.workspace.workspace.watch import WatchDelegate, WatchManager
 
 logger = logging.getLogger(__name__)

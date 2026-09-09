@@ -33,13 +33,14 @@ from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
                                 parse, syntax_error_result)
 from mirage.types import Refusal
 from mirage.workspace.abort import MirageAbortError
-from mirage.workspace.executor.statement import record_status, snapshot_status
+from mirage.workspace.executor.statement import (StatusSnapshot, record_status,
+                                                 snapshot_status)
 from mirage.workspace.node import provision_node, run_command_tree
 from mirage.workspace.node.admission import (admit_line, is_pending,
                                              is_pending_refusal)
 from mirage.workspace.node.explain import prejudge_line, unrefused_nodes
 from mirage.workspace.node.occurrence import evaluated_from
-from mirage.workspace.session import (get_current_session_for,
+from mirage.workspace.session import (Session, get_current_session_for,
                                       reset_current_session,
                                       set_current_session)
 from mirage.workspace.snapshot import ContentDriftError
@@ -48,7 +49,6 @@ from mirage.workspace.workspace.fill import (cli_env_names, fill_env,
                                              fill_names, guest_bound,
                                              line_nodes)
 from mirage.workspace.workspace.line import run_whole_line
-from mirage.workspace.workspace.types import LineFrame
 from mirage.workspace.workspace.utils import command_name, fork_for_call
 
 if TYPE_CHECKING:
@@ -178,6 +178,23 @@ def session_cwd(
         return ws._session_mgr.get(session_id).cwd
     except KeyError:
         return None
+
+
+@dataclass(slots=True)
+class LineFrame:
+    """What ``Workspace.execute`` needs from the line to answer an abort:
+    the shell it ran on and the status that shell had before it, filled
+    by ``execute_line`` as soon as it knows them and before anything
+    stamps. Per call, never on the session, so two lines on one session
+    each keep their own.
+
+    Attributes:
+        session (Session | None): the shell the line stamps on.
+        status_before (StatusSnapshot | None): ``$?`` and
+            ``${PIPESTATUS[@]}`` as the line found them.
+    """
+    session: Session | None = None
+    status_before: StatusSnapshot | None = None
 
 
 async def execute_line(

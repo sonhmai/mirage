@@ -22,6 +22,7 @@ from mirage.io.stream import materialize
 from mirage.policy import Policies
 from mirage.shell import parse
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
+from mirage.shell.errors import ReturnSignal
 from mirage.shell.job_table import JobTable
 from mirage.types import MountMode, PathSpec
 from mirage.workspace.cli.registry import CLIRegistry
@@ -522,7 +523,6 @@ def test_trap():
 
 def test_return_raises_inside_function_frame():
     from mirage.shell.call_stack import CallStack
-    from mirage.workspace.executor.control import ReturnSignal
 
     dispatch = _mock_dispatch()
     reg, _ = _mock_registry()

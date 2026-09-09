@@ -31,6 +31,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, StatPath
 from mirage.policy import resolve_limit, resolve_producer
+from mirage.policy.types import HandOff
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.call_stack import CallStack
@@ -151,7 +152,9 @@ async def handle_command(
     job_table: JobTable | None = None,
     namespace: Namespace | None = None,
     routing_decision: RouteDecision | None = None,
+    agent_id: str | None = None,
     execute_fn: ExecuteLine | None = None,
+    handed: HandOff | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a simple command.
 
@@ -179,7 +182,8 @@ async def handle_command(
     # Shell functions
     if cmd_name in session.functions:
         return await run_shell_function(execute_node, cmd_name, parts, session,
-                                        stdin, call_stack)
+                                        stdin, call_stack, job_table, agent_id,
+                                        handed, registry.decisions)
 
     # Installed CLIs: dispatch by name, never by operand path. Sits
     # below functions (a user can wrap an installed CLI, bash-style)

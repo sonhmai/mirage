@@ -47,6 +47,28 @@ class RecordingSandbox(RemoteSandbox):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("line", [
+    "python3 --version",
+    "python -V",
+    "node --version",
+    "node -v",
+    "tsc --version",
+])
+async def test_version_commands_reach_the_remote_environment(line):
+    box = RecordingSandbox()
+    ws = Workspace({"/data": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[box, "vfs"])
+    try:
+        io = await ws.execute(line)
+        assert io.exit_code == 0
+        assert await materialize(io.stdout) == b"ran:" + line.encode()
+        assert box.execs[0][0] == line
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_first_line_connects_once():
     box = RecordingSandbox(captures=("python3", ))
     ws = Workspace({"/data": RAMResource()},

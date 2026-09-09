@@ -53,6 +53,17 @@ class LanguageRuntime(Runtime):
 
     language: ClassVar[Language]
 
+    async def version(self, env: dict[str, str]) -> RunResult:
+        """Report the bound interpreter's version.
+
+        Args:
+            env (dict[str, str]): the session environment.
+        """
+        return RunResult(
+            stdout=b"",
+            stderr=f"{self.name}: version information unavailable\n".encode(),
+            exit_code=1)
+
     def attach(self, dispatch: DispatchFn, resolver: MountResolver) -> None:
         """Late-wire workspace I/O into a user-constructed instance.
 

@@ -15,7 +15,7 @@
 from typing import ClassVar
 
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.types import Language
+from mirage.runtime.types import Language, RunArgs, RunResult
 
 
 class PythonRuntime(LanguageRuntime):
@@ -36,3 +36,14 @@ class PythonRuntime(LanguageRuntime):
     # system to find a module with. A capability of the tier, declared
     # here rather than probed, so a refusal can name the runtime.
     runs_modules: ClassVar[bool] = True
+    version_suffix: ClassVar[str] = ""
+
+    async def version(self, env: dict[str, str]) -> RunResult:
+        # Process runtimes must supply a probe that cannot run startup hooks.
+        if self.reach != "vfs":
+            return await super().version(env)
+        return await self.run(
+            RunArgs(code=("import sys\n"
+                          "print('Python ' + sys.version.split()[0] + "
+                          f"{self.version_suffix!r})"),
+                    env=env))

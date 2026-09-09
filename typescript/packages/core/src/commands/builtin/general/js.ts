@@ -21,7 +21,7 @@ import { LanguageRuntime } from '../../../runtime/language.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveScript } from '../utils/operands.ts'
 import { FlagView } from '../../spec/types.ts'
-import { STDIN_OPERAND } from './interpreter.ts'
+import { runtimeVersion, STDIN_OPERAND } from './interpreter.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -32,14 +32,20 @@ async function jsCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
+  const label = opts.command ?? 'js'
   if (!(opts.runtime instanceof LanguageRuntime)) {
     return [
       null,
       new IOResult({
         exitCode: 127,
-        stderr: ENC.encode('js: command not found\n'),
+        stderr: ENC.encode(`${label}: command not found\n`),
       }),
     ]
+  }
+
+  const fl = new FlagView(opts.flags, specOf('js'))
+  if (fl.asBool('version')) {
+    return runtimeVersion(label, opts.runtime, opts.env ?? {}, opts.signal, opts.timeoutSeconds)
   }
 
   if (opts.dispatch === undefined) {
@@ -47,12 +53,11 @@ async function jsCommand(
       null,
       new IOResult({
         exitCode: 1,
-        stderr: ENC.encode('js: no dispatch available\n'),
+        stderr: ENC.encode(`${label}: no dispatch available\n`),
       }),
     ]
   }
 
-  const fl = new FlagView(opts.flags, specOf('js'))
   const code = fl.asStr('e') ?? null
   const hasCode = code !== null
   const module = fl.asBool('module')
@@ -87,7 +92,7 @@ async function jsCommand(
         null,
         new IOResult({
           exitCode: 126,
-          stderr: ENC.encode(`js: ${display}: not in EXEC mode\n`),
+          stderr: ENC.encode(`${label}: ${display}: not in EXEC mode\n`),
         }),
       ]
     }
@@ -96,7 +101,7 @@ async function jsCommand(
       null,
       new IOResult({
         exitCode: 126,
-        stderr: ENC.encode("js: root mount '/' is not in EXEC mode\n"),
+        stderr: ENC.encode(`${label}: root mount '/' is not in EXEC mode\n`),
       }),
     ]
   }
@@ -116,6 +121,7 @@ async function jsCommand(
     scriptPath,
     argStrs,
     {
+      command: label,
       stdin: stdinForRuntime,
       env: opts.env ?? {},
       code: resolvedCode,

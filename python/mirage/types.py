@@ -586,6 +586,7 @@ class ResourceName(str, Enum):
     S3 = "s3"
     RAM = "ram"
     GITHUB = "github"
+    WANDB = "wandb"
     LINEAR = "linear"
     GCAL = "gcal"
     GDOCS = "gdocs"

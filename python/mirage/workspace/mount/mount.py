@@ -24,7 +24,8 @@ from mirage.cache.context import push_cache_manager
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import run_with_timeout
-from mirage.commands.config import CommandOpts, ExecContext, RegisteredCommand
+from mirage.commands.config import (CommandOpts, ExecContext,
+                                    RegisteredCommand, has_injected_version)
 from mirage.commands.resolve import get_extension
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import FlagValue
@@ -617,6 +618,7 @@ class MountEntry:
             # reads the fields it wants and ignores the rest, so there is no
             # opt-in registry (mirrors Mount.executeCmd building CommandOpts).
             opts = CommandOpts(
+                command=cmd_name,
                 stdin=stdin,
                 flags=flags,
                 cwd=PathSpec(
@@ -650,12 +652,11 @@ class MountEntry:
             # makes is held to its own region's mode.
             gate_token = set_mount_gate(self.prefix, self.mode)
             try:
-                # --help / --version short-circuit inside the handler wrapper
-                # and never touch the backend, so a read-only mount answers
-                # them like GNU instead of refusing them as writes.
-                info_only = (flags.get("help") is True
-                             or flags.get("version") is True)
                 for cmd in handlers:
+                    # Only wrapper-owned responses bypass the write guard.
+                    info_only = (flags.get("help") is True
+                                 or (flags.get("version") is True
+                                     and has_injected_version(cmd.spec)))
                     # strongest_mode_under, not effective_mode: a mount
                     # whose only writable region is a show entry still runs
                     # the command, and the op door refuses per path. The

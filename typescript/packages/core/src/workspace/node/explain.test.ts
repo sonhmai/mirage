@@ -519,6 +519,12 @@ describe('prejudge', () => {
 
   it.each([
     'sleep 0.2 && cat /data/secret.txt &',
+    'for i in 1 2; do sleep 0.2 && cat /data/secret.txt & done',
+    'if sleep 0.2 && cat /data/secret.txt & then echo yes; fi',
+    'until sleep 0.2 && cat /data/secret.txt & do echo no; done',
+    '{ sleep 0.2 && cat /data/secret.txt & }',
+    'f() { sleep 0.2 && cat /data/secret.txt & }; f',
+
     "eval 'sleep 0.2 && cat /data/secret.txt &'",
     `eval "eval 'sleep 0.2 && cat /data/secret.txt &'"`,
   ])('leaves a grant with a background job until the job ends: %s', async (line) => {
@@ -1010,9 +1016,8 @@ describe('prejudge scope', () => {
   })
 
   it('runs every job a loop launches on one nod', async () => {
-    // The loop body launches a job from one place twice (through eval,
-    // whose line is a program: a `&` written directly in a loop body still
-    // runs in the foreground). Each job takes a copy of the grant claimed
+    // The loop body launches a job from one place twice through eval.
+    // Each job takes a copy of the grant claimed
     // for that place, the line's end leaves the grant standing while a job
     // holds it, and the last job's end spends it.
     const asked: string[] = []

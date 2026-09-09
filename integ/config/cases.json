@@ -206,6 +206,60 @@
       "expect": {
         "refused": "onedrive: config: "
       }
+    },
+    {
+      "id": "wandb_read_only_config",
+      "resource": "wandb",
+      "config": {
+        "entities": [
+          "lab"
+        ],
+        "api_key": "test-key",
+        "base_url": "https://api.wandb.ai",
+        "page_size": 25,
+        "max_pages": 30
+      },
+      "expect": {
+        "state": {
+          "entities": [
+            "lab"
+          ],
+          "api_key": "<REDACTED>",
+          "page_size": 25,
+          "max_pages": 30
+        }
+      }
+    },
+    {
+      "id": "wandb_requires_entities",
+      "resource": "wandb",
+      "config": {},
+      "expect": {
+        "refused": "wandb: entities"
+      }
+    },
+    {
+      "id": "wandb_empty_entities_refused",
+      "resource": "wandb",
+      "config": {
+        "entities": []
+      },
+      "expect": {
+        "refused": "wandb: entities"
+      }
+    },
+    {
+      "id": "wandb_page_size_bounded",
+      "resource": "wandb",
+      "config": {
+        "entities": [
+          "lab"
+        ],
+        "page_size": 1001
+      },
+      "expect": {
+        "refused": "wandb: page"
+      }
     }
   ]
 }

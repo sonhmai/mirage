@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from pathlib import Path
 
+import asyncssh
 import pytest
 
 from mirage.runtime.sandbox.ssh import SSHRuntime, sdk
@@ -115,3 +117,39 @@ async def test_close_ends_the_connection():
     await runtime.close()
     assert conn.closed
     assert runtime._conn is None
+
+
+class NoAuthServer(asyncssh.SSHServer):
+
+    def begin_auth(self, username):
+        return False
+
+
+async def echo_input(process):
+    data = await process.stdin.read()
+    process.stdout.write(data.hex().encode())
+    process.exit(0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("data", [None, b"", bytes(range(256))])
+async def test_real_ssh_stdin_always_reaches_eof(data):
+    key = asyncssh.generate_private_key("ssh-ed25519")
+    async with asyncssh.listen("127.0.0.1",
+                               0,
+                               server_factory=NoAuthServer,
+                               server_host_keys=[key],
+                               process_factory=echo_input,
+                               encoding=None) as server:
+        runtime = SSHRuntime(config={
+            "host": "127.0.0.1",
+            "port": server.get_port(),
+            "username": "test"
+        })
+        try:
+            result = await asyncio.wait_for(
+                runtime.run_line("cat", data, {}, "/"), 5)
+            assert result.stdout == (data or b"").hex().encode()
+            assert result.exit_code == 0
+        finally:
+            await runtime.close()

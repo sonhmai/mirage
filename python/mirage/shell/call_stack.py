@@ -28,6 +28,15 @@ class CallStack:
     def __init__(self) -> None:
         self._frames: list[CallFrame] = [CallFrame()]
 
+    def fork(self) -> "CallStack":
+        child = CallStack()
+        child._frames = [
+            CallFrame(list(frame.positional), dict(frame.locals),
+                      frame.function_name, frame.loop_level)
+            for frame in self._frames
+        ]
+        return child
+
     @property
     def current(self) -> CallFrame:
         return self._frames[-1]

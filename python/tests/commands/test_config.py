@@ -201,6 +201,16 @@ class TestVersionSupport:
         assert b"Services:\n  drive\n" in asyncio.run(_collect(stdout))
         assert result.exit_code == 0
 
+    def test_declared_version_reaches_the_handler(self):
+        _HANDLER_CALLS.clear()
+        registered = command("custom",
+                             resource=None,
+                             spec=CommandSpec(options=(Option(
+                                 long="--version"), )))(_recording_handler)
+        asyncio.run(registered._registered_commands[0].fn(
+            None, [], [], CommandOpts(flags={"version": True})))
+        assert _HANDLER_CALLS == ["called"]
+
 
 class TestVersionRequest:
 

@@ -77,13 +77,14 @@ class SSHRuntime(RemoteSandbox):
     async def _ssh(self, command: str,
                    stdin: bytes | None) -> tuple[bytes, bytes, int]:
         """One exec channel on the connection; the seam tests override."""
-        # No pipe still sends empty input, so stdin closes and a reader
-        # sees EOF immediately (docker's DEVNULL, without a second knob).
-        result = await self._conn.run(
-            command,
-            input=stdin if stdin is not None else b"",
-            encoding=None,
-            check=False)
+        # asyncssh's run(input=b"") leaves stdin open. Close it explicitly
+        # for every finite command, including empty or absent piped input.
+        async with self._conn.create_process(command,
+                                             encoding=None) as process:
+            if stdin:
+                process.stdin.write(stdin)
+            process.stdin.write_eof()
+            result = await process.wait(check=False)
         code = result.returncode if result.returncode is not None else 1
         return result.stdout, result.stderr, code
 

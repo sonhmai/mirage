@@ -12,11 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-/**
- * The one error an aborted invocation rejects with. A signal's own reason
- * rides along as `cause` (a caller's `abort(x)`, a timeout's TimeoutError)
- * so every gate keys on one name and the caller still sees why.
- */
 import { createAsyncContext } from '../utils/async_context.ts'
 
 /**
@@ -28,6 +23,12 @@ import { createAsyncContext } from '../utils/async_context.ts'
  */
 const lineAbortContext = createAsyncContext<{ signal: AbortSignal | undefined }>()
 
+/**
+ * Run `fn` as the body of the line `signal` belongs to. Everything the
+ * body awaits, down to the status door, can then ask `currentLineAbort`
+ * whether its caller is still waiting, without the signal being threaded
+ * through every handler. `execute` is the only caller.
+ */
 export function runWithLineAbort<T>(
   signal: AbortSignal | undefined,
   fn: () => Promise<T>,
@@ -35,10 +36,20 @@ export function runWithLineAbort<T>(
   return Promise.resolve(lineAbortContext.run({ signal }, fn))
 }
 
+/**
+ * The signal of the line the current task belongs to, or undefined
+ * outside `execute` (a background job, a test driving a handler
+ * directly), where nobody is waiting and nothing is an orphan.
+ */
 export function currentLineAbort(): AbortSignal | undefined {
   return lineAbortContext.getStore()?.signal
 }
 
+/**
+ * The one error an aborted invocation rejects with. A signal's own reason
+ * rides along as `cause` (a caller's `abort(x)`, a timeout's TimeoutError)
+ * so every gate keys on one name and the caller still sees why.
+ */
 export function makeAbortError(signal?: AbortSignal): DOMException {
   const reason: unknown = signal?.aborted === true ? signal.reason : undefined
   if (reason instanceof DOMException && reason.name === 'AbortError') return reason
@@ -49,7 +60,6 @@ export function makeAbortError(signal?: AbortSignal): DOMException {
   return error
 }
 
-/** Fold two optional abort signals into one; either aborting aborts. */
 /**
  * Whether the signal has fired. A call rather than a property read, so a
  * check that comes after an earlier one is not narrowed away as stale.
@@ -58,6 +68,7 @@ export function hasAborted(signal?: AbortSignal): boolean {
   return signal?.aborted === true
 }
 
+/** Fold two optional abort signals into one; either aborting aborts. */
 export function mergeSignals(
   a: AbortSignal | null | undefined,
   b: AbortSignal | null | undefined,

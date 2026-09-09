@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn } from 'node:child_process'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url'
 import { ANNOUNCE_RE } from '../kit/typescript/announce.ts'
 import type { JsonValue } from '../kit/typescript/types.ts'
 import { knownFakes, launch } from './main.ts'
+import { API_KEY, loadFixture } from '../wandb/store.ts'
 
 // What a launched fake has to be is INDISTINGUISHABLE from a standalone one,
 // so most of this asserts the properties a merge could quietly break: two
@@ -161,6 +162,8 @@ async function refusals(): Promise<void> {
     ['an out-of-range port is refused', { github: { port: 99999 } }],
     ['a bad arm port is refused', { mail: { imapPort: -1 } }],
     ['a config naming no fakes is refused', { _note: 'prose only' }],
+    ['an unknown W&B fixture is refused', { wandb: { fixture: 'missing' } }],
+    ['a W&B fixture path is refused', { wandb: { fixture: '../v1' } }],
   ]
   for (const [name, cfg] of cases) {
     let threw = ''
@@ -198,6 +201,66 @@ async function refusals(): Promise<void> {
   }
   const after = process.getActiveResourcesInfo().length
   check('a refused launch leaves nothing listening', after <= before, `${before} -> ${after}`)
+}
+
+async function wandb(): Promise<void> {
+  const root = mkdtempSync(join(tmpdir(), 'mirage-launcher-wandb-'))
+  mkdirSync(join(root, 'wandb'))
+  const fixture = loadFixture()
+  fixture.viewer.entity = 'custom-entity'
+  writeFileSync(join(root, 'wandb', 'custom.json'), JSON.stringify(fixture))
+  const lines = new Map<string, string>()
+  const started: Awaited<ReturnType<typeof launch>> = []
+  try {
+    started.push(
+      ...(await launch(
+        {
+          wandb: {},
+          alternate: {
+            fake: 'wandb',
+            fixture: 'custom',
+            fixtureRoot: root,
+            token: 'WANDB_OTHER_URL',
+          },
+        },
+        (a) => lines.set(a.token, a.url),
+      )),
+    )
+    const base = urlOf(lines, 'WANDB_BASE_URL')
+    const other = urlOf(lines, 'WANDB_OTHER_URL')
+    check('W&B instances use separate ports', base !== other)
+    for (const [url, entity] of [
+      [base, 'lab'],
+      [other, 'custom-entity'],
+    ] as const) {
+      const response = await fetch(`${url}/graphql`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${Buffer.from(`api:${API_KEY}`).toString('base64')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query: '{ viewer { entity } }' }),
+      })
+      eq('launched W&B serves its selected fixture', (await response.json()) as JsonValue, {
+        data: { viewer: { entity } },
+      })
+    }
+    const first = started.shift()
+    if (first === undefined) throw new Error('W&B instance missing')
+    await first.close()
+    check(
+      'closing one W&B instance leaves the other listening',
+      await reachable(new URL(other).host),
+    )
+    check('the closed W&B listener is released', !(await reachable(new URL(base).host)))
+  } finally {
+    for (const instance of started) await instance.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+  check(
+    'all W&B listeners close on teardown',
+    !(await reachable(new URL(urlOf(lines, 'WANDB_OTHER_URL')).host)),
+  )
 }
 
 // The registry's completeness is checked against the directory listing, not
@@ -304,6 +367,7 @@ async function empty(): Promise<void> {
 }
 
 await inProcess()
+await wandb()
 await refusals()
 await empty()
 shippedConfig()

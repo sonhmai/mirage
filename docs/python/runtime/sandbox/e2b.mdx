@@ -5,9 +5,9 @@ icon: /images/e2b-logo.svg
 ---
 
 `E2BRuntime` connects to a live [E2B](https://e2b.dev) sandbox by id. Create
-it with E2B's CLI or SDK from a template carrying Mirage and `fuse3`, then
-provision the workspace inside it. Mirage only connects and executes; it never
-creates, starts, stops, or deletes the sandbox.
+it with E2B's CLI or SDK. Programs accessing Mirage mounts as ordinary files
+require Mirage and FUSE inside the sandbox, with mounts at the same paths
+as the host workspace. Sandbox creation and cleanup remain with your application.
 
 See the [Sandbox overview](/python/runtime/sandbox) for the shared image and
 matching mount-prefix setup.
@@ -32,7 +32,7 @@ runtimes:
 
 `api_key` is optional when `E2B_API_KEY` is set. The runtime connects on the
 first captured line and reuses the sandbox client until the workspace closes.
-Closing the workspace releases the client and leaves the sandbox running.
+Closing the workspace leaves the sandbox running.
 
 The same configuration in application code is:
 
@@ -45,12 +45,24 @@ runtime = E2BRuntime(
 )
 ```
 
+The runtime uses E2B's `AsyncSandbox`, with independent stdin and output
+for concurrent commands.
+
+Use the native E2B SDK runtime for E2B commands. SSH remains useful for
+general remote hosts and persistent MCP stdio connections.
+
 Templates, CPU and memory sizing, networking, and lifecycle controls remain
 E2B settings.
 
+## Standard input
+
+Piped input goes directly to stdin, followed by EOF. Commands without input
+start with stdin closed.
+
 <Warning>
-  Mirage timeouts stop waiting rather than terminating the remote process. E2B
-  also applies its SDK command timeout, currently 60 seconds by default, to
+  Cancellation attempts to kill the foreground E2B command and disconnects
+  its event stream. It does not guarantee termination of every descendant
+  process. E2B also applies its SDK command timeout, currently 60 seconds by default, to
   both runaway and legitimate long-running commands. See
   [Resource limits](/python/runtime/sandbox#resource-limits).
 </Warning>

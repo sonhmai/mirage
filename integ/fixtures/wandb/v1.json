@@ -1,0 +1,227 @@
+{
+  "lineage": {
+    "kind": "synthetic",
+    "purpose": "Mirage resource integration; not Toolathlon benchmark observations",
+    "contract": "wandb/wandb v0.21.1 public GraphQL client",
+    "source_projects": []
+  },
+  "entities": {
+    "lab": {
+      "empty": [],
+      "experiments": [
+        {
+          "name": "run-a",
+          "displayName": "duplicate",
+          "state": "finished",
+          "id": "synthetic-storage-id-a",
+          "tags": [
+            "baseline",
+            "café"
+          ],
+          "sweepName": "sweep-01",
+          "group": "ablation",
+          "jobType": "train",
+          "commit": "0123456789abcdef0123456789abcdef01234567",
+          "readOnly": false,
+          "createdAt": "2026-01-01T00:00:00Z",
+          "heartbeatAt": "2026-01-01T00:05:00Z",
+          "description": "Synthetic experiment metadata",
+          "notes": "First line\nSecond line: café",
+          "user": {
+            "id": "synthetic-user-id-bob",
+            "name": "Bob Example",
+            "username": "bob",
+            "email": "bob@example.com"
+          },
+          "systemMetrics": {
+            "cpu": 0,
+            "gpu.0.memoryAllocated": 128.5,
+            "nested": {
+              "missing": null
+            }
+          },
+          "historyKeys": {
+            "lastStep": 5,
+            "keys": {
+              "score": {
+                "type": "number",
+                "count": 3
+              },
+              "train_step": {
+                "type": "number",
+                "count": 4
+              }
+            }
+          },
+          "config": {
+            "lr": {
+              "value": 0.01
+            },
+            "label": {
+              "value": "café"
+            }
+          },
+          "summaryMetrics": {
+            "score": 0.4
+          },
+          "history": [
+            {
+              "_step": 0,
+              "train_step": 0,
+              "score": 0.1
+            },
+            {
+              "_step": 1,
+              "train_step": 100,
+              "score": 0.9
+            },
+            {
+              "_step": 4,
+              "train_step": 400,
+              "loss": null
+            },
+            {
+              "_step": 5,
+              "train_step": 500,
+              "score": 0.4
+            }
+          ],
+          "files": {
+            "notes.txt": {
+              "text": "café\n"
+            },
+            "nested/log.txt": {
+              "text": "second file\n"
+            },
+            "nested/model.bin": {
+              "base64": "AAEC/w=="
+            },
+            "large.txt": {
+              "text": "abcdefghij\n",
+              "repeat": 10000
+            }
+          },
+          "singleStepHistoryEmpty": true
+        },
+        {
+          "name": "run-b",
+          "displayName": "duplicate",
+          "state": "finished",
+          "config": {},
+          "summaryMetrics": {},
+          "history": [],
+          "files": {
+            "wandb-metadata.json": {
+              "text": "{\n  \"os\": \"Linux\",\n  \"python\": \"3.12.0\",\n  \"host\": \"trainer-01\",\n  \"gpu\": \"Example GPU\",\n  \"gpu_count\": 1\n}"
+            }
+          },
+          "createdAt": "2026-01-02T00:00:00Z"
+        },
+        {
+          "name": "run-long",
+          "displayName": "long",
+          "state": "finished",
+          "config": {},
+          "summaryMetrics": {},
+          "historyCount": 2048,
+          "files": {
+            "special/café #1%.txt": {
+              "text": "special café\n"
+            },
+            "empty.bin": {
+              "base64": ""
+            }
+          },
+          "user": {
+            "id": "synthetic-user-id-alice",
+            "name": "Alice Example",
+            "username": "alice",
+            "email": null
+          },
+          "createdAt": "2026-01-03T00:00:00Z"
+        }
+      ]
+    },
+    "other": {
+      "experiments": [
+        {
+          "name": "run-a",
+          "displayName": "different entity",
+          "state": "running",
+          "config": {},
+          "summaryMetrics": {
+            "score": 42
+          },
+          "history": [],
+          "files": {},
+          "createdAt": "2026-01-01T00:00:00Z"
+        }
+      ]
+    }
+  },
+  "viewer": {
+    "id": "synthetic-user-id-alice",
+    "name": "Alice Example",
+    "username": "alice",
+    "email": "alice@example.com",
+    "entity": "lab",
+    "admin": false,
+    "flags": "{}",
+    "deletedAt": null,
+    "apiKeys": {
+      "edges": []
+    },
+    "teams": {
+      "edges": [
+        {
+          "node": {
+            "name": "lab"
+          }
+        },
+        {
+          "node": {
+            "name": "other"
+          }
+        }
+      ]
+    }
+  },
+  "projects": {
+    "lab/empty": {
+      "internalId": "1000",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "readOnly": false,
+      "description": "Synthetic project",
+      "sweeps": {}
+    },
+    "lab/experiments": {
+      "internalId": "1001",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "readOnly": false,
+      "description": "Synthetic project",
+      "sweeps": {
+        "sweep-01": {
+          "id": "synthetic-sweep-id-01",
+          "name": "sweep-01",
+          "displayName": "Synthetic sweep",
+          "state": "FINISHED",
+          "runCountExpected": 1,
+          "bestLoss": null,
+          "config": "method: grid\nparameters:\n  lr:\n    values: [0.01]\n",
+          "method": "grid",
+          "description": "Synthetic sweep metadata",
+          "createdAt": "2026-01-01T00:00:00Z",
+          "updatedAt": "2026-01-01T00:05:00Z",
+          "runCount": 1
+        }
+      }
+    },
+    "other/experiments": {
+      "internalId": "1100",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "readOnly": false,
+      "description": "Synthetic project",
+      "sweeps": {}
+    }
+  }
+}

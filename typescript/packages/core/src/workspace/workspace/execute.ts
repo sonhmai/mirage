@@ -594,6 +594,7 @@ async function runParsedLine(
           env.registry.allMounts(),
           env.registry.policies,
           () => env.invalidateAllAfterRemote(),
+          killed,
         ),
         killed,
       )

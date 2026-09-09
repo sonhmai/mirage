@@ -95,11 +95,7 @@ const PYTHON_OPTIONS: readonly Option[] = [
     choices: ['always', 'default', 'never'],
     description: 'How to validate hash-based .pyc files.',
   }),
-  // Aliases of the injected help/version options, not new behavior:
-  // sharing their long spelling means they share their dest, so the
-  // help/version tier short-circuits them on the one path every command
-  // uses. CPython's -VV adds build info; mirage has no CPython build to
-  // report, so -VV clusters into -V and prints the same line.
+  // -VV shares the concise version line; build details are not exposed.
   new Option({ short: '-h', long: '--help', description: 'Show this help message and exit.' }),
   new Option({
     short: '-V',
@@ -196,6 +192,11 @@ export const SPECS: Record<string, CommandSpec> = {
     description: 'Run JavaScript on a sandboxed quickjs engine.',
     options: [
       new Option({
+        short: '-v',
+        long: '--version',
+        description: 'Show runtime version information and exit.',
+      }),
+      new Option({
         short: '-e',
         type: 'str',
         description: 'Evaluate the next argument as a script.',
@@ -225,6 +226,11 @@ export const SPECS: Record<string, CommandSpec> = {
   node: new CommandSpec({
     description: 'Run JavaScript on a sandboxed quickjs engine.',
     options: [
+      new Option({
+        short: '-v',
+        long: '--version',
+        description: 'Show runtime version information and exit.',
+      }),
       new Option({
         short: '-e',
         type: 'str',

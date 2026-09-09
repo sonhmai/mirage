@@ -23,6 +23,7 @@ import type {
   ExecContext,
   RegisteredCommand,
 } from '../../commands/config.ts'
+import { hasInjectedVersion } from '../../commands/config.ts'
 import { ROOT_CWD } from '../../commands/constants.ts'
 import type { OpKwargs } from '../../ops/registry.ts'
 
@@ -508,11 +509,11 @@ export class MountEntry {
 
       const accessor = (this.resource as { accessor?: Accessor }).accessor ?? NOOP_ACCESSOR
       const cmdOpts: CommandOpts = {
-        command: cmdName,
         stdin: context.stdin ?? null,
         flags,
         filetypeFns: isFiletypeCmd ? null : filetypeFns,
         mountPrefix,
+        command: cmdName,
         cwd: context.cwd ?? ROOT_CWD,
         ...(this.index !== undefined ? { index: this.index } : {}),
         ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
@@ -541,11 +542,11 @@ export class MountEntry {
               runWithRevisions(
                 this.revisions.size > 0 ? this.revisions : null,
                 async (): Promise<[ByteSource | null, IOResult]> => {
-                  // --help / --version short-circuit inside the handler
-                  // wrapper and never touch the backend, so a read-only mount
-                  // answers them like GNU instead of refusing them as writes.
-                  const infoOnly = flags.help === true || flags.version === true
                   for (const cmd of handlers) {
+                    // Only wrapper-owned responses bypass the write guard.
+                    const infoOnly =
+                      flags.help === true ||
+                      (flags.version === true && hasInjectedVersion(cmd.spec))
                     // strongestModeUnder, not effectiveMode: a mount whose
                     // only writable region is a show entry still runs the
                     // command, and the op door refuses per path. The

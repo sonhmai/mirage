@@ -41,10 +41,14 @@ const runPython = makeInterpreterHandler({
 // `-m` against a runtime that cannot run modules. Exit 1 is CPython's code
 // for a `-m` that could not run, but not its "No module named" wording:
 // nothing was searched for, so naming the runtime is the honest report.
-function moduleRefusal(mode: SourceMode | undefined, runtime: LanguageRuntime): string | null {
+function moduleRefusal(
+  mode: SourceMode | undefined,
+  runtime: LanguageRuntime,
+  label: string,
+): string | null {
   if (mode !== 'module') return null
   if (!(runtime instanceof PythonRuntime) || runtime.runsModules) return null
-  return `python3: -m is not supported by the '${runtime.name}' runtime\n`
+  return `${label}: -m is not supported by the '${runtime.name}' runtime\n`
 }
 
 export async function handlePython(
@@ -52,6 +56,7 @@ export async function handlePython(
   pathScope: PathSpec | null,
   args: string[],
   opts: {
+    command?: string
     stdin: ByteSource | null
     env: Record<string, string>
     code: string | null
@@ -74,10 +79,12 @@ export async function handlePython(
     pathScope,
     args,
     {
+      command: opts.command ?? 'python3',
       stdin: opts.stdin,
       env: opts.env,
       code: opts.code,
-      refuse: (runtime: LanguageRuntime) => moduleRefusal(opts.mode, runtime),
+      refuse: (runtime: LanguageRuntime) =>
+        moduleRefusal(opts.mode, runtime, opts.command ?? 'python3'),
       ...(opts.prog !== undefined ? { prog: opts.prog } : {}),
       ...(opts.initFlags !== undefined ? { flags: opts.initFlags as Record<string, unknown> } : {}),
       ...(opts.skipFirstLine === true ? { transformSource: skipFirstLine } : {}),

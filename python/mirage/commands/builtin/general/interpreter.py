@@ -42,6 +42,16 @@ def run_output(result: RunResult) -> CommandOutput:
     )
 
 
+async def runtime_version(label: str, runtime: Runtime | None,
+                          env: dict[str, str] | None,
+                          unavailable: str | None) -> CommandOutput:
+    if not isinstance(runtime, LanguageRuntime):
+        hint = unavailable or "command not found"
+        return None, IOResult(exit_code=127,
+                              stderr=f"{label}: {hint}\n".encode())
+    return run_output(await runtime.version(env or {}))
+
+
 # Which of an interpreter's four doors the source came through. The
 # mode is what decides argv[0], so the two travel together: CPython
 # spells it "-c" for a payload, the module's file for -m, the file as

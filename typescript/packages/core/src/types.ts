@@ -358,6 +358,7 @@ export const ResourceName = Object.freeze({
   S3: 's3',
   RAM: 'ram',
   GITHUB: 'github',
+  WANDB: 'wandb',
   LINEAR: 'linear',
   GCAL: 'gcal',
   GDOCS: 'gdocs',

@@ -393,6 +393,8 @@ export interface TSNodeLike {
   children: TSNodeLike[]
   namedChildren: TSNodeLike[]
   parent?: TSNodeLike | null
+  /** The token after this node in its parent, as web-tree-sitter spells it. */
+  nextSibling?: TSNodeLike | null
   isNamed?: boolean
   isMissing?: boolean
   startIndex?: number

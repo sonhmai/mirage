@@ -49,6 +49,19 @@ import type { BridgeDispatchFn, RunArgs, RunResult, RuntimeLanguage } from './ty
 export abstract class LanguageRuntime extends Runtime {
   abstract readonly language: RuntimeLanguage
 
+  /** Report the bound interpreter's version. */
+  version(
+    _env: Record<string, string>,
+    _signal?: AbortSignal,
+    _timeoutSeconds?: number,
+  ): Promise<RunResult> {
+    return Promise.resolve({
+      stdout: new Uint8Array(),
+      stderr: new TextEncoder().encode(`${this.name}: version information unavailable\n`),
+      exitCode: 1,
+    })
+  }
+
   /**
    * Late-wire workspace I/O into a user-constructed instance. The
    * workspace attaches its dispatch at construction; runtimes that

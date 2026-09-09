@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import type { BridgeDispatchFn } from '../../types.ts'
 import { MontyRuntime } from './index.ts'
+import { MontyUnavailableError } from './binding.ts'
 import { PyodideRuntime } from '../pyodide.ts'
 import { buildRuntime } from '../../table.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
@@ -796,6 +797,59 @@ describe('MontyRuntime', () => {
 })
 
 describe('Workspace with the monty runtime', () => {
+  it('reports an unavailable version runtime as command not found', async () => {
+    const runtime = new MontyRuntime()
+    vi.spyOn(runtime, 'version').mockRejectedValue(
+      new MontyUnavailableError('install @pydantic/monty'),
+    )
+    const ws = new Workspace(
+      { '/data': new RAMResource() },
+      { shellParser: await getTestParser(), runtimes: [runtime, 'vfs'] },
+    )
+    try {
+      const io = await ws.execute('python3 --version')
+      expect(io.exitCode).toBe(127)
+      expect(new TextDecoder().decode(io.stdout)).toBe('')
+      expect(new TextDecoder().decode(io.stderr)).toBe('python3: install @pydantic/monty\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('does not print Mirage versions for unbound interpreter commands', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMResource() },
+      { shellParser: await getTestParser(), runtimes: ['vfs'] },
+    )
+    try {
+      for (const name of ['python3', 'python', 'node', 'js']) {
+        const io = await ws.execute(`${name} --version`)
+        expect(io.exitCode).toBe(127)
+        expect(new TextDecoder().decode(io.stdout)).toBe('')
+        expect(new TextDecoder().decode(io.stderr)).toBe(`${name}: command not found\n`)
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reports the guest Python version for --version and -V', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMResource() },
+      { shellParser: await getTestParser(), runtimes: ['monty', 'vfs'] },
+    )
+    try {
+      for (const line of ['python3 --version', 'python -V', 'python3 -VV']) {
+        const io = await ws.execute(line)
+        expect(io.exitCode).toBe(0)
+        expect(new TextDecoder().decode(io.stdout)).toBe('Python 3.14.0 (monty)\n')
+        expect(new TextDecoder().decode(io.stderr)).toBe('')
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('python3 reads a virtualized file end to end', async () => {
     const parser = await getTestParser()
     const data = new RAMResource()
@@ -846,6 +900,7 @@ describe('monty unavailable', () => {
       config: {},
       attach: () => undefined,
       run: () => Promise.reject(new MontyUnavailableError('install @pydantic/monty')),
+      version: () => Promise.reject(new MontyUnavailableError('install @pydantic/monty')),
       close: () => Promise.resolve(),
     }
     const dispatch = (() => Promise.reject(new Error('unused'))) as never

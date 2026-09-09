@@ -106,3 +106,26 @@ def test_loop_level_reset_on_push():
     assert cs.current.loop_level == 0
     cs.pop()
     assert cs.current.loop_level == 3
+
+
+def test_fork_copies_every_frame_without_sharing_mutable_state():
+    parent = CallStack()
+    parent.set_positional(["outer"])
+    parent.set_local("x", "outer")
+    parent.push(["a", "b"], function_name="f")
+    parent.set_local("x", "inner")
+    parent.current.loop_level = 2
+    child = parent.fork()
+    parent.current.positional.append("c")
+    parent.set_local("x", "changed")
+    parent.pop()
+    assert child.depth == 2
+    assert child.get_all_positional() == ["a", "b"]
+    assert child.get_local("x") == "inner"
+    assert child.current.function_name == "f"
+    assert child.current.loop_level == 2
+    child.pop()
+    child.set_local("x", "child")
+    child.current.positional.append("child")
+    assert parent.get_local("x") == "outer"
+    assert parent.get_all_positional() == ["outer"]

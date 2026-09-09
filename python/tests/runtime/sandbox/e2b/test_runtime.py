@@ -12,62 +12,87 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+from dataclasses import dataclass
+
 import pytest
-from e2b import CommandExitException
+from e2b import CommandExitException, NotFoundException
 
-from mirage.runtime.sandbox.constants import stdin_redirect
-from mirage.runtime.sandbox.e2b import E2BRuntime, sdk
+from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
 
 
+@dataclass
 class FakeResult:
-
-    def __init__(self, stdout: str, stderr: str = "", exit_code: int = 0):
-        self.stdout = stdout
-        self.stderr = stderr
-        self.exit_code = exit_code
+    stdout: str
+    stderr: str
+    exit_code: int
 
 
-class FakeCommands:
+class FakeHandle:
 
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, dict | None, str | None]] = []
+    def __init__(self, command: str, stdin: bool):
+        self.command = command
+        self.input = bytearray()
+        self.eof = not stdin
+        self.disconnected = False
+        self.killed = False
+        self.waiting = asyncio.Event()
+        self.input_error = None
 
-    async def run(self, command, envs=None, cwd=None):
-        self.calls.append((command, envs, cwd))
-        if "exit 3" in command:
+    async def send_stdin(self, data):
+        if self.input_error is not None:
+            raise self.input_error
+        self.input.extend(data)
+
+    async def close_stdin(self):
+        self.eof = True
+
+    async def wait(self):
+        self.waiting.set()
+        if self.command == "sleep":
+            await asyncio.Event().wait()
+        if self.command == "exit 3":
             raise CommandExitException(stderr="boom-err",
                                        stdout="partial",
                                        exit_code=3,
                                        error=None)
-        return FakeResult(f"out:{command}", stderr="warn")
+        assert self.eof
+        return FakeResult(self.input.hex(), "warn", 0)
+
+    async def kill(self):
+        self.killed = True
+
+    async def disconnect(self):
+        self.disconnected = True
 
 
-class FakeFiles:
+class FakeCommands:
 
-    def __init__(self) -> None:
-        self.files: dict[str, bytes] = {}
-        self.dirs: list[str] = []
+    def __init__(self):
+        self.calls = []
+        self.handles = []
+        self.input_error = None
 
-    async def make_dir(self, path):
-        self.dirs.append(path)
-        return True
-
-    async def write(self, path, data):
-        self.files[path] = data
+    async def run(self, command, *, envs, cwd, background, stdin):
+        assert background is True
+        self.calls.append((command, envs, cwd, stdin))
+        handle = FakeHandle(command, stdin)
+        handle.input_error = self.input_error
+        self.handles.append(handle)
+        return handle
 
 
 class FakeSandbox:
-    connected: list[tuple[str, dict]] = []
-    last: "FakeSandbox | None" = None
+    connected = []
+    last = None
 
-    def __init__(self) -> None:
-        self.sandbox_id = "sb-e2b"
+    def __init__(self):
         self.commands = FakeCommands()
-        self.files = FakeFiles()
 
     @classmethod
     async def connect(cls, sandbox_id, **params):
         cls.connected.append((sandbox_id, params))
+        await asyncio.sleep(0)
         cls.last = cls()
         return cls.last
 
@@ -81,10 +106,7 @@ def fake_sdk(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_connect_attaches_by_id_with_api_key():
-    runtime = E2BRuntime(config={
-        "sandbox_id": "sb-live",
-        "api_key": "k-123",
-    })
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live", "api_key": "k-123"})
     await runtime.connect()
     assert FakeSandbox.connected == [("sb-live", {"api_key": "k-123"})]
 
@@ -95,48 +117,91 @@ def test_sandbox_id_is_required():
 
 
 @pytest.mark.asyncio
-async def test_exec_line_threads_env_cwd_and_real_stderr():
+@pytest.mark.parametrize("data", [None, b"", b"a\nb\n", bytes(range(256))])
+async def test_native_stdin_eof_and_command_are_preserved(data):
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
-    await runtime.connect()
-    result = await runtime.exec_line("wc -l", None, {"E": "1"}, "/workspace")
+    result = await runtime.run_line("wc -l | cat", data, {"E": "1"},
+                                    "/workspace")
     assert result.exit_code == 0
-    assert result.stdout == b"out:wc -l"
+    assert result.stdout == (data or b"").hex().encode()
     assert result.stderr == b"warn"
     sandbox = FakeSandbox.last
-    assert sandbox.commands.calls[0] == ("wc -l", {"E": "1"}, "/workspace")
+    assert sandbox.commands.calls == [("wc -l | cat", {
+        "E": "1"
+    }, "/workspace", data is not None)]
+    handle = sandbox.commands.handles[0]
+    assert handle.eof and handle.disconnected and not handle.killed
 
 
 @pytest.mark.asyncio
-async def test_exec_line_nonzero_exit_comes_back_as_result():
+@pytest.mark.parametrize("early_exit", [False, True])
+async def test_nonzero_exit_preserves_output_even_when_stdin_loses_exit_race(
+        early_exit):
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
     await runtime.connect()
-    result = await runtime.exec_line("exit 3", None, {}, "/workspace")
-    assert result.exit_code == 3
-    assert result.stdout == b"partial"
-    assert result.stderr == b"boom-err"
+    if early_exit:
+        FakeSandbox.last.commands.input_error = NotFoundException(
+            "process exited")
+    result = await runtime.exec_line("exit 3", b"input", {}, "/workspace")
+    assert (result.exit_code, result.stdout, result.stderr) == (3, b"partial",
+                                                                b"boom-err")
+    handle = FakeSandbox.last.commands.handles[0]
+    assert handle.disconnected and not handle.killed
 
 
 @pytest.mark.asyncio
-async def test_stdin_redirects_through_an_uploaded_file():
+async def test_parallel_calls_connect_once_and_keep_input_separate():
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    payloads = [bytes([i]) * 100 for i in range(6)]
+    results = await asyncio.gather(
+        *(runtime.run_line("cat", data, {}, "/workspace")
+          for data in payloads))
+    assert len(FakeSandbox.connected) == 1
+    assert [r.stdout
+            for r in results] == [data.hex().encode() for data in payloads]
+    assert all(h.disconnected for h in FakeSandbox.last.commands.handles)
+
+
+@pytest.mark.asyncio
+async def test_input_transport_failure_kills_only_its_command_and_disconnects(
+):
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
     await runtime.connect()
-    result = await runtime.exec_line("wc -l", b"a\nb\n", {}, "/workspace")
-    assert result.exit_code == 0
-    sandbox = FakeSandbox.last
-    [path] = sandbox.files.files
-    # Unique per invocation, so concurrent stdin lines never collide.
-    assert path.startswith("/tmp/.mirage_stdin_")
-    assert sandbox.files.files[path] == b"a\nb\n"
-    assert sandbox.files.dirs == ["/tmp"]
-    command, _, cwd = sandbox.commands.calls[0]
-    assert command == stdin_redirect("wc -l", path)
-    assert f"rm -f {path}" in command
-    assert cwd == "/workspace"
+    FakeSandbox.last.commands.input_error = RuntimeError(
+        "stdin transport failed")
+    with pytest.raises(RuntimeError, match="stdin transport failed"):
+        await runtime.exec_line("cat", b"input", {}, "/workspace")
+    handle = FakeSandbox.last.commands.handles[0]
+    assert handle.killed and handle.disconnected
+
+
+@pytest.mark.asyncio
+async def test_cancellation_kills_command_and_disconnects():
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    task = asyncio.create_task(
+        runtime.exec_line("sleep", None, {}, "/workspace"))
+    await asyncio.sleep(0)
+    handle = FakeSandbox.last.commands.handles[0]
+    await handle.waiting.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert handle.killed and handle.disconnected
 
 
 @pytest.mark.asyncio
 async def test_missing_sdk_fails_with_install_hint(monkeypatch):
     monkeypatch.setattr(sdk, "AsyncSandbox", None)
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
-    with pytest.raises(ImportError, match="mirage-ai\\[e2b\\]"):
+    with pytest.raises(ImportError, match=r"mirage-ai\[e2b\]"):
         await runtime.connect()
+
+
+@pytest.mark.parametrize("value", [None, "", " \t\n", 0, 1, False, [], {}])
+def test_invalid_sandbox_id_is_rejected_before_connecting(value):
+    with pytest.raises(ValueError, match="nonblank sandbox_id"):
+        E2BConfig(sandbox_id=value)
+    with pytest.raises(ValueError, match="nonblank sandbox_id"):
+        E2BRuntime(config={"sandbox_id": value})
+    assert FakeSandbox.connected == []

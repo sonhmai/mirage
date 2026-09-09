@@ -134,6 +134,14 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
             self._dispatch = dispatch
             self._resolver = resolver
 
+    async def version(self, env: dict[str, str]) -> RunResult:
+        stdout, stderr, exit_code = await self._runtime.run(
+            ["qjs", "--version"], None, list(env.items()), WasmVFS())
+        if exit_code == 0:
+            version = stdout.decode().strip()
+            stdout = f"JavaScript (quickjs-ng {version})\n".encode()
+        return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
     async def run(self, args: RunArgs) -> RunResult:
         # --std exposes the std/os globals (stdin via std.in); -m selects
         # ES-module mode for .mjs sources. Trailing args become scriptArgs.

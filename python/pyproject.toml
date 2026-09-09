@@ -1,6 +1,6 @@
 [project]
 name = "mirage-ai"
-version = "0.0.6"
+version = "0.0.7a2"
 description = "A unified virtual filesystem for AI agents. Mount S3, Google Drive, Slack, Gmail, GitHub, Linear, Notion, Postgres, MongoDB, SSH, and more behind one filesystem so agents read, write, and pipe across services with familiar shell commands."
 readme = "README.md"
 license = "Apache-2.0"
@@ -241,7 +241,7 @@ mem0 = [
     "mem0ai>=2.0.6",
 ]
 e2b = [
-    "e2b>=2.0.0",
+    "e2b>=2.35.0",
 ]
 
 [tool.uv]
@@ -280,6 +280,7 @@ dev = [
     "pytest-xdist>=3.8.0",
     "mypy>=2.3.0",
     "deadcode>=2.4.1",
+    "websockets>=15.0.1",
 ]
 
 # Advisory dead-code finder for local use only. NOT a CI gate and not a

@@ -409,7 +409,7 @@
           "command": "python -c \"print(1)\"",
           "expect": {
             "exit": 127,
-            "stderr_contains": "python3: command not found"
+            "stderr_contains": "python: command not found"
           }
         }
       ]

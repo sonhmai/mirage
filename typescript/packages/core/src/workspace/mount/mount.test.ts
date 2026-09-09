@@ -21,9 +21,11 @@ import {
   type ExecContext,
   RegisteredCommand,
 } from '../../commands/config.ts'
-import { CommandSpec, Operand } from '../../commands/spec/types.ts'
-import { IOResult } from '../../io/types.ts'
+import { CommandSpec, Operand, Option } from '../../commands/spec/types.ts'
+import { IOResult, materialize } from '../../io/types.ts'
 import type { Accessor } from '../../accessor/base.ts'
+import type { RAMAccessor } from '../../accessor/ram.ts'
+import { RAMResource } from '../../resource/ram/ram.ts'
 import { revisionFor } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import { BaseResource, type Resource } from '../../resource/base.ts'
@@ -160,6 +162,61 @@ describe('Mount.unregister', () => {
 })
 
 describe('Mount.executeCmd', () => {
+  it.each([
+    [MountMode.READ, false, 'version'],
+    [MountMode.READ, true, 'version'],
+    [MountMode.WRITE, false, 'version'],
+    [MountMode.WRITE, true, 'version'],
+    [MountMode.READ, false, 'help'],
+    [MountMode.READ, true, 'help'],
+    [MountMode.WRITE, false, 'help'],
+    [MountMode.WRITE, true, 'help'],
+  ] as const)(
+    'only wrapper responses bypass the write guard: %s declared=%s %s',
+    async (mode, declared, flag) => {
+      const resource = new RAMResource()
+      const m = new MountEntry({ prefix: '/ram/', resource, mode })
+      const calls: string[] = []
+      const [cmd] = command<RAMAccessor>({
+        name: 'mutate',
+        resource: 'ram',
+        spec: new CommandSpec({
+          options: declared ? [new Option({ long: '--version', type: 'bool' })] : [],
+        }),
+        write: true,
+        fn: (accessor) => {
+          calls.push('handler')
+          accessor.store.files.set('/changed', new TextEncoder().encode('changed'))
+          return [new TextEncoder().encode('custom version\n'), new IOResult()]
+        },
+      })
+      if (cmd === undefined) throw new Error('missing command')
+      m.register(cmd)
+      const [stdout, io] = await m.executeCmd('mutate', [], [], { [flag]: true })
+      const output = new TextDecoder().decode(await materialize(stdout))
+      if (declared && flag === 'version') {
+        if (mode === MountMode.READ) {
+          expect(io.exitCode).toBe(1)
+          expect(new TextDecoder().decode(io.stderr as Uint8Array)).toBe(
+            'mutate: read-only mount at /ram/\n',
+          )
+          expect(calls).toEqual([])
+          expect(resource.store.files.has('/changed')).toBe(false)
+        } else {
+          expect(io.exitCode).toBe(0)
+          expect(output).toBe('custom version\n')
+          expect(calls).toEqual(['handler'])
+          expect(new TextDecoder().decode(resource.store.files.get('/changed'))).toBe('changed')
+        }
+      } else {
+        expect(io.exitCode).toBe(0)
+        expect(output).not.toBe('')
+        expect(calls).toEqual([])
+        expect(resource.store.files.has('/changed')).toBe(false)
+      }
+    },
+  )
+
   it('returns 127 for unknown command', async () => {
     const m = makeMount()
     const [, io] = await m.executeCmd('nope', [], [], {})

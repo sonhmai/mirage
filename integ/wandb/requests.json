@@ -1,0 +1,174 @@
+[
+  {
+    "name": "run listings reuse project discovery",
+    "steps": [
+      {
+        "command": "ls -l /wandb/lab/experiments",
+        "operations": ["Runs", "Runs"],
+        "content_fields": []
+      },
+      {
+        "command": "ls -l /wandb/lab/experiments/run-a",
+        "operations": [],
+        "content_fields": []
+      },
+      {
+        "command": "ls -l /wandb/lab/experiments/run-b",
+        "operations": [],
+        "content_fields": []
+      },
+      {
+        "command": "stat /wandb/lab/experiments/run-a/summary.json",
+        "operations": [],
+        "content_fields": []
+      }
+    ]
+  },
+  {
+    "name": "cold metadata probes fetch no content",
+    "steps": [
+      {
+        "command": "stat /wandb/lab/experiments/run-a/summary.json",
+        "operations": ["RunExists"],
+        "content_fields": []
+      },
+      {
+        "command": "ls -l /wandb/lab/experiments/run-a",
+        "operations": [],
+        "content_fields": []
+      },
+      {
+        "command": "stat /wandb/lab/experiments/run-a/summary.json",
+        "operations": ["RunExists"],
+        "content_fields": [],
+        "invalidate": true
+      }
+    ]
+  },
+  {
+    "name": "metadata reads fetch only requested fields",
+    "steps": [
+      {
+        "command": "cat /wandb/lab/experiments/run-a/summary.json",
+        "operations": ["RunExists", "RunSummary"],
+        "content_fields": ["summaryMetrics"]
+      },
+      {
+        "command": "cat /wandb/lab/experiments/run-a/config.json /wandb/lab/experiments/run-a/summary.json",
+        "operations": ["RunConfig", "RunSummary"],
+        "content_fields": ["config", "summaryMetrics"]
+      },
+      {
+        "command": "cat /wandb/lab/experiments/run-a/summary.json",
+        "operations": ["RunSummary"],
+        "content_fields": ["summaryMetrics"]
+      }
+    ]
+  },
+  {
+    "name": "one catalog serves nested file metadata",
+    "steps": [
+      {
+        "command": "ls -l /wandb/lab/experiments/run-a",
+        "operations": ["RunExists"],
+        "content_fields": []
+      },
+      {
+        "command": "ls -l /wandb/lab/experiments/run-a/files",
+        "operations": ["RunFiles", "RunFiles"],
+        "content_fields": []
+      },
+      {
+        "command": "ls -l /wandb/lab/experiments/run-a/files/nested",
+        "operations": [],
+        "content_fields": []
+      },
+      {
+        "command": "stat /wandb/lab/experiments/run-a/files",
+        "operations": [],
+        "content_fields": []
+      },
+      {
+        "command": "stat /wandb/lab/experiments/run-a/files/nested/model.bin",
+        "operations": [],
+        "content_fields": []
+      },
+      {
+        "command": "ls -l /wandb/lab/experiments/run-a/files/nested",
+        "operations": ["RunFiles", "RunFiles"],
+        "content_fields": [],
+        "invalidate": true
+      }
+    ]
+  },
+  {
+    "name": "downloads resolve only the requested filename",
+    "steps": [
+      {
+        "command": "cat /wandb/lab/experiments/run-a/files/notes.txt",
+        "operations": ["RunFiles", "RunFiles", "RunFile"],
+        "content_fields": ["directUrl", "url"],
+        "filename": "notes.txt"
+      },
+      {
+        "command": "cat /wandb/lab/experiments/run-a/files/notes.txt",
+        "operations": ["RunFile"],
+        "content_fields": ["directUrl", "url"],
+        "filename": "notes.txt"
+      },
+      {
+        "command": "cat /wandb/lab/experiments/run-a/files/nested/log.txt",
+        "operations": ["RunFile"],
+        "content_fields": ["directUrl", "url"],
+        "filename": "nested/log.txt"
+      }
+    ]
+  },
+  {
+    "name": "history prefix stays bounded",
+    "steps": [
+      {
+        "command": "head -n 1 /wandb/lab/experiments/run-long/history.jsonl",
+        "operations": ["RunExists", "HistoryKeys", "HistoryPage"],
+        "content_fields": ["history", "historyKeys"]
+      },
+      {
+        "command": "head -n 1 /wandb/lab/experiments/run-long/history.jsonl",
+        "operations": ["HistoryKeys", "HistoryPage"],
+        "content_fields": ["history", "historyKeys"]
+      }
+    ]
+  },
+  {
+    "name": "rich run metadata remains lazy and fresh",
+    "steps": [
+      {
+        "command": "ls -l /wandb/lab/experiments/run-a",
+        "operations": ["RunExists"],
+        "content_fields": []
+      },
+      {
+        "command": "cat /wandb/lab/experiments/run-a/run.json",
+        "operations": ["Run"],
+        "content_fields": ["historyKeys"],
+        "run_metadata": true
+      },
+      {
+        "command": "cat /wandb/lab/experiments/run-a/run.json",
+        "operations": ["Run"],
+        "content_fields": ["historyKeys"],
+        "run_metadata": true
+      },
+      {
+        "command": "stat /wandb/lab/experiments/run-a/run.json",
+        "operations": [],
+        "content_fields": []
+      },
+      {
+        "command": "cat /wandb/lab/experiments/run-a/config.json",
+        "operations": ["RunConfig"],
+        "content_fields": ["config"]
+      }
+    ]
+  }
+]

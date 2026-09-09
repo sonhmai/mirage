@@ -21,15 +21,14 @@ from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.descriptors import unreadable_stdin
-from mirage.shell.errors import ExitSignal
+from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_text
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import NodeType as NT
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.builtins.exec import (divert_statement,
                                                      stdout_to_stderr)
-from mirage.workspace.executor.control import (BreakSignal, ContinueSignal,
-                                               ReturnSignal)
+from mirage.workspace.executor.control import BreakSignal, ContinueSignal
 from mirage.workspace.executor.jobs import handle_background
 from mirage.workspace.executor.statement import record_status
 from mirage.workspace.types import ExecutionNode

@@ -17,12 +17,16 @@ from typing import Any
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
+from mirage.policy.decisions import Decisions
+from mirage.policy.types import HandOff
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
+from mirage.shell.errors import ReturnSignal
+from mirage.shell.job_table import JobTable
 from mirage.shell.variable import ShellVar
 from mirage.types import PathSpec, word_text
 from mirage.workspace.executor.command.types import ExecuteNodeFn
-from mirage.workspace.executor.control import ReturnSignal
+from mirage.workspace.executor.jobs import run_statement
 from mirage.workspace.executor.statement import finish_statement
 from mirage.workspace.session import Session
 from mirage.workspace.session.state import restore_locals
@@ -36,6 +40,10 @@ async def run_shell_function(
     session: Session,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
+    job_table: JobTable | None = None,
+    agent_id: str | None = None,
+    handed: HandOff | None = None,
+    decisions: Decisions | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a user-defined shell function's body statement by statement.
 
@@ -53,6 +61,11 @@ async def run_shell_function(
         stdin (ByteSource | None): stdin forwarded to each statement.
         call_stack (CallStack | None): the caller's stack, or a fresh
             one for a top-level call.
+        job_table (JobTable | None): the job plane for a body statement
+            ending in ``&``.
+        agent_id (str | None): agent identity for job bookkeeping.
+        handed (HandOff | None): approval claims inherited by a job.
+        decisions (Decisions | None): ledger that holds those claims.
     """
     func_body = session.functions[cmd_name]
     cs = call_stack if call_stack is not None else CallStack()
@@ -74,8 +87,9 @@ async def run_shell_function(
         last_exec = ExecutionNode(command=cmd_name, exit_code=0)
         for cmd in func_body:
             try:
-                stdout, io, last_exec = await execute_node(
-                    cmd, session, stdin, cs)
+                stdout, io, last_exec = await run_statement(
+                    execute_node, cmd, session, stdin, cs, job_table, agent_id,
+                    handed, decisions)
             except ReturnSignal as sig:
                 if sig.stderr:
                     merged_io = await merged_io.merge(

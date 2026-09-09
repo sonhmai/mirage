@@ -180,6 +180,26 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
     }
   }
 
+  override async version(): Promise<RunResult> {
+    const newAsyncModule = await this.loadModule()
+    const QuickJS = await newAsyncModule()
+    const ctx = QuickJS.newContext()
+    try {
+      // JS_DumpMemoryUsage prints the engine's compiled-in version.
+      const version = /^QuickJS memory usage -- (\S+) version,/.exec(
+        ctx.runtime.dumpMemoryUsage(),
+      )?.[1]
+      if (version === undefined) throw new Error('could not read the QuickJS engine version')
+      return {
+        stdout: ENC.encode(`JavaScript (quickjs ${version})\n`),
+        stderr: null,
+        exitCode: 0,
+      }
+    } finally {
+      ctx.dispose()
+    }
+  }
+
   async run(args: RunArgs): Promise<RunResult> {
     const newAsyncModule = await this.loadModule()
     const QuickJS = await newAsyncModule()

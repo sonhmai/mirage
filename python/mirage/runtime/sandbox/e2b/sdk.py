@@ -16,12 +16,16 @@ from typing import Any
 
 AsyncSandbox: Any
 CommandExitException: Any
+NotFoundException: Any
 try:
     from e2b import AsyncSandbox as _AsyncSandbox
     from e2b import CommandExitException as _CommandExitException
+    from e2b import NotFoundException as _NotFoundException
 except ImportError:
     AsyncSandbox = None
     CommandExitException = None
+    NotFoundException = None
 else:
     AsyncSandbox = _AsyncSandbox
     CommandExitException = _CommandExitException
+    NotFoundException = _NotFoundException

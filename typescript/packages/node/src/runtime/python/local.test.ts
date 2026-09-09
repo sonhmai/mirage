@@ -12,13 +12,99 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
+import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { MountMode } from '@struktoai/mirage-core/types'
+import { Workspace } from '../../workspace.ts'
 import { LocalRuntime } from './local.ts'
 
 const DEC = new TextDecoder()
 
 describe('LocalRuntime', () => {
+  it.each([MountMode.READ, MountMode.WRITE, MountMode.EXEC])(
+    'uses only the host environment for the version process in %s mode',
+    async (mode) => {
+      const dir = await mkdtemp(join(tmpdir(), 'mirage-local-version-env-'))
+      vi.stubEnv('MIRAGE_TEST_VERSION_ENV', 'host')
+      const session = {
+        LD_PRELOAD: join(dir, 'session.so'),
+        LD_LIBRARY_PATH: dir,
+        DYLD_INSERT_LIBRARIES: join(dir, 'session.dylib'),
+        DYLD_LIBRARY_PATH: dir,
+        PATH: dir,
+        MIRAGE_TEST_VERSION_ENV: 'session',
+      }
+      const python = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], {
+        encoding: 'utf8',
+      }).trim()
+      const probe = join(dir, 'python-probe')
+      await writeFile(
+        probe,
+        `#!${python}\nimport json, os\nprint(json.dumps({k: os.environ.get(k) for k in ${JSON.stringify(Object.keys(session))}}))\n`,
+      )
+      await chmod(probe, 0o755)
+      const rt = new LocalRuntime({ config: { home: probe } })
+      const baseline = await rt.version({})
+      const expected: unknown = JSON.parse(DEC.decode(baseline.stdout))
+      expect(expected).toMatchObject({ MIRAGE_TEST_VERSION_ENV: 'host' })
+      const ws = new Workspace({ '/': new RAMResource() }, { mode, runtimes: [rt, 'vfs'] })
+      try {
+        for (const line of ['python --version', 'python3 -V', 'python -VV']) {
+          const io = await ws.execute(line, { env: session })
+          expect(io.exitCode).toBe(0)
+          expect(JSON.parse(DEC.decode(io.stdout))).toEqual(expected)
+          expect(DEC.decode(io.stderr)).toBe('')
+        }
+      } finally {
+        await ws.close()
+        vi.unstubAllEnvs()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it('reports versions in READ mode without running Python startup code', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-local-version-'))
+    const marker = join(dir, 'startup-ran')
+    const python = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], {
+      encoding: 'utf8',
+    }).trim()
+    const expected = execFileSync(python, ['--version'], { encoding: 'utf8' })
+    await writeFile(
+      join(dir, 'sitecustomize.py'),
+      `open(${JSON.stringify(marker)}, 'w').write('ran')\n`,
+    )
+    const env = { PYTHONPATH: dir }
+    const rt = new LocalRuntime({ config: { home: python } })
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.READ, runtimes: [rt, 'vfs'] },
+    )
+    try {
+      for (const line of ['python --version', 'python3 -V', 'python -VV']) {
+        const io = await ws.execute(line, { env })
+        expect(io.exitCode).toBe(0)
+        expect(DEC.decode(io.stdout)).toBe(expected)
+        expect(DEC.decode(io.stderr)).toBe('')
+        await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+      }
+      const refused = await ws.execute("python -c 'pass'", { env })
+      expect(refused.exitCode).toBe(126)
+      await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+      const control = await rt.run({ code: 'pass', args: [], stdin: null, env })
+      expect(control.exitCode).toBe(0)
+      expect(await readFile(marker, 'utf8')).toBe('ran')
+    } finally {
+      await ws.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('runs code on the host python with argv, stdin and env', async () => {
     const rt = new LocalRuntime()
     const result = await rt.run({

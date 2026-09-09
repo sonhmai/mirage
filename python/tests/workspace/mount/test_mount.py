@@ -17,6 +17,11 @@ import errno
 
 import pytest
 
+from mirage.accessor.ram import RAMAccessor
+from mirage.commands.config import command
+from mirage.commands.spec import CommandSpec
+from mirage.commands.spec.types import Option
+from mirage.io.types import IOResult, materialize
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.utils.errors import OperationNotSupportedError, ReadOnlyError
@@ -85,6 +90,47 @@ def test_read_only_blocks_write_cmd():
     stdout, io = _run(mount.execute_cmd("mkdir", [scope], [], {}))
     assert io.exit_code != 0
     assert b"read-only" in io.stderr
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [MountMode.READ, MountMode.WRITE])
+@pytest.mark.parametrize("declared", [False, True])
+@pytest.mark.parametrize("flag", ["help", "version"])
+async def test_only_wrapper_responses_bypass_the_write_guard(
+        mode, declared, flag):
+    resource = RAMResource()
+    mount = MountEntry("/ram/", resource, mode)
+    calls: list[str] = []
+    options = (Option(long="--version", type="bool"), ) if declared else ()
+
+    @command("mutate",
+             resource="ram",
+             spec=CommandSpec(options=options),
+             write=True)
+    async def mutate(accessor: RAMAccessor, paths, texts, opts):
+        calls.append("handler")
+        accessor.store.files["/changed"] = b"changed"
+        return b"custom version\n", IOResult()
+
+    mount.register_fns([mutate])
+    stdout, io = await mount.execute_cmd("mutate", [], [], {flag: True})
+    output = await materialize(stdout)
+    if declared and flag == "version":
+        if mode == MountMode.READ:
+            assert io.exit_code == 1
+            assert io.stderr == b"mutate: read-only mount at /ram/\n"
+            assert not calls
+            assert "/changed" not in resource.accessor.store.files
+        else:
+            assert io.exit_code == 0
+            assert output == b"custom version\n"
+            assert calls == ["handler"]
+            assert resource.accessor.store.files["/changed"] == b"changed"
+    else:
+        assert io.exit_code == 0
+        assert output
+        assert not calls
+        assert "/changed" not in resource.accessor.store.files
 
 
 def test_the_read_only_refusal_is_newline_terminated():

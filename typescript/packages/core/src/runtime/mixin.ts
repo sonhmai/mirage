@@ -90,6 +90,7 @@ export interface LineExecutor {
     stdin: Uint8Array | null,
     env: Record<string, string>,
     cwd: string,
+    signal?: AbortSignal,
   ): Promise<RunResult>
 }
 

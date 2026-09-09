@@ -433,16 +433,18 @@ async def _run_argv(
     ptoken = set_op_policies(registry.policies)
     try:
         if admitted is None:
-            return await _route_argv(recurse, dispatch, registry, namespace,
-                                     execute_fn, argv, session, stdin,
-                                     call_stack, job_table, cancel,
-                                     routing_decision, row)
+            return await _route_argv(
+                recurse, dispatch, registry, namespace, execute_fn, argv,
+                session, stdin, call_stack, job_table, cancel,
+                routing_decision, row, agent_id,
+                claimant.line if claimant is not None else None)
         token = set_admission(admitted)
         try:
-            return await _route_argv(recurse, dispatch, registry, namespace,
-                                     execute_fn, argv, session, stdin,
-                                     call_stack, job_table, cancel,
-                                     routing_decision, row)
+            return await _route_argv(
+                recurse, dispatch, registry, namespace, execute_fn, argv,
+                session, stdin, call_stack, job_table, cancel,
+                routing_decision, row, agent_id,
+                claimant.line if claimant is not None else None)
         finally:
             reset_admission(token)
     finally:
@@ -486,6 +488,8 @@ async def _route_argv(
     cancel: asyncio.Event | None,
     routing_decision: RouteDecision | None,
     row: int,
+    agent_id: str = "",
+    handed: HandOff | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Route one admitted command to its builtin or mount handler.
 
@@ -635,7 +639,9 @@ async def _route_argv(
         job_table=job_table,
         namespace=namespace,
         routing_decision=routing_decision,
-        execute_fn=execute_fn)
+        agent_id=agent_id,
+        execute_fn=execute_fn,
+        handed=handed)
 
     if io.exit_code == 0 and namespace.nodes:
         if name == "rm":

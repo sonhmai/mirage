@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { command, crossCommand, RegisteredCommand } from './config.ts'
-import { CommandSpec, Operand } from './spec/types.ts'
+import { CommandSpec, Operand, Option } from './spec/types.ts'
 
 const STUB_SPEC = new CommandSpec({ rest: new Operand({ type: 'path' }) })
 const STUB_FN = () => Promise.resolve([null, { exitCode: 0 } as never] as [null, never])
@@ -37,6 +37,24 @@ describe('RegisteredCommand', () => {
 })
 
 describe('command()', () => {
+  it('lets a declared --version reach the handler', async () => {
+    const fn = vi.fn(STUB_FN)
+    const [rc] = command({
+      name: 'custom',
+      resource: null,
+      spec: new CommandSpec({ options: [new Option({ long: '--version' })] }),
+      fn,
+    })
+    if (rc === undefined) throw new Error('expected a registered command')
+    await rc.fn({} as never, [], [], {
+      stdin: null,
+      flags: { version: true },
+      filetypeFns: null,
+      cwd: '/',
+    })
+    expect(fn).toHaveBeenCalledOnce()
+  })
+
   it('returns one RegisteredCommand per resource when given a single string', () => {
     const out = command({ name: 'cat', resource: 'ram', spec: STUB_SPEC, fn: STUB_FN })
     expect(out).toHaveLength(1)

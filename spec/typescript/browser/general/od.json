@@ -180,6 +180,12 @@
         "has_aggregate": false,
         "has_provision": false,
         "has_write": false
+      },
+      "wandb": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": false
       }
     },
     "filetypes": [],
@@ -216,7 +222,8 @@
       "s3",
       "sharepoint",
       "slack",
-      "trello"
+      "trello",
+      "wandb"
     ]
   },
   "options": [

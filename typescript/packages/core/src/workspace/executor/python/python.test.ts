@@ -19,6 +19,43 @@ import { makeWorkspace, stderrStr, stdoutStr } from '../../fixtures/workspace_fi
 // in tests/workspace/test_workspace.py. Citations are in the `it()` title.
 
 describe('python3: core (ports of Python tests_workspace)', { timeout: 30000 }, () => {
+  it('reports the Pyodide guest version through every version spelling', async () => {
+    const { ws } = await makeWorkspace()
+    try {
+      const guest = await ws.execute("python3 -c 'import sys; print(sys.version.split()[0])'")
+      expect(guest.exitCode).toBe(0)
+      const expected = `Python ${stdoutStr(guest).trim()} (pyodide)\n`
+      for (const name of ['python', 'python3']) {
+        for (const flag of ['--version', '-V', '-VV']) {
+          const io = await ws.execute(`${name} ${flag}`)
+          expect(io.exitCode).toBe(0)
+          expect(stdoutStr(io)).toBe(expected)
+          expect(stderrStr(io)).toBe('')
+        }
+      }
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it('passes a program its own --version argument', async () => {
+    const { ws } = await makeWorkspace()
+    try {
+      await ws.execute("echo 'import sys; print(sys.argv[-1])' > /ram/version.py")
+      for (const line of [
+        "python3 -c 'import sys; print(sys.argv[-1])' --version",
+        'python3 /ram/version.py --version',
+        "echo 'import sys; print(sys.argv[-1])' | python3 - --version",
+      ]) {
+        const io = await ws.execute(line)
+        expect(io.exitCode).toBe(0)
+        expect(stdoutStr(io)).toBe('--version\n')
+      }
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
   it('test_python3_c_simple (L1364): print(42) → "42\\n"', async () => {
     const { ws } = await makeWorkspace()
     const io = await ws.execute('python3 -c "print(42)"')

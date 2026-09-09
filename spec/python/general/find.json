@@ -234,6 +234,12 @@
         "has_aggregate": false,
         "has_provision": true,
         "has_write": false
+      },
+      "wandb": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
       }
     },
     "filetypes": [],
@@ -279,7 +285,8 @@
       "sharepoint",
       "slack",
       "ssh",
-      "trello"
+      "trello",
+      "wandb"
     ]
   },
   "ignore_tokens": [

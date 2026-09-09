@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../io/types.ts'
+import type { LanguageRuntime } from '../../../runtime/language.ts'
+import { QuickJsUnavailableError } from '../../../runtime/js/types.ts'
+import { MontyUnavailableError } from '../../../runtime/python/monty/binding.ts'
+import { PyodideUnavailableError } from '../../../runtime/python/types.ts'
 import type { RunResult } from '../../../runtime/types.ts'
+import { CommandTimeoutError } from '../../errors.ts'
 
 /**
  * Convert one interpreter outcome into a command's output pair.
@@ -29,6 +34,32 @@ export function runOutput(result: RunResult): [Uint8Array | null, IOResult] {
     result.stdout.length > 0 ? result.stdout : null,
     new IOResult({ exitCode: result.exitCode, stderr: result.stderr }),
   ]
+}
+
+export async function runtimeVersion(
+  label: string,
+  runtime: LanguageRuntime,
+  env: Record<string, string>,
+  signal?: AbortSignal,
+  timeoutSeconds?: number,
+): Promise<[Uint8Array | null, IOResult]> {
+  try {
+    return runOutput(await runtime.version(env, signal, timeoutSeconds))
+  } catch (err) {
+    if (err instanceof CommandTimeoutError) throw err
+    const unavailable =
+      err instanceof QuickJsUnavailableError ||
+      err instanceof MontyUnavailableError ||
+      err instanceof PyodideUnavailableError
+    const message = err instanceof Error ? err.message : String(err)
+    return [
+      null,
+      new IOResult({
+        exitCode: unavailable ? 127 : 1,
+        stderr: new TextEncoder().encode(`${label}: ${message}\n`),
+      }),
+    ]
+  }
 }
 
 // Which of an interpreter's four doors the source came through. The

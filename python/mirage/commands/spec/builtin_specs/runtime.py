@@ -79,12 +79,7 @@ _PYTHON_OPTIONS: tuple[Option, ...] = (
            type="str",
            choices=("always", "default", "never"),
            description="How to validate hash-based .pyc files."),
-    # Aliases of the injected help/version options, not new behavior:
-    # sharing their long spelling means they share their dest, so
-    # _with_help_support short-circuits them on the one path every
-    # command uses. CPython's -VV adds build info; mirage has no
-    # CPython build to report, so -VV clusters into -V and prints the
-    # same line.
+    # -VV shares the concise version line; build details are not exposed.
     Option(short="-h",
            long="--help",
            description="Show this help message and exit."),
@@ -115,6 +110,9 @@ SPECS: dict[str, CommandSpec] = {
     CommandSpec(
         description="Run JavaScript on a sandboxed quickjs engine.",
         options=(
+            Option(short="-v",
+                   long="--version",
+                   description="Show runtime version information and exit."),
             Option(short="-e",
                    type="str",
                    description="Evaluate the next argument as a script."),
@@ -130,6 +128,9 @@ SPECS: dict[str, CommandSpec] = {
     CommandSpec(
         description="Run JavaScript on a sandboxed quickjs engine.",
         options=(
+            Option(short="-v",
+                   long="--version",
+                   description="Show runtime version information and exit."),
             Option(short="-e",
                    type="str",
                    description="Evaluate the next argument as a script."),

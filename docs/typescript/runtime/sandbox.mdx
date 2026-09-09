@@ -165,25 +165,12 @@ that exceeds `timeoutSeconds` answers exit 124; `maxBytes` and `maxLines`
 cap its output the same way. There is no sandbox-specific limit surface.
 
 <Warning>
-**In a sandbox a limit bounds the wait, not the run.** Exit 124 means
-mirage stopped waiting; the command keeps going inside the sandbox. Mirage
-holds only a client, and the process lives in the sandbox's own namespace,
-so dropping that client never signals it — a `docker exec` command is still
-burning CPU after its client is killed. Only the provider's own timeout
-reclaims it, and mirage does not set one today:
+E2B cancellation and command timeouts attempt to kill the command and
+disconnect its output stream. Descendant processes may survive.
 
-- **Docker and smolvm** have no server-side timeout: a runaway runs until you
-  stop it or the container or microVM exits.
-- **E2B** applies its SDK default of 60 seconds, which cuts both ways — a
-  runaway stops there, and so does a legitimate build or query that needs
-  longer.
-- **Daytona** defaults to no timeout, so a runaway keeps running, and
-  billing, until you stop it.
-
-Cancelling a line has the same shape: it releases mirage's side and leaves
-the sandbox side running. Treat `commandLimits` here as a bound on
-waiting rather than on execution, and set a lifecycle limit (idle-stop,
-auto-delete) on the sandbox itself.
+Other providers may leave remote commands running after Mirage stops
+waiting. Provider timeouts and sandbox lifecycle limits still apply;
+configure sandbox creation and cleanup in your application.
 </Warning>
 
 ## Evaluating route-policy scripts

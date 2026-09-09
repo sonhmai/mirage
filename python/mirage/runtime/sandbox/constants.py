@@ -15,7 +15,7 @@
 import shlex
 import uuid
 
-# Providers whose exec API has no stdin stream (Daytona, e2b) upload
+# Providers whose exec API has no stdin stream (Daytona) upload
 # piped bytes to a per-invocation file and redirect it into the line.
 STDIN_PREFIX = "/tmp/.mirage_stdin"
 
@@ -34,9 +34,8 @@ def stdin_redirect(line: str, path: str) -> str:
 
     Runs the line in a subshell with stdin redirected from ``path``,
     removes the file afterward, and preserves the line's exit code.
-    This is the only byte-exact stdin with a real EOF that Daytona and
-    e2b allow: their exec APIs take no stdin stream, e2b's send_stdin
-    cannot signal EOF, and a PTY merges streams and mangles bytes.
+    Daytona uses this when its exec API has no stdin stream; a PTY
+    would merge streams and mangle bytes.
 
     Known limitations, all inherent to the file transport:
     - stdin is fully buffered and uploaded before the line starts;

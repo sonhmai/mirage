@@ -74,14 +74,35 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     stdin: Uint8Array | null,
     env: Record<string, string>,
     cwd: string,
+    signal?: AbortSignal,
   ): Promise<RunResult> {
+    signal?.throwIfAborted()
     this.connecting ??= this.connect().catch((err: unknown) => {
       this.connecting = null
       throw err
     })
-    await this.connecting
+    await this.waitFor(this.connecting, signal)
+    signal?.throwIfAborted()
     const merged = { ...this.config.env, ...env }
-    return this.execLine(line, stdin, merged, cwd)
+    return this.execLine(line, stdin, merged, cwd, signal)
+  }
+
+  /** Cancel this caller's wait without cancelling a shared connection. */
+  protected async waitFor<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (signal === undefined) return await operation
+    let onAbort: () => void = () => undefined
+    try {
+      return await new Promise<T>((resolve, reject) => {
+        onAbort = () => {
+          reject(new DOMException('execute aborted', 'AbortError'))
+        }
+        operation.then(resolve, reject)
+        if (signal.aborted) onAbort()
+        else signal.addEventListener('abort', onAbort, { once: true })
+      })
+    } finally {
+      signal.removeEventListener('abort', onAbort)
+    }
   }
 
   /** Attach to the user's live sandbox, failing loud if absent. */
@@ -93,6 +114,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     stdin: Uint8Array | null,
     env: Record<string, string>,
     cwd: string,
+    signal?: AbortSignal,
   ): Promise<RunResult>
 
   /** Release provider client resources; the sandbox itself is the user's. */

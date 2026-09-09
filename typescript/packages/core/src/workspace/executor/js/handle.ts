@@ -37,6 +37,7 @@ export async function handleJs(
   pathScope: PathSpec | null,
   args: string[],
   opts: {
+    command?: string
     stdin: ByteSource | null
     env: Record<string, string>
     code: string | null
@@ -53,6 +54,7 @@ export async function handleJs(
     pathScope,
     args,
     {
+      command: opts.command ?? 'js',
       stdin: opts.stdin,
       env: opts.env,
       code: opts.code,

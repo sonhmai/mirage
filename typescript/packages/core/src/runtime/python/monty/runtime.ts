@@ -101,6 +101,7 @@ function toEvalValue(value: unknown): EvalValue {
  */
 export class MontyRuntime extends PythonRuntime implements Evaluator {
   readonly name = 'monty'
+  protected override readonly versionSuffix = ' (monty)'
   // The interpreter is an in-process guest with no host syscalls: its
   // file I/O can only travel the VFS bridge, so every effect passes
   // the workspace gate (mount modes, policy, recording).

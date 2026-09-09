@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-core",
-  "version": "0.0.6",
+  "version": "0.0.7-alpha.2",
   "description": "A Unified Virtual Filesystem For AI Agents",
   "keywords": [
     "bash",
@@ -32,7 +32,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=20.10.0"
+    "node": ">=20.18.1 <21 || >=22"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -67,7 +67,8 @@
     "quickjs-emscripten": "^0.32.0",
     "tree-sitter-bash": "^0.25.1",
     "typescript": "^6.0.0",
-    "vitest": "^3.2.6"
+    "vitest": "^3.2.6",
+    "e2b": "^2.45.0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
@@ -90,7 +91,8 @@
     "chromadb": "^3.4.3",
     "pyodide": "^0.29.0 || ^314.0.0",
     "quickjs-emscripten": "^0.31.0 || ^0.32.0",
-    "redis": "^5.0.0"
+    "redis": "^5.0.0",
+    "e2b": "^2.45.0"
   },
   "peerDependenciesMeta": {
     "@qdrant/js-client-rest": {
@@ -109,6 +111,9 @@
       "optional": true
     },
     "quickjs-emscripten": {
+      "optional": true
+    },
+    "e2b": {
       "optional": true
     }
   }

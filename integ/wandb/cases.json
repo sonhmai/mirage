@@ -1,0 +1,116 @@
+[
+  {
+    "name": "entities",
+    "command": "ls -1 /wandb",
+    "stdout": "lab\nother\n",
+    "exit_code": 0
+  },
+  {
+    "name": "projects",
+    "command": "ls -1 /wandb/lab",
+    "stdout": "empty\nexperiments\n",
+    "exit_code": 0
+  },
+  {
+    "name": "empty",
+    "command": "ls -1 /wandb/lab/empty",
+    "stdout": "",
+    "exit_code": 0
+  },
+  {
+    "name": "ids",
+    "command": "ls -1 /wandb/lab/experiments",
+    "stdout": "run-a\nrun-b\nrun-long\n",
+    "exit_code": 0
+  },
+  {
+    "name": "run leaves",
+    "command": "ls -1 /wandb/lab/experiments/run-a",
+    "stdout": "config.json\nfiles\nhistory.jsonl\nrun.json\nsummary.json\n",
+    "exit_code": 0
+  },
+  {
+    "name": "nested files",
+    "command": "cat /wandb/lab/experiments/run-a/files/nested/log.txt",
+    "stdout": "second file\n",
+    "exit_code": 0
+  },
+  {
+    "name": "unicode",
+    "command": "cat /wandb/lab/experiments/run-a/files/notes.txt",
+    "stdout": "café\n",
+    "exit_code": 0
+  },
+  {
+    "name": "history",
+    "command": "cat /wandb/lab/experiments/run-a/history.jsonl",
+    "stdout": "{\"_step\":0,\"train_step\":0,\"score\":0.1}\n{\"_step\":1,\"train_step\":100,\"score\":0.9}\n{\"_step\":4,\"train_step\":400,\"loss\":null}\n{\"_step\":5,\"train_step\":500,\"score\":0.4}\n",
+    "exit_code": 0
+  },
+  {
+    "name": "head",
+    "command": "head -n 1 /wandb/lab/experiments/run-long/history.jsonl",
+    "stdout": "{\"_step\":0,\"train_step\":0,\"score\":0}\n",
+    "exit_code": 0
+  },
+  {
+    "name": "empty history",
+    "command": "cat /wandb/lab/experiments/run-b/history.jsonl",
+    "stdout": "",
+    "exit_code": 0
+  },
+  {
+    "name": "large history",
+    "command": "cat /wandb/lab/experiments/run-long/history.jsonl | wc -l",
+    "stdout": "2048\n",
+    "exit_code": 0
+  },
+  {
+    "name": "large file",
+    "command": "cat /wandb/lab/experiments/run-a/files/large.txt | wc -c",
+    "stdout": "110000\n",
+    "exit_code": 0
+  },
+  {
+    "name": "grep",
+    "command": "grep train_step /wandb/lab/experiments/run-a/history.jsonl | wc -l",
+    "stdout": "4\n",
+    "exit_code": 0
+  },
+  {
+    "name": "full run metadata",
+    "command": "cat /wandb/lab/experiments/run-a/run.json",
+    "stdout": "{\n  \"entity\": \"lab\",\n  \"project\": \"experiments\",\n  \"run\": \"run-a\",\n  \"path\": \"lab/experiments/run-a\",\n  \"storage_id\": \"synthetic-storage-id-a\",\n  \"display_name\": \"duplicate\",\n  \"state\": \"finished\",\n  \"tags\": [\n    \"baseline\",\n    \"café\"\n  ],\n  \"sweep_name\": \"sweep-01\",\n  \"group\": \"ablation\",\n  \"job_type\": \"train\",\n  \"commit\": \"0123456789abcdef0123456789abcdef01234567\",\n  \"read_only\": false,\n  \"created_at\": \"2026-01-01T00:00:00Z\",\n  \"heartbeat_at\": \"2026-01-01T00:05:00Z\",\n  \"description\": \"Synthetic experiment metadata\",\n  \"notes\": \"First line\\nSecond line: café\",\n  \"user\": {\n    \"id\": \"synthetic-user-id-bob\",\n    \"name\": \"Bob Example\",\n    \"username\": \"bob\",\n    \"email\": \"bob@example.com\"\n  },\n  \"system_metrics\": {\n    \"cpu\": 0,\n    \"gpu.0.memoryAllocated\": 128.5,\n    \"nested\": {\n      \"missing\": null\n    }\n  },\n  \"history_line_count\": 4,\n  \"history_keys\": {\n    \"lastStep\": 5,\n    \"keys\": {\n      \"score\": {\n        \"type\": \"number\",\n        \"count\": 3\n      },\n      \"train_step\": {\n        \"type\": \"number\",\n        \"count\": 4\n      }\n    }\n  },\n  \"file_count\": 4\n}",
+    "exit_code": 0
+  },
+  {
+    "name": "unavailable run metadata",
+    "command": "cat /wandb/lab/experiments/run-b/run.json",
+    "stdout": "{\n  \"entity\": \"lab\",\n  \"project\": \"experiments\",\n  \"run\": \"run-b\",\n  \"path\": \"lab/experiments/run-b\",\n  \"storage_id\": \"lab/experiments/run-b\",\n  \"display_name\": \"duplicate\",\n  \"state\": \"finished\",\n  \"tags\": [],\n  \"sweep_name\": null,\n  \"group\": null,\n  \"job_type\": null,\n  \"commit\": null,\n  \"read_only\": null,\n  \"created_at\": \"2026-01-02T00:00:00Z\",\n  \"heartbeat_at\": null,\n  \"description\": null,\n  \"notes\": null,\n  \"user\": null,\n  \"system_metrics\": null,\n  \"history_line_count\": 0,\n  \"history_keys\": {\n    \"lastStep\": -1,\n    \"keys\": {}\n  },\n  \"file_count\": 1\n}",
+    "exit_code": 0
+  },
+  {
+    "name": "machine metadata file",
+    "command": "cat /wandb/lab/experiments/run-b/files/wandb-metadata.json",
+    "stdout": "{\n  \"os\": \"Linux\",\n  \"python\": \"3.12.0\",\n  \"host\": \"trainer-01\",\n  \"gpu\": \"Example GPU\",\n  \"gpu_count\": 1\n}",
+    "exit_code": 0
+  },
+  {
+    "name": "unavailable creator attributes",
+    "command": "cat /wandb/lab/experiments/run-long/run.json",
+    "stdout": "{\n  \"entity\": \"lab\",\n  \"project\": \"experiments\",\n  \"run\": \"run-long\",\n  \"path\": \"lab/experiments/run-long\",\n  \"storage_id\": \"lab/experiments/run-long\",\n  \"display_name\": \"long\",\n  \"state\": \"finished\",\n  \"tags\": [],\n  \"sweep_name\": null,\n  \"group\": null,\n  \"job_type\": null,\n  \"commit\": null,\n  \"read_only\": null,\n  \"created_at\": \"2026-01-03T00:00:00Z\",\n  \"heartbeat_at\": null,\n  \"description\": null,\n  \"notes\": null,\n  \"user\": {\n    \"id\": \"synthetic-user-id-alice\",\n    \"name\": \"Alice Example\",\n    \"username\": \"alice\",\n    \"email\": null\n  },\n  \"system_metrics\": null,\n  \"history_line_count\": 2048,\n  \"history_keys\": {\n    \"lastStep\": 2047,\n    \"keys\": {}\n  },\n  \"file_count\": 2\n}",
+    "exit_code": 0
+  },
+  {
+    "name": "encoded filename",
+    "command": "cat '/wandb/lab/experiments/run-long/files/special/café #1%.txt'",
+    "stdout": "special café\n",
+    "exit_code": 0
+  },
+  {
+    "name": "empty file",
+    "command": "cat /wandb/lab/experiments/run-long/files/empty.bin",
+    "stdout": "",
+    "exit_code": 0
+  }
+]

@@ -23,10 +23,14 @@ class E2BConfig(SandboxConfig):
 
     Args:
         sandbox_id (str): id of a sandbox you created (`e2b sandbox
-            spawn` or the SDK), booted from a template with fuse3 and
-            mirage installed.
+            spawn` or the SDK), with workspace files visible at matching
+            paths when commands need them.
         api_key (str | None): E2B credential; None reads E2B_API_KEY.
     """
 
     sandbox_id: str
     api_key: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.sandbox_id, str) or not self.sandbox_id.strip():
+            raise ValueError("e2b config needs a nonblank sandbox_id")

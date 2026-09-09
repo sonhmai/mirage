@@ -255,6 +255,8 @@ async def execute_line(
 
     session_token = set_current_session(effective_session,
                                         owner=ws._session_mgr)
+    # Taken before any statement stamps, so a cancelled line can put
+    # `$?` back to what it found.
     status_before = snapshot_status(session)
     try:
         ast = parse(command)

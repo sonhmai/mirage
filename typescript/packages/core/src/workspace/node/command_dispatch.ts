@@ -582,6 +582,8 @@ async function runArgv(
       routingDecision,
       signal,
       row,
+      agentId,
+      claimant?.line ?? null,
     )
   const gated = admitted
   if (gated === null) return runWithOpPolicies(registry.policies, route)
@@ -628,6 +630,8 @@ async function routeArgv(
   routingDecision: RouteDecision | undefined,
   signal: AbortSignal | undefined,
   row: number,
+  agentId: string,
+  handed: HandOff | null,
 ): Promise<Result> {
   // The half of `runArgv` past the gate, split out so the gate's verdict
   // can be bound around it.
@@ -813,7 +817,9 @@ async function routeArgv(
     runtimeBindings,
     namespace,
     routingDecision,
+    agentId,
     executeFn,
+    handed ?? null,
     signal,
   )
 

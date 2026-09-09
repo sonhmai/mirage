@@ -18,6 +18,53 @@ import { makeWorkspace, stderrStr, stdoutStr } from '../../fixtures/workspace_fi
 // Mirrors the Python `node`/`js` command tests; both run on quickjs so a
 // script behaves identically across languages.
 describe('node/js: quickjs runtime', () => {
+  it('uses the invoked alias in script errors', async () => {
+    const { ws } = await makeWorkspace()
+    try {
+      for (const name of ['python', 'python3', 'js', 'node']) {
+        const io = await ws.execute(`${name} /missing-script`)
+        expect(io.exitCode).toBe(1)
+        expect(stderrStr(io)).toBe(`${name}: /missing-script: No such file\n`)
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('identifies QuickJS for both aliases and both version flags', async () => {
+    const { ws } = await makeWorkspace()
+    try {
+      for (const name of ['js', 'node']) {
+        for (const flag of ['--version', '-v']) {
+          const io = await ws.execute(`${name} ${flag}`)
+          expect(io.exitCode).toBe(0)
+          expect(stdoutStr(io)).toMatch(/^JavaScript \(quickjs \d{4}-\d{2}-\d{2}\)\n$/)
+          expect(stderrStr(io)).toBe('')
+        }
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('passes --version to scripts and inline programs', async () => {
+    const { ws } = await makeWorkspace()
+    try {
+      await ws.execute("echo 'console.log(scriptArgs[0])' > /ram/version.js")
+      for (const line of [
+        'node -e "console.log(scriptArgs[0])" -- --version',
+        'js /ram/version.js --version',
+        "echo 'console.log(scriptArgs[0])' | node - --version",
+      ]) {
+        const io = await ws.execute(line)
+        expect(io.exitCode).toBe(0)
+        expect(stdoutStr(io)).toBe('--version\n')
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('js -e: modern syntax + compute', async () => {
     const { ws } = await makeWorkspace()
     const io = await ws.execute(

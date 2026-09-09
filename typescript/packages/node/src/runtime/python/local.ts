@@ -49,15 +49,29 @@ export class LocalRuntime extends PythonRuntime {
     this.python = chosen !== undefined && chosen !== '' ? chosen : 'python3'
   }
 
+  override version(_env: Record<string, string>, signal?: AbortSignal): Promise<RunResult> {
+    // Session loader variables can execute code before --version is read.
+    return this.runProcess(['--version'], {}, null, signal)
+  }
+
   run(args: RunArgs): Promise<RunResult> {
+    return this.runProcess(['-c', args.code, ...args.args], args.env, args.stdin, args.signal)
+  }
+
+  private runProcess(
+    argv: string[],
+    env: Record<string, string>,
+    stdin: Uint8Array | null,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
     return new Promise((resolve, reject) => {
       // The signal aborts when the command's limit timeout trips:
       // spawn then SIGKILLs the child (matching the python runtime's
       // proc.kill() on cancellation) and 'close' settles the promise.
-      const child = spawn(this.python, ['-c', args.code, ...args.args], {
+      const child = spawn(this.python, argv, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, ...args.env },
-        ...(args.signal !== undefined ? { signal: args.signal, killSignal: 'SIGKILL' } : {}),
+        env: { ...process.env, ...env },
+        ...(signal !== undefined ? { signal, killSignal: 'SIGKILL' } : {}),
       })
       this.children.add(child)
       const out: Buffer[] = []
@@ -91,7 +105,7 @@ export class LocalRuntime extends PythonRuntime {
       child.stdin.on('error', (error: NodeJS.ErrnoException) => {
         if (error.code !== 'EPIPE') reject(error)
       })
-      if (args.stdin !== null) child.stdin.write(args.stdin)
+      if (stdin !== null) child.stdin.write(stdin)
       child.stdin.end()
     })
   }

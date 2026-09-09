@@ -216,6 +216,11 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { normalizeTrelloConfig } = await import('./trello/config.ts')
     return new TrelloResource(normalizeTrelloConfig(config))
   },
+  wandb: async (config) => {
+    const { WandbResource } = await import('@struktoai/mirage-core/resource/wandb/wandb')
+    const { normalizeWandbConfig } = await import('@struktoai/mirage-core/core/wandb/config')
+    return new WandbResource(normalizeWandbConfig(config))
+  },
   linear: async (config) => {
     const { LinearResource } = await import('./linear/linear.ts')
     const { normalizeLinearConfig } = await import('@struktoai/mirage-core/core/linear/config')

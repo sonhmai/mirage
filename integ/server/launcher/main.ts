@@ -36,6 +36,7 @@ import { notionFake } from '../notion/fake.ts'
 import { onedriveFake } from '../onedrive/fake.ts'
 import { slackFake } from '../slack/fake.ts'
 import { trelloFake } from '../trello/fake.ts'
+import { startWandb } from '../wandb/fake.ts'
 
 // ONE process hosting several fakes, each on its OWN port.
 //
@@ -155,6 +156,14 @@ const REGISTRY: Record<string, Entry> = {
   onedrive: plain(onedriveFake),
   slack: plain(slackFake),
   trello: plain(trelloFake),
+  wandb: async (o) => {
+    const started = await startWandb(o.port, o.fixture, o.fixtureRoot)
+    return {
+      name: 'wandb',
+      announces: [{ token: o.token ?? 'WANDB_BASE_URL', url: started.base }],
+      close: started.close,
+    }
+  },
   'hf-hub': withArms(hfHubFake, async (runtime, o) =>
     startHubArms(runtime, portOf(o.extras, 'mcpPort')),
   ),

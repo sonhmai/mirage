@@ -62,6 +62,22 @@ async function sandboxWorkspace(box: RecordingSandbox): Promise<Workspace> {
 }
 
 describe('RemoteSandbox', () => {
+  it.each(['python3 --version', 'python -V', 'node --version', 'node -v', 'tsc --version'])(
+    'passes %s and its output through the remote environment',
+    async (line) => {
+      const box = new RecordingSandbox()
+      const ws = await sandboxWorkspace(box)
+      try {
+        const io = await ws.execute(line)
+        expect(io.exitCode).toBe(0)
+        expect(DEC.decode(io.stdout)).toBe(`ran:${line}`)
+        expect(box.execs[0]?.[0]).toBe(line)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
   it('connects on the first line only', async () => {
     const box = new RecordingSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)

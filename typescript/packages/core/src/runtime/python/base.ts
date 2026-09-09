@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { LanguageRuntime } from '../language.ts'
-import type { RuntimeLanguage, RuntimeOptions } from '../types.ts'
+import type { RunResult, RuntimeLanguage, RuntimeOptions } from '../types.ts'
 
 /**
  * The python tier: every runtime that interprets Python source.
@@ -40,6 +40,24 @@ export abstract class PythonRuntime extends LanguageRuntime {
    * probed, so a refusal can name the runtime.
    */
   readonly runsModules: boolean = true
+  protected readonly versionSuffix: string = ''
+
+  override version(
+    env: Record<string, string>,
+    signal?: AbortSignal,
+    timeoutSeconds?: number,
+  ): Promise<RunResult> {
+    // Process runtimes must supply a probe that cannot run startup hooks.
+    if (this.reach !== 'vfs') return super.version(env, signal, timeoutSeconds)
+    return this.run({
+      code: `import sys\nprint('Python ' + sys.version.split()[0] + ${JSON.stringify(this.versionSuffix)})`,
+      args: [],
+      env,
+      stdin: null,
+      ...(signal !== undefined ? { signal } : {}),
+      ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+    })
+  }
 
   constructor(options: RuntimeOptions<object> = {}, configKeys: readonly string[] = []) {
     super(options, PythonRuntime.commands, configKeys)

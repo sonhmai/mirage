@@ -145,6 +145,7 @@
                     "pages": [
                       "home/setup/github",
                       "home/setup/linear",
+                      "home/setup/wandb",
                       "home/setup/langfuse",
                       "home/setup/slack",
                       "home/setup/discord",
@@ -529,6 +530,7 @@
                     "pages": [
                       "typescript/setup/github",
                       "typescript/setup/linear",
+                      "typescript/setup/wandb",
                       "typescript/setup/langfuse",
                       "typescript/slack",
                       "typescript/discord",

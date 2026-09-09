@@ -69,26 +69,36 @@ class LocalRuntime(PythonRuntime):
         else:
             self._python = sys.executable
 
+    async def version(self, env: dict[str, str]) -> RunResult:
+        # Session loader variables can execute code before --version is read.
+        return await self._run(["--version"], {})
+
     async def run(self, args: RunArgs) -> RunResult:
         # Honoring the init switches is just handing them back to the
         # real interpreter, which is why this tier gets them exactly
         # right (sys.flags included) where an in-process engine cannot.
+        return await self._run([
+            *init_argv(args.flags), "-c",
+            bootstrap(args.code, args.prog), *args.args
+        ], args.env, args.stdin)
+
+    async def _run(self,
+                   argv: list[str],
+                   env: dict[str, str],
+                   stdin: bytes | None = None) -> RunResult:
         proc = await asyncio.create_subprocess_exec(
             self._python,
-            *init_argv(args.flags),
-            "-c",
-            bootstrap(args.code, args.prog),
-            *args.args,
+            *argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env={
                 **os.environ,
-                **args.env
+                **env
             },
         )
         try:
-            stdout, stderr = await proc.communicate(input=args.stdin)
+            stdout, stderr = await proc.communicate(input=stdin)
         except asyncio.CancelledError:
             proc.kill()
             await proc.wait()

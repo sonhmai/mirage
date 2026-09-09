@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { CallStack } from '../../../../shell/call_stack.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
 import { Session } from '../../../session/session.ts'
-import { ReturnSignal } from '../../control.ts'
+import { ReturnSignal } from '../../../../shell/errors.ts'
 import {
   handleColon,
   handleExit,

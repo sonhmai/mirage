@@ -257,6 +257,7 @@ const EVAL_INTERRUPT_SECONDS = 10
 
 export class PyodideRuntime extends PythonRuntime implements Evaluator {
   readonly name = 'pyodide'
+  protected override readonly versionSuffix = ' (pyodide)'
   // The WASM guest's filesystem is the workspace-backed Emscripten FS,
   // so file effects pass the workspace gate, and loader.ts seals the
   // `js` module (null-prototype jsglobals) so guest code cannot reach

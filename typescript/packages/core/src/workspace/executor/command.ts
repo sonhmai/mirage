@@ -61,6 +61,7 @@ import type { NamespaceView, SessionView, StatPath } from '../../ops/types.ts'
 import { applyFindActions } from './find_action_dispatch.ts'
 import { sessionView } from '../session/state.ts'
 import { optionError, parseFlags } from './command/flags.ts'
+import type { HandOff } from '../../policy/types.ts'
 import { executeShellFunction } from './command/functions.ts'
 import {
   CWD_DEFAULT_RAW,
@@ -71,8 +72,6 @@ import {
 import { findStartPoints, runOnMount, type RunOnMountCtx } from './command/run.ts'
 import type { Result } from './command/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-
-export { ReturnSignal } from './control.ts'
 
 // One handler per JOB_BUILTINS member; lookup already narrowed the name.
 const JOB_HANDLERS: Record<
@@ -156,7 +155,9 @@ export async function handleCommand(
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
   routingDecision?: RouteDecision,
+  agentId: string | null = null,
   executeFn?: ExecuteFn,
+  handed: HandOff | null = null,
   signal?: AbortSignal,
 ): Promise<Result> {
   if (parts.length === 0) {
@@ -194,6 +195,10 @@ export async function handleCommand(
       session,
       stdin,
       callStack,
+      jobTable,
+      agentId,
+      handed,
+      registry.decisions,
     )
   }
 

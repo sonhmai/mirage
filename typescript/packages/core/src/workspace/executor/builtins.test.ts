@@ -58,7 +58,7 @@ import {
   handleXargs,
 } from './builtins/index.ts'
 import { parseDuration } from './builtins/timeout/timeout.ts'
-import { ReturnSignal } from './control.ts'
+import { ReturnSignal } from '../../shell/errors.ts'
 
 function wireMount(mount: MountEntry): void {
   const cmds = mount.resource.commands?.()

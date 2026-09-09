@@ -283,7 +283,7 @@ export function versionRequest(
   spec: CommandSpec | null,
   argv: string[],
 ): Uint8Array | null {
-  if (!spec?.options.some((o) => o === VERSION_OPTION)) return null
+  if (!hasInjectedVersion(spec)) return null
   for (const arg of argv) {
     if (arg === '--') return null
     if (arg === '--version') return HELP_ENC.encode(versionLine(name))
@@ -291,10 +291,16 @@ export function versionRequest(
   return null
 }
 
+/** Whether the wrapper supplies this spec's version response. */
+export function hasInjectedVersion(spec: CommandSpec | null): boolean {
+  return spec?.options.some((o) => o === VERSION_OPTION) ?? false
+}
+
 /**
  * Inject --help / --version and short-circuit them before the handler.
  * Mirrors GNU coreutils: every registered command accepts both flags,
  * prints to stdout, and exits 0 without running the command body.
+ * A command declaring its own --version handles that flag itself.
  */
 function withHelpSupport(
   name: string,
@@ -321,7 +327,7 @@ function withHelpSupport(
     if (opts.flags.help === true) {
       return [HELP_ENC.encode(helpText), new IOResult()]
     }
-    if (opts.flags.version === true) {
+    if (!hasVersion && opts.flags.version === true) {
       return [HELP_ENC.encode(versionText), new IOResult()]
     }
     return fn(accessor, paths, texts, opts)

@@ -51,12 +51,20 @@ export function recordStatus(session: Session, code: number, transparent = false
 }
 
 /**
- * Park the status just recorded again, for the boundary that closes the
- * enclosing statement to claim rather than stamp over. A conditional
- * list that short-circuits has closed its left pipeline and runs
- * nothing else, and bash reports the list as that pipeline:
- * `true | false && true` keeps `0 1`. The list is not a pipeline of its
- * own, so without this its boundary would stamp the aggregate `1`.
+ * The status a line found, taken before its first statement runs and
+ * put back if the caller aborts the line.
+ *
+ * An aborted invocation is the caller's outcome, not the shell's, so it
+ * must leave `$?` where it was. But the abort lands on one await inside
+ * the line, and every statement before that await has already stamped
+ * through `recordStatus`. The status door refuses a statement that
+ * settles after the caller was released; this is for the ones that
+ * landed before it, and only a copy taken before the line can undo them.
+ *
+ * The three fields travel together because they are one shell fact:
+ * `$?`, `${PIPESTATUS[@]}`, and the per-segment statuses a pipeline
+ * parked for its boundary to claim. Restoring one without the others
+ * would leave a state no bash line produces.
  */
 export interface StatusSnapshot {
   lastExitCode: number
@@ -85,6 +93,14 @@ export function restoreStatus(session: Session, snapshot: StatusSnapshot): void 
   session.pipeStatusPending = snapshot.pipeStatusPending
 }
 
+/**
+ * Park the status just recorded again, for the boundary that closes the
+ * enclosing statement to claim rather than stamp over. A conditional
+ * list that short-circuits has closed its left pipeline and runs
+ * nothing else, and bash reports the list as that pipeline:
+ * `true | false && true` keeps `0 1`. The list is not a pipeline of its
+ * own, so without this its boundary would stamp the aggregate `1`.
+ */
 export function carryStatus(session: Session): void {
   session.pipeStatusPending = session.pipeStatus
 }

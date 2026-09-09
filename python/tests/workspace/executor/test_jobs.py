@@ -444,3 +444,97 @@ async def test_wait_p_with_no_operand_leaves_the_variable_unset():
                           "echo \"V=[${V-UNSET}]\"")
     assert (await io.stdout_str()) == "V=[UNSET]\n"
     await ws.close()
+
+
+# ── `&` inside a compound body launches a job, as it does at top level ──
+
+_BODY_SHAPES = [
+    "for i in 1; do false & done",
+    "for ((k=0;k<1;k++)); do false & done",
+    "n=0; while [ $n -lt 1 ]; do false & n=$((n+1)); done",
+    "n=0; until [ $n -ge 1 ]; do false & n=$((n+1)); done",
+    "if true; then false & fi",
+    "if false; then :; elif true; then false & fi",
+    "if false; then :; else false & fi",
+    "case x in x) false & ;; esac",
+    "{ false & }",
+    "f() { false & }; f",
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", _BODY_SHAPES)
+async def test_ampersand_inside_a_body_launches_a_job_with_status_zero(line):
+    ws = _workspace()
+    res = await ws.execute(f"{line}; echo rc=$?")
+    assert res.stdout == b"rc=0\n"
+    job = ws.job_table.get(1)
+    assert job is not None
+    assert job.command == "false"
+    await ws.job_table.wait(1)
+    assert job.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_loop_body_jobs_are_still_running_when_the_loop_ends():
+    ws = _workspace()
+    res = await ws.execute("for i in 1 2; do sleep 0.3 & done; jobs")
+    assert res.stdout == b"[1] running sleep 0.3\n[2] running sleep 0.3\n"
+    await ws.execute("wait")
+    assert (await ws.execute("jobs")).stdout == b""
+
+
+@pytest.mark.asyncio
+async def test_wait_adopts_loop_body_jobs_in_id_order_after_the_foreground():
+    ws = _workspace()
+    res = await ws.execute(
+        "for i in 1 2; do echo $i & done; echo launched; wait")
+    assert res.stdout == b"launched\n1\n2\n"
+
+
+@pytest.mark.asyncio
+async def test_bang_names_each_loop_body_job():
+    ws = _workspace()
+    res = await ws.execute("for i in 1 2; do sleep 0.1 & echo $!; done; wait")
+    assert res.stdout == b"1\n2\n"
+
+
+@pytest.mark.asyncio
+async def test_errexit_does_not_trip_on_a_body_launch():
+    ws = _workspace()
+    line = "set -e; for i in 1; do false & done; echo ok; wait"
+    res = await ws.execute(line)
+    assert res.stdout == b"ok\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,expected,code",
+    [
+        ('if false & then echo yes; else echo no; fi; wait "$!"', 'yes\n', 1),
+        ('if false; then echo no; elif false & then echo yes; fi; wait "$!"',
+         'yes\n', 1),
+        ('while false & do echo yes; break; done; wait "$!"', 'yes\n', 1),
+        ('until false & do echo no; break; done; echo yes; wait "$!"', 'yes\n',
+         1),
+        ('f() { { sleep 0.05; printf "%s:%s:%s\\n" "$1" "$#" "$*"; } & }'
+         '; f first second; wait', 'first:2:first second\n', 0),
+        ('f() { { sleep 0.05; printf "%s:%s\\n" "$1" "$#"; } & shift; }'
+         '; f first second; wait', 'first:2\n', 0),
+        ('f() { { shift; sleep 0.05; printf "bg:%s:%s\\n" "$1" "$#"; } &'
+         ' sleep 0.1; printf "fg:%s:%s\\n" "$1" "$#"; wait; }'
+         '; f first second', 'fg:first:2\nbg:second:1\n', 0),
+        ('f() { return 7 & j=$!; wait "$j"; }; f', '', 7),
+        ('f() { { sleep 0.05; return 9; } & }; f; wait "$!"', '', 9),
+        ('f() { false; return & j=$!; wait "$j"; }; f', '', 1),
+    ],
+)
+async def test_background_condition_and_function_scope(line, expected, code):
+    ws = _workspace()
+    try:
+        result = await ws.execute(line)
+        assert await result.stdout_str() == expected
+        assert await result.stderr_str() == ""
+        assert result.exit_code == code
+    finally:
+        await ws.close()

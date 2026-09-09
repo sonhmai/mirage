@@ -17,6 +17,12 @@
   "description": "Run JavaScript on a sandboxed quickjs engine.",
   "options": [
     {
+      "description": "Show runtime version information and exit.",
+      "long": "--version",
+      "short": "-v",
+      "type": "bool"
+    },
+    {
       "description": "Evaluate the next argument as a script.",
       "short": "-e",
       "type": "str"

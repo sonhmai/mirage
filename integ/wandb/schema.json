@@ -1,0 +1,545 @@
+{
+  "source": "https://api.wandb.ai/graphql",
+  "captured_at": "2026-09-07T12:45:24.487Z",
+  "fields": {
+    "PageInfo": {
+      "endCursor": {
+        "type": "String",
+        "args": {}
+      },
+      "hasNextPage": {
+        "type": "Boolean!",
+        "args": {}
+      },
+      "startCursor": {
+        "type": "String",
+        "args": {}
+      },
+      "hasPreviousPage": {
+        "type": "Boolean!",
+        "args": {}
+      }
+    },
+    "ProjectEdge": {
+      "node": {
+        "type": "Project",
+        "args": {}
+      },
+      "cursor": {
+        "type": "String!",
+        "args": {}
+      }
+    },
+    "ProjectConnection": {
+      "edges": {
+        "type": "[ProjectEdge!]!",
+        "args": {}
+      },
+      "pageInfo": {
+        "type": "PageInfo!",
+        "args": {}
+      }
+    },
+    "RunEdge": {
+      "node": {
+        "type": "Run!",
+        "args": {}
+      },
+      "cursor": {
+        "type": "String!",
+        "args": {}
+      }
+    },
+    "RunConnection": {
+      "edges": {
+        "type": "[RunEdge!]!",
+        "args": {}
+      },
+      "pageInfo": {
+        "type": "PageInfo!",
+        "args": {}
+      },
+      "totalCount": {
+        "type": "Int!",
+        "args": {}
+      }
+    },
+    "FileEdge": {
+      "node": {
+        "type": "File",
+        "args": {}
+      },
+      "cursor": {
+        "type": "String!",
+        "args": {}
+      }
+    },
+    "FileConnection": {
+      "edges": {
+        "type": "[FileEdge!]!",
+        "args": {}
+      },
+      "pageInfo": {
+        "type": "PageInfo!",
+        "args": {}
+      },
+      "totalCount": {
+        "type": "Int!",
+        "args": {}
+      }
+    },
+    "Entity": {
+      "name": {
+        "type": "String!",
+        "args": {}
+      }
+    },
+    "EntityEdge": {
+      "node": {
+        "type": "Entity",
+        "args": {}
+      }
+    },
+    "EntityConnection": {
+      "edges": {
+        "type": "[EntityEdge!]!",
+        "args": {}
+      }
+    },
+    "ApiKey": {
+      "id": {
+        "type": "ID!",
+        "args": {}
+      },
+      "name": {
+        "type": "String!",
+        "args": {}
+      },
+      "description": {
+        "type": "String",
+        "args": {}
+      }
+    },
+    "ApiKeyEdge": {
+      "node": {
+        "type": "ApiKey",
+        "args": {}
+      }
+    },
+    "ApiKeyConnection": {
+      "edges": {
+        "type": "[ApiKeyEdge!]!",
+        "args": {}
+      }
+    },
+    "User": {
+      "id": {
+        "type": "ID!",
+        "args": {}
+      },
+      "name": {
+        "type": "String!",
+        "args": {}
+      },
+      "username": {
+        "type": "String",
+        "args": {}
+      },
+      "email": {
+        "type": "String",
+        "args": {}
+      },
+      "entity": {
+        "type": "String",
+        "args": {}
+      },
+      "admin": {
+        "type": "Boolean",
+        "args": {}
+      },
+      "flags": {
+        "type": "JSONString",
+        "args": {}
+      },
+      "deletedAt": {
+        "type": "DateTime",
+        "args": {}
+      },
+      "teams": {
+        "type": "EntityConnection",
+        "args": {}
+      },
+      "apiKeys": {
+        "type": "ApiKeyConnection",
+        "args": {}
+      }
+    },
+    "File": {
+      "id": {
+        "type": "ID!",
+        "args": {}
+      },
+      "name": {
+        "type": "String!",
+        "args": {}
+      },
+      "url": {
+        "type": "String",
+        "args": {
+          "upload": {
+            "type": "Boolean",
+            "default": null
+          }
+        }
+      },
+      "directUrl": {
+        "type": "String!",
+        "args": {}
+      },
+      "sizeBytes": {
+        "type": "Int64!",
+        "args": {}
+      },
+      "mimetype": {
+        "type": "String",
+        "args": {}
+      },
+      "updatedAt": {
+        "type": "DateTime",
+        "args": {}
+      },
+      "md5": {
+        "type": "String",
+        "args": {}
+      }
+    },
+    "Sweep": {
+      "id": {
+        "type": "ID!",
+        "args": {}
+      },
+      "name": {
+        "type": "String!",
+        "args": {}
+      },
+      "displayName": {
+        "type": "String",
+        "args": {}
+      },
+      "state": {
+        "type": "String!",
+        "args": {}
+      },
+      "runCountExpected": {
+        "type": "Int",
+        "args": {}
+      },
+      "bestLoss": {
+        "type": "Float",
+        "args": {}
+      },
+      "config": {
+        "type": "String!",
+        "args": {}
+      },
+      "method": {
+        "type": "String!",
+        "args": {}
+      },
+      "description": {
+        "type": "String",
+        "args": {}
+      },
+      "createdAt": {
+        "type": "DateTime!",
+        "args": {}
+      },
+      "updatedAt": {
+        "type": "DateTime",
+        "args": {}
+      },
+      "runCount": {
+        "type": "Int!",
+        "args": {}
+      }
+    },
+    "ParquetHistory": {
+      "parquetUrls": {
+        "type": "[String!]!",
+        "args": {}
+      },
+      "liveData": {
+        "type": "[JSON!]!",
+        "args": {}
+      }
+    },
+    "Run": {
+      "id": {
+        "type": "ID!",
+        "args": {}
+      },
+      "projectId": {
+        "type": "ID!",
+        "args": {}
+      },
+      "name": {
+        "type": "String!",
+        "args": {}
+      },
+      "displayName": {
+        "type": "String",
+        "args": {}
+      },
+      "state": {
+        "type": "String",
+        "args": {}
+      },
+      "config": {
+        "type": "JSONString",
+        "args": {}
+      },
+      "summaryMetrics": {
+        "type": "JSONString",
+        "args": {}
+      },
+      "historyKeys": {
+        "type": "JSON",
+        "args": {}
+      },
+      "historyLineCount": {
+        "type": "Int",
+        "args": {}
+      },
+      "fileCount": {
+        "type": "Int",
+        "args": {}
+      },
+      "tags": {
+        "type": "[String!]",
+        "args": {}
+      },
+      "createdAt": {
+        "type": "DateTime!",
+        "args": {}
+      },
+      "notes": {
+        "type": "String",
+        "args": {}
+      },
+      "sweepName": {
+        "type": "String",
+        "args": {}
+      },
+      "group": {
+        "type": "String",
+        "args": {}
+      },
+      "jobType": {
+        "type": "String",
+        "args": {}
+      },
+      "commit": {
+        "type": "String",
+        "args": {}
+      },
+      "readOnly": {
+        "type": "Boolean",
+        "args": {}
+      },
+      "heartbeatAt": {
+        "type": "DateTime",
+        "args": {}
+      },
+      "description": {
+        "type": "String",
+        "args": {}
+      },
+      "user": {
+        "type": "User",
+        "args": {}
+      },
+      "systemMetrics": {
+        "type": "JSONString",
+        "args": {}
+      },
+      "history": {
+        "type": "[String!]!",
+        "args": {
+          "minStep": {
+            "type": "Int64",
+            "default": null
+          },
+          "maxStep": {
+            "type": "Int64",
+            "default": null
+          },
+          "samples": {
+            "type": "Int",
+            "default": null
+          }
+        }
+      },
+      "sampledHistory": {
+        "type": "[JSON!]!",
+        "args": {
+          "specs": {
+            "type": "[JSONString!]!",
+            "default": null
+          }
+        }
+      },
+      "parquetHistory": {
+        "type": "ParquetHistory!",
+        "args": {
+          "liveKeys": {
+            "type": "[String!]!",
+            "default": null
+          }
+        }
+      },
+      "files": {
+        "type": "FileConnection",
+        "args": {
+          "after": {
+            "type": "String",
+            "default": null
+          },
+          "first": {
+            "type": "Int",
+            "default": null
+          },
+          "names": {
+            "type": "[String]",
+            "default": null
+          },
+          "pattern": {
+            "type": "String",
+            "default": null
+          }
+        }
+      }
+    },
+    "Project": {
+      "id": {
+        "type": "ID!",
+        "args": {}
+      },
+      "internalId": {
+        "type": "ID!",
+        "args": {}
+      },
+      "name": {
+        "type": "String!",
+        "args": {}
+      },
+      "entityName": {
+        "type": "String!",
+        "args": {}
+      },
+      "createdAt": {
+        "type": "DateTime!",
+        "args": {}
+      },
+      "isBenchmark": {
+        "type": "Boolean!",
+        "args": {}
+      },
+      "description": {
+        "type": "String",
+        "args": {}
+      },
+      "readOnly": {
+        "type": "Boolean",
+        "args": {}
+      },
+      "user": {
+        "type": "User",
+        "args": {}
+      },
+      "runCount": {
+        "type": "Int!",
+        "args": {
+          "filters": {
+            "type": "JSONString",
+            "default": null
+          }
+        }
+      },
+      "runs": {
+        "type": "RunConnection",
+        "args": {
+          "after": {
+            "type": "String",
+            "default": null
+          },
+          "first": {
+            "type": "Int",
+            "default": null
+          },
+          "order": {
+            "type": "String",
+            "default": null
+          },
+          "filters": {
+            "type": "JSONString",
+            "default": null
+          }
+        }
+      },
+      "run": {
+        "type": "Run",
+        "args": {
+          "name": {
+            "type": "String!",
+            "default": null
+          }
+        }
+      },
+      "sweep": {
+        "type": "Sweep",
+        "args": {
+          "sweepName": {
+            "type": "String!",
+            "default": null
+          }
+        }
+      }
+    },
+    "Query": {
+      "models": {
+        "type": "ProjectConnection",
+        "args": {
+          "entityName": {
+            "type": "String",
+            "default": null
+          },
+          "after": {
+            "type": "String",
+            "default": null
+          },
+          "first": {
+            "type": "Int",
+            "default": null
+          }
+        }
+      },
+      "project": {
+        "type": "Project",
+        "args": {
+          "name": {
+            "type": "String",
+            "default": null
+          },
+          "entityName": {
+            "type": "String",
+            "default": null
+          }
+        }
+      },
+      "viewer": {
+        "type": "User",
+        "args": {}
+      }
+    }
+  }
+}

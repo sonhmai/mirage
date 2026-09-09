@@ -36,6 +36,24 @@ export class CallFrame {
 export class CallStack {
   private readonly frames: CallFrame[] = [new CallFrame()]
 
+  fork(): CallStack {
+    const child = new CallStack()
+    child.frames.splice(
+      0,
+      child.frames.length,
+      ...this.frames.map(
+        (frame) =>
+          new CallFrame({
+            positional: [...frame.positional],
+            locals: { ...frame.locals },
+            functionName: frame.functionName,
+            loopLevel: frame.loopLevel,
+          }),
+      ),
+    )
+    return child
+  }
+
   get current(): CallFrame {
     const frame = this.frames[this.frames.length - 1]
     if (frame === undefined) throw new Error('call stack is empty')

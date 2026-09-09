@@ -31,6 +31,7 @@ interface InterpreterDeps {
 }
 
 interface InterpreterOpts {
+  command?: string
   stdin: ByteSource | null
   env: Record<string, string>
   code: string | null
@@ -109,21 +110,20 @@ export function makeInterpreterHandler(spec: InterpreterSpec): InterpreterHandle
     opts: InterpreterOpts,
     deps: InterpreterDeps,
   ): Promise<Result> {
+    const label = opts.command ?? spec.label
     let code = opts.code
     const cmdStr =
-      pathScope !== null
-        ? `${spec.label} ${pathScope.virtual}`
-        : `${spec.label} ${spec.payloadFlag}`
+      pathScope !== null ? `${label} ${pathScope.virtual}` : `${label} ${spec.payloadFlag}`
 
     if (code === null) {
-      if (pathScope === null) return errorResult(cmdStr, `${spec.label}: no input\n`, 1)
+      if (pathScope === null) return errorResult(cmdStr, `${label}: no input\n`, 1)
       try {
         const [data] = await dispatch('read', toPathSpec(pathScope))
         const bytes = await readAllBytes(data)
         code = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
         if (opts.transformSource !== undefined) code = opts.transformSource(code)
       } catch {
-        return errorResult(cmdStr, `${spec.label}: ${pathScope.virtual}: No such file\n`, 1)
+        return errorResult(cmdStr, `${label}: ${pathScope.virtual}: No such file\n`, 1)
       }
     }
 
@@ -152,10 +152,10 @@ export function makeInterpreterHandler(spec: InterpreterSpec): InterpreterHandle
       // failure: let it reach the workspace's 124 handler.
       if (err instanceof CommandTimeoutError) throw err
       if (spec.isUnavailable(err)) {
-        return errorResult(cmdStr, `${spec.label}: ${(err as Error).message}\n`, 127)
+        return errorResult(cmdStr, `${label}: ${(err as Error).message}\n`, 127)
       }
       const msg = err instanceof Error ? err.message : String(err)
-      return errorResult(cmdStr, `${spec.label}: ${msg}\n`, 1)
+      return errorResult(cmdStr, `${label}: ${msg}\n`, 1)
     }
   }
 }

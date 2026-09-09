@@ -147,6 +147,7 @@ describe('ResourceName', () => {
       'supabase',
       'tencent',
       'trello',
+      'wandb',
       'wasabi',
     ])
   })

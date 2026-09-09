@@ -53,7 +53,7 @@
           "command": "python -m json.tool",
           "expect": {
             "exit": 1,
-            "stderr": "python3: -m is not supported by the 'monty' runtime\n"
+            "stderr": "python: -m is not supported by the 'monty' runtime\n"
           }
         }
       ]

@@ -154,9 +154,9 @@ jobs:
         working-directory: typescript
         run: pnpm install --frozen-lockfile
 
-      - name: Build core and node packages
+      - name: Build core, node, and browser packages
         working-directory: typescript
-        run: pnpm -r --filter ./packages/core --filter ./packages/node build
+        run: pnpm -r --filter ./packages/core --filter ./packages/node --filter ./packages/browser build
 
       - name: Pack tarballs
         working-directory: typescript
@@ -164,23 +164,28 @@ jobs:
           mkdir -p "$RUNNER_TEMP/minimal"
           pnpm --filter @struktoai/mirage-core pack --pack-destination "$RUNNER_TEMP/minimal"
           pnpm --filter @struktoai/mirage-node pack --pack-destination "$RUNNER_TEMP/minimal"
+          pnpm --filter @struktoai/mirage-browser pack --pack-destination "$RUNNER_TEMP/minimal"
 
       - name: Install as a bare consumer (no optional peers)
         run: |
           cd "$RUNNER_TEMP/minimal"
           npm init -y > /dev/null
-          npm install ./struktoai-mirage-core-*.tgz ./struktoai-mirage-node-*.tgz
+          npm install ./struktoai-mirage-core-*.tgz ./struktoai-mirage-node-*.tgz ./struktoai-mirage-browser-*.tgz
 
       - name: Verify optional peers stay out of the bare install
         run: |
           cd "$RUNNER_TEMP/minimal"
-          for dep in @lancedb opendal mongodb pg redis ssh2 imapflow mailparser nodemailer @zkochan; do
+          for dep in @lancedb opendal mongodb pg redis ssh2 imapflow mailparser nodemailer @zkochan e2b; do
             if [ -e "node_modules/$dep" ]; then
               echo "FAIL: optional peer $dep leaked into bare install"
               exit 1
             fi
           done
           echo "OK: no optional peers in bare install"
+
+      - name: Bundle browser package without E2B
+        working-directory: integ
+        run: node runtime/e2b_install.ts "$RUNNER_TEMP/minimal"
 
       - name: Core workspace smoke test on bare install
         run: |

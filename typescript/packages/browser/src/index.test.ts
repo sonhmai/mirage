@@ -28,6 +28,21 @@ describe('@struktoai/mirage-browser barrel exports', () => {
     expect(typeof browserPkg.Workspace).toBe('function')
   })
 
+  it('registers E2B only after importing its subpath', async () => {
+    expect(browserPkg).not.toHaveProperty('E2BRuntime')
+    expect(browserPkg.knownRuntimes()).not.toContain('e2b')
+    const { E2BRuntime } = await import('./runtime/sandbox/e2b/runtime.ts')
+    expect(browserPkg.knownRuntimes()).toContain('e2b')
+    const workspace = new browserPkg.Workspace(
+      {},
+      {
+        runtimes: [new E2BRuntime({ captures: ['python3'], config: { sandboxId: 'test' } }), 'vfs'],
+      },
+    )
+    expect(workspace).toBeInstanceOf(browserPkg.Workspace)
+    await workspace.close()
+  })
+
   it('exports OPFSResource', () => {
     expect(browserPkg.OPFSResource).toBeDefined()
     expect(typeof browserPkg.OPFSResource).toBe('function')

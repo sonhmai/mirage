@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import sys
+
 import pytest
 import pytest_asyncio
 
@@ -68,11 +70,56 @@ async def test_payload_option_without_its_argument_exits_2(ws):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("line", ["python3 -V", "python3 -VV"])
-async def test_dash_v_aliases_the_version_tier(ws, line):
+@pytest.mark.parametrize("name", ["python", "python3"])
+@pytest.mark.parametrize("flag", ["--version", "-V", "-VV"])
+async def test_version_reports_the_monty_guest(ws, name, flag):
+    io = await ws.execute(f"{name} {flag}")
+    assert io.exit_code == 0
+    assert await materialize(io.stdout) == b"Python 3.14.0 (monty)\n"
+    assert await materialize(io.stderr) == b""
+
+
+@pytest.mark.asyncio
+async def test_version_reports_the_local_interpreter(ws_cpython):
+    io = await ws_cpython.execute("python3 --version")
+    assert io.exit_code == 0
+    assert await materialize(
+        io.stdout) == f"Python {sys.version.split()[0]}\n".encode()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", [
+    "python3 -c 'print(argv[-1])' --version",
+    "python3 /version.py --version",
+    "echo 'print(argv[-1])' | python3 - --version",
+])
+async def test_program_version_operand_is_not_intercepted(ws, line):
+    await ws.execute("echo 'print(argv[-1])' > /version.py")
     io = await ws.execute(line)
     assert io.exit_code == 0
-    assert b"(Mirage)" in (await materialize(io.stdout))
+    assert await materialize(io.stdout) == b"--version\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["python", "python3", "js", "node"])
+async def test_version_without_a_runtime_uses_the_invoked_name(name):
+    ws = Workspace({"/": RAMResource()}, runtimes=[])
+    try:
+        io = await ws.execute(f"{name} --version")
+        assert io.exit_code == 127
+        assert await materialize(io.stdout) == b""
+        assert await materialize(io.stderr
+                                 ) == f"{name}: command not found\n".encode()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["python", "python3", "js", "node"])
+async def test_missing_script_uses_the_invoked_name(ws, name):
+    io = await ws.execute(f"{name} /missing-script")
+    assert io.exit_code == 1
+    assert await io.stderr_str() == f"{name}: /missing-script: No such file\n"
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,8 @@ import type { MountEntry } from '../mount/mount.ts'
 import type { Session } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import { commandName } from './utils.ts'
+import { makeAbortError, mergeSignals } from '../abort.ts'
+import { isControlFlowError } from './failure.ts'
 import type { Refusal } from '../../types.ts'
 
 /**
@@ -58,19 +60,26 @@ export async function runWholeLine(
   mounts: readonly MountEntry[],
   policies: Policies,
   invalidate: () => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<LineResult> {
   const data = stdin !== null ? await materialize(stdin) : null
   const name = commandName(command)
   const guard = resolveLimit(name, mounts)
+  const timeout = guard?.timeoutSeconds ?? null
+  const deadline = timeout !== null && timeout > 0 ? new AbortController() : null
+  const runSignal = mergeSignals(signal, deadline?.signal)
   let result: RunResult
   try {
     result = await runWithTimeout(
-      runtime.runLine(command, data, envSnapshot(session), session.cwd),
-      guard?.timeoutSeconds ?? null,
+      runtime.runLine(command, data, envSnapshot(session), session.cwd, runSignal),
+      timeout,
       name,
     )
   } catch (err) {
+    if (signal?.aborted) throw makeAbortError()
+    if (isControlFlowError(err)) throw err
     if (err instanceof CommandTimeoutError) {
+      deadline?.abort()
       result = {
         stdout: new Uint8Array(),
         stderr: new TextEncoder().encode(`${err.message}\n`),

@@ -23,6 +23,7 @@ import { resolveScript } from '../utils/operands.ts'
 import { FlagView } from '../../spec/types.ts'
 import {
   moduleSource,
+  runtimeVersion,
   PAYLOAD_ARGV0,
   STDIN_ARGV0,
   STDIN_OPERAND,
@@ -63,14 +64,20 @@ async function pythonCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
+  const label = opts.command ?? 'python3'
   if (!(opts.runtime instanceof LanguageRuntime)) {
     return [
       null,
       new IOResult({
         exitCode: 127,
-        stderr: ENC.encode('python3: command not found\n'),
+        stderr: ENC.encode(`${label}: command not found\n`),
       }),
     ]
+  }
+
+  const fl = new FlagView(opts.flags, specOf('python3'))
+  if (fl.asBool('version')) {
+    return runtimeVersion(label, opts.runtime, opts.env ?? {}, opts.signal, opts.timeoutSeconds)
   }
 
   if (opts.dispatch === undefined) {
@@ -78,12 +85,11 @@ async function pythonCommand(
       null,
       new IOResult({
         exitCode: 1,
-        stderr: ENC.encode('python3: no dispatch available\n'),
+        stderr: ENC.encode(`${label}: no dispatch available\n`),
       }),
     ]
   }
 
-  const fl = new FlagView(opts.flags, specOf('python3'))
   const code = fl.asStr('c') ?? null
   const moduleName = fl.asStr('m') ?? null
   const hasCode = code !== null
@@ -141,7 +147,7 @@ async function pythonCommand(
         null,
         new IOResult({
           exitCode: 126,
-          stderr: ENC.encode(`python3: ${display}: not in EXEC mode\n`),
+          stderr: ENC.encode(`${label}: ${display}: not in EXEC mode\n`),
         }),
       ]
     }
@@ -150,12 +156,12 @@ async function pythonCommand(
       null,
       new IOResult({
         exitCode: 126,
-        stderr: ENC.encode("python3: root mount '/' is not in EXEC mode\n"),
+        stderr: ENC.encode(`${label}: root mount '/' is not in EXEC mode\n`),
       }),
     ]
   }
 
-  let resolvedCode: string | null = moduleName !== null ? moduleSource(moduleName, 'python3') : code
+  let resolvedCode: string | null = moduleName !== null ? moduleSource(moduleName, label) : code
   let stdinForRuntime = opts.stdin
   if (resolvedCode === null && scriptPath === null && opts.stdin !== null) {
     const bytes = await materialize(opts.stdin)
@@ -170,6 +176,7 @@ async function pythonCommand(
     scriptPath,
     argStrs,
     {
+      command: label,
       stdin: stdinForRuntime,
       env: opts.env ?? {},
       code: resolvedCode,

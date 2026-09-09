@@ -175,7 +175,7 @@
       "targets": [
         "cli-hf"
       ],
-      "command": "hf version | sed 's/[0-9][0-9.]*/N/'",
+      "command": "hf version | sed 's/[0-9][^ ]*/N/'",
       "expect": {
         "exit": 0,
         "stdout": "hf version N (mirage)\n",

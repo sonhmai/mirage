@@ -222,6 +222,15 @@ def _version_line(name: str) -> bytes:
     return f"{name} (Mirage) {__version__}\n".encode()
 
 
+def has_injected_version(spec: CommandSpec | None) -> bool:
+    """Whether the wrapper supplies this spec's version response.
+
+    Args:
+        spec (CommandSpec | None): the registered command spec.
+    """
+    return spec is not None and any(o is _VERSION_OPTION for o in spec.options)
+
+
 def version_request(name: str, spec: CommandSpec | None,
                     argv: list[str]) -> bytes | None:
     """Version output when argv asks a command for the injected --version.
@@ -234,7 +243,7 @@ def version_request(name: str, spec: CommandSpec | None,
         spec (CommandSpec | None): the command's registered spec.
         argv (list[str]): the words after the command name.
     """
-    if spec is None or not any(o is _VERSION_OPTION for o in spec.options):
+    if not has_injected_version(spec):
         return None
     for arg in argv:
         if arg == "--":
@@ -251,11 +260,13 @@ def _with_help_support(
 
     Mirrors GNU coreutils: every registered command accepts both flags,
     prints to stdout, and exits 0 without running the command body.
+    A command declaring its own --version handles that flag itself.
     """
     extras: list[Option] = []
     if not any(o.long == "--help" for o in spec.options):
         extras.append(HELP_OPTION)
-    if not any(o.long == "--version" for o in spec.options):
+    has_version = any(o.long == "--version" for o in spec.options)
+    if not has_version:
         extras.append(_VERSION_OPTION)
     new_spec = (spec if not extras else replace(
         spec, options=spec.options + tuple(extras)))
@@ -267,7 +278,7 @@ def _with_help_support(
                       texts: list[str], opts: CommandOpts) -> CommandFnResult:
         if opts.flags.get("help") is True:
             return yield_bytes(help_text), IOResult()
-        if opts.flags.get("version") is True:
+        if not has_version and opts.flags.get("version") is True:
             return yield_bytes(version_text), IOResult()
         return await fn(accessor, paths, texts, opts)
 

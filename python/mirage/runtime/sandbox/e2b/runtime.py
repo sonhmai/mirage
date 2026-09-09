@@ -12,14 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from typing import Any
 
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.constants import (sdk_install_hint, stdin_path,
-                                              stdin_redirect)
+from mirage.runtime.sandbox.constants import sdk_install_hint
 from mirage.runtime.sandbox.e2b import sdk
 from mirage.runtime.sandbox.e2b.config import E2BConfig
 from mirage.runtime.types import RunResult
+
+logger = logging.getLogger(__name__)
 
 
 class E2BRuntime(RemoteSandbox):
@@ -28,8 +30,8 @@ class E2BRuntime(RemoteSandbox):
     You create the sandbox yourself (`e2b sandbox spawn` or the SDK);
     mirage only connects by ``sandbox_id`` and execs lines.
     ``api_key`` falls back to E2B_API_KEY. E2B's exec reports stdout
-    and stderr separately, so both stream back real; it takes no
-    stdin, so piped bytes are uploaded and redirected in.
+    and stderr separately. Piped bytes use native stdin followed by
+    an explicit EOF; no input closes stdin when the command starts.
 
     Args:
         options (Any): the RemoteSandbox constructor fields.
@@ -52,23 +54,33 @@ class E2BRuntime(RemoteSandbox):
 
     async def exec_line(self, line: str, stdin: bytes | None,
                         env: dict[str, str], cwd: str) -> RunResult:
-        command = line
-        if stdin is not None:
-            path = stdin_path()
-            await self._upload(path, stdin)
-            command = stdin_redirect(line, path)
+        handle = await self._sandbox.commands.run(line,
+                                                  envs=env,
+                                                  cwd=cwd,
+                                                  background=True,
+                                                  stdin=stdin is not None)
         try:
-            result = await self._sandbox.commands.run(command,
-                                                      envs=env,
-                                                      cwd=cwd)
+            try:
+                if stdin is not None:
+                    if stdin:
+                        await handle.send_stdin(stdin)
+                    await handle.close_stdin()
+            except sdk.NotFoundException:
+                # A command may exit before the input RPC arrives. Its exit
+                # status, including nonzero exits, still determines the result.
+                result = await handle.wait()
+            else:
+                result = await handle.wait()
         except sdk.CommandExitException as exc:
             result = exc
+        except BaseException:
+            try:
+                await handle.kill()
+            except Exception:
+                logger.warning("Failed to stop the E2B command", exc_info=True)
+            raise
+        finally:
+            await handle.disconnect()
         return RunResult(stdout=str(result.stdout).encode(),
                          stderr=str(result.stderr).encode(),
                          exit_code=int(result.exit_code))
-
-    async def _upload(self, path: str, data: bytes) -> None:
-        parent = path.rsplit("/", 1)[0]
-        if parent:
-            await self._sandbox.files.make_dir(parent)
-        await self._sandbox.files.write(path, data)

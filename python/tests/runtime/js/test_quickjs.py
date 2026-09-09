@@ -19,11 +19,13 @@ from pathlib import Path
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.io.types import materialize
 from mirage.resource.ram import RAMResource
 from mirage.runtime.errors import EvalError
 from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.types import RunArgs
+from mirage.runtime.wasm import WasmVFS
 
 
 def _home_dir() -> str | None:
@@ -98,6 +100,28 @@ async def test_module_mode_is_still_the_interpreters_own_switch():
     rt = _spied_runtime()
     await rt.run(RunArgs(code="CODE", flags={"module": True}))
     assert rt._runtime.argv == ["qjs", "--std", "-m", "-e", "CODE", "--"]
+
+
+@live
+@pytest.mark.asyncio
+async def test_version_commands_report_the_quickjs_engine():
+    runtime = QuickJsRuntime()
+    raw, _, code = await runtime._runtime.run(argv=["qjs", "--version"],
+                                              stdin=None,
+                                              env=[],
+                                              fs=WasmVFS())
+    assert code == 0
+    ws = Workspace({"/": RAMResource()}, runtimes=[runtime, "vfs"])
+    try:
+        for line in ["js --version", "node --version", "js -v", "node -v"]:
+            io = await ws.execute(line)
+            assert io.exit_code == 0
+            assert await materialize(io.stdout
+                                     ) == (b"JavaScript (quickjs-ng " +
+                                           raw.strip() + b")\n")
+            assert await materialize(io.stderr) == b""
+    finally:
+        await ws.close()
 
 
 @live

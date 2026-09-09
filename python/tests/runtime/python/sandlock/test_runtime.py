@@ -18,6 +18,7 @@ import sys
 
 import pytest
 
+from mirage import MountMode, RAMResource, Workspace
 from mirage.runtime.python.sandlock import (SandlockRuntime,
                                             interpreter_readable)
 from mirage.runtime.types import RunArgs
@@ -140,6 +141,39 @@ async def test_run_wraps_the_interpreter_in_the_sandlock_cli(cli, spawned):
     assert ["-w", "/mnt/ws"] == argv[separator - 2:separator]
     assert argv[separator + 1] == sys.executable
     assert "-c" in argv[separator:]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode",
+                         [MountMode.READ, MountMode.WRITE, MountMode.EXEC])
+async def test_version_keeps_confinement_and_uses_only_config_environment(
+        cli, spawned, monkeypatch, mode):
+    monkeypatch.setenv("MIRAGE_TEST_HOST_ONLY", "not-in-child")
+    runtime = SandlockRuntime(config={"home": "python", "env": {"TZ": "UTC"}})
+    ws = Workspace({"/": RAMResource()}, mode=mode, runtimes=[runtime, "vfs"])
+    try:
+        io = await ws.execute("python --version",
+                              env={
+                                  "PYTHONPATH": "/startup",
+                                  "LD_PRELOAD": "/session/library.so",
+                                  "DYLD_INSERT_LIBRARIES":
+                                  "/session/library.dylib",
+                                  "PATH": "/session/bin",
+                                  "TZ": "session-override",
+                              })
+        assert io.exit_code == 0
+        assert await io.stdout_str() == "out"
+        assert spawned == [{
+            "argv": [
+                SANDLOCK_BIN, "run", *runtime.policy_argv(), "--",
+                "/usr/bin/python", "--version"
+            ],
+            "env": {
+                "TZ": "UTC"
+            },
+        }]
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-browser",
-  "version": "0.0.6",
+  "version": "0.0.7-alpha.2",
   "description": "A Unified Virtual Filesystem For AI Agents",
   "keywords": [
     "bash",
@@ -32,7 +32,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=20.10.0"
+    "node": ">=20.18.1 <21 || >=22"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -64,6 +64,15 @@
     "tree-sitter-bash": "^0.25.1",
     "typescript": "^6.0.0",
     "vitest": "^3.2.6",
-    "web-tree-sitter": "^0.26.13"
+    "web-tree-sitter": "^0.26.13",
+    "e2b": "^2.45.0"
+  },
+  "peerDependencies": {
+    "e2b": "^2.45.0"
+  },
+  "peerDependenciesMeta": {
+    "e2b": {
+      "optional": true
+    }
   }
 }

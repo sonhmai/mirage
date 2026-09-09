@@ -72,6 +72,7 @@ class WasiRuntime(PythonRuntime):
     """
 
     name = "wasi"
+    version_suffix = " (wasi)"
     # Guest file I/O can only travel the workspace bridge; the one
     # host surface is the interpreter's own build directory, served
     # read-only (mutations raise PermissionError in WasmVFS), so

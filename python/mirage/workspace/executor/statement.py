@@ -61,6 +61,26 @@ def record_status(session: Session,
 
 @dataclass(frozen=True, slots=True)
 class StatusSnapshot:
+    """The status a line found, taken before its first statement runs
+    and put back if the caller cancels the line.
+
+    A cancelled invocation is the caller's outcome, not the shell's, so
+    it must leave ``$?`` where it was. But the cancellation lands on one
+    await inside the line, and every statement before that await has
+    already stamped through ``record_status``; only a copy taken before
+    the line can undo them.
+
+    The three fields travel together because they are one shell fact:
+    ``$?``, ``${PIPESTATUS[@]}``, and the per-segment statuses a
+    pipeline parked for its boundary to claim. Restoring one without
+    the others would leave a state no bash line produces.
+
+    Attributes:
+        last_exit_code (int): ``$?``.
+        pipe_status (tuple[int, ...]): ``${PIPESTATUS[@]}``.
+        pipe_status_pending (tuple[int, ...] | None): statuses a
+            pipeline parked for the enclosing boundary.
+    """
     last_exit_code: int
     pipe_status: tuple[int, ...]
     pipe_status_pending: tuple[int, ...] | None

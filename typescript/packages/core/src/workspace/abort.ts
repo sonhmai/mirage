@@ -13,36 +13,58 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createAsyncContext } from '../utils/async_context.ts'
+import type { Session } from './session/session.ts'
 
 /**
- * The signal of the line the current task is running, bound by `execute`
- * for the line's duration and read at the status door. It rides the async
- * context rather than the session, so two lines on one session each see
- * their own, and a statement that settles after its caller was released
- * still reads the signal of the line that produced it.
+ * One running line: its signal and the sessions its statements stamp
+ * on (the target session and the per-call fork, one object when the
+ * call named no cwd or env). Bound by `execute` for the line's duration
+ * and read at the status door. It rides the async context rather than
+ * the session, so two lines on one session each see their own, and a
+ * statement that settles after its caller was released still reads the
+ * signal of the line that produced it.
  */
-const lineAbortContext = createAsyncContext<{ signal: AbortSignal | undefined }>()
+interface LineAbortFrame {
+  signal: AbortSignal | undefined
+  sessions: readonly Session[]
+}
+
+const lineAbortContext = createAsyncContext<LineAbortFrame>()
 
 /**
  * Run `fn` as the body of the line `signal` belongs to. Everything the
- * body awaits, down to the status door, can then ask `currentLineAbort`
+ * body awaits, down to the status door, can then ask `abortedLine`
  * whether its caller is still waiting, without the signal being threaded
  * through every handler. `execute` is the only caller.
  */
 export function runWithLineAbort<T>(
   signal: AbortSignal | undefined,
+  sessions: readonly Session[],
   fn: () => Promise<T>,
 ): Promise<T> {
-  return Promise.resolve(lineAbortContext.run({ signal }, fn))
+  return Promise.resolve(lineAbortContext.run({ signal, sessions }, fn))
 }
 
 /**
- * The signal of the line the current task belongs to, or undefined
- * outside `execute` (a background job, a test driving a handler
- * directly), where nobody is waiting and nothing is an orphan.
+ * The aborted signal of the line stamping on `session`, or undefined
+ * when that line is still wanted, or when no line is running at all (a
+ * background job, a test driving a handler directly): nobody is
+ * waiting there and nothing is an orphan.
+ *
+ * Read from every live frame for the session rather than the newest
+ * frame. On an isolating runtime the live frames are the current task's
+ * alone, so the answer is exact. On the browser fallback the newest
+ * frame may belong to another line that happens to overlap, so the door
+ * refuses only when every live line on this session has aborted: one
+ * line's abort never reaches a concurrent line's statement, and the one
+ * case left open is two aborted-or-not lines overlapping on one session
+ * without task isolation, where the fallback cannot tell them apart.
  */
-export function currentLineAbort(): AbortSignal | undefined {
-  return lineAbortContext.getStore()?.signal
+export function abortedLine(session: Session): AbortSignal | undefined {
+  const frames = lineAbortContext.liveStores().filter((f) => f.sessions.includes(session))
+  if (frames.length === 0) return undefined
+  const aborted = frames.filter((f) => f.signal?.aborted === true)
+  return aborted.length === frames.length ? aborted[0]?.signal : undefined
 }
 
 /**

@@ -391,25 +391,28 @@ async function runLine(
     // The line's signal, the caller's folded with the session's kill
     // channel, rides the async context so the status door can refuse an
     // orphan of this line and no other.
-    return await runWithLineAbort(mergeSignals(options.signal, effectiveSession.abortSignal), () =>
-      runWithSession(
-        effectiveSession,
-        () =>
-          runParsedLine(
-            env,
-            command,
-            options,
-            rootNode,
-            deps,
-            targetSession,
-            effectiveSession,
-            stdin,
-            (line) => parser.parse(line),
-            nested,
-            handed,
-          ),
-        env.sessions,
-      ),
+    return await runWithLineAbort(
+      mergeSignals(options.signal, effectiveSession.abortSignal),
+      [targetSession, effectiveSession],
+      () =>
+        runWithSession(
+          effectiveSession,
+          () =>
+            runParsedLine(
+              env,
+              command,
+              options,
+              rootNode,
+              deps,
+              targetSession,
+              effectiveSession,
+              stdin,
+              (line) => parser.parse(line),
+              nested,
+              handed,
+            ),
+          env.sessions,
+        ),
     )
   } finally {
     // Durable session fields (cwd, env, grants) flush at the end of

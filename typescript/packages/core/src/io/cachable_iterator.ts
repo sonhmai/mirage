@@ -19,6 +19,10 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
   private readonly buffer: Uint8Array[] = []
   private exhaustedFlag = false
   private discardedFlag = false
+  // Set while a pull on the source is outstanding. A pull the consumer
+  // abandoned (raced against a signal) stays outstanding, and a return
+  // queued behind it would never settle.
+  private pulling = false
   private readonly checkpoint = new Checkpoint()
 
   constructor(source: AsyncIterable<Uint8Array>) {
@@ -55,7 +59,7 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
     try {
       const pending = this.checkpoint.run()
       if (pending !== undefined) await pending
-      const result = await this.source.next()
+      const result = await this.pull()
       if (result.done === true) {
         this.exhaustedFlag = true
         return { done: true, value: undefined }
@@ -74,7 +78,7 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
       for (;;) {
         const pending = this.checkpoint.run()
         if (pending !== undefined) await pending
-        const result = await this.source.next()
+        const result = await this.pull()
         if (result.done === true) break
         this.buffer.push(result.value)
       }
@@ -99,7 +103,7 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
       for (;;) {
         const pending = this.checkpoint.run()
         if (pending !== undefined) await pending
-        const result = await this.source.next()
+        const result = await this.pull()
         if (result.done === true) break
         this.buffer.push(result.value)
         total += result.value.byteLength
@@ -117,14 +121,35 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
     return concat(this.buffer)
   }
 
+  private async pull(): Promise<IteratorResult<Uint8Array>> {
+    this.pulling = true
+    try {
+      return await this.source.next()
+    } finally {
+      // Reached only when the pull settled; an abandoned pull leaves the
+      // flag set, which is what discard reads.
+      this.pulling = false
+    }
+  }
+
   // Explicit failure cleanup; no return(), so normal early consumers can still drain.
   async discard(): Promise<void> {
     if (this.discardedFlag) return
     this.discardedFlag = true
     this.exhaustedFlag = true
     this.buffer.length = 0
+    const closing = this.source.return?.(undefined)
+    if (closing === undefined) return
+    // A return queued behind a pull that never settles would hang the
+    // cleanup that called this, and with it the abort or timeout it is
+    // cleaning up after. Behind an outstanding pull it is not awaited;
+    // the producer closes when the pull settles, if it ever does.
+    if (this.pulling) {
+      void closing.catch(() => undefined)
+      return
+    }
     try {
-      await this.source.return?.(undefined)
+      await closing
     } catch {
       // Failed content is already discarded; preserve the consumer's error.
     }

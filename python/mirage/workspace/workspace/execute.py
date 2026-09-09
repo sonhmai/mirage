@@ -91,14 +91,15 @@ class NestedRefusal:
 
 async def recurse(
     ws: "Workspace",
-    cancel: asyncio.Event | None,
-    routing_decision: RouteDecision | None,
-    agent_id: str | None,
-    nested: NestedRefusal,
     cmd: str,
     node: Any = None,
     span: tuple[int, int] | None = None,
     handed: HandOff | None = None,
+    *,
+    cancel: asyncio.Event | None,
+    routing_decision: RouteDecision | None,
+    agent_id: str | None,
+    nested: NestedRefusal,
     **opts: Any,
 ) -> Any:
     """The executor's internal eval ($(), source, eval, xargs, ...).
@@ -119,7 +120,9 @@ async def recurse(
 
     Args:
         ws: the workspace hosting the outer line.
-        cancel (asyncio.Event | None): the outer line's abort event.
+        cancel (asyncio.Event | None): the abort event of the line or
+            job this evaluation runs in; the walker rebinds it at every
+            node, so a background job's evaluations carry none.
         routing_decision (RouteDecision | None): the typed line's
             decision, inherited verbatim.
         agent_id (str | None): the typed line's agent, inherited.
@@ -309,7 +312,15 @@ async def execute_line(
         # job's subtree runs on a hand-off of the job's own.
         if handed is None:
             handed = HandOff()
-        exec_recursion = partial(recurse, ws, cancel, decision, agent, nested)
+        # Bound by keyword so the walker can rebind it per node: a
+        # background job's nested lines run without the caller's event,
+        # as the job itself does.
+        exec_recursion = partial(recurse,
+                                 ws,
+                                 cancel=cancel,
+                                 routing_decision=decision,
+                                 agent_id=agent,
+                                 nested=nested)
         if provision:
             name = command_name(command)
             guard = resolve_limit(name) if name else None

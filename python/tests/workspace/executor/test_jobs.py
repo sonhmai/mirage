@@ -538,3 +538,19 @@ async def test_background_condition_and_function_scope(line, expected, code):
         assert result.exit_code == code
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_job_evaluating_a_nested_line_survives_the_line_cancel():
+    # The launching line returned; its caller then set the event. The
+    # job is not the caller's to abort, and neither is a line the job
+    # evaluates on its way.
+    ws = _workspace()
+    cancel = asyncio.Event()
+    await ws.execute("{ sleep 0.1; echo $(echo inner); } &", cancel=cancel)
+    cancel.set()
+    await ws.job_table.wait(1)
+    job = ws.job_table.get(1)
+    assert job is not None
+    assert job.exit_code == 0
+    assert (await job.console.snapshot(Channel.STDOUT)) == b"inner\n"

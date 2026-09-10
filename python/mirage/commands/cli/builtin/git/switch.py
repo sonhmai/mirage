@@ -29,8 +29,8 @@ from mirage.commands.cli.builtin.git.refs import (BRANCH_PREFIX, TAG_PREFIX,
                                                   read_head, valid_ref_name)
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
-                                                  links_of)
+from mirage.commands.cli.builtin.git.util import (  # yapf: disable
+    check_operands, escaped, fatal, links_of)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
@@ -106,7 +106,7 @@ async def switch(
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(texts, UnknownSwitchError)
+        check_operands(texts, UnknownSwitchError, escaped(inv.argv))
         flags = parse_flags(fl)
         creating = flags.create is not None
         if creating and flags.detach:

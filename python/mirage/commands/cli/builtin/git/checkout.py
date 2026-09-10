@@ -33,6 +33,7 @@ from mirage.commands.cli.builtin.git.format import short, subject
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import remove_file, restore_entry
 from mirage.commands.cli.builtin.git.objects import abbrev_for
+from mirage.commands.cli.builtin.git.pathspec import under
 from mirage.commands.cli.builtin.git.reflog import record
 from mirage.commands.cli.builtin.git.refs import (BRANCH_PREFIX, detach_head,
                                                   read_head, set_head,
@@ -41,8 +42,8 @@ from mirage.commands.cli.builtin.git.reset import restored
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import HeadRef, RepoLocation
-from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
-                                                  links_of)
+from mirage.commands.cli.builtin.git.util import (  # yapf: disable
+    check_operands, escaped, fatal, links_of)
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
@@ -144,6 +145,15 @@ def _conflicts(before: Tree, after: Tree, dirty: set[str]) -> list[str]:
                   if before.get(path.encode()) != after.get(path.encode()))
 
 
+def _tree_names(tree: Tree) -> set[str]:
+    """The paths a tree records, as text.
+
+    Args:
+        tree (Tree): a flattened tree, keyed by encoded path.
+    """
+    return {name.decode("utf-8", errors="replace") for name in tree}
+
+
 def _overwritten(after: Tree, untracked: list[str]) -> list[str]:
     """Which untracked files the tree being switched to would write over.
 
@@ -153,11 +163,36 @@ def _overwritten(after: Tree, untracked: list[str]) -> list[str]:
     one. An ignored file is not in this list and git overwrites it
     silently, which is the same split. Pinned against git 2.50.
 
+    Equality is not the whole test. An untracked file ``slot`` is also
+    in the way of a target that records ``slot/child``, because the
+    directory cannot be created without deleting it; git names the
+    untracked file itself there, not the entry that needs the room.
+
     Args:
         after (Tree): the tree being switched to.
         untracked (list[str]): every untracked path the walk found.
     """
-    return sorted(path for path in untracked if path.encode() in after)
+    names = _tree_names(after)
+    return sorted(path for path in untracked
+                  if path in names or any(under(name, path) for name in names))
+
+
+def _lost_directories(after: Tree, untracked: list[str]) -> list[str]:
+    """Which directories the switch would empty of untracked files.
+
+    The mirror of the case above: the target records a *file* where the
+    working tree has a directory, so writing it means removing the
+    directory, and anything untracked inside it is gone. git words this
+    one differently and names the directory rather than the files, since
+    the directory is what the caller has to move. Pinned against git
+    2.50.1.
+
+    Args:
+        after (Tree): the tree being switched to.
+        untracked (list[str]): every untracked path the walk found.
+    """
+    return sorted(name for name in _tree_names(after) if any(
+        under(path, name) for path in untracked))
 
 
 async def _switch(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
@@ -292,8 +327,9 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
     dirty = set(unstaged) | staged
     blocked = _conflicts(before, after, dirty)
     overwritten = _overwritten(after, found.untracked)
-    if blocked or overwritten:
-        raise CheckoutConflictError(blocked, overwritten)
+    lost = _lost_directories(after, found.untracked)
+    if blocked or overwritten or lost:
+        raise CheckoutConflictError(blocked, overwritten, lost)
     await _switch(dispatch, repo, location, before, after, dirty,
                   state.entries, links)
     if creating and ref is not None:
@@ -335,7 +371,7 @@ async def checkout(
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(texts, UnknownSwitchError)
+        check_operands(texts, UnknownSwitchError, escaped(inv.argv))
         if not texts:
             raise UnknownPathspecError("")
         target = texts[0]

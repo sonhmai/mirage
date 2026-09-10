@@ -168,3 +168,41 @@ async def test_a_source_that_is_no_tree_is_still_refused(git_rw):
     code, _out, err = await run(git_rw, "restore --source=nosuch a.txt")
     assert code == 128
     assert err == b"fatal: could not resolve nosuch\n"
+
+
+@pytest.mark.asyncio
+async def test_a_directory_source_replaces_a_file(git_rw, repo_path: Path):
+    await run(git_rw, "rm --cached a.txt")
+    (repo_path / "a.txt").unlink()
+    (repo_path / "a.txt").mkdir()
+    (repo_path / "a.txt" / "child").write_text("inner\n", encoding="utf-8")
+    await run(git_rw, "add a.txt")
+    await run(git_rw, "commit -m dir")
+    with Repo(str(repo_path)) as repo:
+        tree = repo[b"HEAD"].tree.decode()
+    await run(git_rw, "rm -r --cached a.txt")
+    (repo_path / "a.txt" / "child").unlink()
+    (repo_path / "a.txt").rmdir()
+    (repo_path / "a.txt").write_text("flat\n", encoding="utf-8")
+    await run(git_rw, "add a.txt")
+    assert await run(git_rw,
+                     f"restore --source={tree} -SW a.txt") == (0, b"", b"")
+    assert (repo_path / "a.txt" / "child").read_text() == "inner\n"
+    # The source is HEAD's tree, so a restore that reached both the index
+    # and the working tree leaves nothing for status to report.
+    assert (await run(git_rw, "status --porcelain"))[1] == b""
+
+
+@pytest.mark.asyncio
+async def test_a_file_source_replaces_a_directory(git_rw, repo_path: Path):
+    with Repo(str(repo_path)) as repo:
+        tree = repo[b"HEAD"].tree.decode()
+    await run(git_rw, "rm --cached a.txt")
+    (repo_path / "a.txt").unlink()
+    (repo_path / "a.txt").mkdir()
+    (repo_path / "a.txt" / "child").write_text("inner\n", encoding="utf-8")
+    await run(git_rw, "add a.txt")
+    assert await run(git_rw,
+                     f"restore --source={tree} -SW a.txt") == (0, b"", b"")
+    assert (repo_path / "a.txt").read_text() == "one changed\n"
+    assert not (repo_path / "a.txt" / "child").exists()

@@ -117,10 +117,10 @@ git -C /repo tag -d v1.0
 | `reset`    | mixed only, from HEAD; a pathspec limits it to those paths                                                                              |
 | `restore`  | worktree by default, `--staged` the index, `-SW` both; `--source` takes any tree-ish, and a path it lacks is removed from the target   |
 | `rm`       | refuses a path with uncommitted work unless `-f`; `--cached` keeps the file; `-r` for a directory; `-q`, `--ignore-unmatch`             |
-| `mv`       | files and directories, `-f` over an existing file, `-k` skips what cannot move, `-n` dry run, `-v`; two sources cannot land on one name, and an unmerged path moves nowhere |
+| `mv`       | files and directories, `-f` over an existing file, `-k` skips what cannot move, `-n` dry run, `-v`; two sources cannot land on one name, an unmerged path moves nowhere, and a directory holding a mount is refused rather than half-moved |
 | `commit`   | `-m` required, `--author "Name <email>"` optional                                                                                       |
 | `branch`   | `-d` deletes a merged branch, `-D` any branch                                                                                           |
-| `checkout` | refuses rather than overwrite work you have not committed                                                                              |
+| `checkout` | refuses rather than overwrite work you have not committed, an untracked file the target needs the room for included                     |
 | `switch`   | the same move for a branch only; `-c` creates and checks the name against git's ref rules, `--detach` is the only way onto a bare commit and takes HEAD when nothing is named |
 | `tag`      | lists sorted, `-l <pattern>`, `-n[<num>]`; a name is a lightweight tag, `-a`/`-m` an annotated one; any object is a legal target; `-d`, `-f`; a creation option needs a name |
 
@@ -131,6 +131,11 @@ serve, and inventing a name would put an unreviewed one into history.
 ## Deliberate limits
 
 - **No network verbs.** `clone`, `fetch`, `pull` and `push` are absent.
+- **A pathspec that begins with a dash needs `--`.** `git rm -draft` is a
+  refused switch and `git rm -- -draft` removes the file, which is what
+  every synopsis ending `[--] [<pathspec>...]` promises. The marker
+  itself is consumed by the parser, so a verb reading a *revision* still
+  resolves an escaped word as one rather than narrowing by it.
 - **No `reset --hard`.** It destroys uncommitted work with no reflog here
   to recover it from. `rm` and `restore` are the way to discard a file's
   changes on purpose, and `rm` refuses unless `-f` says so.

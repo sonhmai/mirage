@@ -164,3 +164,13 @@ async def test_a_directory_is_refused_without_r_and_removed_with_it(
     assert await run(git_rw, "rm -r docs") == (0, b"rm 'docs/one.md'\n", b"")
     # git removes the directory its last tracked file left empty.
     assert not (repo_path / "docs").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_dashed_pathspec_is_removed_when_the_line_escapes_it(
+        git_rw, repo_path: Path):
+    (repo_path / "-draft").write_text("x\n", encoding="utf-8")
+    await run(git_rw, "add -- -draft")
+    await run(git_rw, "commit -m draft")
+    assert await run(git_rw, "rm -- -draft") == (0, b"rm '-draft'\n", b"")
+    assert not (repo_path / "-draft").exists()

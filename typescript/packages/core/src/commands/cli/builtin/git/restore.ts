@@ -35,7 +35,7 @@ import { restored } from './reset.ts'
 import { resolveCommit } from './revparse.ts'
 import { commitEntries, treeEntries, type TreeEntry } from './tree.ts'
 import type { IndexEntry } from './types.ts'
-import { checkOperands, fatal, startPoint } from './util.ts'
+import { checkOperands, escaped, fatal, startPoint } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 /** The parsed shape of a `git restore` invocation. */
@@ -113,7 +113,7 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
-    checkOperands(texts, UnknownSwitchError)
+    checkOperands(texts, UnknownSwitchError, escaped(inv.argv))
     if (texts.length === 0) throw new NoRestorePathsError()
     const flags = parseFlags(fl)
     const repo = await opened(fl, doors)
@@ -148,6 +148,16 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
       await updateIndex(repo, staged, absent)
     }
     if (flags.worktree) {
+      // Removals first, because the two sets can name the same place:
+      // restoring a directory over a file writes `slot/child` where the
+      // file `slot` still sits, and the other direction writes the file
+      // where the directory still sits. Nothing is read back from the
+      // working tree, so emptying it first is free.
+      for (const name of absent) {
+        const path = under(repo.location.worktree, name)
+        await removeFile(dispatch, path)
+        await removeEmptyParents(dispatch, path, repo.location.worktree)
+      }
       for (const name of present) {
         const entry = tree.get(name)
         if (entry === undefined) continue
@@ -159,11 +169,6 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
           blob,
           doors.ns?.links ?? null,
         )
-      }
-      for (const name of absent) {
-        const path = under(repo.location.worktree, name)
-        await removeFile(dispatch, path)
-        await removeEmptyParents(dispatch, path, repo.location.worktree)
       }
     }
   } catch (err) {

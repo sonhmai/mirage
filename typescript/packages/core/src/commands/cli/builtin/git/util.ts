@@ -20,6 +20,8 @@ import type { GitError } from './errors.ts'
 import { UnrecognizedArgumentError } from './errors.ts'
 
 const ROOT = '/'
+// The end-of-options marker, which the parser consumes.
+const MARKER = '--'
 
 const ENC = new TextEncoder()
 
@@ -53,6 +55,27 @@ export function revisionArg(texts: readonly string[], fallback: string = HEAD): 
 }
 
 /**
+ * The words a `--` on the line marked as operands, not options.
+ *
+ * `--` is exactly how a caller names a file whose name begins with a dash, and
+ * git says so in every synopsis that ends `[--] [<pathspec>...]`: `git rm
+ * -draft` is a refused switch and `git rm -- -draft` removes the file. The
+ * parser consumes the marker, so the words themselves are what carries the fact
+ * forward, read back off the verbatim argv the record already holds.
+ *
+ * A set is enough. A dash word before the marker was read as an option and
+ * never reached the operands, so a word that is here and also spelled earlier on
+ * the line is still the escaped one.
+ *
+ * @param argv the line's verbatim tokens after the head word, subcommand words
+ *   included
+ */
+export function escaped(argv: readonly string[]): Set<string> {
+  const at = argv.indexOf(MARKER)
+  return at === -1 ? new Set() : new Set(argv.slice(at + 1))
+}
+
+/**
  * Refuse an operand that is really an option this build lacks.
  *
  * A verb taking a revision accepts free text, so every flag mirage does not
@@ -61,26 +84,30 @@ export function revisionArg(texts: readonly string[], fallback: string = HEAD): 
  * when what happened is that mirage has no such flag. Refused here, before any
  * object is read, so the message names the real problem.
  *
- * A pathspec is not checked for and cannot be: the shared parser consumes `--`
- * as its end-of-options marker, so `log -- a.txt` and `log a.txt` reach a leaf
- * identically. Both resolve the operand as a revision and fail with git's own
- * "unknown revision or path" wording, which is exactly right for an untracked
- * path and a deliberate divergence for a tracked one, where git would narrow the
- * walk instead. Erring is the safe half of that trade: limiting by nothing would
- * print every commit and look like an answer.
+ * Unless the caller said otherwise. A word after `--` is an operand by the
+ * caller's own instruction whatever it starts with, so it is never read as an
+ * option here; see `escaped`, which is where the marker survives the parser.
+ *
+ * Which side of the marker an operand fell on says nothing about what it
+ * *means*: a verb taking a revision reads an escaped word as one and fails with
+ * git's own "unknown revision or path" wording, where git would narrow the walk
+ * by it instead. That divergence is unchanged and deliberate, because limiting
+ * by nothing would print every commit and look like an answer.
  *
  * Which refusal to raise is the caller's, because git words this differently per
  * verb and means each one: see UnknownSwitchError for the three.
  *
  * @param texts positional text operands, as typed
  * @param error the refusal this verb words it with
+ * @param marked operands a `--` on the line escaped
  */
 export function checkOperands(
   texts: readonly string[],
   error: new (argument: string) => GitError = UnrecognizedArgumentError,
+  marked: ReadonlySet<string> = new Set(),
 ): void {
   for (const text of texts) {
-    if (text.startsWith('-')) throw new error(text)
+    if (text.startsWith('-') && !marked.has(text)) throw new error(text)
   }
 }
 

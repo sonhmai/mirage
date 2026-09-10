@@ -34,7 +34,8 @@ from mirage.commands.cli.builtin.git.refs import (TAG_PREFIX, delete_ref,
                                                   valid_ref_name, write_ref)
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.util import check_operands, fatal
+from mirage.commands.cli.builtin.git.util import (  # yapf: disable
+    check_operands, escaped, fatal)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
@@ -260,7 +261,7 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None:
             raise NoWorkspaceError()
-        check_operands(texts, UnknownSwitchError)
+        check_operands(texts, UnknownSwitchError, escaped(inv.argv))
         flags = parse_flags(fl)
         if flags.listing and flags.delete:
             raise IncompatibleOptionsError("-l", "-d")

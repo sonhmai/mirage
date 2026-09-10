@@ -35,8 +35,8 @@ from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
 from mirage.commands.cli.builtin.git.reset import restored
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
-                                                  links_of, start_point)
+from mirage.commands.cli.builtin.git.util import (  # yapf: disable
+    check_operands, escaped, fatal, links_of, start_point)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -144,7 +144,7 @@ async def restore(
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(texts, UnknownSwitchError)
+        check_operands(texts, UnknownSwitchError, escaped(inv.argv))
         if not texts:
             raise NoRestorePathsError()
         flags = parse_flags(fl)
@@ -185,15 +185,21 @@ async def restore(
         if flags.worktree:
             blobs = await asyncio.to_thread(
                 contents, repo, [tree[name.encode()][1] for name in present])
+            # Removals first, because the two sets can name the same
+            # place: restoring a directory over a file writes
+            # ``slot/child`` where the file ``slot`` still sits, and the
+            # other direction writes the file where the directory still
+            # sits. Nothing is read back from the working tree, so
+            # emptying it first is free.
+            for name in sorted(absent):
+                path = posixpath.join(location.worktree, name)
+                await remove_file(dispatch, path)
+                await remove_empty_parents(dispatch, path, location.worktree)
             for name in sorted(present):
                 mode, sha = tree[name.encode()]
                 await restore_entry(dispatch,
                                     posixpath.join(location.worktree, name),
                                     mode, blobs[sha], links_of(doors))
-            for name in sorted(absent):
-                path = posixpath.join(location.worktree, name)
-                await remove_file(dispatch, path)
-                await remove_empty_parents(dispatch, path, location.worktree)
     except GitError as exc:
         return fatal(exc)
     return None, IOResult()

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import type { LinkView, StatPath } from '../../../../ops/types.ts'
+import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
 import { FileType, type FileStat } from '../../../../types.ts'
 import { isMissingPath } from '../../../../utils/errors.ts'
 import type { CommandFnResult } from '../../../config.ts'
@@ -31,10 +31,10 @@ import {
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import { removeFile, renamePath, under } from './io.ts'
 import { basename } from './path.ts'
-import { repoRelative } from './pathspec.ts'
+import { repoRelative, under as inside } from './pathspec.ts'
 import { opened } from './repo.ts'
 import type { Dispatch, IndexEntry, RepoLocation } from './types.ts'
-import { checkOperands, fatal, startPoint } from './util.ts'
+import { checkOperands, escaped, fatal, startPoint } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -49,6 +49,10 @@ const SOURCE_DIRECTORY_EMPTY = 'source directory is empty'
 const NOT_UNDER_VERSION_CONTROL = 'not under version control'
 const MULTIPLE_SOURCES = 'multiple sources for the same target'
 const CONFLICTED = 'conflicted'
+// Not one of git's, because git has no concept to word: a mount is mirage's own
+// boundary, so the refusal borrows the strerror the kernel gives for a rename it
+// will not perform.
+const BUSY = 'Device or resource busy'
 
 /** The parsed shape of a `git mv` invocation. */
 export interface MvFlags {
@@ -107,11 +111,6 @@ async function lstat(
   const link = links?.statAt(path) ?? null
   if (link !== null) return link
   return statPath(path)
-}
-
-/** Whether a repository-relative path sits inside a directory. */
-function inside(path: string, directory: string): boolean {
-  return directory === '' || path.startsWith(`${directory}/`)
 }
 
 /** Where one tracked path lands after a move. */
@@ -196,6 +195,22 @@ export async function check(
 }
 
 /**
+ * Whether renaming a path would leave a mount behind.
+ *
+ * A mount nested in the repository is served by another resource, and the
+ * rename op reaches only the backend holding the parent path: that backend
+ * cannot see the child's keys, so it moves everything except them and the index
+ * is then re-keyed onto files that never moved. The mount root itself is the
+ * same problem one level up, since the table still points at the old prefix.
+ * Neither is something the verb can repair afterwards, so both are refused
+ * before anything moves.
+ */
+function spanning(mounts: MountView | null, path: string): boolean {
+  if (mounts === null) return false
+  return mounts.isRoot(path) || mounts.descendants(path).length > 0
+}
+
+/**
  * Decide every move before making any, which is git's order too.
  *
  * The last operand is the destination. With several sources it has to be a
@@ -205,6 +220,7 @@ export async function check(
 export async function plan(
   statPath: StatPath,
   links: LinkView | null,
+  mounts: MountView | null,
   location: RepoLocation,
   start: string,
   operands: readonly string[],
@@ -259,6 +275,13 @@ export async function plan(
         named = clash
       }
     }
+    if (reason === null && spanning(mounts, under(location.worktree, source))) {
+      // Last, after every check git itself makes, so a source git would refuse
+      // anyway is refused in git's own words. `-k` skips it like any other
+      // rename this source cannot survive.
+      if (flags.skip) continue
+      throw new RenameFailedError(source, BUSY)
+    }
     if (reason !== null) {
       if (flags.skip) continue
       throw new MoveRefusedError(reason, named[0], named[1])
@@ -311,7 +334,7 @@ export async function mv(inv: CLIInvocation): Promise<CommandFnResult> {
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
-    checkOperands(texts, UnknownSwitchError)
+    checkOperands(texts, UnknownSwitchError, escaped(inv.argv))
     const flags = parseFlags(fl)
     if (texts.length < 2) throw new MoveUsageError()
     const repo = await opened(fl, doors)
@@ -324,6 +347,7 @@ export async function mv(inv: CLIInvocation): Promise<CommandFnResult> {
     const moves = await plan(
       statPath,
       doors.ns?.links ?? null,
+      doors.ns?.mounts ?? null,
       repo.location,
       startPoint(fl),
       texts,

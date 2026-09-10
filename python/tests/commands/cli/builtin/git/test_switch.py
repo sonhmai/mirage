@@ -203,3 +203,41 @@ async def test_a_plain_switch_still_needs_a_branch(git_rw):
     code, _out, err = await run(git_rw, "switch")
     assert code == 128
     assert err.startswith(b"fatal: ")
+
+
+@pytest.mark.asyncio
+async def test_an_untracked_file_blocks_a_directory_the_target_holds(
+        git_rw, repo_path: Path):
+    await run(git_rw, "switch -c other")
+    (repo_path / "slot").mkdir()
+    (repo_path / "slot" / "file").write_text("x\n", encoding="utf-8")
+    await run(git_rw, "add slot")
+    await run(git_rw, "commit -m dir")
+    await run(git_rw, "switch main")
+    # The switch removed the tracked file and left the directory that
+    # held it, so the untracked file has to take its place.
+    (repo_path / "slot").rmdir()
+    (repo_path / "slot").write_text("mine\n", encoding="utf-8")
+    code, _out, err = await run(git_rw, "switch other")
+    assert code == 1
+    assert err == (b"error: The following untracked working tree files would "
+                   b"be overwritten by checkout:\n\tslot\nPlease move or "
+                   b"remove them before you switch branches.\nAborting\n")
+    assert (repo_path / "slot").read_text() == "mine\n"
+
+
+@pytest.mark.asyncio
+async def test_an_untracked_file_inside_a_directory_the_target_replaces(
+        git_rw, repo_path: Path):
+    await run(git_rw, "switch -c other")
+    (repo_path / "slot").write_text("theirs\n", encoding="utf-8")
+    await run(git_rw, "add slot")
+    await run(git_rw, "commit -m file")
+    await run(git_rw, "switch main")
+    (repo_path / "slot").mkdir()
+    (repo_path / "slot" / "file").write_text("mine\n", encoding="utf-8")
+    code, _out, err = await run(git_rw, "switch other")
+    assert code == 1
+    assert err == (b"error: Updating the following directories would lose "
+                   b"untracked files in them:\n\tslot\n\nAborting\n")
+    assert (repo_path / "slot" / "file").read_text() == "mine\n"

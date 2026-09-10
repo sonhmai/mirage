@@ -467,13 +467,18 @@ class UnknownPathspecError(GitError):
                          f"known to git")
 
 
-def _conflict_block(header: str, paths: list[str], advice: str) -> str:
+def _conflict_block(header: str, paths: list[str], advice: str = "") -> str:
     """One named-files paragraph of a checkout refusal.
+
+    The advice line is optional because one of git's three paragraphs
+    has none: the directory one ends at its list, which renders as the
+    blank line before the next paragraph.
 
     Args:
         header (str): the line that introduces the list.
         paths (list[str]): the files to name, one per tab-indented line.
-        advice (str): the line telling the caller what to do about them.
+        advice (str): the line telling the caller what to do about them,
+            empty for a paragraph git words without one.
     """
     listed = "\n".join(f"\t{path}" for path in sorted(paths))
     return f"{header}\n{listed}\n{advice}"
@@ -486,21 +491,28 @@ class CheckoutConflictError(GitError):
     the one safety check that makes checkout usable at all: without it a
     branch switch silently destroys whatever was edited and not staged.
 
-    Two kinds of work are at risk and git words them differently: a
-    tracked file carrying uncommitted changes, and an untracked file the
-    target branch would write over. Both are carried here rather than
-    raised separately because when both apply git prints both
-    paragraphs and aborts once, pinned against git 2.50.
+    Three kinds of work are at risk and git words them differently: a
+    tracked file carrying uncommitted changes, an untracked *directory*
+    the target replaces with a file of the same name, and an untracked
+    file the target branch would write over. All three are carried here
+    rather than raised separately because when several apply git prints
+    every paragraph and aborts once, in this order, pinned against git
+    2.50.1.
 
     Args:
         local (list[str]): tracked files with uncommitted changes.
+        directories (list[str]): directories holding untracked files
+            that the target records a file at.
         untracked (list[str]): untracked files the target branch holds.
     """
 
     prefix = "error"
     code = 1
 
-    def __init__(self, local: list[str], untracked: list[str]) -> None:
+    def __init__(self,
+                 local: list[str],
+                 untracked: list[str],
+                 directories: list[str] | None = None) -> None:
         blocks: list[str] = []
         if local:
             blocks.append(
@@ -509,6 +521,11 @@ class CheckoutConflictError(GitError):
                     "overwritten by checkout:", local,
                     "Please commit your changes or stash them before you "
                     "switch branches."))
+        if directories:
+            blocks.append(
+                _conflict_block(
+                    "Updating the following directories would lose "
+                    "untracked files in them:", directories))
         if untracked:
             blocks.append(
                 _conflict_block(

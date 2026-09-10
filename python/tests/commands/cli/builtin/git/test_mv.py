@@ -16,9 +16,14 @@ from pathlib import Path
 
 import pytest
 
+from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.mv import Move, moved_path, parse_flags
 from mirage.commands.spec.types import FlagView
-from tests.commands.cli.builtin.git.conftest import conflict_index
+from mirage.resource.disk import DiskResource
+from mirage.resource.ram import RAMResource
+from mirage.types import MountMode
+from mirage.workspace import Workspace
+from tests.commands.cli.builtin.git.conftest import MOUNT, conflict_index
 
 
 async def run(ws, line: str) -> tuple[int, bytes, bytes]:
@@ -247,3 +252,71 @@ async def test_a_directory_carries_its_symlinks(git_rw):
     assert left.exit_code != 0
     assert (await run(git_rw, "status --porcelain"))[1] == (
         b"R  docs/link -> notes/link\nR  docs/one.md -> notes/one.md\n")
+
+
+@pytest.mark.asyncio
+async def test_a_directory_holding_a_mount_will_not_move(repo_path: Path):
+    with Workspace(
+        {
+            MOUNT: DiskResource(root=str(repo_path)),
+            "/repo/docs/inner/": RAMResource(),
+        },
+            mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        await ws.execute("mkdir -p /repo/docs && echo x > /repo/docs/one.md")
+        await run(ws, "add docs")
+        code, _out, err = await run(ws, "mv docs notes")
+        assert code == 128
+        assert err == (b"fatal: renaming 'docs' failed: Device or resource "
+                       b"busy\n")
+        assert (repo_path / "docs" / "one.md").exists()
+        assert not (repo_path / "notes").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_mount_root_itself_will_not_move(repo_path: Path):
+    with Workspace(
+        {
+            MOUNT: DiskResource(root=str(repo_path)),
+            "/repo/inner/": RAMResource(),
+        },
+            mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        await ws.execute("echo x > /repo/inner/one.md")
+        await run(ws, "add inner")
+        code, _out, err = await run(ws, "mv inner elsewhere")
+        assert code == 128
+        assert err == (b"fatal: renaming 'inner' failed: Device or resource "
+                       b"busy\n")
+
+
+@pytest.mark.asyncio
+async def test_k_skips_a_source_that_holds_a_mount(repo_path: Path):
+    with Workspace(
+        {
+            MOUNT: DiskResource(root=str(repo_path)),
+            "/repo/docs/inner/": RAMResource(),
+        },
+            mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        await ws.execute("mkdir -p /repo/docs && echo x > /repo/docs/one.md")
+        await run(ws, "add docs")
+        assert await run(ws, "mv -k docs notes") == (0, b"", b"")
+        assert (repo_path / "docs" / "one.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_dashed_pathspec_moves_when_the_line_escapes_it(
+        git_rw, repo_path: Path):
+    (repo_path / "-draft").write_text("x\n", encoding="utf-8")
+    await run(git_rw, "add -- -draft")
+    assert await run(git_rw, "mv -- -draft kept.txt") == (0, b"", b"")
+    assert (repo_path / "kept.txt").read_text() == "x\n"
+    assert not (repo_path / "-draft").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_dashed_operand_is_still_a_switch_unescaped(git_rw):
+    code, _out, err = await run(git_rw, "mv -draft kept.txt")
+    assert code == 129
+    assert err == b"error: unknown switch `draft'\n"

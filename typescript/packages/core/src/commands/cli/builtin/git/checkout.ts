@@ -34,13 +34,14 @@ import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import { removeFile, restoreEntry, under } from './io.ts'
 import { record } from './reflog.ts'
 import { BRANCH_PREFIX, detachHead, loadRefs, readHead, setHead, writeRef } from './refs.ts'
+import { under as inside } from './pathspec.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import { restored } from './reset.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
 import type { LinkView, StatPath } from '../../../../ops/types.ts'
 import type { Dispatch, HeadRef, IndexEntry } from './types.ts'
-import { checkOperands, fatal } from './util.ts'
+import { checkOperands, escaped, fatal } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -106,12 +107,38 @@ function conflicts(
  * the only copy there is. git refuses and names each one. An ignored file is
  * not in this list and git overwrites it silently, which is the same split.
  * Pinned against git 2.50.
+ *
+ * Equality is not the whole test. An untracked file `slot` is also in the way
+ * of a target that records `slot/child`, because the directory cannot be
+ * created without deleting it; git names the untracked file itself there, not
+ * the entry that needs the room.
  */
 function overwritten(
   after: ReadonlyMap<string, TreeEntry>,
   untracked: readonly string[],
 ): string[] {
-  return untracked.filter((path) => after.has(path)).sort(compareCodePoints)
+  const names = [...after.keys()]
+  return untracked
+    .filter((path) => after.has(path) || names.some((name) => inside(name, path)))
+    .sort(compareCodePoints)
+}
+
+/**
+ * Which directories the switch would empty of untracked files.
+ *
+ * The mirror of the case above: the target records a *file* where the working
+ * tree has a directory, so writing it means removing the directory, and
+ * anything untracked inside it is gone. git words this one differently and
+ * names the directory rather than the files, since the directory is what the
+ * caller has to move. Pinned against git 2.50.1.
+ */
+function lostDirectories(
+  after: ReadonlyMap<string, TreeEntry>,
+  untracked: readonly string[],
+): string[] {
+  return [...after.keys()]
+    .filter((name) => untracked.some((path) => inside(path, name)))
+    .sort(compareCodePoints)
 }
 
 /**
@@ -229,8 +256,9 @@ export async function moveHead(
   const dirty = new Set([...unstaged.keys(), ...stagedPaths])
   const blocked = conflicts(before, after, dirty)
   const clobbered = overwritten(after, found.untracked)
-  if (blocked.length > 0 || clobbered.length > 0) {
-    throw new CheckoutConflictError(blocked, clobbered)
+  const lost = lostDirectories(after, found.untracked)
+  if (blocked.length > 0 || clobbered.length > 0 || lost.length > 0) {
+    throw new CheckoutConflictError(blocked, clobbered, lost)
   }
   await switchTo(repo, dispatch, before, after, dirty, state.entries, links)
   if (creating && ref !== null) await writeRef(dispatch, repo.location.commondir, ref, oid)
@@ -268,7 +296,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
-    checkOperands(texts, UnknownSwitchError)
+    checkOperands(texts, UnknownSwitchError, escaped(inv.argv))
     const target = texts[0]
     if (target === undefined) throw new UnknownPathspecError('')
     const repo = await opened(fl, doors)

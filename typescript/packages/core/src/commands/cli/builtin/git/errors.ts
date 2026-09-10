@@ -384,8 +384,12 @@ export class UnknownPathspecError extends GitError {
 
 /**
  * One named-files paragraph of a checkout refusal.
+ *
+ * The advice line is optional because one of git's three paragraphs has none:
+ * the directory one ends at its list, which renders as the blank line before
+ * the next paragraph.
  */
-function conflictBlock(header: string, paths: readonly string[], advice: string): string {
+function conflictBlock(header: string, paths: readonly string[], advice = ''): string {
   const listed = [...paths]
     .sort(compareCodePoints)
     .map((path) => `\t${path}`)
@@ -401,16 +405,21 @@ function conflictBlock(header: string, paths: readonly string[], advice: string)
  * silently destroys whatever was edited and not staged.
  *
  * Two kinds of work are at risk and git words them differently: a tracked file
- * carrying uncommitted changes, and an untracked file the target branch would
- * write over. Both are carried here rather than thrown separately because when
- * both apply git prints both paragraphs and aborts once, pinned against git
- * 2.50.
+ * carrying uncommitted changes, an untracked *directory* the target replaces
+ * with a file of the same name, and an untracked file the target branch would
+ * write over. All three are carried here rather than thrown separately because
+ * when several apply git prints every paragraph and aborts once, in this
+ * order, pinned against git 2.50.1.
  */
 export class CheckoutConflictError extends GitError {
   override readonly prefix = 'error'
   override readonly code = 1
 
-  constructor(local: readonly string[], untracked: readonly string[]) {
+  constructor(
+    local: readonly string[],
+    untracked: readonly string[],
+    directories: readonly string[] = [],
+  ) {
     const blocks: string[] = []
     if (local.length > 0) {
       blocks.push(
@@ -418,6 +427,14 @@ export class CheckoutConflictError extends GitError {
           'Your local changes to the following files would be overwritten by checkout:',
           local,
           'Please commit your changes or stash them before you switch branches.',
+        ),
+      )
+    }
+    if (directories.length > 0) {
+      blocks.push(
+        conflictBlock(
+          'Updating the following directories would lose untracked files in them:',
+          directories,
         ),
       )
     }

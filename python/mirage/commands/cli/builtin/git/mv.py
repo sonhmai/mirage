@@ -23,13 +23,13 @@ from mirage.commands.cli.builtin.git.io import remove_file, rename_path
 from mirage.commands.cli.builtin.git.pathspec import repo_relative, under
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import IndexState, RepoLocation
-from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
-                                                  links_of, start_point)
+from mirage.commands.cli.builtin.git.util import (  # yapf: disable
+    check_operands, escaped, fatal, links_of, mounts_of, start_point)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatPath
+from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType
 from mirage.utils.errors import MISS_ERRORS
@@ -44,6 +44,10 @@ SOURCE_DIRECTORY_EMPTY = "source directory is empty"
 NOT_UNDER_VERSION_CONTROL = "not under version control"
 MULTIPLE_SOURCES = "multiple sources for the same target"
 CONFLICTED = "conflicted"
+# Not one of git's, because git has no concept to word: a mount is
+# mirage's own boundary, so the refusal borrows the strerror the kernel
+# gives for a rename it will not perform.
+BUSY = "Device or resource busy"
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +172,27 @@ def clashing(move: Move, claimed: set[str]) -> tuple[str, str] | None:
     return None
 
 
+def spanning(mounts: MountView | None, path: str) -> bool:
+    """Whether renaming a path would leave a mount behind.
+
+    A mount nested in the repository is served by another resource, and
+    the rename op reaches only the backend holding the parent path: that
+    backend cannot see the child's keys, so it moves everything except
+    them and the index is then re-keyed onto files that never moved. The
+    mount root itself is the same problem one level up, since the table
+    still points at the old prefix. Neither is something the verb can
+    repair afterwards, so both are refused before anything moves.
+
+    Args:
+        mounts (MountView | None): the name plane's mount boundaries,
+            None outside a workspace.
+        path (str): absolute virtual path of the source.
+    """
+    if mounts is None:
+        return False
+    return mounts.is_root(path) or bool(mounts.descendants(path))
+
+
 async def check(stat_path: StatPath, links: LinkView | None,
                 location: RepoLocation, source: str, destination: str,
                 tracked: set[str], conflicted: set[str],
@@ -222,9 +247,9 @@ async def check(stat_path: StatPath, links: LinkView | None,
 
 
 async def plan(stat_path: StatPath, links: LinkView | None,
-               location: RepoLocation, start: str, operands: tuple[str, ...],
-               tracked: set[str], conflicted: set[str],
-               flags: MvFlags) -> list[Move]:
+               mounts: MountView | None, location: RepoLocation, start: str,
+               operands: tuple[str, ...], tracked: set[str],
+               conflicted: set[str], flags: MvFlags) -> list[Move]:
     """Decide every move before making any, which is git's order too.
 
     The last operand is the destination. With several sources it has to
@@ -234,6 +259,7 @@ async def plan(stat_path: StatPath, links: LinkView | None,
     Args:
         stat_path (StatPath): dispatcher-backed stat, both channels.
         links (LinkView | None): the name plane's link facts.
+        mounts (MountView | None): the name plane's mount boundaries.
         location (RepoLocation): the discovered repository.
         start (str): absolute virtual path git is running in.
         operands (tuple[str, ...]): the operands as typed.
@@ -273,6 +299,14 @@ async def plan(stat_path: StatPath, links: LinkView | None,
             clash = clashing(move, claimed)
             if clash is not None:
                 reason, named = MULTIPLE_SOURCES, clash
+        if reason is None and spanning(
+                mounts, posixpath.join(location.worktree, source)):
+            # Last, after every check git itself makes, so a source git
+            # would refuse anyway is refused in git's own words. ``-k``
+            # skips it like any other rename this source cannot survive.
+            if flags.skip:
+                continue
+            raise RenameFailedError(source, BUSY)
         if reason is not None:
             if flags.skip:
                 continue
@@ -330,7 +364,7 @@ async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(texts, UnknownSwitchError)
+        check_operands(texts, UnknownSwitchError, escaped(inv.argv))
         flags = parse_flags(fl)
         if len(texts) < 2:
             raise MoveUsageError()
@@ -347,7 +381,8 @@ async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             path.decode("utf-8", errors="replace")
             for path in state.entries
         } | conflicted
-        moves = await plan(stat_path, links_of(doors), location,
+        moves = await plan(stat_path,
+                           links_of(doors), mounts_of(doors), location,
                            start_point(fl), texts, tracked, conflicted, flags)
         lines: list[str] = []
         if flags.dry_run:

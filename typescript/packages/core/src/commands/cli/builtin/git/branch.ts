@@ -35,7 +35,7 @@ import { deleteRef, loadRefs, readHead, validRefName, writeRef, SYMREF_PREFIX } 
 import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import type { Dispatch, HeadRef } from './types.ts'
-import { checkOperands, fatal } from './util.ts'
+import { checkOperands, escaped, fatal } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -147,7 +147,7 @@ export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     const dispatch = doors.dispatch
     if (dispatch === undefined) throw new NoWorkspaceError()
-    checkOperands(texts, UnknownSwitchError)
+    checkOperands(texts, UnknownSwitchError, escaped(inv.argv))
     const repo = await opened(fl, doors)
     refs = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)
     head = await readHead(dispatch, repo.location.gitdir)

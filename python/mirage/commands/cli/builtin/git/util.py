@@ -19,10 +19,12 @@ from mirage.commands.cli.types import CLIDoors
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
+from mirage.ops.types import LinkView, MountView
 
 ROOT = "/"
 STDOUT = "stdout"
+# The end-of-options marker, which the parser consumes.
+MARKER = "--"
 
 
 def links_of(doors: CLIDoors) -> LinkView | None:
@@ -37,6 +39,21 @@ def links_of(doors: CLIDoors) -> LinkView | None:
         doors (CLIDoors): the invocation's doors, one per state plane.
     """
     return doors.ns.links if doors.ns is not None else None
+
+
+def mounts_of(doors: CLIDoors) -> MountView | None:
+    """The name plane's mount boundaries, None when no namespace is wired.
+
+    A mount nested inside the repository is served by another resource
+    entirely, so the backend holding the parent path cannot see it and
+    cannot carry it along in a rename. A verb that moves a directory has
+    to ask here or it silently leaves the mount at its old prefix with
+    the index pointing at files that never moved.
+
+    Args:
+        doors (CLIDoors): the invocation's doors, one per state plane.
+    """
+    return doors.ns.mounts if doors.ns is not None else None
 
 
 def start_point(fl: FlagView) -> str:
@@ -68,8 +85,34 @@ def revision_arg(texts: tuple[str, ...], default: str = HEAD) -> str:
     return texts[0] if texts else default
 
 
-def check_operands(texts: tuple[str, ...],
-                   error: type[GitError] = UnrecognizedArgumentError) -> None:
+def escaped(argv: tuple[str, ...]) -> frozenset[str]:
+    """The words a ``--`` on the line marked as operands, not options.
+
+    ``--`` is exactly how a caller names a file whose name begins with a
+    dash, and git says so in every synopsis that ends
+    ``[--] [<pathspec>...]``: ``git rm -draft`` is a refused switch and
+    ``git rm -- -draft`` removes the file. The parser consumes the
+    marker, so the words themselves are what carries the fact forward,
+    read back off the verbatim argv the record already holds.
+
+    A set is enough. A dash word before the marker was read as an
+    option and never reached the operands, so a word that is here and
+    also spelled earlier on the line is still the escaped one.
+
+    Args:
+        argv (tuple[str, ...]): the line's verbatim tokens after the
+            head word, subcommand words included.
+    """
+    if MARKER not in argv:
+        return frozenset()
+    return frozenset(argv[argv.index(MARKER) + 1:])
+
+
+def check_operands(
+    texts: tuple[str, ...],
+    error: type[GitError] = UnrecognizedArgumentError,
+    marked: frozenset[str] = frozenset()
+) -> None:
     """Refuse an operand that is really an option this build lacks.
 
     A verb taking a revision accepts free text, so every flag mirage
@@ -79,14 +122,17 @@ def check_operands(texts: tuple[str, ...],
     has no such flag. Refused here, before any object is read, so the
     message names the real problem.
 
-    A pathspec is not checked for and cannot be: the shared parser
-    consumes ``--`` as its end-of-options marker, so ``log -- a.txt``
-    and ``log a.txt`` reach a leaf identically. Both resolve the operand
-    as a revision and fail with git's own "unknown revision or path"
-    wording, which is exactly right for an untracked path and a
-    deliberate divergence for a tracked one, where git would narrow the
-    walk instead. Erring is the safe half of that trade: limiting by
-    nothing would print every commit and look like an answer.
+    Unless the caller said otherwise. A word after ``--`` is an operand
+    by the caller's own instruction whatever it starts with, so it is
+    never read as an option here; see ``escaped``, which is where the
+    marker survives the parser.
+
+    Which side of the marker an operand fell on says nothing about what
+    it *means*: a verb taking a revision reads an escaped word as one
+    and fails with git's own "unknown revision or path" wording, where
+    git would narrow the walk by it instead. That divergence is
+    unchanged and deliberate, because limiting by nothing would print
+    every commit and look like an answer.
 
     Which refusal to raise is the caller's, because git words this
     differently per verb and means each one: see ``UnknownSwitchError``
@@ -95,9 +141,10 @@ def check_operands(texts: tuple[str, ...],
     Args:
         texts (tuple[str, ...]): positional text operands, as typed.
         error (type[GitError]): the refusal this verb words it with.
+        marked (frozenset[str]): operands a ``--`` on the line escaped.
     """
     for text in texts:
-        if text.startswith("-"):
+        if text.startswith("-") and text not in marked:
             raise error(text)
 
 

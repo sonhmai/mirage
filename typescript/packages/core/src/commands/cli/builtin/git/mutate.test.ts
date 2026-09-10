@@ -102,7 +102,7 @@ interface Harness {
  * index) starts from one git itself wrote rather than from bytes this file
  * hand-rolled.
  */
-async function harness(prepare?: (repo: string) => void): Promise<Harness> {
+async function harness(prepare?: (repo: string) => void, nested?: string): Promise<Harness> {
   const repo = mkdtempSync(join(tmp, 'repo-'))
   roots.push(repo)
   execFileSync('bash', [BUILDER, repo], { stdio: 'ignore' })
@@ -111,14 +111,33 @@ async function harness(prepare?: (repo: string) => void): Promise<Harness> {
   const ram = new RAMResource()
   const registry = new OpsRegistry()
   registry.registerResource(ram)
-  const ws = new Workspace(
-    { '/repo': ram },
-    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
-  )
+  // `nested` mounts a second resource inside the repository, which is the
+  // one shape a verb cannot rename: its keys live in another resource, so
+  // the backend holding the parent path cannot carry them along.
+  const mounts: Record<string, RAMResource> = { '/repo': ram }
+  if (nested !== undefined) {
+    const child = new RAMResource()
+    registry.registerResource(child)
+    mounts[nested] = child
+  }
+  const ws = new Workspace(mounts, {
+    mode: MountMode.WRITE,
+    ops: registry,
+    shellParser: parser,
+  })
   const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [
     await ws.dispatch(op, path.virtual, args, kwargs),
     new IOResult(),
   ]
+  // A mount's ancestors read as existing directories the moment the child is
+  // mounted, so `ensureDir` stops at one and the parent backend never gets the
+  // key. Created directly here, before anything is copied in.
+  if (nested !== undefined) {
+    const parts = nested.slice('/repo/'.length).split('/').slice(0, -1)
+    for (let n = 1; n <= parts.length; n += 1) {
+      await ws.dispatch('mkdir', `/repo/${parts.slice(0, n).join('/')}`)
+    }
+  }
   for (const rel of walkDisk(repo)) {
     const target = `/repo/${rel}`
     await ensureDir(dispatch, target.slice(0, target.lastIndexOf('/')))
@@ -1454,5 +1473,132 @@ describe('git restore --source', () => {
     const [code, , err] = await h.run('restore --source=nosuch letters.txt')
     expect(code).toBe(128)
     expect(err).toBe('fatal: could not resolve nosuch\n')
+  })
+})
+
+describe('a name that is a file on one side and a directory on the other', () => {
+  it('replaces the file with the directory the source holds', async () => {
+    let dir = ''
+    const h = await harness((repo) => {
+      mkdirSync(join(repo, 'slot'))
+      writeFileSync(join(repo, 'slot/child'), 'inner\n')
+      git(repo, ['add', 'slot'])
+      git(repo, ['commit', '-q', '-m', 'dir'])
+      dir = git(repo, ['rev-parse', 'HEAD^{tree}']).trim()
+      git(repo, ['rm', '-q', '-r', 'slot'])
+      writeFileSync(join(repo, 'slot'), 'flat\n')
+      git(repo, ['add', 'slot'])
+      git(repo, ['commit', '-q', '-m', 'flat'])
+    })
+    expect(await h.run(`restore --source=${dir} -SW slot`)).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['ls-files', 'slot'])).toBe('slot/child\n')
+    expect(readFileSync(join(drained, 'slot/child'), 'utf8')).toBe('inner\n')
+  })
+
+  it('replaces the directory with the file the source holds', async () => {
+    let flat = ''
+    const h = await harness((repo) => {
+      writeFileSync(join(repo, 'slot'), 'flat\n')
+      git(repo, ['add', 'slot'])
+      git(repo, ['commit', '-q', '-m', 'flat'])
+      flat = git(repo, ['rev-parse', 'HEAD^{tree}']).trim()
+      git(repo, ['rm', '-q', 'slot'])
+      mkdirSync(join(repo, 'slot'))
+      writeFileSync(join(repo, 'slot/child'), 'inner\n')
+      git(repo, ['add', 'slot'])
+      git(repo, ['commit', '-q', '-m', 'dir'])
+    })
+    expect(await h.run(`restore --source=${flat} -SW slot`)).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['ls-files', 'slot'])).toBe('slot\n')
+    expect(readFileSync(join(drained, 'slot'), 'utf8')).toBe('flat\n')
+  })
+})
+
+describe('an untracked path that collides with the target tree', () => {
+  it('refuses a file standing where the target holds a directory', async () => {
+    const h = await harness((repo) => {
+      git(repo, ['checkout', '-q', '-b', 'other'])
+      mkdirSync(join(repo, 'slot'))
+      writeFileSync(join(repo, 'slot/file'), 'theirs\n')
+      git(repo, ['add', 'slot'])
+      git(repo, ['commit', '-q', '-m', 'dir'])
+      git(repo, ['checkout', '-q', 'main'])
+    })
+    await write(h, 'slot', 'mine\n')
+    const [code, , err] = await h.run('switch other')
+    expect(code).toBe(1)
+    expect(err).toBe(
+      'error: The following untracked working tree files would be overwritten by ' +
+        'checkout:\n\tslot\nPlease move or remove them before you switch branches.\nAborting\n',
+    )
+  })
+
+  it('refuses a directory standing where the target holds a file', async () => {
+    const h = await harness((repo) => {
+      git(repo, ['checkout', '-q', '-b', 'other'])
+      writeFileSync(join(repo, 'slot'), 'theirs\n')
+      git(repo, ['add', 'slot'])
+      git(repo, ['commit', '-q', '-m', 'file'])
+      git(repo, ['checkout', '-q', 'main'])
+    })
+    await write(h, 'slot/file', 'mine\n')
+    const [code, , err] = await h.run('switch other')
+    expect(code).toBe(1)
+    expect(err).toBe(
+      'error: Updating the following directories would lose untracked files in ' +
+        'them:\n\tslot\n\nAborting\n',
+    )
+  })
+})
+
+describe('a pathspec that begins with a dash', () => {
+  it('moves it when the line escapes it with --', async () => {
+    const h = await harness()
+    await write(h, '-draft', 'x\n')
+    await h.run('add -- -draft')
+    expect(await h.run('mv -- -draft kept.txt')).toEqual([0, '', ''])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('A  kept.txt\n')
+  })
+
+  it('removes it when the line escapes it with --', async () => {
+    const h = await harness()
+    await write(h, '-draft', 'x\n')
+    await h.run('add -- -draft')
+    await h.run('commit -m draft')
+    expect(await h.run('rm -- -draft')).toEqual([0, "rm '-draft'\n", ''])
+  })
+
+  it('is still an unknown switch unescaped', async () => {
+    const h = await harness()
+    const [code, , err] = await h.run('rm -draft')
+    expect(code).toBe(129)
+    expect(err).toBe("error: unknown switch `draft'\n")
+  })
+})
+
+describe('a rename that would leave a mount behind', () => {
+  it('refuses a directory holding one', async () => {
+    const h = await harness(undefined, '/repo/docs/inner')
+    const [code, , err] = await h.run('mv docs notes')
+    expect(code).toBe(128)
+    expect(err).toBe("fatal: renaming 'docs' failed: Device or resource busy\n")
+    expect(await h.run('status --porcelain')).toEqual([0, '', ''])
+  })
+
+  it('refuses the mount root itself', async () => {
+    const h = await harness(undefined, '/repo/inner')
+    await write(h, 'inner/one.md', 'x\n')
+    await h.run('add inner')
+    const [code, , err] = await h.run('mv inner elsewhere')
+    expect(code).toBe(128)
+    expect(err).toBe("fatal: renaming 'inner' failed: Device or resource busy\n")
+  })
+
+  it('skips it under -k', async () => {
+    const h = await harness(undefined, '/repo/docs/inner')
+    expect(await h.run('mv -k docs notes')).toEqual([0, '', ''])
+    expect(await h.run('status --porcelain')).toEqual([0, '', ''])
   })
 })

@@ -30,8 +30,8 @@ from mirage.commands.cli.builtin.git.io import (remove_empty_parents,
 from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
-from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
-                                                  links_of, start_point)
+from mirage.commands.cli.builtin.git.util import (  # yapf: disable
+    check_operands, escaped, fatal, links_of, start_point)
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
@@ -176,7 +176,7 @@ async def rm(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(texts, UnknownSwitchError)
+        check_operands(texts, UnknownSwitchError, escaped(inv.argv))
         flags = parse_flags(fl)
         if not texts:
             raise NoPathspecRemoveError()

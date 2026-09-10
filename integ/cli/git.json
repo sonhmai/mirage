@@ -2183,6 +2183,34 @@
         "stdout": "n0tag\nn0tag           has a message\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_rm_takes_a_dashed_pathspec_after_the_marker",
+      "seq": 568315,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "echo x > /repo/-draft && git -C /repo add -- -draft && git -C /repo rm -f -- -draft",
+      "expect": {
+        "exit": 0,
+        "stdout": "rm '-draft'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rm_refuses_a_dashed_operand_without_the_marker",
+      "seq": 568316,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rm -draft",
+      "expect": {
+        "exit": 129,
+        "stdout": "",
+        "stderr": "error: unknown switch `draft'\n"
+      }
     }
   ]
 }

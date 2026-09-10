@@ -26,12 +26,13 @@ import {
   CheckoutConflictError,
   GitError,
   NoWorkspaceError,
+  ResolveIndexError,
   UnknownPathspecError,
   UnknownSwitchError,
 } from './errors.ts'
 import { short } from './format.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
-import { removeFile, restoreEntry, under } from './io.ts'
+import { removeEmptyParents, removeFile, restoreEntry, under } from './io.ts'
 import { record } from './reflog.ts'
 import { BRANCH_PREFIX, detachHead, loadRefs, readHead, setHead, writeRef } from './refs.ts'
 import { under as inside } from './pathspec.ts'
@@ -158,16 +159,26 @@ async function switchTo(
   held: ReadonlyMap<string, IndexEntry>,
   links: LinkView | null,
 ): Promise<void> {
-  for (const [path, entry] of after) {
+  // Removals first, and the emptied directories with them, because the two
+  // sets name the same place whenever a branch records a file where the other
+  // records a directory: writing `slot/child` while the file `slot` is still
+  // there fails, and so does writing the file while the directory is. Nothing
+  // is read back from the working tree, so emptying it first is free.
+  // `restore` orders its own pass the same way, for the same reason.
+  for (const path of [...before.keys()].sort(compareCodePoints)) {
+    if (after.has(path)) continue
+    const where = under(repo.location.worktree, path)
+    await removeFile(dispatch, where)
+    await removeEmptyParents(dispatch, where, repo.location.worktree)
+  }
+  for (const path of [...after.keys()].sort(compareCodePoints)) {
+    const entry = after.get(path)
+    if (entry === undefined) continue
     const old = before.get(path)
     if (old?.oid === entry.oid && old.mode === entry.mode) continue
     if (keep.has(path)) continue
     const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
     await restoreEntry(dispatch, under(repo.location.worktree, path), entry.mode, blob, links)
-  }
-  for (const path of before.keys()) {
-    if (after.has(path)) continue
-    await removeFile(dispatch, under(repo.location.worktree, path))
   }
   const state = await readIndex(repo, dispatch)
   const staged = new Map<string, StagedEntry>()
@@ -200,15 +211,47 @@ export async function previousPosition(repo: Repo, head: HeadRef): Promise<strin
 }
 
 /**
+ * Point HEAD at a commit and write the reflog line for the move.
+ *
+ * The half of a checkout that happens whatever the working tree holds: a branch
+ * created where HEAD already is does only this.
+ */
+async function attach(
+  dispatch: Dispatch,
+  repo: Repo,
+  known: ReadonlyMap<string, string>,
+  head: HeadRef,
+  oid: string,
+  target: string,
+  ref: string | null,
+  creating: boolean,
+): Promise<void> {
+  if (creating && ref !== null) await writeRef(dispatch, repo.location.commondir, ref, oid)
+  if (ref !== null) await setHead(dispatch, repo.location.gitdir, ref)
+  else await detachHead(dispatch, repo.location.gitdir, oid)
+  const where = head.branch ?? short(head.commit ?? '', repo.abbrev)
+  await record(
+    dispatch,
+    repo.location.gitdir,
+    ref,
+    headCommit(known, head),
+    oid,
+    IDENTITY,
+    Math.floor(Date.now() / 1000),
+    `checkout: moving from ${where} to ${target}`,
+  )
+}
+
+/**
  * Move HEAD, the index and the working tree to a commit.
  *
  * The one procedure `checkout` and `switch` share, since the two differ only in
  * what they accept and how they word a miss. Refuses rather than overwriting
  * when the move would destroy work that is not committed, whether that is an
- * edit to a tracked file or an untracked file the target holds. That check is
- * the whole reason either verb is safe to offer: without it a branch switch
- * silently throws away whatever was changed and not staged, and there is no
- * reflog here to get it back from.
+ * edit to a tracked file, an untracked file the target holds, or a conflict
+ * still being resolved. Those checks are the whole reason either verb is safe to
+ * offer: without them a branch switch silently throws away whatever was changed
+ * and not staged, and there is no reflog here to get it back from.
  *
  * @param dispatch workspace op dispatcher
  * @param statPath dispatcher-backed stat, both channels
@@ -220,6 +263,8 @@ export async function previousPosition(repo: Repo, head: HeadRef): Promise<strin
  * @param target the operand as the user spelled it, for the reflog
  * @param ref the branch to attach HEAD to, null to detach it at the commit
  * @param creating whether `ref` is a new branch to write first
+ * @param inPlace whether the line named no start point, so the new branch is
+ *   being created where HEAD already is
  * @returns the paths whose uncommitted changes were carried across
  */
 export async function moveHead(
@@ -233,10 +278,27 @@ export async function moveHead(
   target: string,
   ref: string | null,
   creating: boolean,
+  inPlace: boolean,
 ): Promise<Set<string>> {
+  // A branch created where HEAD already is moves nothing: git writes the ref,
+  // points HEAD at it, and never touches the working tree or the index, so an
+  // unmerged index survives `git switch -c topic` and is refused by
+  // `git switch -c topic HEAD` a word later. The shape of the line is what
+  // decides it, which is git's own reading rather than a comparison of the two
+  // trees. Pinned against git 2.50.1.
+  if (inPlace) {
+    await attach(dispatch, repo, known, head, oid, target, ref, creating)
+    return new Set()
+  }
   const before = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
   const after = await commitEntries(repo, oid)
   const state = await readIndex(repo, dispatch)
+  // First, before either tree is compared and before the working tree is
+  // walked, which is where git refuses it too. Every check below reads stage 0,
+  // so a path held only as conflict stages is invisible to all of them and the
+  // move would clear the stages and delete the file, throwing away a resolution
+  // in progress.
+  if (state.conflicts.size > 0) throw new ResolveIndexError([...state.conflicts.keys()])
   const tracked = new Set(state.entries.keys())
   // UNTRACKED_ALL, not the mode status uses: "normal" collapses a wholly
   // untracked directory to one `dir/` entry, and a collision has to be
@@ -261,20 +323,7 @@ export async function moveHead(
     throw new CheckoutConflictError(blocked, clobbered, lost)
   }
   await switchTo(repo, dispatch, before, after, dirty, state.entries, links)
-  if (creating && ref !== null) await writeRef(dispatch, repo.location.commondir, ref, oid)
-  if (ref !== null) await setHead(dispatch, repo.location.gitdir, ref)
-  else await detachHead(dispatch, repo.location.gitdir, oid)
-  const where = head.branch ?? short(head.commit ?? '', repo.abbrev)
-  await record(
-    dispatch,
-    repo.location.gitdir,
-    ref,
-    headCommit(known, head),
-    oid,
-    IDENTITY,
-    Math.floor(Date.now() / 1000),
-    `checkout: moving from ${where} to ${target}`,
-  )
+  await attach(dispatch, repo, known, head, oid, target, ref, creating)
   return dirty
 }
 
@@ -342,6 +391,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
       target,
       attached ? ref : null,
       creating,
+      creating && startPoint === undefined,
     )
     carried = [...dirty]
       .sort(compareCodePoints)

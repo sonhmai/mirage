@@ -17,11 +17,37 @@ import { HEAD } from './constants.ts'
 
 import { AmbiguousArgumentError } from './errors.ts'
 import { repoArgs, type Repo } from './repo.ts'
-import type { AncestryStep } from './types.ts'
+import type { AncestryStep, GitObject } from './types.ts'
 
 const ANCESTOR = '~'
 const PARENT = '^'
 const SUFFIXES = [ANCESTOR, PARENT]
+// `<rev>^{<type>}` peels to a type; `<rev>:<path>` reads a tree.
+const PEEL_OPEN = '^{'
+const PEEL_CLOSE = '}'
+const PATH_MARK = ':'
+const COMMIT = 'commit'
+const TREE = 'tree'
+
+/**
+ * Split a trailing `^{<type>}` off a revision.
+ *
+ * `HEAD^{tree}` is a peel, not an ancestry step, and reading it as one is silent
+ * rather than loud: `^` with no digits means "first parent", so the suffix
+ * resolved to HEAD's parent commit and the caller was handed a different object
+ * than it asked for without a word. The braces tell the two apart, and git
+ * forbids both of them in a ref name, so nothing else can end this way.
+ *
+ * @param revision revision as the user spelled it
+ * @returns the revision without the peel, and the type word inside it, empty for
+ *   `^{}` and null when there is no peel at all
+ */
+function splitPeel(revision: string): [string, string | null] {
+  if (!revision.endsWith(PEEL_CLOSE)) return [revision, null]
+  const index = revision.lastIndexOf(PEEL_OPEN)
+  if (index < 0) return [revision, null]
+  return [revision.slice(0, index), revision.slice(index + PEEL_OPEN.length, -1)]
+}
 
 /**
  * Split a revision into its base and its ancestry suffixes.
@@ -107,11 +133,17 @@ async function applyStep(
  * tag; it knows nothing about `~` and `^`, which are applied here on top of
  * whatever its own parser returns.
  *
+ * A `^{}` or `^{commit}` peel asks for exactly what this returns and is
+ * honoured; a peel naming any other type is a revision this caller cannot use,
+ * so it is refused rather than quietly stripped.
+ *
  * @param repo repository to resolve against
  * @param revision revision as the user spelled it
  */
 export async function resolveCommit(repo: Repo, revision: string): Promise<string> {
-  const [base, steps] = splitRevision(revision)
+  const [stem, want] = splitPeel(revision)
+  if (want !== null && want !== '' && want !== COMMIT) throw new AmbiguousArgumentError(revision)
+  const [base, steps] = splitRevision(stem)
   let oid: string
   try {
     oid = await git.resolveRef({ ...repoArgs(repo), ref: base })
@@ -142,4 +174,106 @@ export async function resolveCommit(repo: Repo, revision: string): Promise<strin
     oid = await applyStep(repo, oid, step, revision)
   }
   return oid
+}
+
+/** The type isomorphic-git records for one object id. */
+async function typeOf(repo: Repo, oid: string, revision: string): Promise<string> {
+  try {
+    // Deprecated upstream for being general, but the general answer is what
+    // peeling needs: which of commit/tag/tree/blob this id names, without
+    // reading it as each in turn until one does not throw.
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    return (await git.readObject({ ...repoArgs(repo), oid })).type
+  } catch {
+    throw new AmbiguousArgumentError(revision)
+  }
+}
+
+/**
+ * Follow a `^{<type>}` peel from the object the stem named.
+ *
+ * A tag is unwrapped first whatever the type asked for, which is what `^{}`
+ * means on its own. `^{tree}` then takes a commit's tree, git's one implicit
+ * step; every other spelling has to already name the type it asks for, so
+ * `HEAD^{blob}` is refused rather than answered with something else.
+ */
+async function peeled(
+  repo: Repo,
+  found: GitObject,
+  want: string,
+  revision: string,
+): Promise<GitObject> {
+  let { oid, type } = found
+  while (type === 'tag') {
+    oid = (await git.readTag({ ...repoArgs(repo), oid })).tag.object
+    type = await typeOf(repo, oid, revision)
+  }
+  if (want === '') return { oid, type }
+  if (want === TREE && type === COMMIT) {
+    oid = (await git.readCommit({ ...repoArgs(repo), oid })).commit.tree
+    type = TREE
+  }
+  if (type !== want) throw new AmbiguousArgumentError(revision)
+  return { oid, type }
+}
+
+/**
+ * The object a `<rev>:<path>` names inside a tree.
+ *
+ * @param repo the opened repository
+ * @param rev the revision before the colon, HEAD when empty
+ * @param path the path after it, repository-relative
+ * @param revision the whole revision, for error attribution
+ */
+async function atPath(repo: Repo, rev: string, path: string, revision: string): Promise<GitObject> {
+  const holder = await resolveObject(repo, rev)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    const found = await git.readObject({ ...repoArgs(repo), oid: holder.oid, filepath: path })
+    return { oid: found.oid, type: found.type }
+  } catch {
+    throw new AmbiguousArgumentError(revision)
+  }
+}
+
+/**
+ * The object a revision names, whatever type it turns out to be.
+ *
+ * The whole grammar a caller that wants an object rather than a commit has to
+ * read: `HEAD:a.txt` is the blob at a path, `HEAD^{tree}` is a commit's tree,
+ * `v1^{}` is what a tag points at, and a bare id of any type is itself. A
+ * commit-ish is tried first because that is what the operand is normally spelled
+ * with, and it is the only reading that understands ancestry.
+ *
+ * @param repo repository to resolve against
+ * @param revision revision as the user spelled it
+ */
+export async function resolveObject(repo: Repo, revision: string): Promise<GitObject> {
+  const mark = revision.indexOf(PATH_MARK)
+  if (mark >= 0) {
+    const rev = revision.slice(0, mark)
+    return atPath(repo, rev === '' ? HEAD : rev, revision.slice(mark + 1), revision)
+  }
+  const [stem, want] = splitPeel(revision)
+  if (want === null) {
+    try {
+      return { oid: await resolveCommit(repo, revision), type: COMMIT }
+    } catch {
+      // Not a commit-ish. A raw id is read as itself before the revision is
+      // called unresolved, and the type is kept, since it is what a caller
+      // records.
+      const oid = await expanded(repo, revision)
+      return { oid, type: await typeOf(repo, oid, revision) }
+    }
+  }
+  return peeled(repo, await resolveObject(repo, stem), want, revision)
+}
+
+/** One id, full or abbreviated, expanded through the object store. */
+async function expanded(repo: Repo, revision: string): Promise<string> {
+  try {
+    return await git.expandOid({ ...repoArgs(repo), oid: revision })
+  } catch {
+    throw new AmbiguousArgumentError(revision)
+  }
 }

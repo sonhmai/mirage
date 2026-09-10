@@ -32,7 +32,7 @@ from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.refs import (TAG_PREFIX, delete_ref,
                                                   valid_ref_name, write_ref)
-from mirage.commands.cli.builtin.git.revparse import resolve_commit
+from mirage.commands.cli.builtin.git.revparse import resolve_object
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (  # yapf: disable
     check_operands, escaped, fatal)
@@ -158,39 +158,15 @@ def render_listing(names: list[str], messages: dict[str, list[str]] | None,
     return "".join(f"{line}\n" for line in lines).encode()
 
 
-def object_at(repo: BaseRepo, revision: str) -> ShaFile:
-    """The object one id names, whatever its type.
-
-    Only an id, full or abbreviated: a ref and an ancestry suffix have
-    already been tried as a commit by the caller, and this is what is
-    left for the tree or blob id git also takes as a tag target. An
-    abbreviation is expanded through the store rather than looked up,
-    since a store answers only a whole id.
-
-    Args:
-        repo (BaseRepo): the opened repository.
-        revision (str): the id as the user spelled it.
-
-    Raises:
-        KeyError: when no object carries that id.
-    """
-    wanted = revision.encode()
-    try:
-        return repo[ObjectID(wanted)]
-    except KeyError:
-        found = list(repo.object_store.iter_prefix(wanted))
-        if len(found) != 1:
-            raise
-        return repo[found[0]]
-
-
 def resolve_target(repo: BaseRepo, known: set[Ref], revision: str) -> ShaFile:
     """The object a new tag points at.
 
     A tag made from another tag points at the tag object itself rather
-    than at what it peels to, which is git's own rule; anything else
-    resolves as a commit first, ancestry suffixes included, and then as
-    a bare object, so a blob or a tree id is a legal target.
+    than at what it peels to, which is git's own rule. Anything else is
+    resolved as an object expression, because git tags any object and
+    its usage line says so: ``HEAD^{tree}`` and ``HEAD:a.txt`` are as
+    good a target as a branch, and the type resolution lands on is what
+    the tag records.
 
     Args:
         repo (BaseRepo): the opened repository.
@@ -201,16 +177,9 @@ def resolve_target(repo: BaseRepo, known: set[Ref], revision: str) -> ShaFile:
     if ref in known:
         return repo.object_store[ObjectID(repo.refs[ref])]
     try:
-        return resolve_commit(repo, revision)
-    except GitError:
-        # git tags any object and its usage line says so, so a blob or
-        # a tree id is read as itself before the revision is called
-        # unresolved; the type is kept, since it is what the tag
-        # records.
-        try:
-            return object_at(repo, revision)
-        except (KeyError, ValueError) as exc:
-            raise UnresolvedRefError(revision) from exc
+        return resolve_object(repo, revision)
+    except GitError as exc:
+        raise UnresolvedRefError(revision) from exc
 
 
 def build_tag(repo: BaseRepo, name: str, target: ShaFile, message: str,

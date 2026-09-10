@@ -19,6 +19,7 @@ import pytest
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git.checkout import _conflicts
+from tests.commands.cli.builtin.git.conftest import conflict_index
 
 MODE = 0o100644
 
@@ -402,3 +403,22 @@ async def test_checking_out_a_link_that_moved_retargets_it(git_rw):
     assert (await git_rw.execute("readlink /repo/lk")).stdout == b"a.txt\n"
     assert (await run(git_rw, "checkout second"))[0] == 0
     assert (await git_rw.execute("readlink /repo/lk")).stdout == b"b.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_an_unmerged_index_stops_a_checkout(git_rw, repo_path: Path):
+    assert (await run(git_rw, "branch topic"))[0] == 0
+    conflict_index(repo_path, "a.txt")
+    code, out, err = await run(git_rw, "checkout topic")
+    assert code == 1
+    assert out == b"a.txt: needs merge\n"
+    assert err == b"error: you need to resolve your current index first\n"
+
+
+@pytest.mark.asyncio
+async def test_branching_here_survives_an_unmerged_index(
+        git_rw, repo_path: Path):
+    conflict_index(repo_path, "a.txt")
+    assert (await run(git_rw, "checkout -b topic"))[0] == 0
+    with Repo(str(repo_path)) as repo:
+        assert repo.open_index().has_conflicts()

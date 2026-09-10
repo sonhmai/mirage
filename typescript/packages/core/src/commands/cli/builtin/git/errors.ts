@@ -43,11 +43,17 @@ const ADVICE_REF_SYNTAX = 'hint: Disable this message with "git config set advic
  * what git does when the refusal is a report rather than an error ("nothing to
  * commit"), and such a report goes to stdout because that is where the report it
  * replaces would have gone.
+ *
+ * `report` is the other half of a refusal git splits across both streams: the
+ * sentence saying it refused goes to stderr, and the per-path diagnosis naming
+ * what is in the way goes to stdout, which is where the same lines would have
+ * gone had the command run.
  */
 export class GitError extends Error {
   readonly prefix: string | null = 'fatal'
   readonly code: number = FATAL_EXIT
   readonly stream: 'stdout' | 'stderr' = 'stderr'
+  readonly report: string = ''
 }
 
 /**
@@ -450,6 +456,62 @@ export class CheckoutConflictError extends GitError {
     // git emits each paragraph as its own error, so the second one carries the
     // prefix inline: the renderer only writes the first.
     super(`${blocks.map((block) => `${block}\n`).join('error: ')}Aborting`)
+  }
+}
+
+/**
+ * A branch move while the index still records conflict stages.
+ *
+ * Every collision check a checkout makes reads stage 0, so a path held only as
+ * stages 1-3 is invisible to all of them: the move would clear the stages and
+ * delete the working-tree copy, throwing away a conflict resolution in progress
+ * with no reflog to recover it from. git refuses first, before it reads either
+ * tree.
+ *
+ * Both streams carry part of it, pinned against git 2.50.1: the per-path
+ * diagnosis is stdout's, written by the index refresh that found the stages, and
+ * the sentence saying the command stopped is stderr's. Exit 1, not the 128 a
+ * fatal takes.
+ */
+export class ResolveIndexError extends GitError {
+  override readonly prefix = 'error'
+  override readonly code = 1
+  override readonly report: string
+
+  constructor(paths: readonly string[]) {
+    super('you need to resolve your current index first')
+    this.report = [...paths]
+      .sort(compareCodePoints)
+      .map((path) => `${path}: needs merge\n`)
+      .join('')
+  }
+}
+
+/**
+ * `restore` naming a path the source cannot put back.
+ *
+ * A path with conflict stages has no stage-0 content, so restoring the working
+ * tree from the index has nothing to write and restoring the index from a tree
+ * that does not hold the path has nothing to stage. git names each such path and
+ * does none of the work; a path the source *does* hold restores normally and the
+ * stages go with it.
+ *
+ * One line per path, so several are refused in one answer rather than one per
+ * run. Pinned against git 2.50.1.
+ */
+export class UnmergedPathError extends GitError {
+  override readonly prefix = 'error'
+  override readonly code = 1
+
+  constructor(paths: readonly string[]) {
+    // git emits each path as its own error, so every line after the first
+    // carries the prefix inline: the renderer writes one.
+    super(
+      [...paths]
+        .sort(compareCodePoints)
+        .map((path) => `path '${path}' is unmerged`)
+        .join('\nerror: '),
+    )
   }
 }
 

@@ -125,11 +125,11 @@ async def switch(
             ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
             if ref in known:
                 raise BranchExistsError(target)
-            start = texts[0] if texts else HEAD
+            start = texts[0] if texts else None
             try:
-                commit = resolve_commit(repo, start)
+                commit = resolve_commit(repo, start or HEAD)
             except GitError as exc:
-                raise InvalidReferenceError(start) from exc
+                raise InvalidReferenceError(start or HEAD) from exc
             # After the start point and before anything is written,
             # which is git's own order. A ref is a path below .git, so
             # an unchecked name reaches write_ref as one: -c
@@ -139,6 +139,7 @@ async def switch(
                 raise InvalidBranchNameError(target)
             attached = True
         else:
+            start = None
             target = texts[0] if texts else HEAD
             ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
             if not flags.detach and target == head.branch:
@@ -153,7 +154,8 @@ async def switch(
                 raise BranchExpectedError(expected_kind(known, target), target)
         dirty = await move_head(dispatch, stat_path, links_of(doors), repo,
                                 location, head, commit, target,
-                                ref if attached else None, creating)
+                                ref if attached else None, creating, creating
+                                and start is None)
     except GitError as exc:
         return fatal(exc)
     carried = "".join(f"M\t{path}\n" for path in sorted(dirty))

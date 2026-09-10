@@ -158,6 +158,11 @@ def fatal(exc: GitError) -> tuple[ByteSource | None, IOResult]:
     and a refusal that is really a report ("nothing to commit") carries
     no prefix and goes to stdout.
 
+    An error carrying a ``report`` puts that on stdout beside the
+    stderr line, because git writes some refusals to both streams at
+    once: ``<path>: needs merge`` is the diagnosis and "you need to
+    resolve your current index first" is the refusal.
+
     Args:
         exc (GitError): the error to render.
     """
@@ -165,4 +170,5 @@ def fatal(exc: GitError) -> tuple[ByteSource | None, IOResult]:
     data = body.encode()
     if exc.stream == STDOUT:
         return yield_bytes(data), IOResult(exit_code=exc.code)
-    return None, IOResult(exit_code=exc.code, stderr=data)
+    told = yield_bytes(exc.report.encode()) if exc.report else None
+    return told, IOResult(exit_code=exc.code, stderr=data)

@@ -25,6 +25,7 @@ import {
   NoWorkspaceError,
   UnknownPathspecError,
   UnknownSwitchError,
+  UnmergedPathError,
   UnresolvableSourceError,
 } from './errors.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
@@ -128,7 +129,12 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
       source = null
     }
     const tree = source ?? held
-    const names = new Set([...held.keys(), ...tree.keys()])
+    // The conflict stages name paths too. An unmerged path has no stage-0
+    // entry, so neither the index nor HEAD carries it and the pathspec would
+    // miss what git matches: to git it is an index entry like any other.
+    // Selecting it is what lets a source holding it put it back, stages and
+    // all, and what lets the refusal below name it when none does.
+    const names = new Set([...held.keys(), ...tree.keys(), ...state.conflicts.keys()])
     const start = startPoint(fl)
     const selected = new Set<string>()
     for (const operand of texts) {
@@ -138,6 +144,13 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
     }
     const present = [...selected].filter((name) => tree.has(name)).sort(compareCodePoints)
     const absent = [...selected].filter((name) => !tree.has(name)).sort(compareCodePoints)
+    // A selected path the source does not hold and the index still holds
+    // stages for cannot be restored either way: there is no stage-0 content to
+    // write into the working tree and no entry to stage. git names every one of
+    // them and does none of the work, where an absent path with no stages is
+    // simply removed.
+    const unmerged = absent.filter((name) => state.conflicts.has(name))
+    if (unmerged.length > 0) throw new UnmergedPathError(unmerged)
     if (flags.staged) {
       const staged = new Map<string, StagedEntry>()
       for (const name of present) {

@@ -19,6 +19,7 @@ from dulwich.refs import Ref
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git.switch import expected_kind
+from tests.commands.cli.builtin.git.conftest import conflict_index
 
 
 async def run(ws, line: str) -> tuple[int, bytes, bytes]:
@@ -214,9 +215,6 @@ async def test_an_untracked_file_blocks_a_directory_the_target_holds(
     await run(git_rw, "add slot")
     await run(git_rw, "commit -m dir")
     await run(git_rw, "switch main")
-    # The switch removed the tracked file and left the directory that
-    # held it, so the untracked file has to take its place.
-    (repo_path / "slot").rmdir()
     (repo_path / "slot").write_text("mine\n", encoding="utf-8")
     code, _out, err = await run(git_rw, "switch other")
     assert code == 1
@@ -241,3 +239,90 @@ async def test_an_untracked_file_inside_a_directory_the_target_replaces(
     assert err == (b"error: Updating the following directories would lose "
                    b"untracked files in them:\n\tslot\n\nAborting\n")
     assert (repo_path / "slot" / "file").read_text() == "mine\n"
+
+
+@pytest.mark.asyncio
+async def test_an_unmerged_index_stops_a_switch(git_rw, repo_path: Path):
+    # Every collision check reads stage 0, so a path held only as
+    # stages 1 to 3 would be carried through them all and then cleared.
+    await run(git_rw, "branch topic")
+    conflict_index(repo_path, "a.txt")
+    code, out, err = await run(git_rw, "switch topic")
+    assert code == 1
+    assert out == b"a.txt: needs merge\n"
+    assert err == b"error: you need to resolve your current index first\n"
+    assert head_ref(repo_path) == b"ref: refs/heads/main"
+
+
+@pytest.mark.asyncio
+async def test_an_unmerged_index_stops_a_detach(git_rw, repo_path: Path):
+    conflict_index(repo_path, "a.txt")
+    code, out, _err = await run(git_rw, "switch --detach HEAD")
+    assert code == 1
+    assert out == b"a.txt: needs merge\n"
+    assert head_ref(repo_path) == b"ref: refs/heads/main"
+
+
+@pytest.mark.asyncio
+async def test_creating_a_branch_here_survives_an_unmerged_index(
+        git_rw, repo_path: Path):
+    # Nothing moves, so git writes the ref and leaves the index alone.
+    # Naming the same commit as a start point is refused a word later,
+    # which is the shape of the line deciding it rather than the trees.
+    conflict_index(repo_path, "a.txt")
+    assert await run(git_rw, "switch -c topic") == (0, b"", b"Switched to a "
+                                                    b"new branch 'topic'\n")
+    assert head_ref(repo_path) == b"ref: refs/heads/topic"
+    with Repo(str(repo_path)) as repo:
+        assert repo.open_index().has_conflicts()
+
+
+@pytest.mark.asyncio
+async def test_creating_a_branch_elsewhere_stops_at_an_unmerged_index(
+        git_rw, repo_path: Path):
+    conflict_index(repo_path, "a.txt")
+    code, out, _err = await run(git_rw, "switch -c topic HEAD")
+    assert code == 1
+    assert out == b"a.txt: needs merge\n"
+    assert head_ref(repo_path) == b"ref: refs/heads/main"
+
+
+@pytest.mark.asyncio
+async def test_a_file_becomes_a_directory_across_a_switch(
+        git_rw, repo_path: Path):
+    # The file has to go before the directory can be made, and the
+    # target tree names both places.
+    (repo_path / "slot").write_text("flat\n", encoding="utf-8")
+    await run(git_rw, "add slot")
+    await run(git_rw, "commit -m flat")
+    await run(git_rw, "switch -c other")
+    await run(git_rw, "rm slot")
+    (repo_path / "slot").mkdir()
+    (repo_path / "slot" / "child").write_text("deep\n", encoding="utf-8")
+    await run(git_rw, "add slot")
+    await run(git_rw, "commit -m deep")
+    await run(git_rw, "switch main")
+    assert (repo_path / "slot").read_text() == "flat\n"
+    assert await run(git_rw, "switch other") == (0, b"", b"Switched to branch "
+                                                 b"'other'\n")
+    assert (repo_path / "slot" / "child").read_text() == "deep\n"
+
+
+@pytest.mark.asyncio
+async def test_a_directory_becomes_a_file_across_a_switch(
+        git_rw, repo_path: Path):
+    (repo_path / "slot").mkdir()
+    (repo_path / "slot" / "child").write_text("deep\n", encoding="utf-8")
+    await run(git_rw, "add slot")
+    await run(git_rw, "commit -m deep")
+    await run(git_rw, "switch -c other")
+    await run(git_rw, "rm slot/child")
+    (repo_path / "slot").write_text("flat\n", encoding="utf-8")
+    await run(git_rw, "add slot")
+    await run(git_rw, "commit -m flat")
+    assert await run(git_rw, "switch main") == (0, b"", b"Switched to branch "
+                                                b"'main'\n")
+    assert (repo_path / "slot" / "child").read_text() == "deep\n"
+    assert await run(git_rw, "switch other") == (0, b"", b"Switched to branch "
+                                                 b"'other'\n")
+    assert (repo_path / "slot").read_text() == "flat\n"

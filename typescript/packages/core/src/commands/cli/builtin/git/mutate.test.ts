@@ -175,12 +175,19 @@ function git(repo: string, args: string[]): string {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' })
 }
 
-/** Leave one tracked path unmerged, with all three stages holding its blob. */
-function conflictIndex(repo: string, path: string): void {
-  const blob = git(repo, ['rev-parse', `HEAD:${path}`]).trim()
-  const stages = [1, 2, 3].map((stage) => `100644 ${blob} ${String(stage)}\t${path}`)
+/** Leave one staged path unmerged, its stages all holding the blob it has. */
+function conflictIndex(repo: string, path: string, stages: number[] = [1, 2, 3]): void {
+  const blob = git(repo, ['rev-parse', `:${path}`]).trim()
+  // A merge replaces the stage-0 entry rather than sitting beside it, and
+  // `--index-info` removes one only when told to, so the zero id goes first.
+  // Left in, the path reads as staged and unmerged at once, which is a state
+  // no merge produces and which hides every refusal that reads stage 0.
+  const lines = [
+    `0 ${'0'.repeat(40)}\t${path}`,
+    ...stages.map((stage) => `100644 ${blob} ${String(stage)}\t${path}`),
+  ]
   execFileSync('git', ['-C', repo, 'update-index', '--index-info'], {
-    input: `${stages.join('\n')}\n`,
+    input: `${lines.join('\n')}\n`,
   })
 }
 
@@ -1332,11 +1339,7 @@ describe('a ref that lives only in packed-refs', () => {
 describe('restoring an unmerged path', () => {
   it('clears its conflict stages', async () => {
     const h = await harness((repo) => {
-      const blob = git(repo, ['rev-parse', 'HEAD:letters.txt']).trim()
-      const stages = [1, 2, 3].map((stage) => `100644 ${blob} ${String(stage)}\tletters.txt`)
-      execFileSync('git', ['-C', repo, 'update-index', '--index-info'], {
-        input: `${stages.join('\n')}\n`,
-      })
+      conflictIndex(repo, 'letters.txt')
     })
     expect(git(await h.drain(), ['status', '--porcelain'])).toBe('UU letters.txt\n')
     expect(await h.run('restore --staged letters.txt')).toEqual([0, '', ''])
@@ -1600,5 +1603,170 @@ describe('a rename that would leave a mount behind', () => {
     const h = await harness(undefined, '/repo/docs/inner')
     expect(await h.run('mv -k docs notes')).toEqual([0, '', ''])
     expect(await h.run('status --porcelain')).toEqual([0, '', ''])
+  })
+})
+
+describe('a switch while the index is unmerged', () => {
+  it('refuses before it moves anything', async () => {
+    const h = await harness((repo) => {
+      git(repo, ['branch', 'sidebar'])
+      conflictIndex(repo, 'letters.txt')
+    })
+    expect(await h.run('switch sidebar')).toEqual([
+      1,
+      'letters.txt: needs merge\n',
+      'error: you need to resolve your current index first\n',
+    ])
+    const drained = await h.drain()
+    expect(git(drained, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('main\n')
+    expect(git(drained, ['status', '--porcelain'])).toBe('UU letters.txt\n')
+  })
+
+  it('refuses a detach at the commit HEAD already names', async () => {
+    const h = await harness((repo) => {
+      conflictIndex(repo, 'letters.txt')
+    })
+    const [code, out] = await h.run('switch --detach HEAD')
+    expect([code, out]).toEqual([1, 'letters.txt: needs merge\n'])
+  })
+
+  it('lets a branch created here through, because nothing moves', async () => {
+    const h = await harness((repo) => {
+      conflictIndex(repo, 'letters.txt')
+    })
+    expect(await h.run('switch -c sidebar')).toEqual([
+      0,
+      '',
+      "Switched to a new branch 'sidebar'\n",
+    ])
+    const drained = await h.drain()
+    expect(git(drained, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('sidebar\n')
+    expect(git(drained, ['status', '--porcelain'])).toBe('UU letters.txt\n')
+  })
+
+  it('refuses the same branch once a start point is named', async () => {
+    const h = await harness((repo) => {
+      conflictIndex(repo, 'letters.txt')
+    })
+    const [code, out] = await h.run('switch -c sidebar HEAD')
+    expect([code, out]).toEqual([1, 'letters.txt: needs merge\n'])
+  })
+})
+
+describe('a name that swaps between file and directory across branches', () => {
+  it('switches from the file to the directory', async () => {
+    const h = await harness((repo) => {
+      // Both trees are built with the real binary, because a swap this
+      // shape is exactly what the verbs under test used to get wrong.
+      writeFileSync(join(repo, 'slot'), 'flat\n')
+      git(repo, ['add', 'slot'])
+      git(repo, ['commit', '-m', 'flat'])
+      git(repo, ['checkout', '-q', '-b', 'other'])
+      git(repo, ['rm', '-q', 'slot'])
+      mkdirSync(join(repo, 'slot'))
+      writeFileSync(join(repo, 'slot', 'child'), 'deep\n')
+      git(repo, ['add', 'slot'])
+      git(repo, ['commit', '-m', 'deep'])
+      git(repo, ['checkout', '-q', 'main'])
+    })
+    expect(await h.run('switch other')).toEqual([0, '', "Switched to branch 'other'\n"])
+    const drained = await h.drain()
+    expect(readFileSync(join(drained, 'slot', 'child'), 'utf8')).toBe('deep\n')
+    expect(git(drained, ['status', '--porcelain'])).toBe('')
+  })
+
+  it('switches from the directory back to the file', async () => {
+    const h = await harness((repo) => {
+      mkdirSync(join(repo, 'slot'))
+      writeFileSync(join(repo, 'slot', 'child'), 'deep\n')
+      git(repo, ['add', 'slot'])
+      git(repo, ['commit', '-m', 'deep'])
+      git(repo, ['checkout', '-q', '-b', 'other'])
+      git(repo, ['rm', '-q', 'slot/child'])
+      writeFileSync(join(repo, 'slot'), 'flat\n')
+      git(repo, ['add', 'slot'])
+      git(repo, ['commit', '-m', 'flat'])
+      git(repo, ['checkout', '-q', 'main'])
+    })
+    expect(await h.run('switch other')).toEqual([0, '', "Switched to branch 'other'\n"])
+    const drained = await h.drain()
+    expect(readFileSync(join(drained, 'slot'), 'utf8')).toBe('flat\n')
+    expect(git(drained, ['status', '--porcelain'])).toBe('')
+  })
+})
+
+describe('a restore naming an unmerged path', () => {
+  it('refuses when the source holds nothing to put back', async () => {
+    const h = await harness((repo) => {
+      // Added on this side only, so HEAD holds nothing to restore from
+      // and the index holds no stage 0 either.
+      writeFileSync(join(repo, 'fresh.txt'), 'mine\n')
+      git(repo, ['add', 'fresh.txt'])
+      conflictIndex(repo, 'fresh.txt', [2, 3])
+    })
+    expect(await h.run('restore --staged fresh.txt')).toEqual([
+      1,
+      '',
+      "error: path 'fresh.txt' is unmerged\n",
+    ])
+    expect(git(await h.drain(), ['ls-files', '-u'])).not.toBe('')
+  })
+
+  it('refuses a working-tree restore, whose source is the index', async () => {
+    const h = await harness((repo) => {
+      conflictIndex(repo, 'letters.txt')
+    })
+    expect(await h.run('restore letters.txt')).toEqual([
+      1,
+      '',
+      "error: path 'letters.txt' is unmerged\n",
+    ])
+  })
+
+  it('names every one it cannot restore', async () => {
+    const h = await harness((repo) => {
+      conflictIndex(repo, 'letters.txt')
+      conflictIndex(repo, 'numbers.txt')
+    })
+    const [code, , err] = await h.run('restore letters.txt numbers.txt')
+    expect([code, err]).toEqual([
+      1,
+      "error: path 'letters.txt' is unmerged\nerror: path 'numbers.txt' is unmerged\n",
+    ])
+  })
+})
+
+describe('a tag target spelled as an object expression', () => {
+  it('takes a tree', async () => {
+    const h = await harness()
+    expect(await h.run('tag treetag HEAD^{tree}')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['cat-file', '-t', 'treetag']).trim()).toBe('tree')
+    expect(git(drained, ['rev-parse', 'treetag'])).toBe(git(drained, ['rev-parse', 'HEAD^{tree}']))
+  })
+
+  it('takes a blob at a path', async () => {
+    const h = await harness()
+    expect(await h.run('tag blobtag HEAD:letters.txt')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['cat-file', '-t', 'blobtag']).trim()).toBe('blob')
+    expect(git(drained, ['rev-parse', 'blobtag'])).toBe(
+      git(drained, ['rev-parse', 'HEAD:letters.txt']),
+    )
+  })
+
+  it('records the type on an annotated tag', async () => {
+    const h = await harness()
+    expect((await h.run('tag -a -m msg noted HEAD:letters.txt'))[0]).toBe(0)
+    expect(git(await h.drain(), ['cat-file', '-p', 'noted'])).toContain('type blob')
+  })
+
+  it('refuses one that resolves to nothing', async () => {
+    const h = await harness()
+    expect(await h.run('tag missed HEAD:nosuch')).toEqual([
+      128,
+      '',
+      "fatal: Failed to resolve 'HEAD:nosuch' as a valid ref.\n",
+    ])
   })
 })

@@ -206,3 +206,53 @@ async def test_a_file_source_replaces_a_directory(git_rw, repo_path: Path):
                      f"restore --source={tree} -SW a.txt") == (0, b"", b"")
     assert (repo_path / "a.txt").read_text() == "one changed\n"
     assert not (repo_path / "a.txt" / "child").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_conflict_the_source_cannot_put_back_is_refused(
+        git_rw, repo_path: Path):
+    # Added on this side only, so HEAD holds nothing to restore from
+    # and the index holds no stage 0 either. git names the path rather
+    # than reporting a pathspec it does not recognise.
+    (repo_path / "c.txt").write_text("mine\n", encoding="utf-8")
+    assert (await run(git_rw, "add c.txt"))[0] == 0
+    conflict_index(repo_path, "c.txt")
+    code, _out, err = await run(git_rw, "restore --staged c.txt")
+    assert code == 1
+    assert err == b"error: path 'c.txt' is unmerged\n"
+    assert Index(str(repo_path / ".git" / "index")).has_conflicts()
+
+
+@pytest.mark.asyncio
+async def test_restoring_a_conflict_from_the_index_is_refused(
+        git_rw, repo_path: Path):
+    # The working tree restores from the index, and an unmerged path
+    # has no stage 0 there whatever HEAD holds.
+    conflict_index(repo_path, "a.txt")
+    code, _out, err = await run(git_rw, "restore a.txt")
+    assert code == 1
+    assert err == b"error: path 'a.txt' is unmerged\n"
+
+
+@pytest.mark.asyncio
+async def test_every_unrestorable_conflict_is_named(git_rw, repo_path: Path):
+    conflict_index(repo_path, "a.txt")
+    conflict_index(repo_path, "b.txt")
+    code, _out, err = await run(git_rw, "restore a.txt b.txt")
+    assert code == 1
+    assert err == (b"error: path 'a.txt' is unmerged\n"
+                   b"error: path 'b.txt' is unmerged\n")
+
+
+@pytest.mark.asyncio
+async def test_a_source_holding_the_conflict_restores_it(
+        git_rw, repo_path: Path):
+    (repo_path / "c.txt").write_text("mine\n", encoding="utf-8")
+    assert (await run(git_rw, "add c.txt"))[0] == 0
+    assert (await run(git_rw, "commit -m added"))[0] == 0
+    (repo_path / "c.txt").write_text("theirs\n", encoding="utf-8")
+    assert (await run(git_rw, "add c.txt"))[0] == 0
+    conflict_index(repo_path, "c.txt")
+    assert await run(git_rw, "restore --staged c.txt") == (0, b"", b"")
+    index = Index(str(repo_path / ".git" / "index"))
+    assert not index.has_conflicts()

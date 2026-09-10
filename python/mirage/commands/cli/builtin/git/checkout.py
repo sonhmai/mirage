@@ -28,10 +28,12 @@ from mirage.commands.cli.builtin.git.changes import head_entries, work_changes
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     BadStartPointError, BranchExistsError, CheckoutConflictError, GitError,
-    NoWorkspaceError, UnknownPathspecError, UnknownSwitchError)
+    NoWorkspaceError, ResolveIndexError, UnknownPathspecError,
+    UnknownSwitchError)
 from mirage.commands.cli.builtin.git.format import short, subject
 from mirage.commands.cli.builtin.git.index import read_index, write_index
-from mirage.commands.cli.builtin.git.io import remove_file, restore_entry
+from mirage.commands.cli.builtin.git.io import (remove_empty_parents,
+                                                remove_file, restore_entry)
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.pathspec import under
 from mirage.commands.cli.builtin.git.reflog import record
@@ -224,20 +226,27 @@ async def _switch(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
     state = await read_index(dispatch, location.gitdir)
     state.entries.clear()
     state.conflicts.clear()
-    changed = [
-        path for path in after if before.get(path) != after[path]
-        and path.decode("utf-8", errors="replace") not in keep
-    ]
+    changed = sorted(path for path in after if before.get(path) != after[path]
+                     and path.decode("utf-8", errors="replace") not in keep)
     blobs = await asyncio.to_thread(contents, repo,
                                     [after[path][1] for path in changed])
+    # Removals first, and the emptied directories with them, because
+    # the two sets name the same place whenever a branch records a file
+    # where the other records a directory: writing ``slot/child`` while
+    # the file ``slot`` is still there fails, and so does writing the
+    # file while the directory is. Nothing is read back from the
+    # working tree, so emptying it first is free. ``restore`` orders
+    # its own pass the same way, for the same reason.
+    for path in sorted(set(before) - set(after)):
+        name = path.decode("utf-8", errors="replace")
+        where = posixpath.join(location.worktree, name)
+        await remove_file(dispatch, where)
+        await remove_empty_parents(dispatch, where, location.worktree)
     for path in changed:
         name = path.decode("utf-8", errors="replace")
         mode, sha = after[path]
         await restore_entry(dispatch, posixpath.join(location.worktree, name),
                             mode, blobs[sha], links)
-    for path in set(before) - set(after):
-        name = path.decode("utf-8", errors="replace")
-        await remove_file(dispatch, posixpath.join(location.worktree, name))
     for path, (mode, sha) in after.items():
         name = path.decode("utf-8", errors="replace")
         held = staged.get(path)
@@ -268,20 +277,57 @@ def previous_position(repo: BaseRepo, head: HeadRef) -> str:
             f"{short(commit.id, abbrev_for(repo))} {subject(commit)}\n")
 
 
+async def _attach(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
+                  head: HeadRef, commit: Commit, target: str, ref: Ref | None,
+                  creating: bool) -> None:
+    """Point HEAD at a commit and write the reflog line for the move.
+
+    The half of a checkout that happens whatever the working tree
+    holds: a branch created where HEAD already is does only this.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        repo (BaseRepo): the opened repository.
+        location (RepoLocation): the discovered repository.
+        head (HeadRef): what HEAD pointed at before the move.
+        commit (Commit): the commit HEAD is moving to.
+        target (str): the operand as the user spelled it, for the
+            reflog.
+        ref (Ref | None): the branch to attach HEAD to, None to detach
+            it at the commit.
+        creating (bool): whether ``ref`` is a new branch to write first.
+    """
+    if creating and ref is not None:
+        await write_ref(dispatch, location.commondir, ref.decode(), commit.id)
+    if ref is not None:
+        await set_head(dispatch, location.gitdir, ref.decode())
+    else:
+        await detach_head(dispatch, location.gitdir, commit.id)
+    where = head.branch if head.branch is not None else short(
+        (head.commit or "").encode(), abbrev_for(repo))
+    await record(dispatch, location.gitdir,
+                 ref.decode() if ref is not None else None,
+                 head_commit(repo,
+                             head), commit.id, IDENTITY, int(time.time()),
+                 f"checkout: moving from {where} to {target}")
+
+
 async def move_head(dispatch: DispatchFn, stat_path: StatPath,
                     links: LinkView | None, repo: BaseRepo,
                     location: RepoLocation, head: HeadRef, commit: Commit,
-                    target: str, ref: Ref | None, creating: bool) -> set[str]:
+                    target: str, ref: Ref | None, creating: bool,
+                    in_place: bool) -> set[str]:
     """Move HEAD, the index and the working tree to a commit.
 
     The one procedure ``checkout`` and ``switch`` share, since the two
     differ only in what they accept and how they word a miss. Refuses
     rather than overwriting when the move would destroy work that is
-    not committed, whether that is an edit to a tracked file or an
-    untracked file the target holds. That check is the whole reason
-    either verb is safe to offer: without it a branch switch silently
-    throws away whatever was changed and not staged, and there is no
-    reflog here to get it back from.
+    not committed, whether that is an edit to a tracked file, an
+    untracked file the target holds, or a conflict still being
+    resolved. Those checks are the whole reason either verb is safe to
+    offer: without them a branch switch silently throws away whatever
+    was changed and not staged, and there is no reflog here to get it
+    back from.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
@@ -297,13 +343,35 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
         ref (Ref | None): the branch to attach HEAD to, None to detach
             it at the commit.
         creating (bool): whether ``ref`` is a new branch to write first.
+        in_place (bool): whether the line named no start point, so the
+            new branch is being created where HEAD already is.
 
     Returns:
         set[str]: paths whose uncommitted changes were carried across.
     """
+    # A branch created where HEAD already is moves nothing: git writes
+    # the ref, points HEAD at it, and never touches the working tree or
+    # the index, so an unmerged index survives ``git switch -c topic``
+    # and is refused by ``git switch -c topic HEAD`` a word later. The
+    # shape of the line is what decides it, which is git's own reading
+    # rather than a comparison of the two trees. Pinned against git
+    # 2.50.1.
+    if in_place:
+        await _attach(dispatch, repo, location, head, commit, target, ref,
+                      creating)
+        return set()
     before = await asyncio.to_thread(head_entries, repo) or {}
     after = await asyncio.to_thread(tree_of, repo, commit.id)
     state = await read_index(dispatch, location.gitdir)
+    # First, before either tree is compared and before the working tree
+    # is walked, which is where git refuses it too. Every check below
+    # reads stage 0, so a path held only as conflict stages is invisible
+    # to all of them and the move would clear the stages and delete the
+    # file, throwing away a resolution in progress.
+    if state.conflicts:
+        raise ResolveIndexError([
+            path.decode("utf-8", errors="replace") for path in state.conflicts
+        ])
     tracked = {
         path.decode("utf-8", errors="replace")
         for path in state.entries
@@ -332,19 +400,8 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
         raise CheckoutConflictError(blocked, overwritten, lost)
     await _switch(dispatch, repo, location, before, after, dirty,
                   state.entries, links)
-    if creating and ref is not None:
-        await write_ref(dispatch, location.commondir, ref.decode(), commit.id)
-    if ref is not None:
-        await set_head(dispatch, location.gitdir, ref.decode())
-    else:
-        await detach_head(dispatch, location.gitdir, commit.id)
-    where = head.branch if head.branch is not None else short(
-        (head.commit or "").encode(), abbrev_for(repo))
-    await record(dispatch, location.gitdir,
-                 ref.decode() if ref is not None else None,
-                 head_commit(repo,
-                             head), commit.id, IDENTITY, int(time.time()),
-                 f"checkout: moving from {where} to {target}")
+    await _attach(dispatch, repo, location, head, commit, target, ref,
+                  creating)
     return dirty
 
 
@@ -404,7 +461,8 @@ async def checkout(
         attached = creating or ref in known
         dirty = await move_head(dispatch, stat_path, links_of(doors), repo,
                                 location, head, commit, target,
-                                ref if attached else None, creating)
+                                ref if attached else None, creating, creating
+                                and start is None)
     except GitError as exc:
         return fatal(exc)
     carried = "".join(f"M\t{path}\n" for path in sorted(dirty))

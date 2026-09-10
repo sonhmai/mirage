@@ -2211,6 +2211,34 @@
         "stdout": "",
         "stderr": "error: unknown switch `draft'\n"
       }
+    },
+    {
+      "id": "git_tag_takes_a_path_expression",
+      "seq": 568317,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag blobtag HEAD:letters.txt && git -C /repo tag -l blobtag && git -C /repo tag -d blobtag > /dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "blobtag\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_switch_swaps_a_file_and_a_directory",
+      "seq": 568318,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "mkdir /repo/slot && echo deep > /repo/slot/child && git -C /repo add slot && git -C /repo commit -m deep > /dev/null && git -C /repo switch -c other 2> /dev/null && git -C /repo rm -r slot > /dev/null && echo flat > /repo/slot && git -C /repo add slot && git -C /repo commit -m flat > /dev/null && git -C /repo switch main 2> /dev/null && cat /repo/slot/child && git -C /repo switch other 2> /dev/null && cat /repo/slot",
+      "expect": {
+        "exit": 0,
+        "stdout": "deep\nflat\n",
+        "stderr": ""
+      }
     }
   ]
 }

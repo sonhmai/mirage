@@ -108,9 +108,11 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
     let target: string
     let oid: string
     let attached: boolean
+    let startPoint: string | undefined
     if (flags.create !== undefined) {
       target = flags.create
       if (known.has(`${BRANCH_PREFIX}${target}`)) throw new BranchExistsError(target)
+      startPoint = first
       const start = first ?? HEAD
       try {
         oid = await resolveCommit(repo, start)
@@ -149,6 +151,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       target,
       attached ? `${BRANCH_PREFIX}${target}` : null,
       creating,
+      creating && startPoint === undefined,
     )
     carried = [...dirty]
       .sort(compareCodePoints)

@@ -17,7 +17,10 @@ import pytest
 from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.errors import AmbiguousArgumentError
 from mirage.commands.cli.builtin.git.repo import open_repo
-from mirage.commands.cli.builtin.git.revparse import (resolve_commit,
+from mirage.commands.cli.builtin.git.revparse import (object_at,
+                                                      resolve_commit,
+                                                      resolve_object,
+                                                      split_peel,
                                                       split_revision)
 
 from .conftest import repo_facts
@@ -107,3 +110,88 @@ async def test_second_parent_of_a_linear_commit_is_refused(workspace):
     repo = await open_repo(workspace.dispatch, location)
     with pytest.raises(AmbiguousArgumentError):
         resolve_commit(repo, "HEAD^2")
+
+
+def test_a_revision_with_no_peel_keeps_its_whole_spelling():
+    assert split_peel("HEAD~2") == ("HEAD~2", None)
+
+
+def test_a_bare_peel_carries_an_empty_type():
+    assert split_peel("v1^{}") == ("v1", "")
+
+
+def test_a_typed_peel_carries_its_word():
+    assert split_peel("HEAD^{tree}") == ("HEAD", "tree")
+
+
+def test_a_peel_is_not_an_ancestry_step():
+    # Read as one it is `^` with no digits, which means the first
+    # parent: the caller was handed another commit without a word.
+    stem, _want = split_peel("HEAD^{tree}")
+    assert split_revision(stem) == ("HEAD", ())
+
+
+@pytest.mark.asyncio
+async def test_a_peel_to_a_commit_is_the_commit(workspace):
+    location = await discover(*repo_facts(workspace), "/repo")
+    repo = await open_repo(workspace.dispatch, location)
+    head = resolve_commit(repo, "HEAD")
+    assert resolve_commit(repo, "HEAD^{}").id == head.id
+    assert resolve_commit(repo, "HEAD^{commit}").id == head.id
+
+
+@pytest.mark.asyncio
+async def test_a_peel_to_another_type_is_no_commit(workspace):
+    location = await discover(*repo_facts(workspace), "/repo")
+    repo = await open_repo(workspace.dispatch, location)
+    with pytest.raises(AmbiguousArgumentError):
+        resolve_commit(repo, "HEAD^{tree}")
+
+
+@pytest.mark.asyncio
+async def test_an_object_expression_reaches_a_tree(workspace):
+    location = await discover(*repo_facts(workspace), "/repo")
+    repo = await open_repo(workspace.dispatch, location)
+    head = resolve_commit(repo, "HEAD")
+    assert resolve_object(repo, "HEAD^{tree}").id == head.tree
+
+
+@pytest.mark.asyncio
+async def test_an_object_expression_reaches_a_blob(workspace):
+    location = await discover(*repo_facts(workspace), "/repo")
+    repo = await open_repo(workspace.dispatch, location)
+    found = resolve_object(repo, "HEAD:a.txt")
+    assert found.type_name == b"blob"
+    assert found.data == b"one changed\n"
+
+
+@pytest.mark.asyncio
+async def test_an_ancestry_suffix_still_reads_inside_a_path(workspace):
+    location = await discover(*repo_facts(workspace), "/repo")
+    repo = await open_repo(workspace.dispatch, location)
+    assert resolve_object(repo, "HEAD~2:a.txt").data == b"one\n"
+
+
+@pytest.mark.asyncio
+async def test_a_bare_object_id_is_itself(workspace):
+    location = await discover(*repo_facts(workspace), "/repo")
+    repo = await open_repo(workspace.dispatch, location)
+    tree = resolve_commit(repo, "HEAD").tree.decode()
+    assert resolve_object(repo, tree).id.decode() == tree
+    assert object_at(repo, tree[:7]).id.decode() == tree
+
+
+@pytest.mark.asyncio
+async def test_a_path_the_tree_lacks_is_unresolvable(workspace):
+    location = await discover(*repo_facts(workspace), "/repo")
+    repo = await open_repo(workspace.dispatch, location)
+    with pytest.raises(AmbiguousArgumentError):
+        resolve_object(repo, "HEAD:nosuch")
+
+
+@pytest.mark.asyncio
+async def test_a_peel_naming_the_wrong_type_is_refused(workspace):
+    location = await discover(*repo_facts(workspace), "/repo")
+    repo = await open_repo(workspace.dispatch, location)
+    with pytest.raises(AmbiguousArgumentError):
+        resolve_object(repo, "HEAD^{blob}")

@@ -286,3 +286,37 @@ async def test_a_target_that_is_no_object_is_still_refused(git_rw):
     code, _out, err = await run(git_rw, "tag v2 nosuchrev")
     assert code == 128
     assert err == b"fatal: Failed to resolve 'nosuchrev' as a valid ref.\n"
+
+
+@pytest.mark.asyncio
+async def test_a_tree_expression_is_a_tag_target(git_rw, repo_path: Path):
+    assert await run(git_rw, "tag treetag HEAD^{tree}") == (0, b"", b"")
+    with Repo(str(repo_path)) as repo:
+        head = repo[b"HEAD"]
+        assert repo.refs[b"refs/tags/treetag"] == head.tree
+
+
+@pytest.mark.asyncio
+async def test_a_path_expression_is_a_tag_target(git_rw, repo_path: Path):
+    assert await run(git_rw, "tag blobtag HEAD:a.txt") == (0, b"", b"")
+    with Repo(str(repo_path)) as repo:
+        held = repo[repo.refs[b"refs/tags/blobtag"]]
+        assert held.type_name == b"blob"
+        assert held.data == b"one changed\n"
+
+
+@pytest.mark.asyncio
+async def test_an_annotated_tag_records_the_expressions_type(
+        git_rw, repo_path: Path):
+    assert (await run(git_rw, "tag -a -m msg noted HEAD:a.txt"))[0] == 0
+    with Repo(str(repo_path)) as repo:
+        tag = repo[repo.refs[b"refs/tags/noted"]]
+        assert tag.object[0].type_name == b"blob"
+
+
+@pytest.mark.asyncio
+async def test_an_expression_that_resolves_to_nothing_is_refused(git_rw):
+    code, _out, err = await run(git_rw, "tag missed HEAD:nosuch")
+    assert code == 128
+    assert err == (b"fatal: Failed to resolve 'HEAD:nosuch' as a valid "
+                   b"ref.\n")

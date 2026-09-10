@@ -14,6 +14,7 @@
 
 import asyncio
 import posixpath
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from dulwich.index import IndexEntry
@@ -27,7 +28,7 @@ from mirage.commands.cli.builtin.git.checkout import (Tree, contents,
 from mirage.commands.cli.builtin.git.errors import GitError  # yapf: disable
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     NoRestorePathsError, NoWorkspaceError, UnknownPathspecError,
-    UnknownSwitchError, UnresolvableSourceError)
+    UnknownSwitchError, UnmergedPathError, UnresolvableSourceError)
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import (remove_empty_parents,
                                                 remove_file, restore_entry)
@@ -80,11 +81,11 @@ def index_tree(entries: dict[bytes, IndexEntry]) -> Tree:
     return {path: (entry.mode, entry.sha) for path, entry in entries.items()}
 
 
-def decoded(paths: set[bytes] | dict[bytes, tuple[int, bytes]]) -> set[str]:
+def decoded(paths: Iterable[bytes]) -> set[str]:
     """Repository-relative paths as text.
 
     Args:
-        paths (set[bytes] | dict): index or tree keys.
+        paths (Iterable[bytes]): index, conflict or tree keys.
     """
     return {path.decode("utf-8", errors="replace") for path in paths}
 
@@ -159,7 +160,13 @@ async def restore(
         else:
             source = None
         tree = held if source is None else source
-        names = decoded(held) | decoded(tree)
+        # The conflict stages name paths too. An unmerged path has no
+        # stage-0 entry, so neither the index nor HEAD carries it and
+        # the pathspec would miss what git matches: to git it is an
+        # index entry like any other. Selecting it is what lets a
+        # source holding it put it back, stages and all, and what lets
+        # the refusal below name it when none does.
+        names = decoded(held) | decoded(tree) | decoded(state.conflicts)
         start = start_point(fl)
         selected: set[str] = set()
         for operand in texts:
@@ -169,6 +176,16 @@ async def restore(
             selected |= hits
         present = {name for name in selected if name.encode() in tree}
         absent = selected - present
+        # A selected path the source does not hold and the index still
+        # holds stages for cannot be restored either way: there is no
+        # stage-0 content to write into the working tree and no entry
+        # to stage. git names every one of them and does none of the
+        # work, where an absent path with no stages is simply removed.
+        unmerged = [
+            name for name in absent if name.encode() in state.conflicts
+        ]
+        if unmerged:
+            raise UnmergedPathError(unmerged)
         if flags.staged:
             for name in present:
                 mode, sha = tree[name.encode()]

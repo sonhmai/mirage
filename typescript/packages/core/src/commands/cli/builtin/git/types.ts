@@ -60,6 +60,18 @@ export interface HeadRef {
   readonly commit: string | null
 }
 
+/**
+ * One object id with the type git records for it.
+ *
+ * The pair travels together because a revision that names a tree or a blob is
+ * as legal as one that names a commit wherever an object is wanted, and the
+ * type is what a tag records about its target.
+ */
+export interface GitObject {
+  readonly oid: string
+  readonly type: string
+}
+
 /** One `~` or `^` suffix of a revision. */
 export interface AncestryStep {
   /**

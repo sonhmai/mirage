@@ -36,7 +36,7 @@ import {
 import { short } from './format.ts'
 import { deleteRef, loadRefs, TAG_PREFIX, validRefName, writeRef } from './refs.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
-import { resolveCommit } from './revparse.ts'
+import { resolveObject } from './revparse.ts'
 import { checkOperands, escaped, fatal } from './util.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -147,9 +147,10 @@ export function renderListing(
  * The object a new tag points at, and what kind it is.
  *
  * A tag made from another tag points at the tag object itself rather than at
- * what it peels to, which is git's own rule; anything else resolves as a
- * commit first, ancestry suffixes included, and then as a bare object, so a
- * blob or a tree id is a legal target.
+ * what it peels to, which is git's own rule. Anything else is resolved as an
+ * object expression, because git tags any object and its usage line says so:
+ * `HEAD^{tree}` and `HEAD:a.txt` are as good a target as a branch, and the type
+ * resolution lands on is what the tag records.
  */
 async function resolveTarget(
   repo: Repo,
@@ -163,17 +164,7 @@ async function resolveTarget(
     return { oid: held, type: type === 'tag' ? 'tag' : 'commit' }
   }
   try {
-    return { oid: await resolveCommit(repo, revision), type: 'commit' }
-  } catch {
-    // Not a commit-ish. git tags any object and its usage line says so, so the
-    // id is read as itself before the revision is called unresolved; the type
-    // is kept, since it is what the tag records.
-  }
-  try {
-    const oid = await git.expandOid({ ...repoArgs(repo), oid: revision })
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
-    const { type } = await git.readObject({ ...repoArgs(repo), oid })
-    return { oid, type }
+    return await resolveObject(repo, revision)
   } catch {
     throw new UnresolvedRefError(revision)
   }

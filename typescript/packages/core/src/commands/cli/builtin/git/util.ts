@@ -120,11 +120,18 @@ export function checkOperands(
  * instead, which is git's own split, and a refusal that is really a report
  * ("nothing to commit") carries no prefix and goes to stdout.
  *
+ *
+ * An error carrying a `report` puts that on stdout beside the stderr line,
+ * because git writes some refusals to both streams at once: `<path>: needs
+ * merge` is the diagnosis and "you need to resolve your current index first" is
+ * the refusal.
+ *
  * @param exc the error to render
  */
 export function fatal(exc: GitError): CommandFnResult {
   const body = exc.prefix === null ? `${exc.message}\n` : `${exc.prefix}: ${exc.message}\n`
   const data = ENC.encode(body)
   if (exc.stream === 'stdout') return [data, new IOResult({ exitCode: exc.code })]
-  return [null, new IOResult({ exitCode: exc.code, stderr: data })]
+  const told = exc.report === '' ? null : ENC.encode(exc.report)
+  return [told, new IOResult({ exitCode: exc.code, stderr: data })]
 }

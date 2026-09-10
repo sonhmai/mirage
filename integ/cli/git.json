@@ -2155,6 +2155,34 @@
         "stdout": "",
         "stderr": "usage: git tag [-a] [-f] [-m <msg>] <tagname> [<commit> | <object>]\n   or: git tag -d <tagname>...\n   or: git tag [-n[<num>]] -l [<pattern>...]\n"
       }
+    },
+    {
+      "id": "git_switch_detach_defaults_to_head",
+      "seq": 568313,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch --detach > /dev/null 2>&1 && git -C /repo status -b --porcelain && git -C /repo switch main > /dev/null 2>&1",
+      "expect": {
+        "exit": 0,
+        "stdout": "## HEAD (no branch)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_n0_prints_bare_names",
+      "seq": 568314,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag -a n0tag -m 'has a message' && git -C /repo tag -n0 -l n0tag && git -C /repo tag -n1 -l n0tag && git -C /repo tag -d n0tag > /dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "n0tag\nn0tag           has a message\n",
+        "stderr": ""
+      }
     }
   ]
 }

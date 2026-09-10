@@ -18,6 +18,7 @@ import pytest
 
 from mirage.commands.cli.builtin.git.mv import Move, moved_path, parse_flags
 from mirage.commands.spec.types import FlagView
+from tests.commands.cli.builtin.git.conftest import conflict_index
 
 
 async def run(ws, line: str) -> tuple[int, bytes, bytes]:
@@ -190,3 +191,59 @@ async def test_k_skips_the_source_that_would_collide(git_rw, repo_path: Path):
     assert await run(git_rw, "mv -k a/x b/x dest") == (0, b"", b"")
     assert (repo_path / "dest" / "x").read_text() == "ax\n"
     assert (repo_path / "b" / "x").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_conflicted_source_is_refused(git_rw, repo_path: Path):
+    conflict_index(repo_path, "a.txt")
+    code, _out, err = await run(git_rw, "mv a.txt c.txt")
+    assert code == 128
+    assert err == b"fatal: conflicted, source=a.txt, destination=c.txt\n"
+    assert (repo_path / "a.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_conflicted_source_outranks_an_occupied_destination(
+        git_rw, repo_path: Path):
+    conflict_index(repo_path, "a.txt")
+    _code, _out, err = await run(git_rw, "mv a.txt b.txt")
+    assert err == b"fatal: conflicted, source=a.txt, destination=b.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_a_directory_holding_a_conflict_is_refused_by_that_path(
+        git_rw, repo_path: Path):
+    await git_rw.execute("mkdir /repo/docs && echo x > /repo/docs/one.md")
+    await run(git_rw, "add docs")
+    await run(git_rw, "commit -m docs")
+    conflict_index(repo_path, "docs/one.md")
+    code, _out, err = await run(git_rw, "mv docs notes")
+    assert code == 128
+    assert err == (b"fatal: conflicted, source=docs/one.md, "
+                   b"destination=notes/one.md\n")
+    assert (repo_path / "docs" / "one.md").exists()
+    assert not (repo_path / "notes").exists()
+
+
+@pytest.mark.asyncio
+async def test_k_skips_a_conflicted_source(git_rw, repo_path: Path):
+    conflict_index(repo_path, "a.txt")
+    assert await run(git_rw, "mv -k a.txt c.txt") == (0, b"", b"")
+    assert (repo_path / "a.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_directory_carries_its_symlinks(git_rw):
+    await git_rw.execute("mkdir /repo/docs && echo x > /repo/docs/one.md")
+    await git_rw.execute("ln -s one.md /repo/docs/link")
+    await run(git_rw, "add docs")
+    await run(git_rw, "commit -m docs")
+    assert await run(git_rw, "mv docs notes") == (0, b"", b"")
+    # The link lives in the namespace, not on the disk the mount serves,
+    # so it is read back through the workspace rather than off the path.
+    moved = await git_rw.execute("readlink /repo/notes/link")
+    left = await git_rw.execute("readlink /repo/docs/link")
+    assert moved.stdout == b"one.md\n"
+    assert left.exit_code != 0
+    assert (await run(git_rw, "status --porcelain"))[1] == (
+        b"R  docs/link -> notes/link\nR  docs/one.md -> notes/one.md\n")

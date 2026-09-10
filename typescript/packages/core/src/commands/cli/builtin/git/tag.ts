@@ -148,13 +148,14 @@ export function renderListing(
  *
  * A tag made from another tag points at the tag object itself rather than at
  * what it peels to, which is git's own rule; anything else resolves as a
- * commit, ancestry suffixes included.
+ * commit first, ancestry suffixes included, and then as a bare object, so a
+ * blob or a tree id is a legal target.
  */
 async function resolveTarget(
   repo: Repo,
   known: ReadonlyMap<string, string>,
   revision: string,
-): Promise<{ oid: string; type: 'commit' | 'tag' }> {
+): Promise<{ oid: string; type: string }> {
   const held = known.get(`${TAG_PREFIX}${revision}`)
   if (held !== undefined) {
     // eslint-disable-next-line @typescript-eslint/no-deprecated
@@ -163,6 +164,16 @@ async function resolveTarget(
   }
   try {
     return { oid: await resolveCommit(repo, revision), type: 'commit' }
+  } catch {
+    // Not a commit-ish. git tags any object and its usage line says so, so the
+    // id is read as itself before the revision is called unresolved; the type
+    // is kept, since it is what the tag records.
+  }
+  try {
+    const oid = await git.expandOid({ ...repoArgs(repo), oid: revision })
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    const { type } = await git.readObject({ ...repoArgs(repo), oid })
+    return { oid, type }
   } catch {
     throw new UnresolvedRefError(revision)
   }
@@ -253,7 +264,9 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
     if (flags.listing || flags.lines !== undefined || texts.length === 0) {
       const names = selectedNames(tagNames(known), texts)
       let messages: Map<string, string[]> | null = null
-      if (flags.lines !== undefined) {
+      // -n0 (and any other count that prints no line) is a plain listing in
+      // git, so nothing is read and nothing is padded.
+      if (flags.lines !== undefined && flags.lines > 0) {
         messages = new Map()
         for (const each of names) {
           messages.set(each, await messageLines(repo, known.get(`${TAG_PREFIX}${each}`) ?? ''))

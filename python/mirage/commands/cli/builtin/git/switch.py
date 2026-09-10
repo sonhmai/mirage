@@ -113,7 +113,9 @@ async def switch(
             raise DetachWithCreateError()
         if len(texts) > 1:
             raise OneReferenceError()
-        if not creating and not texts:
+        # A detach takes HEAD when nothing is named, which is git's
+        # own default; only an attaching switch needs a branch to name.
+        if not creating and not texts and not flags.detach:
             raise MissingBranchArgumentError()
         repo, location = await opened(fl, doors)
         head = await read_head(dispatch, location.gitdir)
@@ -137,7 +139,7 @@ async def switch(
                 raise InvalidBranchNameError(target)
             attached = True
         else:
-            target = texts[0]
+            target = texts[0] if texts else HEAD
             ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
             if not flags.detach and target == head.branch:
                 return None, IOResult(

@@ -478,6 +478,13 @@ export class Dispatcher {
         // new file, every read followed the old link, and the moved
         // content was reachable under no name at all.
         await this.namespace.unlink(renameDst.virtual)
+        // The subtree moves with it, and only the node table can move the
+        // part of it no backend holds: a link or an attr overlay below the
+        // source is addressed by absolute path, so it would otherwise stay
+        // behind at a name the rename has emptied. The destination's own
+        // subtree is replaced first, as rename(2) replaces what it lands on.
+        await this.namespace.purgeUnder(renameDst.virtual)
+        await this.namespace.renameUnder(p.virtual, renameDst.virtual)
       }
     }
     if (opName === 'stat' && result instanceof FileStat) {

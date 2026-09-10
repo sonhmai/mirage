@@ -43,6 +43,7 @@ DESTINATION_ALREADY_EXISTS = "destination already exists"
 SOURCE_DIRECTORY_EMPTY = "source directory is empty"
 NOT_UNDER_VERSION_CONTROL = "not under version control"
 MULTIPLE_SOURCES = "multiple sources for the same target"
+CONFLICTED = "conflicted"
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +125,26 @@ def moved_path(move: Move, path: str) -> str:
     return f"{move.destination}{path[len(move.source):]}"
 
 
+def conflicting(move: Move, conflicted: set[str]) -> tuple[str, str] | None:
+    """The first path in a move that the index left unmerged.
+
+    Named the way the collision is named, by the path itself rather than
+    by the operand that carried it, which is what git reports for a
+    directory holding one.
+
+    Args:
+        move (Move): the move being planned.
+        conflicted (set[str]): repository-relative paths with stages.
+
+    Returns:
+        tuple: the source path and the landing it wanted, or None.
+    """
+    for path in move.paths:
+        if path in conflicted:
+            return path, moved_path(move, path)
+    return None
+
+
 def clashing(move: Move, claimed: set[str]) -> tuple[str, str] | None:
     """The first path in a move that lands where an earlier one already does.
 
@@ -149,9 +170,15 @@ def clashing(move: Move, claimed: set[str]) -> tuple[str, str] | None:
 
 async def check(stat_path: StatPath, links: LinkView | None,
                 location: RepoLocation, source: str, destination: str,
-                tracked: set[str],
+                tracked: set[str], conflicted: set[str],
                 force: bool) -> tuple[str | None, tuple[str, ...], bool]:
     """Whether one source can move, in git's own order of refusals.
+
+    The index is read before the destination is looked at, which is
+    git's order and observable: a conflicted source is refused as
+    conflicted even when the destination is occupied, and a directory
+    holding an unmerged path is refused for that rather than for a
+    destination that already exists.
 
     Args:
         stat_path (StatPath): dispatcher-backed stat, both channels.
@@ -159,7 +186,9 @@ async def check(stat_path: StatPath, links: LinkView | None,
         location (RepoLocation): the discovered repository.
         source (str): repository-relative source.
         destination (str): repository-relative destination.
-        tracked (set[str]): repository-relative paths the index holds.
+        tracked (set[str]): repository-relative paths the index holds,
+            unmerged ones included.
+        conflicted (set[str]): of those, the ones left unmerged.
         force (bool): whether ``-f`` was given.
 
     Returns:
@@ -172,17 +201,21 @@ async def check(stat_path: StatPath, links: LinkView | None,
         return BAD_SOURCE, (), False
     if destination == source or destination.startswith(f"{source}/"):
         return INTO_ITSELF, (), False
-    target = await lstat(stat_path, links,
-                         posixpath.join(location.worktree, destination))
+    landing = posixpath.join(location.worktree, destination)
     if info.type is FileType.DIRECTORY:
-        if target is not None:
-            return DESTINATION_ALREADY_EXISTS, (), True
         inside = tuple(sorted(path for path in tracked if under(path, source)))
+        if any(path in conflicted for path in inside):
+            return CONFLICTED, inside, True
+        if await lstat(stat_path, links, landing) is not None:
+            return DESTINATION_ALREADY_EXISTS, (), True
         if not inside:
             return SOURCE_DIRECTORY_EMPTY, (), True
         return None, inside, True
     if source not in tracked:
         return NOT_UNDER_VERSION_CONTROL, (), False
+    if source in conflicted:
+        return CONFLICTED, (source, ), False
+    target = await lstat(stat_path, links, landing)
     if target is not None and (not force or target.type is FileType.DIRECTORY):
         return DESTINATION_EXISTS, (), False
     return None, (source, ), False
@@ -190,7 +223,8 @@ async def check(stat_path: StatPath, links: LinkView | None,
 
 async def plan(stat_path: StatPath, links: LinkView | None,
                location: RepoLocation, start: str, operands: tuple[str, ...],
-               tracked: set[str], flags: MvFlags) -> list[Move]:
+               tracked: set[str], conflicted: set[str],
+               flags: MvFlags) -> list[Move]:
     """Decide every move before making any, which is git's order too.
 
     The last operand is the destination. With several sources it has to
@@ -203,7 +237,9 @@ async def plan(stat_path: StatPath, links: LinkView | None,
         location (RepoLocation): the discovered repository.
         start (str): absolute virtual path git is running in.
         operands (tuple[str, ...]): the operands as typed.
-        tracked (set[str]): repository-relative paths the index holds.
+        tracked (set[str]): repository-relative paths the index holds,
+            unmerged ones included.
+        conflicted (set[str]): of those, the ones left unmerged.
         flags (MvFlags): the parsed flags.
     """
     destination = repo_relative(location, start, operands[-1])
@@ -221,9 +257,15 @@ async def plan(stat_path: StatPath, links: LinkView | None,
                    if into else destination)
         reason, paths, directory = await check(stat_path, links, location,
                                                source, landing, tracked,
-                                               flags.force)
+                                               conflicted, flags.force)
         move = Move(source, landing, paths, directory)
         named = (source, landing)
+        if reason == CONFLICTED:
+            # git names the unmerged path, which for a directory is one
+            # of the paths inside rather than the operand.
+            found = conflicting(move, conflicted)
+            if found is not None:
+                named = found
         if reason is None:
             # Last of the per-source refusals, which is git's order:
             # a source with a fault of its own is refused for that
@@ -294,12 +336,19 @@ async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             raise MoveUsageError()
         repo, location = await opened(fl, doors)
         state = await read_index(dispatch, location.gitdir)
+        conflicted = {
+            path.decode("utf-8", errors="replace")
+            for path in state.conflicts
+        }
+        # An unmerged path holds no ordinary entry, so a tracked set
+        # built from the entries alone would call it untracked and let
+        # a directory holding one move with its stages left behind.
         tracked = {
             path.decode("utf-8", errors="replace")
             for path in state.entries
-        }
+        } | conflicted
         moves = await plan(stat_path, links_of(doors), location,
-                           start_point(fl), texts, tracked, flags)
+                           start_point(fl), texts, tracked, conflicted, flags)
         lines: list[str] = []
         if flags.dry_run:
             lines.extend(f"Checking rename of '{move.source}' to "

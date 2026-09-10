@@ -15,10 +15,12 @@
 from pathlib import Path
 
 import pytest
-from dulwich.index import ConflictedIndexEntry, Index, IndexEntry
+from dulwich.index import Index, IndexEntry
+from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git.restore import index_tree, parse_flags
 from mirage.commands.spec.types import FlagView
+from tests.commands.cli.builtin.git.conftest import conflict_index
 
 
 async def run(ws, line: str) -> tuple[int, bytes, bytes]:
@@ -142,31 +144,27 @@ async def test_a_deleted_file_comes_back(git_rw, repo_path: Path):
     assert (repo_path / "a.txt").read_text() == "one changed\n"
 
 
-def conflict_the_index(repo_path: Path, name: str) -> None:
-    """Turn one staged path into an unmerged one, stages 1 to 3.
-
-    Written straight into the index because reaching this state through
-    the CLI would need a merge, and what is under test is what
-    ``restore`` does to a path that is already conflicted.
-
-    Args:
-        repo_path (Path): the repository's working tree.
-        name (str): the path to conflict, repository-relative.
-    """
-    index = Index(str(repo_path / ".git" / "index"))
-    entry = index[name.encode()]
-    assert isinstance(entry, IndexEntry)
-    index[name.encode()] = ConflictedIndexEntry(ancestor=entry,
-                                                this=entry,
-                                                other=entry)
-    index.write()
-
-
 @pytest.mark.asyncio
 async def test_restoring_the_index_clears_the_conflict_stages(
         git_rw, repo_path: Path):
-    conflict_the_index(repo_path, "a.txt")
+    conflict_index(repo_path, "a.txt")
     assert await run(git_rw, "restore --staged a.txt") == (0, b"", b"")
     index = Index(str(repo_path / ".git" / "index"))
     assert not index.has_conflicts()
     assert isinstance(index[b"a.txt"], IndexEntry)
+
+
+@pytest.mark.asyncio
+async def test_a_raw_tree_is_a_source(git_rw, repo_path: Path):
+    with Repo(str(repo_path)) as repo:
+        tree = repo[b"HEAD"].tree.decode()
+    await git_rw.execute("echo edited > /repo/a.txt")
+    assert await run(git_rw, f"restore --source={tree} a.txt") == (0, b"", b"")
+    assert (repo_path / "a.txt").read_text() == "one changed\n"
+
+
+@pytest.mark.asyncio
+async def test_a_source_that_is_no_tree_is_still_refused(git_rw):
+    code, _out, err = await run(git_rw, "restore --source=nosuch a.txt")
+    assert code == 128
+    assert err == b"fatal: could not resolve nosuch\n"

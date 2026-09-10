@@ -116,14 +116,14 @@ git -C /repo tag -d v1.0
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `add`      | `-A` everything, `-u` tracked only, `-f` to stage an ignored path                                                                       |
 | `reset`    | mixed only, from HEAD; a pathspec limits it to those paths                                                                              |
-| `restore`  | worktree by default, `--staged` the index, `-SW` both; `--source` names the tree, and a path it lacks is removed from the target        |
+| `restore`  | worktree by default, `--staged` the index, `-SW` both; `--source` takes any tree-ish, and a path it lacks is removed from the target   |
 | `rm`       | refuses a path with uncommitted work unless `-f`; `--cached` keeps the file; `-r` for a directory; `-q`, `--ignore-unmatch`             |
-| `mv`       | files and directories, `-f` over an existing file, `-k` skips what cannot move, `-n` dry run, `-v`; two sources cannot land on one name |
+| `mv`       | files and directories, `-f` over an existing file, `-k` skips what cannot move, `-n` dry run, `-v`; two sources cannot land on one name, and an unmerged path moves nowhere |
 | `commit`   | `-m` required, `--author "Name <email>"` optional                                                                                       |
 | `branch`   | `-d` deletes a merged branch, `-D` any branch                                                                                           |
 | `checkout` | refuses rather than overwrite work you have not committed                                                                              |
-| `switch`   | the same move for a branch only; `-c` creates and checks the name against git's ref rules, `--detach` is the only way onto a bare commit |
-| `tag`      | lists sorted, `-l <pattern>`, `-n[<num>]`; a name is a lightweight tag, `-a`/`-m` an annotated one; `-d`, `-f`; a creation option needs a name |
+| `switch`   | the same move for a branch only; `-c` creates and checks the name against git's ref rules, `--detach` is the only way onto a bare commit and takes HEAD when nothing is named |
+| `tag`      | lists sorted, `-l <pattern>`, `-n[<num>]`; a name is a lightweight tag, `-a`/`-m` an annotated one; any object is a legal target; `-d`, `-f`; a creation option needs a name |
 
 `commit` records `mirage <mirage@localhost>` unless `--author` says
 otherwise: git reads `user.name` from config files that a mount does not

@@ -186,3 +186,20 @@ async def test_switch_c_refuses_a_name_holding_a_space(git_rw):
 async def test_an_unresolvable_start_point_is_named_first(git_rw):
     _code, _out, err = await run(git_rw, "switch -c ../../config nosuchstart")
     assert err == b"fatal: invalid reference: nosuchstart\n"
+
+
+@pytest.mark.asyncio
+async def test_detach_with_no_operand_takes_head(git_rw, repo_path: Path):
+    code, _out, err = await run(git_rw, "switch --detach")
+    assert code == 0
+    assert err.startswith(b"HEAD is now at ")
+    with Repo(str(repo_path)) as repo:
+        main = repo.refs[Ref(b"refs/heads/main")]
+        assert repo.refs.read_ref(b"HEAD") == main
+
+
+@pytest.mark.asyncio
+async def test_a_plain_switch_still_needs_a_branch(git_rw):
+    code, _out, err = await run(git_rw, "switch")
+    assert code == 128
+    assert err.startswith(b"fatal: ")

@@ -180,6 +180,40 @@ describe('the node table answers every verb that names a link', () => {
     }
   })
 
+  it('carries the nodes below a renamed directory', async () => {
+    // A rename re-anchors a whole subtree, and the part of it no backend can
+    // see has to move with it: the link below the source used to stay at a
+    // name the rename had emptied, so the moved directory was missing it and
+    // the old name still answered readlink.
+    const ws = await linkWorkspace()
+    try {
+      await ws.execute('echo hi > /ram/d/a.txt')
+      await ws.execute('ln -s a.txt /ram/d/inner')
+      await ws.dispatch('rename', '/ram/d', [PathSpec.fromStrPath('/ram/e')])
+      expect(DEC.decode((await ws.execute('readlink /ram/e/inner')).stdout)).toBe('a.txt\n')
+      expect((await ws.execute('readlink /ram/d/inner')).exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('replaces the nodes below a rename destination', async () => {
+    // rename(2) replaces what it lands on, subtree included, so a link left
+    // below the destination would shadow the content that arrived.
+    const ws = await linkWorkspace()
+    try {
+      await ws.execute('echo hi > /ram/d/a.txt')
+      await ws.execute('ln -s a.txt /ram/d/inner')
+      await ws.execute('mkdir /ram/e')
+      await ws.execute('ln -s gone /ram/e/stale')
+      await ws.dispatch('rename', '/ram/d', [PathSpec.fromStrPath('/ram/e')])
+      expect((await ws.execute('readlink /ram/e/stale')).exitCode).toBe(1)
+      expect(DEC.decode((await ws.execute('readlink /ram/e/inner')).stdout)).toBe('a.txt\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('answers a no-follow stat with the link row', async () => {
     // lstat asks for the row only the node table holds; a following stat
     // arrives resolved to the target and must not see a link at all.

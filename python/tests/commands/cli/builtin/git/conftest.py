@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 from dulwich import porcelain
+from dulwich.index import ConflictedIndexEntry, Index, IndexEntry
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
@@ -131,6 +132,26 @@ def make_branch(repo_path: Path, name: str) -> None:
         name (str): branch name, e.g. ``feat/git-cli``.
     """
     porcelain.branch_create(str(repo_path), name.encode())
+
+
+def conflict_index(repo_path: Path, name: str) -> None:
+    """Turn one staged path into an unmerged one, stages 1 to 3.
+
+    Written straight into the index because reaching this state through
+    the CLI would need a merge, and what the callers exercise is what a
+    verb does to a path that is already conflicted.
+
+    Args:
+        repo_path (Path): the repository's working tree.
+        name (str): the path to conflict, repository-relative.
+    """
+    index = Index(str(repo_path / ".git" / "index"))
+    entry = index[name.encode()]
+    assert isinstance(entry, IndexEntry)
+    index[name.encode()] = ConflictedIndexEntry(ancestor=entry,
+                                                this=entry,
+                                                other=entry)
+    index.write()
 
 
 @contextlib.contextmanager

@@ -79,21 +79,30 @@ Turn off this advice by setting config variable advice.detachedHead to false
 """
 
 
-def tree_of(repo: BaseRepo, commit_id: ObjectID) -> Tree:
-    """Every path a commit's tree holds, with its mode and blob id.
+def flat_tree(repo: BaseRepo, tree_id: ObjectID) -> Tree:
+    """Every path one tree holds, with its mode and blob id.
 
     Synchronous, and called on a worker thread: reading a tree pulls
     objects through the dispatcher.
 
     Args:
         repo (BaseRepo): the opened repository.
-        commit_id (ObjectID): the commit to read.
+        tree_id (ObjectID): the tree to read.
     """
-    commit = parse_commit(repo, commit_id)
     return {
         entry.path: (entry.mode, entry.sha)
-        for entry in iter_tree_contents(repo.object_store, commit.tree)
+        for entry in iter_tree_contents(repo.object_store, tree_id)
     }
+
+
+def tree_of(repo: BaseRepo, commit_id: ObjectID) -> Tree:
+    """Every path a commit's tree holds, with its mode and blob id.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        commit_id (ObjectID): the commit to read.
+    """
+    return flat_tree(repo, parse_commit(repo, commit_id).tree)
 
 
 def contents(repo: BaseRepo, shas: list[bytes]) -> dict[bytes, bytes]:

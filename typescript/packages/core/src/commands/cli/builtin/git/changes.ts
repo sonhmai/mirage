@@ -46,11 +46,16 @@ const UNTRACKED = '?'
 // git gives up rather than answer differently.
 const RENAME_THRESHOLD = 60
 const MAX_RENAME_FILES = 200
-// A regular file, as the mode's type bits spell it. Only these are rename
-// candidates: a symlink and a file that happen to share bytes are not a rename
-// of each other.
+// A regular file, as the mode's type bits spell it. Only these are scored for
+// similarity: a symlink is paired only with another symlink holding the same
+// bytes, since scoring one against a file would pair two unrelated things by
+// the bytes of a path.
 const REGULAR_MODE = '100644'
 const REGULAR_EXEC_MODE = '100755'
+// What a mode says a path is, for pairing within one kind. Only the executable
+// bit separates the two regular modes, and git renames across it.
+const SYMLINK_KIND = 'symlink'
+const REGULAR_KIND = 'regular'
 
 // git spells an unmerged path by which of the three index stages it kept, keyed
 // here as (ancestor, ours, theirs). The pair is the porcelain XY, and the long
@@ -70,6 +75,12 @@ type StagedRow = readonly [string, string | null]
 
 function isRegular(mode: string): boolean {
   return mode === REGULAR_MODE || mode === REGULAR_EXEC_MODE
+}
+
+/** What a mode makes a path, for a rename pair that must not cross kinds. */
+function kindOf(mode: string): string {
+  if (isRegular(mode)) return REGULAR_KIND
+  return mode === '120000' ? SYMLINK_KIND : mode
 }
 
 /**
@@ -94,23 +105,30 @@ export async function headEntries(repo: Repo): Promise<Map<string, TreeEntry> | 
  * Pair an add with a delete holding byte-identical content.
  *
  * Costs a map rather than a read, so it runs first and takes every pair it can
- * before anything is fetched.
+ * before anything is fetched. Keyed by kind as well as content, because a
+ * symlink and a regular file that happen to share bytes are not a rename of
+ * each other, while a moved symlink is exactly one.
  */
 function exactRenames(
   adds: readonly string[],
   deletes: readonly string[],
   oids: ReadonlyMap<string, string>,
+  kinds: ReadonlyMap<string, string>,
 ): [string, string][] {
+  const key = (path: string): string | undefined => {
+    const oid = oids.get(path)
+    return oid === undefined ? undefined : `${kinds.get(path) ?? ''}:${oid}`
+  }
   const sources = new Map<string, string>()
   for (const path of deletes) {
-    const oid = oids.get(path)
-    if (oid !== undefined && !sources.has(oid)) sources.set(oid, path)
+    const held = key(path)
+    if (held !== undefined && !sources.has(held)) sources.set(held, path)
   }
   const taken = new Set<string>()
   const pairs: [string, string][] = []
   for (const path of adds) {
-    const oid = oids.get(path)
-    const origin = oid === undefined ? undefined : sources.get(oid)
+    const held = key(path)
+    const origin = held === undefined ? undefined : sources.get(held)
     if (origin !== undefined && !taken.has(origin)) {
       taken.add(origin)
       pairs.push([path, origin])
@@ -187,29 +205,31 @@ async function contentRenames(
  * Fold an add and a delete of the same file into one rename.
  *
  * Two passes, git's own order: identical content first, then what is merely
- * similar enough.
+ * similar enough. Both pair within one kind, and only the second is limited to
+ * regular files: a moved symlink is a rename git reports as one.
  */
 async function pairRenames(
   repo: Repo,
   staged: ReadonlyMap<string, string>,
   oids: ReadonlyMap<string, string>,
-  regular: ReadonlySet<string>,
+  kinds: ReadonlyMap<string, string>,
 ): Promise<Map<string, StagedRow>> {
   const pick = (letter: string): string[] =>
     [...staged.entries()]
-      .filter(([path, held]) => held === letter && regular.has(path))
+      .filter(([path, held]) => held === letter && kinds.has(path))
       .map(([path]) => path)
       .sort(compareCodePoints)
   const adds = pick(ADDED)
   const deletes = pick(DELETED)
-  const pairs = exactRenames(adds, deletes, oids)
+  const pairs = exactRenames(adds, deletes, oids, kinds)
   const matchedNew = new Set(pairs.map(([fresh]) => fresh))
   const matchedOld = new Set(pairs.map(([, old]) => old))
+  const scored = (side: string[]): string[] => side.filter((p) => kinds.get(p) === REGULAR_KIND)
   pairs.push(
     ...(await contentRenames(
       repo,
-      adds.filter((p) => !matchedNew.has(p)),
-      deletes.filter((p) => !matchedOld.has(p)),
+      scored(adds.filter((p) => !matchedNew.has(p))),
+      scored(deletes.filter((p) => !matchedOld.has(p))),
       oids,
     )),
   )
@@ -240,13 +260,13 @@ async function stageChanges(
   const tree = head ?? new Map<string, TreeEntry>()
   const staged = new Map<string, string>()
   const oids = new Map<string, string>()
-  const regular = new Set<string>()
+  const kinds = new Map<string, string>()
   for (const [path, entry] of entries) {
     const recorded = tree.get(path)
     if (recorded === undefined) {
       staged.set(path, ADDED)
       oids.set(path, entry.oid)
-      if (isRegular(entry.mode.toString(8))) regular.add(path)
+      kinds.set(path, kindOf(entry.mode.toString(8)))
     } else if (recorded.oid !== entry.oid || Number.parseInt(recorded.mode, 8) !== entry.mode) {
       staged.set(path, MODIFIED)
     }
@@ -255,9 +275,9 @@ async function stageChanges(
     if (entries.has(path) || conflicts.has(path)) continue
     staged.set(path, DELETED)
     oids.set(path, recorded.oid)
-    if (isRegular(recorded.mode)) regular.add(path)
+    kinds.set(path, kindOf(recorded.mode))
   }
-  return pairRenames(repo, staged, oids, regular)
+  return pairRenames(repo, staged, oids, kinds)
 }
 
 /** The two-letter code for each unmerged path. */

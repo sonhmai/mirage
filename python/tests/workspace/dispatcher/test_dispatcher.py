@@ -286,6 +286,37 @@ async def test_rename_moves_a_namespace_link():
 
 
 @pytest.mark.asyncio
+async def test_rename_carries_the_nodes_below_a_directory():
+    # A rename re-anchors a whole subtree, and the part of it no backend
+    # can see has to move with it: the link below the source used to
+    # stay at a name the rename had emptied, so the moved directory was
+    # missing it and the old name still answered readlink.
+    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
+        await ws.execute("mkdir -p /ram/d && echo hi > /ram/d/a.txt")
+        await ws.execute("ln -s a.txt /ram/d/link")
+        await ws.dispatch("rename",
+                          PathSpec.from_str_path("/ram/d"),
+                          dst=PathSpec.from_str_path("/ram/e"))
+        assert not ws._namespace.is_link("/ram/d/link")
+        assert ws._namespace.readlink("/ram/e/link") == "a.txt"
+
+
+@pytest.mark.asyncio
+async def test_rename_replaces_the_nodes_below_the_destination():
+    # rename(2) replaces what it lands on, subtree included, so a link
+    # left below the destination would shadow the content that arrived.
+    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
+        await ws.execute("mkdir -p /ram/d /ram/e && echo hi > /ram/d/a.txt")
+        await ws.execute("ln -s a.txt /ram/d/link")
+        await ws.execute("ln -s gone /ram/e/stale")
+        await ws.dispatch("rename",
+                          PathSpec.from_str_path("/ram/d"),
+                          dst=PathSpec.from_str_path("/ram/e"))
+        assert not ws._namespace.is_link("/ram/e/stale")
+        assert ws._namespace.readlink("/ram/e/link") == "a.txt"
+
+
+@pytest.mark.asyncio
 async def test_a_no_follow_stat_answers_a_links_own_row():
     # lstat asks for the row only the node table holds. Without it every
     # surface rebuilt the row from the target string and reported epoch

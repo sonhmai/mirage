@@ -97,7 +97,11 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
     if (creating && flags.detach) throw new DetachWithCreateError()
     if (texts.length > 1) throw new OneReferenceError()
     const first = texts[0]
-    if (!creating && first === undefined) throw new MissingBranchArgumentError()
+    // A detach takes HEAD when nothing is named, which is git's own default;
+    // only an attaching switch needs a branch to name.
+    if (!creating && first === undefined && !flags.detach) {
+      throw new MissingBranchArgumentError()
+    }
     const repo = await opened(fl, doors)
     const head = await readHead(dispatch, repo.location.gitdir)
     const known = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)
@@ -120,7 +124,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       if (!validRefName(target)) throw new InvalidBranchNameError(target)
       attached = true
     } else {
-      target = first ?? ''
+      target = first ?? HEAD
       if (!flags.detach && target === head.branch) {
         return [null, new IOResult({ stderr: ENC.encode(`Already on '${target}'\n`) })]
       }

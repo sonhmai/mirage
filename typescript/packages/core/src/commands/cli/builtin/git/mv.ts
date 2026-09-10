@@ -48,6 +48,7 @@ const DESTINATION_ALREADY_EXISTS = 'destination already exists'
 const SOURCE_DIRECTORY_EMPTY = 'source directory is empty'
 const NOT_UNDER_VERSION_CONTROL = 'not under version control'
 const MULTIPLE_SOURCES = 'multiple sources for the same target'
+const CONFLICTED = 'conflicted'
 
 /** The parsed shape of a `git mv` invocation. */
 export interface MvFlags {
@@ -120,6 +121,20 @@ export function movedPath(move: Move, path: string): string {
 }
 
 /**
+ * The first path in a move that the index left unmerged.
+ *
+ * Named the way the collision is named, by the path itself rather than by the
+ * operand that carried it, which is what git reports for a directory holding
+ * one.
+ */
+export function conflicting(move: Move, conflicted: ReadonlySet<string>): [string, string] | null {
+  for (const path of move.paths) {
+    if (conflicted.has(path)) return [path, movedPath(move, path)]
+  }
+  return null
+}
+
+/**
  * The first path in a move that lands where an earlier one already does.
  *
  * Landings are compared one tracked path at a time rather than one operand at a
@@ -135,7 +150,14 @@ export function clashing(move: Move, claimed: ReadonlySet<string>): [string, str
   return null
 }
 
-/** Whether one source can move, in git's own order of refusals. */
+/**
+ * Whether one source can move, in git's own order of refusals.
+ *
+ * The index is read before the destination is looked at, which is git's order
+ * and observable: a conflicted source is refused as conflicted even when the
+ * destination is occupied, and a directory holding an unmerged path is refused
+ * for that rather than for a destination that already exists.
+ */
 export async function check(
   statPath: StatPath,
   links: LinkView | null,
@@ -143,6 +165,7 @@ export async function check(
   source: string,
   destination: string,
   tracked: ReadonlySet<string>,
+  conflicted: ReadonlySet<string>,
   force: boolean,
 ): Promise<Verdict> {
   const info = await lstat(statPath, links, under(location.worktree, source))
@@ -150,15 +173,22 @@ export async function check(
   if (destination === source || destination.startsWith(`${source}/`)) {
     return { reason: INTO_ITSELF, paths: [], directory: false }
   }
-  const target = await lstat(statPath, links, under(location.worktree, destination))
+  const landing = under(location.worktree, destination)
   if (info.type === FileType.DIRECTORY) {
-    if (target !== null) return { reason: DESTINATION_ALREADY_EXISTS, paths: [], directory: true }
     const held = [...tracked].filter((path) => inside(path, source)).sort(compareCodePoints)
+    if (held.some((path) => conflicted.has(path))) {
+      return { reason: CONFLICTED, paths: held, directory: true }
+    }
+    if ((await lstat(statPath, links, landing)) !== null) {
+      return { reason: DESTINATION_ALREADY_EXISTS, paths: [], directory: true }
+    }
     if (held.length === 0) return { reason: SOURCE_DIRECTORY_EMPTY, paths: [], directory: true }
     return { reason: null, paths: held, directory: true }
   }
   if (!tracked.has(source))
     return { reason: NOT_UNDER_VERSION_CONTROL, paths: [], directory: false }
+  if (conflicted.has(source)) return { reason: CONFLICTED, paths: [source], directory: false }
+  const target = await lstat(statPath, links, landing)
   if (target !== null && (!force || target.type === FileType.DIRECTORY)) {
     return { reason: DESTINATION_EXISTS, paths: [], directory: false }
   }
@@ -179,6 +209,7 @@ export async function plan(
   start: string,
   operands: readonly string[],
   tracked: ReadonlySet<string>,
+  conflicted: ReadonlySet<string>,
   flags: MvFlags,
 ): Promise<Move[]> {
   const destination = repoRelative(location, start, operands[operands.length - 1] ?? '')
@@ -194,7 +225,16 @@ export async function plan(
         ? basename(source)
         : `${destination}/${basename(source)}`
       : destination
-    const verdict = await check(statPath, links, location, source, landing, tracked, flags.force)
+    const verdict = await check(
+      statPath,
+      links,
+      location,
+      source,
+      landing,
+      tracked,
+      conflicted,
+      flags.force,
+    )
     const move: Move = {
       source,
       destination: landing,
@@ -203,6 +243,12 @@ export async function plan(
     }
     let reason = verdict.reason
     let named: [string, string] = [source, landing]
+    if (reason === CONFLICTED) {
+      // git names the unmerged path, which for a directory is one of the paths
+      // inside rather than the operand.
+      const found = conflicting(move, conflicted)
+      if (found !== null) named = found
+    }
     if (reason === null) {
       // Last of the per-source refusals, which is git's order: a source with a
       // fault of its own is refused for that fault even when it also collides
@@ -270,7 +316,11 @@ export async function mv(inv: CLIInvocation): Promise<CommandFnResult> {
     if (texts.length < 2) throw new MoveUsageError()
     const repo = await opened(fl, doors)
     const state = await readIndex(repo, dispatch)
-    const tracked = new Set(state.entries.keys())
+    const conflicted = new Set(state.conflicts.keys())
+    // An unmerged path holds no ordinary entry, so a tracked set built from the
+    // entries alone would call it untracked and let a directory holding one
+    // move with its stages left behind.
+    const tracked = new Set([...state.entries.keys(), ...conflicted])
     const moves = await plan(
       statPath,
       doors.ns?.links ?? null,
@@ -278,6 +328,7 @@ export async function mv(inv: CLIInvocation): Promise<CommandFnResult> {
       startPoint(fl),
       texts,
       tracked,
+      conflicted,
       flags,
     )
     if (flags.dryRun) {

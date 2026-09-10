@@ -443,6 +443,15 @@ class Dispatcher:
                 # followed the old link, and the moved content was
                 # reachable under no name at all.
                 await self._namespace.unlink(kwargs["dst"].virtual)
+                # The subtree moves with it, and only the node table can
+                # move the part of it no backend holds: a link or an
+                # attr overlay below the source is addressed by absolute
+                # path, so it would otherwise stay behind at a name the
+                # rename has emptied. The destination's own subtree is
+                # replaced first, as rename(2) replaces what it lands on.
+                await self._namespace.purge_under(kwargs["dst"].virtual)
+                await self._namespace.rename_under(path.virtual,
+                                                   kwargs["dst"].virtual)
         bound = await post_ops_gate(policies, op, path, write, mount.prefix,
                                     result)
         if bound is not None:

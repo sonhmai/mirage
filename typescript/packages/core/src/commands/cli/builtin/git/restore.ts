@@ -30,10 +30,10 @@ import {
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import { removeEmptyParents, removeFile, restoreEntry, under } from './io.ts'
 import { matched, repoRelative } from './pathspec.ts'
-import { opened, repoArgs } from './repo.ts'
+import { opened, repoArgs, type Repo } from './repo.ts'
 import { restored } from './reset.ts'
 import { resolveCommit } from './revparse.ts'
-import { commitEntries, type TreeEntry } from './tree.ts'
+import { commitEntries, treeEntries, type TreeEntry } from './tree.ts'
 import type { IndexEntry } from './types.ts'
 import { checkOperands, fatal, startPoint } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -69,6 +69,31 @@ export function indexTree(entries: ReadonlyMap<string, IndexEntry>): Map<string,
 }
 
 /**
+ * Every path a `--source` names, commit-ish or tree-ish.
+ *
+ * git takes any tree-ish here, so a raw tree id
+ * (`--source=$(git rev-parse HEAD^{tree})`) is as good as a branch. A
+ * commit-ish is tried first because it is what the option is normally spelled
+ * with and it is the only form carrying ancestry suffixes; a revision neither
+ * reading resolves is unresolvable.
+ */
+export async function sourceTree(repo: Repo, revision: string): Promise<Map<string, TreeEntry>> {
+  try {
+    return await commitEntries(repo, await resolveCommit(repo, revision))
+  } catch {
+    // Not a commit-ish. The id is read as a tree before the revision is called
+    // unresolvable, never instead of reporting it: the throw below is what a
+    // spelling neither reading accepts still gets.
+  }
+  try {
+    const oid = await git.expandOid({ ...repoArgs(repo), oid: revision })
+    return await treeEntries(repo, oid)
+  } catch {
+    throw new UnresolvableSourceError(revision)
+  }
+}
+
+/**
  * Put paths back to what a source records.
  *
  * Two targets and one source, git's own model. `--staged` restores the index
@@ -96,13 +121,7 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
     const held = indexTree(state.entries)
     let source: Map<string, TreeEntry> | null
     if (flags.source !== undefined) {
-      let oid: string
-      try {
-        oid = await resolveCommit(repo, flags.source)
-      } catch {
-        throw new UnresolvableSourceError(flags.source)
-      }
-      source = await commitEntries(repo, oid)
+      source = await sourceTree(repo, flags.source)
     } else if (flags.staged) {
       source = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
     } else {

@@ -156,6 +156,15 @@ function git(repo: string, args: string[]): string {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' })
 }
 
+/** Leave one tracked path unmerged, with all three stages holding its blob. */
+function conflictIndex(repo: string, path: string): void {
+  const blob = git(repo, ['rev-parse', `HEAD:${path}`]).trim()
+  const stages = [1, 2, 3].map((stage) => `100644 ${blob} ${String(stage)}\t${path}`)
+  execFileSync('git', ['-C', repo, 'update-index', '--index-info'], {
+    input: `${stages.join('\n')}\n`,
+  })
+}
+
 /** Write into the mount, which is where the verbs under test read from. */
 async function write(h: Harness, path: string, text: string): Promise<void> {
   const target = `/repo/${path}`
@@ -1315,5 +1324,135 @@ describe('restoring an unmerged path', () => {
     const drained = await h.drain()
     expect(git(drained, ['ls-files', '-u'])).toBe('')
     expect(git(drained, ['status', '--porcelain'])).toBe('')
+  })
+})
+
+describe('a path the index left unmerged', () => {
+  it('refuses to move as a source of its own', async () => {
+    const h = await harness((repo) => {
+      conflictIndex(repo, 'letters.txt')
+    })
+    expect(await h.run('mv letters.txt moved.txt')).toEqual([
+      128,
+      '',
+      'fatal: conflicted, source=letters.txt, destination=moved.txt\n',
+    ])
+  })
+
+  it('outranks a destination that already exists', async () => {
+    const h = await harness((repo) => {
+      conflictIndex(repo, 'letters.txt')
+    })
+    const [, , err] = await h.run('mv letters.txt numbers.txt')
+    expect(err).toBe('fatal: conflicted, source=letters.txt, destination=numbers.txt\n')
+  })
+
+  it('refuses the directory holding it, named by the path itself', async () => {
+    const h = await harness((repo) => {
+      conflictIndex(repo, 'docs/readme.md')
+    })
+    expect(await h.run('mv docs notes')).toEqual([
+      128,
+      '',
+      'fatal: conflicted, source=docs/readme.md, destination=notes/readme.md\n',
+    ])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('UU docs/readme.md\n')
+  })
+
+  it('is skipped under -k', async () => {
+    const h = await harness((repo) => {
+      conflictIndex(repo, 'letters.txt')
+    })
+    expect(await h.run('mv -k letters.txt moved.txt')).toEqual([0, '', ''])
+  })
+})
+
+describe('a directory holding a symlink', () => {
+  it('carries it along when git mv renames the directory', async () => {
+    const h = await harness()
+    await h.ws.dispatch('symlink', '/repo/docs/link', [], { target: 'readme.md' })
+    await h.run('add docs')
+    await h.run('commit -m link')
+    expect(await h.run('mv docs notes')).toEqual([0, '', ''])
+    // The link is namespace state, not a backend entry, so it is read back
+    // through the workspace rather than out of the drained copy.
+    expect(await h.ws.dispatch('readlink', '/repo/notes/link')).toBe('readme.md')
+    expect(await h.run('status --porcelain')).toEqual([
+      0,
+      'R  docs/link -> notes/link\nR  docs/readme.md -> notes/readme.md\n',
+      '',
+    ])
+    // The index is asserted on the drained copy rather than its status: the
+    // drain writes files, so the link lands there as a regular file and the
+    // real binary reads the pair as a type change.
+    const rows = git(await h.drain(), ['ls-files', '-s'])
+    expect(rows).toContain('120000')
+    expect(rows).toContain('notes/link')
+    expect(rows).not.toContain('docs/link')
+  })
+})
+
+describe('git switch --detach', () => {
+  it('takes HEAD when nothing is named', async () => {
+    const h = await harness()
+    const [code, , err] = await h.run('switch --detach')
+    expect(code).toBe(0)
+    expect(err.startsWith('HEAD is now at ')).toBe(true)
+    const drained = await h.drain()
+    expect(git(drained, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('HEAD\n')
+    expect(git(drained, ['rev-parse', 'HEAD'])).toBe(git(drained, ['rev-parse', 'main']))
+  })
+
+  it('still needs a branch when attaching', async () => {
+    const h = await harness()
+    const [code, , err] = await h.run('switch')
+    expect(code).toBe(128)
+    expect(err.startsWith('fatal: ')).toBe(true)
+  })
+})
+
+describe('a tag target that is not a commit', () => {
+  it('points a lightweight tag at a blob', async () => {
+    const h = await harness()
+    const blob = git(h.repo, ['rev-parse', 'HEAD:letters.txt']).trim()
+    expect(await h.run(`tag blobtag ${blob}`)).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['cat-file', '-t', 'blobtag'])).toBe('blob\n')
+    expect(git(drained, ['rev-parse', 'blobtag'])).toBe(`${blob}\n`)
+  })
+
+  it('records the type in an annotated tag', async () => {
+    const h = await harness()
+    const blob = git(h.repo, ['rev-parse', 'HEAD:letters.txt']).trim()
+    expect(await h.run(`tag -a annblob -m m ${blob}`)).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['cat-file', '-t', 'annblob'])).toBe('tag\n')
+    expect(git(drained, ['cat-file', '-p', 'annblob']).split('\n')[1]).toBe('type blob')
+  })
+})
+
+describe('git tag -n0', () => {
+  it('prints bare names where -n1 pads them', async () => {
+    const h = await harness()
+    await h.run("tag -a v1 -m 'the message'")
+    expect(await h.run('tag -n0')).toEqual([0, 'v1\n', ''])
+    expect(await h.run('tag -n1')).toEqual([0, 'v1              the message\n', ''])
+  })
+})
+
+describe('git restore --source', () => {
+  it('takes a raw tree id', async () => {
+    const h = await harness()
+    const tree = git(h.repo, ['rev-parse', 'HEAD^{tree}']).trim()
+    await write(h, 'letters.txt', 'edited\n')
+    expect(await h.run(`restore --source=${tree} letters.txt`)).toEqual([0, '', ''])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('')
+  })
+
+  it('still refuses a source that is no tree at all', async () => {
+    const h = await harness()
+    const [code, , err] = await h.run('restore --source=nosuch letters.txt')
+    expect(code).toBe(128)
+    expect(err).toBe('fatal: could not resolve nosuch\n')
   })
 })

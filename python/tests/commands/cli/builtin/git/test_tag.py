@@ -248,3 +248,41 @@ async def test_deleting_a_packed_tag_removes_it(repo_path: Path):
     assert "refs/tags/" not in packed
     assert "^" not in packed
     assert "refs/heads/main" in packed
+
+
+@pytest.mark.asyncio
+async def test_n0_prints_bare_names(git_rw):
+    await run(git_rw, "tag -a v1 -m msg")
+    await run(git_rw, "tag lw")
+    assert (await run(git_rw, "tag -n0"))[1] == b"lw\nv1\n"
+    assert (await run(git_rw, "tag -n1"))[1] == (b"lw              third\n"
+                                                 b"v1              msg\n")
+
+
+@pytest.mark.asyncio
+async def test_a_tag_can_point_at_a_blob(git_rw, repo_path: Path):
+    with Repo(str(repo_path)) as repo:
+        blob = repo.get_object(repo[b"HEAD"].tree).lookup_path(
+            repo.get_object, b"a.txt")[1].decode()
+    assert await run(git_rw, f"tag blobtag {blob}") == (0, b"", b"")
+    assert tag_object(repo_path, "blobtag").id.decode() == blob
+    assert (await run(git_rw, "tag -n0"))[1] == b"blobtag\n"
+
+
+@pytest.mark.asyncio
+async def test_an_annotated_tag_records_the_blob_type(git_rw, repo_path: Path):
+    with Repo(str(repo_path)) as repo:
+        blob = repo.get_object(repo[b"HEAD"].tree).lookup_path(
+            repo.get_object, b"a.txt")[1].decode()
+    assert await run(git_rw, f"tag -a annblob -m m {blob}") == (0, b"", b"")
+    written = tag_object(repo_path, "annblob")
+    assert isinstance(written, Tag)
+    assert written.object[0].type_name == b"blob"
+    assert written.object[1].decode() == blob
+
+
+@pytest.mark.asyncio
+async def test_a_target_that_is_no_object_is_still_refused(git_rw):
+    code, _out, err = await run(git_rw, "tag v2 nosuchrev")
+    assert code == 128
+    assert err == b"fatal: Failed to resolve 'nosuchrev' as a valid ref.\n"

@@ -18,9 +18,12 @@ from dataclasses import dataclass
 
 from dulwich.index import IndexEntry
 from dulwich.objects import ObjectID
+from dulwich.objectspec import parse_tree
+from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.changes import head_entries
-from mirage.commands.cli.builtin.git.checkout import Tree, contents, tree_of
+from mirage.commands.cli.builtin.git.checkout import (Tree, contents,
+                                                      flat_tree, tree_of)
 from mirage.commands.cli.builtin.git.errors import GitError  # yapf: disable
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     NoRestorePathsError, NoWorkspaceError, UnknownPathspecError,
@@ -86,6 +89,35 @@ def decoded(paths: set[bytes] | dict[bytes, tuple[int, bytes]]) -> set[str]:
     return {path.decode("utf-8", errors="replace") for path in paths}
 
 
+def source_tree(repo: BaseRepo, revision: str) -> Tree:
+    """Every path a ``--source`` names, commit-ish or tree-ish.
+
+    git takes any tree-ish here, so a raw tree id
+    (``--source=$(git rev-parse HEAD^{tree})``) is as good as a branch.
+    A commit-ish is tried first because it is what the option is
+    normally spelled with and it is the only form carrying ancestry
+    suffixes; a revision neither reading resolves is unresolvable.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        revision (str): the source as the user spelled it.
+    """
+    try:
+        commit = resolve_commit(repo, revision)
+    except GitError:
+        # Not a commit-ish. The id is read as a tree before the
+        # revision is called unresolvable, never instead of reporting
+        # it: a spelling neither reading accepts still refuses here.
+        try:
+            return flat_tree(repo, parse_tree(repo, revision).id)
+        except (AssertionError, KeyError, ValueError) as exc:
+            # dulwich asserts rather than raises on a name that is not
+            # hex at all, so the refusal has to catch that too or a
+            # typo escapes as an unhandled error.
+            raise UnresolvableSourceError(revision) from exc
+    return tree_of(repo, commit.id)
+
+
 async def restore(
         inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     """Put paths back to what a source records.
@@ -120,12 +152,8 @@ async def restore(
         state = await read_index(dispatch, location.gitdir)
         held = index_tree(state.entries)
         if flags.source is not None:
-            try:
-                commit = resolve_commit(repo, flags.source)
-            except GitError as exc:
-                raise UnresolvableSourceError(flags.source) from exc
             source: Tree | None = await asyncio.to_thread(
-                tree_of, repo, commit.id)
+                source_tree, repo, flags.source)
         elif flags.staged:
             source = await asyncio.to_thread(head_entries, repo) or {}
         else:

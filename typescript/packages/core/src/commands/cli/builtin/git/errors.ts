@@ -668,6 +668,19 @@ export class NoRestorePathsError extends GitError {
   }
 }
 
+/**
+ * `restore --source` naming an object that is no tree.
+ *
+ * A revision that resolves is reported by the id it resolved to rather than by
+ * the spelling, which is git's own wording: the complaint is about the object
+ * found, not about the name.
+ */
+export class UnreadableTreeError extends GitError {
+  constructor(oid: string) {
+    super(`unable to read tree (${oid})`)
+  }
+}
+
 /** `restore --source` naming a tree this repository cannot resolve. */
 export class UnresolvableSourceError extends GitError {
   constructor(source: string) {

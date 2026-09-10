@@ -256,3 +256,72 @@ async def test_a_source_holding_the_conflict_restores_it(
     assert await run(git_rw, "restore --staged c.txt") == (0, b"", b"")
     index = Index(str(repo_path / ".git" / "index"))
     assert not index.has_conflicts()
+
+
+@pytest.mark.asyncio
+async def test_a_tree_peel_is_a_source(git_rw, repo_path: Path):
+    # git's own help says --source <tree-ish>, and a peel is the
+    # ordinary way to spell one. Probed on git 2.50.1: exit 0.
+    await git_rw.execute("echo edited > /repo/a.txt")
+    assert await run(git_rw,
+                     "restore --source=HEAD^{tree} a.txt") == (0, b"", b"")
+    assert (repo_path / "a.txt").read_text() == "one changed\n"
+
+
+@pytest.mark.asyncio
+async def test_a_tag_peel_is_a_source(git_rw, repo_path: Path):
+    assert (await run(git_rw, "tag v1"))[0] == 0
+    await git_rw.execute("echo edited > /repo/a.txt")
+    assert await run(git_rw,
+                     "restore --source=v1^{tree} a.txt") == (0, b"", b"")
+    assert (repo_path / "a.txt").read_text() == "one changed\n"
+
+
+@pytest.mark.asyncio
+async def test_a_subtree_at_a_path_is_a_source(git_rw, repo_path: Path):
+    (repo_path / "sub").mkdir()
+    (repo_path / "sub" / "a.txt").write_text("nested\n", encoding="utf-8")
+    assert (await run(git_rw, "add sub"))[0] == 0
+    assert (await run(git_rw, "commit -m nested"))[0] == 0
+    assert await run(git_rw,
+                     "restore --source=HEAD:sub a.txt") == (0, b"", b"")
+    assert (repo_path / "a.txt").read_text() == "nested\n"
+
+
+@pytest.mark.asyncio
+async def test_a_source_that_is_no_tree_is_named_by_its_id(git_rw):
+    # git reports the object it reached, not the spelling: the name
+    # resolved fine and what it found was the problem.
+    code, _out, err = await run(git_rw, "restore --source=HEAD:a.txt a.txt")
+    assert code == 128
+    assert err.startswith(b"fatal: unable to read tree (")
+    assert err.endswith(b")\n")
+
+
+@pytest.mark.asyncio
+async def test_a_peel_that_resolves_to_nothing_is_named_as_typed(git_rw):
+    code, _out, err = await run(git_rw, "restore --source=nosuch^{tree} a.txt")
+    assert code == 128
+    assert err == b"fatal: could not resolve nosuch^{tree}\n"
+
+
+@pytest.mark.asyncio
+async def test_a_file_replaces_a_directory_an_untracked_file_holds(
+        git_rw, repo_path: Path):
+    # The source keeps a.txt as a file, the index keeps a.txt/child, and
+    # an untracked a.txt/keep holds the directory open. git replaces the
+    # whole directory here, untracked child and all, and exits 0
+    # (probed on git 2.50.1); the write would otherwise fail with the
+    # index already changed.
+    with Repo(str(repo_path)) as repo:
+        tree = repo[b"HEAD"].tree.decode()
+    await run(git_rw, "rm --cached a.txt")
+    (repo_path / "a.txt").unlink()
+    (repo_path / "a.txt").mkdir()
+    (repo_path / "a.txt" / "child").write_text("inner\n", encoding="utf-8")
+    await run(git_rw, "add a.txt/child")
+    (repo_path / "a.txt" / "keep").write_text("untracked\n", encoding="utf-8")
+    assert await run(git_rw,
+                     f"restore --source={tree} -SW a.txt") == (0, b"", b"")
+    assert (repo_path / "a.txt").is_file()
+    assert (repo_path / "a.txt").read_text() == "one changed\n"

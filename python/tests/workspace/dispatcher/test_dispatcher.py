@@ -302,18 +302,39 @@ async def test_rename_carries_the_nodes_below_a_directory():
 
 
 @pytest.mark.asyncio
-async def test_rename_replaces_the_nodes_below_the_destination():
-    # rename(2) replaces what it lands on, subtree included, so a link
-    # left below the destination would shadow the content that arrived.
+async def test_rename_refuses_a_destination_holding_a_link():
+    # A link is a directory entry no backend can see, so a destination
+    # the backend reads as empty is not: POSIX rename(2) answers
+    # ENOTEMPTY for it (probed on debian:stable-slim, where a directory
+    # holding one broken symlink refuses the rename). Letting the
+    # backend decide replaced the directory and deleted the link with
+    # it, which loses namespace state where the kernel refuses.
     with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
         await ws.execute("mkdir -p /ram/d /ram/e && echo hi > /ram/d/a.txt")
         await ws.execute("ln -s a.txt /ram/d/link")
         await ws.execute("ln -s gone /ram/e/stale")
+        with pytest.raises(OSError) as caught:
+            await ws.dispatch("rename",
+                              PathSpec.from_str_path("/ram/d"),
+                              dst=PathSpec.from_str_path("/ram/e"))
+        assert caught.value.errno == errno.ENOTEMPTY
+        # Nothing moved: both ends are as they were.
+        assert ws._namespace.readlink("/ram/e/stale") == "gone"
+        assert ws._namespace.readlink("/ram/d/link") == "a.txt"
+
+
+@pytest.mark.asyncio
+async def test_rename_replaces_an_empty_destination():
+    # The other half of rename(2): a destination with nothing in it is
+    # replaced, and the subtree re-anchors onto the new name.
+    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
+        await ws.execute("mkdir -p /ram/d /ram/e && echo hi > /ram/d/a.txt")
+        await ws.execute("ln -s a.txt /ram/d/link")
         await ws.dispatch("rename",
                           PathSpec.from_str_path("/ram/d"),
                           dst=PathSpec.from_str_path("/ram/e"))
-        assert not ws._namespace.is_link("/ram/e/stale")
         assert ws._namespace.readlink("/ram/e/link") == "a.txt"
+        assert not ws._namespace.is_link("/ram/d/link")
 
 
 @pytest.mark.asyncio

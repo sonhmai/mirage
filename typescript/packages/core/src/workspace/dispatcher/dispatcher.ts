@@ -26,6 +26,7 @@ import {
   eexist,
   einval,
   enoent,
+  enotempty,
   isMissError,
   isMissingOp,
   type FsError,
@@ -242,6 +243,19 @@ export class Dispatcher {
           throw eacces(path.virtual)
         }
       }
+    }
+    if (
+      opName === 'rename' &&
+      dstArg instanceof PathSpec &&
+      this.namespace.linkStatsBelow(dstArg.virtual).length > 0
+    ) {
+      // rename(2) replaces a destination directory only when it is empty, and
+      // the node table is half of what empty means here: a link is invisible to
+      // every backend, so a destination the backend reads as empty can still
+      // hold one. Left to the backend the rename succeeded and the purge below
+      // then deleted the link with it, losing namespace state silently where
+      // POSIX promises ENOTEMPTY.
+      throw enotempty(dstArg.virtual)
     }
     if (this.tableAnswers(opName, path.virtual, kwargs)) {
       return [

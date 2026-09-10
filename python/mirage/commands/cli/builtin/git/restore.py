@@ -18,8 +18,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from dulwich.index import IndexEntry
-from dulwich.objects import ObjectID
-from dulwich.objectspec import parse_tree
+from dulwich.objects import Commit, ObjectID
 from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.changes import head_entries
@@ -28,19 +27,22 @@ from mirage.commands.cli.builtin.git.checkout import (Tree, contents,
 from mirage.commands.cli.builtin.git.errors import GitError  # yapf: disable
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     NoRestorePathsError, NoWorkspaceError, UnknownPathspecError,
-    UnknownSwitchError, UnmergedPathError, UnresolvableSourceError)
+    UnknownSwitchError, UnmergedPathError, UnreadableTreeError,
+    UnresolvableSourceError)
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import (remove_empty_parents,
-                                                remove_file, restore_entry)
+                                                remove_file, remove_tree,
+                                                restore_entry)
 from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
 from mirage.commands.cli.builtin.git.reset import restored
-from mirage.commands.cli.builtin.git.revparse import resolve_commit
+from mirage.commands.cli.builtin.git.revparse import TREE, resolve_object
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (  # yapf: disable
     check_operands, escaped, fatal, links_of, start_point)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import FileType
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,30 +95,31 @@ def decoded(paths: Iterable[bytes]) -> set[str]:
 def source_tree(repo: BaseRepo, revision: str) -> Tree:
     """Every path a ``--source`` names, commit-ish or tree-ish.
 
-    git takes any tree-ish here, so a raw tree id
-    (``--source=$(git rev-parse HEAD^{tree})``) is as good as a branch.
-    A commit-ish is tried first because it is what the option is
-    normally spelled with and it is the only form carrying ancestry
-    suffixes; a revision neither reading resolves is unresolvable.
+    git takes any tree-ish here, and the option's own help says so
+    (``--source <tree-ish>``), so the whole object grammar is legal:
+    a branch, a raw tree id, a peel (``HEAD^{tree}``, ``v1^{tree}``)
+    and a subtree at a path (``HEAD:sub``) all name a tree.
+
+    The two refusals are worded differently because they are different
+    complaints. A spelling that resolves to nothing is reported by the
+    spelling; one that resolves to an object which is no tree is
+    reported by the id it reached, since the name was fine and the
+    object was not.
 
     Args:
         repo (BaseRepo): the opened repository.
         revision (str): the source as the user spelled it.
     """
     try:
-        commit = resolve_commit(repo, revision)
-    except GitError:
-        # Not a commit-ish. The id is read as a tree before the
-        # revision is called unresolvable, never instead of reporting
-        # it: a spelling neither reading accepts still refuses here.
-        try:
-            return flat_tree(repo, parse_tree(repo, revision).id)
-        except (AssertionError, KeyError, ValueError) as exc:
-            # dulwich asserts rather than raises on a name that is not
-            # hex at all, so the refusal has to catch that too or a
-            # typo escapes as an unhandled error.
-            raise UnresolvableSourceError(revision) from exc
-    return tree_of(repo, commit.id)
+        found = resolve_object(repo, revision)
+    except GitError as exc:
+        raise UnresolvableSourceError(revision) from exc
+    if isinstance(found, Commit):
+        # git's one implicit peel: a commit stands for its tree here.
+        return tree_of(repo, found.id)
+    if found.type_name.decode() != TREE:
+        raise UnreadableTreeError(found.id.decode())
+    return flat_tree(repo, found.id)
 
 
 async def restore(
@@ -200,6 +203,7 @@ async def restore(
                 state.conflicts.pop(name.encode(), None)
             await write_index(dispatch, location.gitdir, state)
         if flags.worktree:
+            links = links_of(doors)
             blobs = await asyncio.to_thread(
                 contents, repo, [tree[name.encode()][1] for name in present])
             # Removals first, because the two sets can name the same
@@ -214,9 +218,20 @@ async def restore(
                 await remove_empty_parents(dispatch, path, location.worktree)
             for name in sorted(present):
                 mode, sha = tree[name.encode()]
-                await restore_entry(dispatch,
-                                    posixpath.join(location.worktree, name),
-                                    mode, blobs[sha], links_of(doors))
+                where = posixpath.join(location.worktree, name)
+                # A directory can still stand here after the loop
+                # above: it removed the tracked children, but an
+                # untracked one keeps it alive and the write would
+                # fail on it with the index already updated. git
+                # replaces the whole directory, untracked children
+                # included. A link is left to restore_entry, which
+                # retargets it; following one to a directory here
+                # would delete a tree no branch named.
+                if links is None or links.stat_at(where) is None:
+                    info = await stat_path(where)
+                    if info is not None and info.type is FileType.DIRECTORY:
+                        await remove_tree(dispatch, where)
+                await restore_entry(dispatch, where, mode, blobs[sha], links)
     except GitError as exc:
         return fatal(exc)
     return None, IOResult()

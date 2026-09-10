@@ -15,6 +15,7 @@
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
+import { FileType } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
 import type { CLIInvocation } from '../../types.ts'
@@ -26,16 +27,17 @@ import {
   UnknownPathspecError,
   UnknownSwitchError,
   UnmergedPathError,
+  UnreadableTreeError,
   UnresolvableSourceError,
 } from './errors.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
-import { removeEmptyParents, removeFile, restoreEntry, under } from './io.ts'
+import { removeEmptyParents, removeFile, removeTree, restoreEntry, under } from './io.ts'
 import { matched, repoRelative } from './pathspec.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
 import { restored } from './reset.ts'
-import { resolveCommit } from './revparse.ts'
+import { COMMIT, TREE, resolveObject } from './revparse.ts'
 import { commitEntries, treeEntries, type TreeEntry } from './tree.ts'
-import type { IndexEntry } from './types.ts'
+import type { GitObject, IndexEntry } from './types.ts'
 import { checkOperands, escaped, fatal, startPoint } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -79,19 +81,16 @@ export function indexTree(entries: ReadonlyMap<string, IndexEntry>): Map<string,
  * reading resolves is unresolvable.
  */
 export async function sourceTree(repo: Repo, revision: string): Promise<Map<string, TreeEntry>> {
+  let found: GitObject
   try {
-    return await commitEntries(repo, await resolveCommit(repo, revision))
-  } catch {
-    // Not a commit-ish. The id is read as a tree before the revision is called
-    // unresolvable, never instead of reporting it: the throw below is what a
-    // spelling neither reading accepts still gets.
-  }
-  try {
-    const oid = await git.expandOid({ ...repoArgs(repo), oid: revision })
-    return await treeEntries(repo, oid)
+    found = await resolveObject(repo, revision)
   } catch {
     throw new UnresolvableSourceError(revision)
   }
+  // git's one implicit peel: a commit stands for its tree here.
+  if (found.type === COMMIT) return await commitEntries(repo, found.oid)
+  if (found.type !== TREE) throw new UnreadableTreeError(found.oid)
+  return await treeEntries(repo, found.oid)
 }
 
 /**
@@ -171,17 +170,25 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
         await removeFile(dispatch, path)
         await removeEmptyParents(dispatch, path, repo.location.worktree)
       }
+      const links = doors.ns?.links ?? null
       for (const name of present) {
         const entry = tree.get(name)
         if (entry === undefined) continue
         const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
-        await restoreEntry(
-          dispatch,
-          under(repo.location.worktree, name),
-          entry.mode,
-          blob,
-          doors.ns?.links ?? null,
-        )
+        const where = under(repo.location.worktree, name)
+        // A directory can still stand here after the loop above: it removed
+        // the tracked children, but an untracked one keeps it alive and the
+        // write would fail on it with the index already updated. git replaces
+        // the whole directory, untracked children included. A link is left to
+        // restoreEntry, which retargets it; following one to a directory here
+        // would delete a tree no branch named.
+        if ((links?.statAt(where) ?? null) === null) {
+          const info = await statPath(where)
+          if (info !== null && info.type === FileType.DIRECTORY) {
+            await removeTree(dispatch, where)
+          }
+        }
+        await restoreEntry(dispatch, where, entry.mode, blob, links)
       }
     }
   } catch (err) {

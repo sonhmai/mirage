@@ -18,6 +18,7 @@ import { parent, posixNormpath } from '../../../../utils/path.ts'
 import { isMissingPath } from '../../../../utils/errors.ts'
 import type { LinkView } from '../../../../ops/types.ts'
 import { SYMLINK_MODE } from './constants.ts'
+import { basename } from './path.ts'
 import type { Dispatch } from './types.ts'
 
 /** Read one virtual path through the workspace dispatcher. */
@@ -222,6 +223,51 @@ export async function renamePath(
   target: string,
 ): Promise<void> {
   await dispatch('rename', PathSpec.fromStrPath(source), [PathSpec.fromStrPath(target)])
+}
+
+/**
+ * Delete a path and everything under it, tracked or not.
+ *
+ * git replaces a tree entry rather than merging with it, so a directory
+ * standing where the source keeps a file goes entirely. That is one of the few
+ * places git removes a file it never tracked: an untracked child keeps the
+ * directory alive after the tracked ones are gone, and restoring the file over
+ * it would otherwise fail with the index already changed.
+ *
+ * A file and an absent path both walk out through the same two steps, since
+ * `readdir` reads a non-directory as nothing there and `rmdir` refuses it.
+ *
+ * @param dispatch workspace op dispatcher
+ * @param path absolute virtual path to clear
+ */
+export async function removeTree(dispatch: Dispatch, path: string): Promise<void> {
+  let entries: string[] = []
+  try {
+    entries = await readNames(dispatch, path)
+  } catch (err) {
+    // `readNames` reads only an absent path as nothing there, where python's
+    // `read_names` folds "not a directory" in as well (MISS_ERRORS carries
+    // NotADirectoryError). A file listed as a directory is exactly what this
+    // walk expects to meet, and the unlink below is its answer.
+    if ((err as { code?: string }).code !== 'ENOTDIR') throw err
+  }
+  for (const entry of entries) {
+    // A listing answers in whole paths, so the child is rebuilt from the
+    // basename the way every other walk here does.
+    const name = basename(entry)
+    if (name === '') continue
+    await removeTree(dispatch, under(path, name))
+  }
+  try {
+    await dispatch('rmdir', PathSpec.fromStrPath(path))
+  } catch (err) {
+    // A directory the walk above was supposed to empty is a real failure and
+    // stays thrown. Everything else means this was no directory (or is
+    // already gone), so the path is whatever one file it is and unlink
+    // tolerates an absent one.
+    if ((err as { code?: string }).code === 'ENOTEMPTY') throw err
+    await removeFile(dispatch, path)
+  }
 }
 
 /**

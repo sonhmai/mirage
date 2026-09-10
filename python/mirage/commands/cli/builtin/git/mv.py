@@ -172,7 +172,7 @@ def clashing(move: Move, claimed: set[str]) -> tuple[str, str] | None:
     return None
 
 
-def spanning(mounts: MountView | None, path: str) -> bool:
+def spanning(mounts: MountView | None, path: str, landing: str) -> bool:
     """Whether renaming a path would leave a mount behind.
 
     A mount nested in the repository is served by another resource, and
@@ -183,14 +183,24 @@ def spanning(mounts: MountView | None, path: str) -> bool:
     still points at the old prefix. Neither is something the verb can
     repair afterwards, so both are refused before anything moves.
 
+    The destination is the same fault read from the other end, and it
+    catches an ordinary file the first two questions pass: the op is
+    bound to the backend serving the source, so a landing another mount
+    serves is written into the source's backend at a path it does not
+    own. The file is then hidden behind the other mount while the index
+    names the new path, which is the same broken pair one level down.
+
     Args:
         mounts (MountView | None): the name plane's mount boundaries,
             None outside a workspace.
         path (str): absolute virtual path of the source.
+        landing (str): absolute virtual path the source moves to.
     """
     if mounts is None:
         return False
-    return mounts.is_root(path) or bool(mounts.descendants(path))
+    if mounts.is_root(path) or bool(mounts.descendants(path)):
+        return True
+    return mounts.root_of(path) != mounts.root_of(landing)
 
 
 async def check(stat_path: StatPath, links: LinkView | None,
@@ -300,7 +310,8 @@ async def plan(stat_path: StatPath, links: LinkView | None,
             if clash is not None:
                 reason, named = MULTIPLE_SOURCES, clash
         if reason is None and spanning(
-                mounts, posixpath.join(location.worktree, source)):
+                mounts, posixpath.join(location.worktree, source),
+                posixpath.join(location.worktree, landing)):
             # Last, after every check git itself makes, so a source git
             # would refuse anyway is refused in git's own words. ``-k``
             # skips it like any other rename this source cannot survive.

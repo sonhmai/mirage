@@ -300,6 +300,17 @@ class Dispatcher:
                     and await self._moved_source_is_dir(path)):
                 raise PermissionError(errno.EACCES, os.strerror(errno.EACCES),
                                       path.virtual)
+        if (op == "rename" and isinstance(dst, PathSpec)
+                and self._namespace.link_stats_below(dst.virtual)):
+            # rename(2) replaces a destination directory only when it
+            # is empty, and the node table is half of what empty means
+            # here: a link is invisible to every backend, so a
+            # destination the backend reads as empty can still hold
+            # one. Left to the backend the rename succeeded and the
+            # purge below then deleted the link with it, losing
+            # namespace state silently where POSIX promises ENOTEMPTY.
+            raise OSError(errno.ENOTEMPTY, os.strerror(errno.ENOTEMPTY),
+                          dst.virtual)
         if self._table_answers(op, path.virtual, kwargs):
             return (await self._namespace_table_op(op, path, kwargs,
                                                    report), IOResult())

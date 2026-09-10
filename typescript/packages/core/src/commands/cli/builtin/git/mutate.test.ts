@@ -1604,6 +1604,106 @@ describe('a rename that would leave a mount behind', () => {
     expect(await h.run('mv -k docs notes')).toEqual([0, '', ''])
     expect(await h.run('status --porcelain')).toEqual([0, '', ''])
   })
+
+  it('refuses a file moving into another mount', async () => {
+    // The source is an ordinary tracked file, so neither "is a mount root"
+    // nor "holds one" catches it. The rename op binds to the backend serving
+    // the source, so the write would land in the repository's own mount at a
+    // path the inner one serves: the file ends up hidden behind that mount
+    // while the index names the new path.
+    const h = await harness(undefined, '/repo/inner')
+    await write(h, 'one.md', 'x\n')
+    await h.run('add one.md')
+    const [code, , err] = await h.run('mv one.md inner/one.md')
+    expect(code).toBe(128)
+    expect(err).toBe("fatal: renaming 'one.md' failed: Device or resource busy\n")
+  })
+
+  it('refuses a file moving out of a nested mount', async () => {
+    const h = await harness(undefined, '/repo/inner')
+    await write(h, 'inner/one.md', 'x\n')
+    await h.run('add inner/one.md')
+    const [code, , err] = await h.run('mv inner/one.md one.md')
+    expect(code).toBe(128)
+    expect(err).toBe("fatal: renaming 'inner/one.md' failed: Device or resource busy\n")
+  })
+
+  it('still moves inside one mount', async () => {
+    // The destination check compares the two ends, so an ordinary move that
+    // never leaves the repository's own mount is untouched by it.
+    const h = await harness(undefined, '/repo/inner')
+    await write(h, 'one.md', 'x\n')
+    await h.run('add one.md')
+    expect(await h.run('mv one.md docs/one.md')).toEqual([0, '', ''])
+  })
+})
+
+describe('a restore source spelled as a tree expression', () => {
+  it('takes a tree peel', async () => {
+    // git's own help says --source <tree-ish>, and a peel is the ordinary way
+    // to spell one. Probed on git 2.50.1: exit 0.
+    const h = await harness()
+    await write(h, 'letters.txt', 'edited\n')
+    expect(await h.run('restore --source=HEAD^{tree} letters.txt')).toEqual([0, '', ''])
+  })
+
+  it('takes a tag peel', async () => {
+    const h = await harness((repo) => {
+      git(repo, ['tag', 'v1'])
+    })
+    await write(h, 'letters.txt', 'edited\n')
+    expect(await h.run('restore --source=v1^{tree} letters.txt')).toEqual([0, '', ''])
+  })
+
+  it('takes a subtree named at a path', async () => {
+    const h = await harness((repo) => {
+      mkdirSync(join(repo, 'sub'))
+      writeFileSync(join(repo, 'sub', 'letters.txt'), 'nested\n')
+      git(repo, ['add', 'sub'])
+      git(repo, ['commit', '-m', 'nested'])
+    })
+    expect(await h.run('restore --source=HEAD:sub letters.txt')).toEqual([0, '', ''])
+    expect(DEC.decode((await readOptional(h.dispatch, '/repo/letters.txt')) ?? undefined)).toBe(
+      'nested\n',
+    )
+  })
+
+  it('names the object by its id when it is no tree', async () => {
+    // git reports the object it reached, not the spelling: the name resolved
+    // fine and what it found was the problem.
+    const h = await harness()
+    const [code, , err] = await h.run('restore --source=HEAD:letters.txt letters.txt')
+    expect(code).toBe(128)
+    expect(err).toMatch(/^fatal: unable to read tree \([0-9a-f]{40}\)\n$/)
+  })
+
+  it('names the spelling when the peel resolves to nothing', async () => {
+    const h = await harness()
+    const [code, , err] = await h.run('restore --source=nosuch^{tree} letters.txt')
+    expect(code).toBe(128)
+    expect(err).toBe('fatal: could not resolve nosuch^{tree}\n')
+  })
+})
+
+describe('a restore writing a file over an occupied directory', () => {
+  it('replaces the directory, untracked child and all', async () => {
+    // The source keeps letters.txt as a file, the index keeps
+    // letters.txt/child, and an untracked letters.txt/keep holds the
+    // directory open. git replaces the whole directory here and exits 0
+    // (probed on git 2.50.1); the write would otherwise fail with the index
+    // already changed.
+    const h = await harness()
+    const tree = (await h.run('rev-parse HEAD^{tree}'))[1].trim()
+    await h.run('rm --cached letters.txt')
+    await h.ws.dispatch('unlink', '/repo/letters.txt')
+    await write(h, 'letters.txt/child', 'inner\n')
+    await h.run('add letters.txt/child')
+    await write(h, 'letters.txt/keep', 'untracked\n')
+    expect(await h.run(`restore --source=${tree} -SW letters.txt`)).toEqual([0, '', ''])
+    expect(DEC.decode((await readOptional(h.dispatch, '/repo/letters.txt')) ?? undefined)).toBe(
+      'alpha\nbeta\ngamma\ndelta\n',
+    )
+  })
 })
 
 describe('a switch while the index is unmerged', () => {

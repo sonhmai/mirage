@@ -792,6 +792,21 @@ class NoRestorePathsError(GitError):
         super().__init__("you must specify path(s) to restore")
 
 
+class UnreadableTreeError(GitError):
+    """``restore --source`` naming an object that is no tree.
+
+    A revision that resolves is reported by the id it resolved to
+    rather than by the spelling, which is git's own wording: the
+    complaint is about the object found, not about the name.
+
+    Args:
+        oid (str): hex id of the object the source resolved to.
+    """
+
+    def __init__(self, oid: str) -> None:
+        super().__init__(f"unable to read tree ({oid})")
+
+
 class UnresolvableSourceError(GitError):
     """``restore --source`` naming a tree this repository cannot resolve.
 

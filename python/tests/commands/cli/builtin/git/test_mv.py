@@ -291,6 +291,64 @@ async def test_a_mount_root_itself_will_not_move(repo_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_a_file_will_not_move_into_another_mount(repo_path: Path):
+    # The source is an ordinary tracked file, so neither "is a mount
+    # root" nor "holds one" catches it. The rename op binds to the
+    # backend serving the source, so the write would land in the
+    # repository's own mount at a path the inner one serves: the file
+    # ends up hidden behind that mount while the index names the new
+    # path.
+    with Workspace(
+        {
+            MOUNT: DiskResource(root=str(repo_path)),
+            "/repo/inner/": RAMResource(),
+        },
+            mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        await ws.execute("echo x > /repo/one.md")
+        await run(ws, "add one.md")
+        code, _out, err = await run(ws, "mv one.md inner/one.md")
+        assert code == 128
+        assert err == (b"fatal: renaming 'one.md' failed: Device or resource "
+                       b"busy\n")
+        assert (repo_path / "one.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_file_will_not_move_out_of_a_nested_mount(repo_path: Path):
+    with Workspace(
+        {
+            MOUNT: DiskResource(root=str(repo_path)),
+            "/repo/inner/": RAMResource(),
+        },
+            mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        await ws.execute("echo x > /repo/inner/one.md")
+        await run(ws, "add inner/one.md")
+        code, _out, err = await run(ws, "mv inner/one.md one.md")
+        assert code == 128
+        assert err == (b"fatal: renaming 'inner/one.md' failed: Device or "
+                       b"resource busy\n")
+
+
+@pytest.mark.asyncio
+async def test_a_move_inside_one_mount_still_goes(repo_path: Path):
+    # The destination check compares the two ends, so an ordinary move
+    # that never leaves the repository's own mount is untouched by it.
+    with Workspace(
+        {
+            MOUNT: DiskResource(root=str(repo_path)),
+            "/repo/inner/": RAMResource(),
+        },
+            mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        await ws.execute("mkdir -p /repo/docs && echo x > /repo/one.md")
+        await run(ws, "add one.md")
+        assert await run(ws, "mv one.md docs/one.md") == (0, b"", b"")
+        assert (repo_path / "docs" / "one.md").exists()
+
+
+@pytest.mark.asyncio
 async def test_k_skips_a_source_that_holds_a_mount(repo_path: Path):
     with Workspace(
         {

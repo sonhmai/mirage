@@ -26,8 +26,8 @@ const SUFFIXES = [ANCESTOR, PARENT]
 const PEEL_OPEN = '^{'
 const PEEL_CLOSE = '}'
 const PATH_MARK = ':'
-const COMMIT = 'commit'
-const TREE = 'tree'
+export const COMMIT = 'commit'
+export const TREE = 'tree'
 
 /**
  * Split a trailing `^{<type>}` off a revision.

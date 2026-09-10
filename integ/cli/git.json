@@ -2239,6 +2239,34 @@
         "stdout": "deep\nflat\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_restore_takes_a_tree_peel_as_a_source",
+      "seq": 568319,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "echo one > /repo/peel.txt && git -C /repo add peel.txt && git -C /repo commit -m peel > /dev/null && echo two > /repo/peel.txt && git -C /repo restore --source=HEAD^{tree} peel.txt && cat /repo/peel.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_restore_replaces_a_directory_an_untracked_file_holds",
+      "seq": 568320,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "echo flat > /repo/slot2 && git -C /repo add slot2 && git -C /repo commit -m slot2 > /dev/null && git -C /repo rm --cached slot2 > /dev/null && rm /repo/slot2 && mkdir /repo/slot2 && echo inner > /repo/slot2/child && git -C /repo add slot2/child && echo untracked > /repo/slot2/keep && git -C /repo restore --source=HEAD -SW slot2 && cat /repo/slot2",
+      "expect": {
+        "exit": 0,
+        "stdout": "flat\n",
+        "stderr": ""
+      }
     }
   ]
 }

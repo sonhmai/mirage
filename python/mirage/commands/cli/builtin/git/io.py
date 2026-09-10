@@ -272,6 +272,42 @@ async def rename_path(dispatch: DispatchFn, source: str, target: str) -> None:
                    dst=PathSpec.from_str_path(target))
 
 
+async def remove_tree(dispatch: DispatchFn, path: str) -> None:
+    """Delete a path and everything under it, tracked or not.
+
+    git replaces a tree entry rather than merging with it, so a
+    directory standing where the source keeps a file goes entirely.
+    That is one of the few places git removes a file it never tracked:
+    an untracked child keeps the directory alive after the tracked ones
+    are gone, and restoring the file over it would otherwise fail with
+    the index already changed.
+
+    A file and an absent path both walk out through the same two steps,
+    since ``readdir`` reads a non-directory as nothing there and
+    ``rmdir`` refuses it.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        path (str): absolute virtual path to clear.
+    """
+    for entry in await read_names(dispatch, path):
+        # A listing answers in whole paths, so the child is rebuilt from
+        # the basename the way every other walk here does.
+        name = entry.rstrip("/").rsplit("/", 1)[-1]
+        if not name:
+            continue
+        await remove_tree(dispatch, posixpath.join(path, name))
+    try:
+        await dispatch("rmdir", PathSpec.from_str_path(path))
+    except MISS_ERRORS as exc:
+        # Not a directory, or already gone: the path is whatever one file
+        # it is, and remove_file tolerates an absent one. A directory the
+        # walk above was supposed to empty raises OSError(ENOTEMPTY),
+        # which is not a miss and stays raised.
+        logger.debug("no directory to remove at %s: %s", path, exc)
+        await remove_file(dispatch, path)
+
+
 async def remove_empty_parents(dispatch: DispatchFn, path: str,
                                stop: str) -> None:
     """Drop the directories a deletion left empty, up to a root.

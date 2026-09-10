@@ -204,10 +204,18 @@ export async function check(
  * same problem one level up, since the table still points at the old prefix.
  * Neither is something the verb can repair afterwards, so both are refused
  * before anything moves.
+ *
+ * The destination is the same fault read from the other end, and it catches an
+ * ordinary file the first two questions pass: the op is bound to the backend
+ * serving the source, so a landing another mount serves is written into the
+ * source's backend at a path it does not own. The file is then hidden behind
+ * the other mount while the index names the new path, which is the same broken
+ * pair one level down.
  */
-function spanning(mounts: MountView | null, path: string): boolean {
+function spanning(mounts: MountView | null, path: string, landing: string): boolean {
   if (mounts === null) return false
-  return mounts.isRoot(path) || mounts.descendants(path).length > 0
+  if (mounts.isRoot(path) || mounts.descendants(path).length > 0) return true
+  return mounts.rootOf(path) !== mounts.rootOf(landing)
 }
 
 /**
@@ -275,7 +283,10 @@ export async function plan(
         named = clash
       }
     }
-    if (reason === null && spanning(mounts, under(location.worktree, source))) {
+    if (
+      reason === null &&
+      spanning(mounts, under(location.worktree, source), under(location.worktree, landing))
+    ) {
       // Last, after every check git itself makes, so a source git would refuse
       // anyway is refused in git's own words. `-k` skips it like any other
       // rename this source cannot survive.

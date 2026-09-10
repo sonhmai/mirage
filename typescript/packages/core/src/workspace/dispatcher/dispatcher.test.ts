@@ -197,18 +197,41 @@ describe('the node table answers every verb that names a link', () => {
     }
   })
 
-  it('replaces the nodes below a rename destination', async () => {
-    // rename(2) replaces what it lands on, subtree included, so a link left
-    // below the destination would shadow the content that arrived.
+  it('refuses a rename destination holding a link', async () => {
+    // A link is a directory entry no backend can see, so a destination the
+    // backend reads as empty is not: POSIX rename(2) answers ENOTEMPTY for it
+    // (probed on debian:stable-slim, where a directory holding one broken
+    // symlink refuses the rename). Letting the backend decide replaced the
+    // directory and deleted the link with it, which loses namespace state
+    // where the kernel refuses.
     const ws = await linkWorkspace()
     try {
       await ws.execute('echo hi > /ram/d/a.txt')
       await ws.execute('ln -s a.txt /ram/d/inner')
       await ws.execute('mkdir /ram/e')
       await ws.execute('ln -s gone /ram/e/stale')
+      await expect(
+        ws.dispatch('rename', '/ram/d', [PathSpec.fromStrPath('/ram/e')]),
+      ).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+      // Nothing moved: both ends are as they were.
+      expect(DEC.decode((await ws.execute('readlink /ram/e/stale')).stdout)).toBe('gone\n')
+      expect(DEC.decode((await ws.execute('readlink /ram/d/inner')).stdout)).toBe('a.txt\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('replaces an empty rename destination', async () => {
+    // The other half of rename(2): a destination with nothing in it is
+    // replaced, and the subtree re-anchors onto the new name.
+    const ws = await linkWorkspace()
+    try {
+      await ws.execute('echo hi > /ram/d/a.txt')
+      await ws.execute('ln -s a.txt /ram/d/inner')
+      await ws.execute('mkdir /ram/e')
       await ws.dispatch('rename', '/ram/d', [PathSpec.fromStrPath('/ram/e')])
-      expect((await ws.execute('readlink /ram/e/stale')).exitCode).toBe(1)
       expect(DEC.decode((await ws.execute('readlink /ram/e/inner')).stdout)).toBe('a.txt\n')
+      expect((await ws.execute('readlink /ram/d/inner')).exitCode).toBe(1)
     } finally {
       await ws.close()
     }

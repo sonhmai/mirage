@@ -471,7 +471,7 @@ export class Dispatcher {
       const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null
       await this.invalidateAfterWriteByPath(p.virtual, observed)
       if (renameDst !== null) {
-        await this.invalidateAfterWriteByPath(renameDst.virtual)
+        await this.invalidateAfterRenameByPath(p.virtual, renameDst.virtual)
         // rename(2) replaces the destination, so a node the table holds
         // at that name does not survive the move. A link left there
         // shadowed the file that had just landed: the listing showed the
@@ -1017,6 +1017,26 @@ export class Dispatcher {
     await this.cache.clear()
   }
 
+  /**
+   * The cache manager that owns a mount's listings and bodies.
+   *
+   * One manager for both halves, as Python's invalidate_after_write does: it
+   * is what knows the file cache is keyed mount-absolute while the index may
+   * not be, and evicting the index inline here spelled the key the other way
+   * and missed.
+   */
+  private managerFor(mount: MountEntry): CacheManager {
+    return (
+      mount.cacheManager ??
+      new CacheManager(
+        this.cache,
+        mount.resource.index ?? null,
+        mount.prefix,
+        cachesReads(mount.resource),
+      )
+    )
+  }
+
   async invalidateAfterWriteByPath(rawPath: string, observed: number | null = null): Promise<void> {
     // Directory writes (mkdir/rmdir via tree copies) arrive with a
     // trailing slash; normalize so the parent computation below does not
@@ -1026,20 +1046,29 @@ export class Dispatcher {
     const mount = this.namespace.tryMountFor(path)
     if (mount === null) return
     await this.namespace.clearTimes(path, observed)
-    // One manager for both halves, as Python's invalidate_after_write
-    // does: it is what knows the file cache is keyed mount-absolute while
-    // the index may not be, and evicting the index inline here spelled
-    // the key the other way and missed.
-    const manager =
-      mount.cacheManager ??
-      new CacheManager(
-        this.cache,
-        mount.resource.index ?? null,
-        mount.prefix,
-        cachesReads(mount.resource),
-      )
+    const manager = this.managerFor(mount)
     await manager.invalidateAfterWrite(path)
     await manager.invalidateAncestors(path)
+  }
+
+  /**
+   * Drop everything cached below both ends of a rename.
+   *
+   * A rename re-anchors the whole subtree under its source, so the listings
+   * and bodies cached one level down under either name are stale, not just the
+   * two paths and their parents. Evicting only those left a moved directory's
+   * old name answering `stat` and `ls` from its cached children, so the next
+   * rename onto that name saw a directory that was no longer there.
+   */
+  async invalidateAfterRenameByPath(source: string, dst: string): Promise<void> {
+    const from = rstripSlash(source) || '/'
+    const to = rstripSlash(dst) || '/'
+    const mount = this.namespace.tryMountFor(from)
+    if (mount === null) return
+    const manager = this.managerFor(mount)
+    await manager.invalidateSubtree(from)
+    await manager.invalidateSubtree(to)
+    await manager.invalidateAncestors(to)
   }
 
   // The file cache only holds paths for read-caching mounts, mirroring

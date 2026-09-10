@@ -21,6 +21,7 @@ from mirage.context import reset_current_session, set_current_session
 from mirage.policy import (Action, CommandRule, Deny, OpsContext, Policies,
                            Policy, PolicyDenied)
 from mirage.policy.rule import RulePolicy
+from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.types import (ConsistencyPolicy, FileType, HiddenPaths, MountMode,
                           PathSpec)
@@ -596,3 +597,24 @@ async def test_a_non_oserror_cascade_failure_keeps_the_refusal(monkeypatch):
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
     kept = await ws.execute("cat /a/d/sec/k")
     assert (kept.stdout or b"") == b"k\n"
+
+
+@pytest.mark.asyncio
+async def test_a_directory_rename_drops_the_listing_cached_below_it(tmp_path):
+    # The old name kept answering from its cached children after the
+    # move, so a later rename onto that name saw a directory that was no
+    # longer there and landed the source inside it.
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "readme.md").write_text("notes\n", encoding="utf-8")
+    with Workspace({"/disk/": DiskResource(root=str(tmp_path))},
+                   mode=MountMode.WRITE) as ws:
+        listed = await ws.execute("ls /disk/docs")
+        assert listed.stdout == b"readme.md\n"
+        await ws.dispatch("rename",
+                          PathSpec.from_str_path("/disk/docs"),
+                          dst=PathSpec.from_str_path("/disk/moved"))
+        gone = await ws.execute("test -d /disk/docs && echo stale || echo gone"
+                                )
+        assert gone.stdout == b"gone\n"
+        assert (await ws.execute("ls /disk/docs")).exit_code != 0
+        assert (await ws.execute("ls /disk/moved")).stdout == b"readme.md\n"

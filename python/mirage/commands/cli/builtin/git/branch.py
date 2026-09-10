@@ -84,7 +84,7 @@ async def _create(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
     await write_ref(dispatch, location.commondir, ref, commit.id)
 
 
-def _head_commit(repo: BaseRepo, head: HeadRef) -> bytes | None:
+def head_commit(repo: BaseRepo, head: HeadRef) -> bytes | None:
     """The commit HEAD resolves to, None on an unborn branch.
 
     HEAD carries an object id only when detached; attached it names a
@@ -156,7 +156,7 @@ async def _delete(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
         raise CheckedOutBranchError(name, location.worktree)
     sha = repo.refs[ref]
     if not force and not await asyncio.to_thread(_merged, repo, sha,
-                                                 _head_commit(repo, head)):
+                                                 head_commit(repo, head)):
         raise UnmergedBranchError(name)
     await delete_ref(dispatch, location.commondir, ref.decode())
     return (f"Deleted branch {name} "

@@ -252,3 +252,48 @@ async def remove_file(dispatch: DispatchFn, path: str) -> None:
         await dispatch("unlink", PathSpec.from_str_path(path))
     except MISS_ERRORS as exc:
         logger.debug("nothing to remove at %s: %s", path, exc)
+
+
+async def rename_path(dispatch: DispatchFn, source: str, target: str) -> None:
+    """Move one virtual path, file or directory, to another name.
+
+    The mount's own rename, so a directory moves with everything under
+    it, tracked or not, which is what ``git mv`` does with a directory.
+    The destination's directory is not created: git's rename fails when
+    it is missing, and the caller words that failure.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        source (str): absolute virtual path to move.
+        target (str): absolute virtual path to move it to.
+    """
+    await dispatch("rename",
+                   PathSpec.from_str_path(source),
+                   dst=PathSpec.from_str_path(target))
+
+
+async def remove_empty_parents(dispatch: DispatchFn, path: str,
+                               stop: str) -> None:
+    """Drop the directories a deletion left empty, up to a root.
+
+    git removes a directory the moment its last tracked file is deleted
+    or restored away, so ``rm -r docs`` leaves no ``docs/`` behind. The
+    walk stops at the first directory that still holds something and
+    never touches ``stop`` itself.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        path (str): absolute virtual path of the file that was removed.
+        stop (str): absolute virtual path of the working tree root.
+    """
+    root = stop.rstrip("/") or "/"
+    current = posixpath.dirname(path)
+    while current != root and current.startswith(root):
+        if await read_names(dispatch, current):
+            return
+        try:
+            await dispatch("rmdir", PathSpec.from_str_path(current))
+        except MISS_ERRORS as exc:
+            logger.debug("no directory to remove at %s: %s", current, exc)
+            return
+        current = posixpath.dirname(current)

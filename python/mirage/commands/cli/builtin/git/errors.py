@@ -537,3 +537,329 @@ class InvalidOptionError(GitError):
 
     def __init__(self, argument: str) -> None:
         super().__init__(f"invalid option: {argument}")
+
+
+class NoPathspecRemoveError(GitError):
+    """``rm`` with no pathspec at all.
+
+    Args:
+        None.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("No pathspec was given. Which files should I remove?")
+
+
+class NotRecursiveError(GitError):
+    """``rm`` naming a directory without ``-r``.
+
+    Args:
+        operand (str): the operand as the user spelled it.
+    """
+
+    def __init__(self, operand: str) -> None:
+        super().__init__(f"not removing '{operand}' recursively without -r")
+
+
+# The three refusals ``rm`` groups its paths under, in the order git
+# prints them: a path whose staged content matches neither the file
+# nor HEAD, a path with a staged change, a path with an unstaged edit.
+# Each header comes in a singular and a plural form.
+STAGED_BOTH = ("the following file has staged content different from "
+               "both the\nfile and the HEAD:",
+               "the following files have staged content different from "
+               "both the\nfile and the HEAD:", "(use -f to force removal)")
+STAGED_INDEX = ("the following file has changes staged in the index:",
+                "the following files have changes staged in the index:",
+                "(use --cached to keep the file, or -f to force removal)")
+LOCAL_CHANGES = ("the following file has local modifications:",
+                 "the following files have local modifications:",
+                 "(use --cached to keep the file, or -f to force removal)")
+
+
+def _removal_block(wording: tuple[str, str, str], paths: list[str]) -> str:
+    """One paragraph of an ``rm`` refusal.
+
+    Args:
+        wording (tuple[str, str, str]): singular header, plural header,
+            and the hint line that closes the paragraph.
+        paths (list[str]): the paths to name, repository-relative.
+    """
+    header = wording[0] if len(paths) == 1 else wording[1]
+    listed = "\n".join(f"    {path}" for path in sorted(paths))
+    return f"{header}\n{listed}\n{wording[2]}"
+
+
+class RemovalRefusedError(GitError):
+    """``rm`` naming a path whose removal would lose uncommitted work.
+
+    git refuses rather than deleting, and names every path under the
+    reason it refused it. Three reasons, printed as three paragraphs in
+    a fixed order when more than one applies, pinned against git 2.50.1.
+
+    Args:
+        both (list[str]): paths staged with content that matches neither
+            the working tree nor HEAD.
+        staged (list[str]): paths with a change staged in the index.
+        local (list[str]): paths with an unstaged edit.
+    """
+
+    prefix = "error"
+    code = 1
+
+    def __init__(self, both: list[str], staged: list[str],
+                 local: list[str]) -> None:
+        blocks = [
+            _removal_block(wording, paths)
+            for wording, paths in ((STAGED_BOTH, both), (STAGED_INDEX, staged),
+                                   (LOCAL_CHANGES, local)) if paths
+        ]
+        # git emits each paragraph as its own error, so the second one
+        # carries the prefix inline: the renderer only writes the first.
+        super().__init__("\nerror: ".join(blocks))
+
+
+class MoveUsageError(GitError):
+    """``mv`` with fewer than two operands.
+
+    git prints its usage and exits 129. Only the two synopsis lines are
+    kept: the option list below them describes flags this build does
+    not all have.
+
+    Args:
+        None.
+    """
+
+    prefix = None
+    code = OPTION_EXIT
+
+    def __init__(self) -> None:
+        super().__init__("usage: git mv [-v] [-f] [-n] [-k] <source> "
+                         "<destination>\n   or: git mv [-v] [-f] [-n] [-k] "
+                         "<source>... <destination-directory>")
+
+
+class MoveRefusedError(GitError):
+    """``mv`` refusing one source, in git's ``reason, source, destination``
+    shape.
+
+    Args:
+        reason (str): git's own wording for what is wrong.
+        source (str): the source, repository-relative.
+        destination (str): the destination, repository-relative.
+    """
+
+    def __init__(self, reason: str, source: str, destination: str) -> None:
+        super().__init__(f"{reason}, source={source}, "
+                         f"destination={destination}")
+
+
+class NotADirectoryDestinationError(GitError):
+    """``mv`` with several sources and a destination that is not a directory.
+
+    Args:
+        destination (str): the destination, repository-relative.
+    """
+
+    def __init__(self, destination: str) -> None:
+        super().__init__(f"destination '{destination}' is not a directory")
+
+
+class RenameFailedError(GitError):
+    """``mv`` whose rename the mount refused.
+
+    git names the source and the strerror. The one reason a mount gives
+    is a destination whose directory does not exist: git does not create
+    it, and neither does this.
+
+    Args:
+        source (str): the source, repository-relative.
+        reason (str): the strerror to name.
+    """
+
+    def __init__(self,
+                 source: str,
+                 reason: str = "No such file or directory") -> None:
+        super().__init__(f"renaming '{source}' failed: {reason}")
+
+
+class NoRestorePathsError(GitError):
+    """``restore`` with no pathspec at all.
+
+    Args:
+        None.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("you must specify path(s) to restore")
+
+
+class UnresolvableSourceError(GitError):
+    """``restore --source`` naming a tree this repository cannot resolve.
+
+    Args:
+        source (str): the source as the user spelled it.
+    """
+
+    def __init__(self, source: str) -> None:
+        super().__init__(f"could not resolve {source}")
+
+
+class InvalidReferenceError(GitError):
+    """``switch`` naming something that is neither a branch nor a commit.
+
+    ``switch`` words the miss differently from ``checkout``, which calls
+    the same operand a pathspec: switch never takes a path, so nothing
+    it was given could have been one.
+
+    Args:
+        name (str): the operand as the user spelled it.
+    """
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"invalid reference: {name}")
+
+
+class BranchExpectedError(GitError):
+    """``switch`` given a commit, tag or remote branch without ``--detach``.
+
+    git refuses rather than detaching, because a detached HEAD is the
+    state an agent loses commits in, and ``switch`` exists to be the
+    verb that never gets there by accident.
+
+    Args:
+        kind (str): what the operand named: ``commit``, ``tag`` or
+            ``remote branch``.
+        name (str): the operand as the user spelled it.
+    """
+
+    def __init__(self, kind: str, name: str) -> None:
+        super().__init__(f"a branch is expected, got {kind} '{name}'\n"
+                         f"hint: If you want to detach HEAD at the commit, "
+                         f"try again with the --detach option.")
+
+
+class MissingBranchArgumentError(GitError):
+    """``switch`` with nothing to switch to.
+
+    Args:
+        None.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("missing branch or commit argument")
+
+
+class OneReferenceError(GitError):
+    """``switch`` given more than one operand.
+
+    Args:
+        None.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("only one reference expected")
+
+
+class DetachWithCreateError(GitError):
+    """``switch -c`` together with ``--detach``.
+
+    Args:
+        None.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("'--detach' cannot be used with '-b/-B/--orphan'")
+
+
+class TagExistsError(GitError):
+    """``tag <name>`` naming a tag that is already there.
+
+    Args:
+        name (str): the tag name.
+    """
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"tag '{name}' already exists")
+
+
+class TagNotFoundError(GitError):
+    """``tag -d`` naming a tag that is not there.
+
+    Reported and moved past: git deletes the other names on the line and
+    exits 1 at the end, so this is rendered per name rather than raised.
+
+    Args:
+        name (str): the tag name as the user spelled it.
+    """
+
+    prefix = "error"
+    code = 1
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"tag '{name}' not found.")
+
+
+class InvalidTagNameError(GitError):
+    """A tag name git's ref rules refuse.
+
+    Args:
+        name (str): the name as the user spelled it.
+    """
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"'{name}' is not a valid tag name.")
+
+
+class UnresolvedRefError(GitError):
+    """``tag`` given an object it cannot resolve.
+
+    Args:
+        revision (str): the operand as the user spelled it.
+    """
+
+    def __init__(self, revision: str) -> None:
+        super().__init__(f"Failed to resolve '{revision}' as a valid ref.")
+
+
+class TooManyArgumentsError(GitError):
+    """``tag`` given more operands than a name and an object.
+
+    Args:
+        None.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("too many arguments")
+
+
+class MissingTagMessageError(GitError):
+    """``tag -a`` with no ``-m``.
+
+    git would open an editor here, exactly as ``commit`` would, and the
+    same answer applies: a mount has no editor, and inventing a message
+    would put an unreviewed one into the repository.
+
+    Args:
+        None.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("no tag message supplied (mirage has no editor to "
+                         "open; pass -m)")
+
+
+class IncompatibleOptionsError(GitError):
+    """Two options git refuses to take together.
+
+    Args:
+        first (str): the first option as spelled on the command line.
+        second (str): the second.
+    """
+
+    prefix = "error"
+    code = OPTION_EXIT
+
+    def __init__(self, first: str, second: str) -> None:
+        super().__init__(f"options '{first}' and '{second}' cannot be used "
+                         f"together")

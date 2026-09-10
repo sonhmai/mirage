@@ -435,7 +435,7 @@ class Dispatcher:
             observed = time.time() if op in STAMP_WRITE_OPS else None
             await self.invalidate_after_write(mount, path, observed=observed)
             if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
-                await self.invalidate_after_write(mount, kwargs["dst"])
+                await self.invalidate_after_rename(mount, path, kwargs["dst"])
                 # rename(2) replaces the destination, so a node the
                 # table holds at that name does not survive the move.
                 # A link left there shadowed the file that had just
@@ -926,14 +926,44 @@ class Dispatcher:
                 async with mount.use():
                     await mount.resource.index.clear()
 
+    def _manager_for(self, mount: MountEntry) -> CacheManager:
+        """The cache manager that owns a mount's listings and bodies.
+
+        Args:
+            mount (MountEntry): the mount that was written.
+        """
+        manager = mount.cache_manager
+        if manager is None:
+            manager = CacheManager(self._cache, mount.resource.index,
+                                   mount.prefix, mount.resource.caches_reads)
+        return manager
+
     async def invalidate_after_write(self,
                                      mount: MountEntry,
                                      path: PathSpec,
                                      observed: float | None = None) -> None:
         await self._namespace.clear_times(path.virtual, observed=observed)
-        manager = mount.cache_manager
-        if manager is None:
-            manager = CacheManager(self._cache, mount.resource.index,
-                                   mount.prefix, mount.resource.caches_reads)
+        manager = self._manager_for(mount)
         await manager.invalidate_after_write(path)
         await manager.invalidate_ancestors(path)
+
+    async def invalidate_after_rename(self, mount: MountEntry,
+                                      source: PathSpec, dst: PathSpec) -> None:
+        """Drop everything cached below both ends of a rename.
+
+        A rename re-anchors the whole subtree under its source, so the
+        listings and bodies cached one level down under either name
+        are stale, not just the two paths and their parents. Evicting
+        only those left a moved directory's old name answering ``stat``
+        and ``ls`` from its cached children, so the next rename onto
+        that name saw a directory that was no longer there.
+
+        Args:
+            mount (MountEntry): the mount the rename ran on.
+            source (PathSpec): the name the subtree left.
+            dst (PathSpec): the name it now lives under.
+        """
+        manager = self._manager_for(mount)
+        await manager.invalidate_subtree(source)
+        await manager.invalidate_subtree(dst)
+        await manager.invalidate_ancestors(dst)

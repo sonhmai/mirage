@@ -178,3 +178,34 @@ export async function loadRefs(
   else if (head.commit !== null) refs.set(HEAD_FILE, head.commit)
   return refs
 }
+
+export const TAG_PREFIX = 'refs/tags/'
+
+// Every character git forbids anywhere in a ref name, on top of the control
+// characters: the shell metacharacters that would make a name unusable as a
+// revision, and the backslash.
+const FORBIDDEN_IN_REF = new Set([' ', '~', '^', ':', '?', '*', '[', '\\'])
+const LOCK_SUFFIX = '.lock'
+
+/**
+ * Whether a name passes git's ref rules (`git check-ref-format`).
+ *
+ * The rules, in git's own order: no component may start with `.` or end with
+ * `.lock`; `..` may not appear; no control character, space or shell
+ * metacharacter; no leading, trailing or doubled `/`; no trailing `.`; and no
+ * `@{`. Empty is refused too. A bare `@` is refused only as a whole ref, and a
+ * name here always sits below `refs/`, so it passes. Pinned against git 2.50.1.
+ *
+ * @param name the name below `refs/heads/` or `refs/tags/`
+ */
+export function validRefName(name: string): boolean {
+  if (name === '' || name.startsWith('/') || name.endsWith('/')) return false
+  if (name.includes('//') || name.includes('..') || name.includes('@{') || name.endsWith('.')) {
+    return false
+  }
+  for (const ch of name) {
+    const code = ch.codePointAt(0) ?? 0
+    if (code < 0x20 || code === 0x7f || FORBIDDEN_IN_REF.has(ch)) return false
+  }
+  return name.split('/').every((part) => !part.startsWith('.') && !part.endsWith(LOCK_SUFFIX))
+}

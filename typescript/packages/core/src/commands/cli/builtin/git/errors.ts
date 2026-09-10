@@ -453,3 +453,244 @@ export class InvalidOptionError extends GitError {
     super(`invalid option: ${argument}`)
   }
 }
+
+/** `rm` with no pathspec at all. */
+export class NoPathspecRemoveError extends GitError {
+  constructor() {
+    super('No pathspec was given. Which files should I remove?')
+  }
+}
+
+/** `rm` naming a directory without `-r`. */
+export class NotRecursiveError extends GitError {
+  constructor(operand: string) {
+    super(`not removing '${operand}' recursively without -r`)
+  }
+}
+
+// The three refusals `rm` groups its paths under, in the order git prints
+// them: a path whose staged content matches neither the file nor HEAD, a path
+// with a staged change, a path with an unstaged edit. Each header comes in a
+// singular and a plural form.
+const STAGED_BOTH: [string, string, string] = [
+  'the following file has staged content different from both the\nfile and the HEAD:',
+  'the following files have staged content different from both the\nfile and the HEAD:',
+  '(use -f to force removal)',
+]
+const STAGED_INDEX: [string, string, string] = [
+  'the following file has changes staged in the index:',
+  'the following files have changes staged in the index:',
+  '(use --cached to keep the file, or -f to force removal)',
+]
+const LOCAL_CHANGES: [string, string, string] = [
+  'the following file has local modifications:',
+  'the following files have local modifications:',
+  '(use --cached to keep the file, or -f to force removal)',
+]
+
+/** One paragraph of an `rm` refusal. */
+function removalBlock(wording: [string, string, string], paths: readonly string[]): string {
+  const header = paths.length === 1 ? wording[0] : wording[1]
+  const listed = [...paths]
+    .sort(compareCodePoints)
+    .map((path) => `    ${path}`)
+    .join('\n')
+  return `${header}\n${listed}\n${wording[2]}`
+}
+
+/**
+ * `rm` naming a path whose removal would lose uncommitted work.
+ *
+ * git refuses rather than deleting, and names every path under the reason it
+ * refused it. Three reasons, printed as three paragraphs in a fixed order when
+ * more than one applies, pinned against git 2.50.1.
+ */
+export class RemovalRefusedError extends GitError {
+  override readonly prefix = 'error'
+  override readonly code = 1
+
+  constructor(both: readonly string[], staged: readonly string[], local: readonly string[]) {
+    const blocks: string[] = []
+    if (both.length > 0) blocks.push(removalBlock(STAGED_BOTH, both))
+    if (staged.length > 0) blocks.push(removalBlock(STAGED_INDEX, staged))
+    if (local.length > 0) blocks.push(removalBlock(LOCAL_CHANGES, local))
+    // git emits each paragraph as its own error, so the second one carries the
+    // prefix inline: the renderer only writes the first.
+    super(blocks.join('\nerror: '))
+  }
+}
+
+/**
+ * `mv` with fewer than two operands.
+ *
+ * git prints its usage and exits 129. Only the two synopsis lines are kept: the
+ * option list below them describes flags this build does not all have.
+ */
+export class MoveUsageError extends GitError {
+  override readonly prefix = null
+  override readonly code = OPTION_EXIT
+
+  constructor() {
+    super(
+      'usage: git mv [-v] [-f] [-n] [-k] <source> <destination>\n' +
+        '   or: git mv [-v] [-f] [-n] [-k] <source>... <destination-directory>',
+    )
+  }
+}
+
+/** `mv` refusing one source, in git's `reason, source, destination` shape. */
+export class MoveRefusedError extends GitError {
+  constructor(reason: string, source: string, destination: string) {
+    super(`${reason}, source=${source}, destination=${destination}`)
+  }
+}
+
+/** `mv` with several sources and a destination that is not a directory. */
+export class NotADirectoryDestinationError extends GitError {
+  constructor(destination: string) {
+    super(`destination '${destination}' is not a directory`)
+  }
+}
+
+/**
+ * `mv` whose rename the mount refused.
+ *
+ * git names the source and the strerror. The one reason a mount gives is a
+ * destination whose directory does not exist: git does not create it, and
+ * neither does this.
+ */
+export class RenameFailedError extends GitError {
+  constructor(source: string, reason = 'No such file or directory') {
+    super(`renaming '${source}' failed: ${reason}`)
+  }
+}
+
+/** `restore` with no pathspec at all. */
+export class NoRestorePathsError extends GitError {
+  constructor() {
+    super('you must specify path(s) to restore')
+  }
+}
+
+/** `restore --source` naming a tree this repository cannot resolve. */
+export class UnresolvableSourceError extends GitError {
+  constructor(source: string) {
+    super(`could not resolve ${source}`)
+  }
+}
+
+/**
+ * `switch` naming something that is neither a branch nor a commit.
+ *
+ * `switch` words the miss differently from `checkout`, which calls the same
+ * operand a pathspec: switch never takes a path, so nothing it was given could
+ * have been one.
+ */
+export class InvalidReferenceError extends GitError {
+  constructor(name: string) {
+    super(`invalid reference: ${name}`)
+  }
+}
+
+/**
+ * `switch` given a commit, tag or remote branch without `--detach`.
+ *
+ * git refuses rather than detaching, because a detached HEAD is the state an
+ * agent loses commits in, and `switch` exists to be the verb that never gets
+ * there by accident.
+ */
+export class BranchExpectedError extends GitError {
+  constructor(kind: string, name: string) {
+    super(
+      `a branch is expected, got ${kind} '${name}'\n` +
+        `hint: If you want to detach HEAD at the commit, try again with the --detach option.`,
+    )
+  }
+}
+
+/** `switch` with nothing to switch to. */
+export class MissingBranchArgumentError extends GitError {
+  constructor() {
+    super('missing branch or commit argument')
+  }
+}
+
+/** `switch` given more than one operand. */
+export class OneReferenceError extends GitError {
+  constructor() {
+    super('only one reference expected')
+  }
+}
+
+/** `switch -c` together with `--detach`. */
+export class DetachWithCreateError extends GitError {
+  constructor() {
+    super(`'--detach' cannot be used with '-b/-B/--orphan'`)
+  }
+}
+
+/** `tag <name>` naming a tag that is already there. */
+export class TagExistsError extends GitError {
+  constructor(name: string) {
+    super(`tag '${name}' already exists`)
+  }
+}
+
+/**
+ * `tag -d` naming a tag that is not there.
+ *
+ * Reported and moved past: git deletes the other names on the line and exits 1
+ * at the end, so this is rendered per name rather than thrown.
+ */
+export class TagNotFoundError extends GitError {
+  override readonly prefix = 'error'
+  override readonly code = 1
+
+  constructor(name: string) {
+    super(`tag '${name}' not found.`)
+  }
+}
+
+/** A tag name git's ref rules refuse. */
+export class InvalidTagNameError extends GitError {
+  constructor(name: string) {
+    super(`'${name}' is not a valid tag name.`)
+  }
+}
+
+/** `tag` given an object it cannot resolve. */
+export class UnresolvedRefError extends GitError {
+  constructor(revision: string) {
+    super(`Failed to resolve '${revision}' as a valid ref.`)
+  }
+}
+
+/** `tag` given more operands than a name and an object. */
+export class TooManyArgumentsError extends GitError {
+  constructor() {
+    super('too many arguments')
+  }
+}
+
+/**
+ * `tag -a` with no `-m`.
+ *
+ * git would open an editor here, exactly as `commit` would, and the same answer
+ * applies: a mount has no editor, and inventing a message would put an
+ * unreviewed one into the repository.
+ */
+export class MissingTagMessageError extends GitError {
+  constructor() {
+    super('no tag message supplied (mirage has no editor to open; pass -m)')
+  }
+}
+
+/** Two options git refuses to take together. */
+export class IncompatibleOptionsError extends GitError {
+  override readonly prefix = 'error'
+  override readonly code = OPTION_EXIT
+
+  constructor(first: string, second: string) {
+    super(`options '${first}' and '${second}' cannot be used together`)
+  }
+}

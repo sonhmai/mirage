@@ -29,6 +29,7 @@ PACKED_REFS = "packed-refs"
 REFS_DIR = "refs"
 SYMREF_PREFIX = "ref: "
 BRANCH_PREFIX = "refs/heads/"
+TAG_PREFIX = "refs/tags/"
 
 
 async def read_head(dispatch: DispatchFn, gitdir: str) -> HeadRef:
@@ -196,3 +197,36 @@ async def load_refs(dispatch: DispatchFn,
     elif head.commit is not None:
         refs[HEAD_REF] = head.commit.encode()
     return DictRefsContainer(refs)
+
+
+# Every byte git forbids anywhere in a ref name, on top of the control
+# characters: the shell metacharacters that would make a name unusable
+# as a revision, and the backslash.
+FORBIDDEN_IN_REF = frozenset(" ~^:?*[\\")
+LOCK_SUFFIX = ".lock"
+
+
+def valid_ref_name(name: str) -> bool:
+    """Whether a name passes git's ref rules (``git check-ref-format``).
+
+    The rules, in git's own order: no component may start with ``.`` or
+    end with ``.lock``; ``..`` may not appear; no control character,
+    space or shell metacharacter; no leading, trailing or doubled ``/``;
+    no trailing ``.``; and no ``@{``. Empty is refused too. A bare ``@``
+    is refused only as a whole ref, and a name here always sits below
+    ``refs/``, so it passes. Pinned against git 2.50.1.
+
+    Args:
+        name (str): the name below ``refs/heads/`` or ``refs/tags/``.
+    """
+    if not name or name.startswith("/") or name.endswith("/"):
+        return False
+    if "//" in name or ".." in name or "@{" in name or name.endswith("."):
+        return False
+    for ch in name:
+        if ord(ch) < 0x20 or ord(ch) == 0x7F or ch in FORBIDDEN_IN_REF:
+            return False
+    for part in name.split("/"):
+        if part.startswith(".") or part.endswith(LOCK_SUFFIX):
+            return False
+    return True

@@ -15,6 +15,7 @@
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -803,5 +804,352 @@ describe('commit identity', () => {
     expect((await h.run('commit -m plain'))[0]).toBe(0)
     const out = await h.drain()
     expect(git(out, ['log', '-1', '--format=%an <%ae>'])).toBe('mirage <mirage@localhost>\n')
+  })
+})
+
+describe('git switch', () => {
+  it('moves to a branch and the real binary agrees on HEAD', async () => {
+    const h = await harness()
+    expect(await h.run('switch topic')).toEqual([0, '', "Switched to branch 'topic'\n"])
+    expect(git(await h.drain(), ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('topic\n')
+  })
+
+  it('says so when already there', async () => {
+    const h = await harness()
+    expect(await h.run('switch main')).toEqual([0, '', "Already on 'main'\n"])
+  })
+
+  it('creates with -c at a start point', async () => {
+    const h = await harness()
+    expect(await h.run('switch -c older HEAD~1')).toEqual([
+      0,
+      '',
+      "Switched to a new branch 'older'\n",
+    ])
+    const drained = await h.drain()
+    expect(git(drained, ['rev-parse', 'older'])).toBe(git(drained, ['rev-parse', 'main~1']))
+  })
+
+  it('words an unknown name as an invalid reference', async () => {
+    const h = await harness()
+    expect(await h.run('switch nosuch')).toEqual([128, '', 'fatal: invalid reference: nosuch\n'])
+  })
+
+  it('refuses a bare commit without --detach', async () => {
+    const h = await harness()
+    const [code, , err] = await h.run('switch 265ec3a')
+    expect(code).toBe(128)
+    expect(err).toBe(
+      "fatal: a branch is expected, got commit '265ec3a'\n" +
+        'hint: If you want to detach HEAD at the commit, try again with the --detach option.\n',
+    )
+  })
+
+  it('detaches under --detach and names the previous position on the way back', async () => {
+    const h = await harness()
+    expect(await h.run('switch --detach HEAD~1')).toEqual([
+      0,
+      '',
+      'HEAD is now at 225f39c add docs\n',
+    ])
+    expect(await h.run('switch main')).toEqual([
+      0,
+      '',
+      "Previous HEAD position was 225f39c add docs\nSwitched to branch 'main'\n",
+    ])
+  })
+
+  it('refuses a switch that would overwrite an edit', async () => {
+    const h = await harness()
+    await write(h, 'numbers.txt', 'precious\n')
+    const [code, , err] = await h.run('switch topic')
+    expect(code).toBe(1)
+    expect(err.startsWith('error: Your local changes to the following files')).toBe(true)
+  })
+
+  it('needs exactly one operand', async () => {
+    const h = await harness()
+    expect(await h.run('switch')).toEqual([128, '', 'fatal: missing branch or commit argument\n'])
+    expect(await h.run('switch main topic')).toEqual([
+      128,
+      '',
+      'fatal: only one reference expected\n',
+    ])
+  })
+})
+
+describe('git restore', () => {
+  it('puts a worktree edit back', async () => {
+    const h = await harness()
+    await write(h, 'letters.txt', 'edited\n')
+    expect(await h.run('restore letters.txt')).toEqual([0, '', ''])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('')
+  })
+
+  it('unstages under --staged and keeps the edit', async () => {
+    const h = await harness()
+    await write(h, 'letters.txt', 'edited\n')
+    await h.run('add letters.txt')
+    expect(await h.run('restore --staged letters.txt')).toEqual([0, '', ''])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe(' M letters.txt\n')
+  })
+
+  it('restores both targets under -SW', async () => {
+    const h = await harness()
+    await write(h, 'letters.txt', 'edited\n')
+    await h.run('add letters.txt')
+    await write(h, 'letters.txt', 'again\n')
+    expect(await h.run('restore -SW letters.txt')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['status', '--porcelain'])).toBe('')
+    expect(readFileSync(join(drained, 'letters.txt'), 'utf8')).toBe('alpha\nbeta\ngamma\ndelta\n')
+  })
+
+  it('restores from --source', async () => {
+    const h = await harness()
+    expect(await h.run('restore --source HEAD~3 numbers.txt')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(readFileSync(join(drained, 'numbers.txt'), 'utf8')).toBe('one\n')
+    expect(git(drained, ['status', '--porcelain'])).toBe(' M numbers.txt\n')
+  })
+
+  it('removes a path the source lacks from both targets', async () => {
+    const h = await harness()
+    expect(await h.run('restore -s HEAD~3 -SW docs/readme.md')).toEqual([0, '', ''])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('D  docs/readme.md\n')
+  })
+
+  it('words an unknown path as an error, not a fatal', async () => {
+    const h = await harness()
+    expect(await h.run('restore nosuch')).toEqual([
+      1,
+      '',
+      "error: pathspec 'nosuch' did not match any file(s) known to git\n",
+    ])
+  })
+
+  it('needs a pathspec', async () => {
+    const h = await harness()
+    expect(await h.run('restore')).toEqual([
+      128,
+      '',
+      'fatal: you must specify path(s) to restore\n',
+    ])
+  })
+
+  it('refuses a source it cannot resolve', async () => {
+    const h = await harness()
+    expect(await h.run('restore -s nosuch letters.txt')).toEqual([
+      128,
+      '',
+      'fatal: could not resolve nosuch\n',
+    ])
+  })
+})
+
+describe('git rm', () => {
+  it('stages a deletion and removes the file', async () => {
+    const h = await harness()
+    expect(await h.run('rm letters.txt')).toEqual([0, "rm 'letters.txt'\n", ''])
+    const drained = await h.drain()
+    expect(git(drained, ['status', '--porcelain'])).toBe('D  letters.txt\n')
+    expect(existsSync(join(drained, 'letters.txt'))).toBe(false)
+  })
+
+  it('keeps the file under --cached', async () => {
+    const h = await harness()
+    expect(await h.run('rm --cached letters.txt')).toEqual([0, "rm 'letters.txt'\n", ''])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('D  letters.txt\n?? letters.txt\n')
+  })
+
+  it('refuses a directory without -r and removes it with', async () => {
+    const h = await harness()
+    expect(await h.run('rm docs')).toEqual([
+      128,
+      '',
+      "fatal: not removing 'docs' recursively without -r\n",
+    ])
+    expect(await h.run('rm -r docs')).toEqual([0, "rm 'docs/readme.md'\n", ''])
+    expect(existsSync(join(await h.drain(), 'docs'))).toBe(false)
+  })
+
+  it('refuses a local modification and names it', async () => {
+    const h = await harness()
+    await write(h, 'letters.txt', 'edited\n')
+    expect(await h.run('rm letters.txt')).toEqual([
+      1,
+      '',
+      'error: the following file has local modifications:\n    letters.txt\n' +
+        '(use --cached to keep the file, or -f to force removal)\n',
+    ])
+  })
+
+  it('groups refusals the way git prints them', async () => {
+    const h = await harness()
+    await write(h, 'letters.txt', 'edited\n')
+    await write(h, 'numbers.txt', 'edited\n')
+    await h.run('add numbers.txt')
+    const [code, , err] = await h.run('rm letters.txt numbers.txt')
+    expect(code).toBe(1)
+    expect(err).toBe(
+      'error: the following file has changes staged in the index:\n    numbers.txt\n' +
+        '(use --cached to keep the file, or -f to force removal)\n' +
+        'error: the following file has local modifications:\n    letters.txt\n' +
+        '(use --cached to keep the file, or -f to force removal)\n',
+    )
+  })
+
+  it('removes over an edit under -f', async () => {
+    const h = await harness()
+    await write(h, 'letters.txt', 'edited\n')
+    expect(await h.run('rm -f letters.txt')).toEqual([0, "rm 'letters.txt'\n", ''])
+  })
+
+  it('refuses an unknown path and a missing pathspec', async () => {
+    const h = await harness()
+    expect(await h.run('rm nosuch')).toEqual([
+      128,
+      '',
+      "fatal: pathspec 'nosuch' did not match any files\n",
+    ])
+    expect(await h.run('rm')).toEqual([
+      128,
+      '',
+      'fatal: No pathspec was given. Which files should I remove?\n',
+    ])
+  })
+})
+
+describe('git mv', () => {
+  it('renames and stages the rename', async () => {
+    const h = await harness()
+    expect(await h.run('mv letters.txt moved.txt')).toEqual([0, '', ''])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('R  letters.txt -> moved.txt\n')
+  })
+
+  it('moves into a directory under the same name', async () => {
+    const h = await harness()
+    expect(await h.run('mv letters.txt docs')).toEqual([0, '', ''])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe(
+      'R  letters.txt -> docs/letters.txt\n',
+    )
+  })
+
+  it('moves a directory with everything under it', async () => {
+    const h = await harness()
+    await write(h, 'docs/untracked.md', 'u\n')
+    expect(await h.run('mv docs notes')).toEqual([0, '', ''])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe(
+      'R  docs/readme.md -> notes/readme.md\n?? notes/untracked.md\n',
+    )
+  })
+
+  it('refuses an existing destination unless forced', async () => {
+    const h = await harness()
+    expect(await h.run('mv letters.txt numbers.txt')).toEqual([
+      128,
+      '',
+      'fatal: destination exists, source=letters.txt, destination=numbers.txt\n',
+    ])
+    expect(await h.run('mv -f letters.txt numbers.txt')).toEqual([0, '', ''])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('D  letters.txt\nM  numbers.txt\n')
+  })
+
+  it('words a bad and an untracked source the way git does', async () => {
+    const h = await harness()
+    expect(await h.run('mv nosuch dest')).toEqual([
+      128,
+      '',
+      'fatal: bad source, source=nosuch, destination=dest\n',
+    ])
+    await write(h, 'u.txt', 'u\n')
+    expect(await h.run('mv u.txt dest')).toEqual([
+      128,
+      '',
+      'fatal: not under version control, source=u.txt, destination=dest\n',
+    ])
+  })
+
+  it('prints usage for one operand and moves nothing on a dry run', async () => {
+    const h = await harness()
+    const [code, , err] = await h.run('mv letters.txt')
+    expect(code).toBe(129)
+    expect(err.startsWith('usage: git mv [-v] [-f] [-n] [-k] <source> <destination>\n')).toBe(true)
+    expect(await h.run('mv -n letters.txt moved.txt')).toEqual([
+      0,
+      "Checking rename of 'letters.txt' to 'moved.txt'\nRenaming letters.txt to moved.txt\n",
+      '',
+    ])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('')
+  })
+})
+
+describe('git tag', () => {
+  it('creates a lightweight tag the real binary resolves', async () => {
+    const h = await harness()
+    expect(await h.run('tag v1.0 HEAD~1')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['cat-file', '-t', 'v1.0'])).toBe('commit\n')
+    expect(git(drained, ['rev-parse', 'v1.0'])).toBe(git(drained, ['rev-parse', 'HEAD~1']))
+  })
+
+  it('writes an annotated tag git can read back', async () => {
+    const h = await harness()
+    expect(await h.run("tag -a v1.1 -m 'first release'")).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['cat-file', '-t', 'v1.1'])).toBe('tag\n')
+    expect(git(drained, ['tag', '-n'])).toBe('v1.1            first release\n')
+    expect(await h.run('tag -n')).toEqual([0, 'v1.1            first release\n', ''])
+  })
+
+  it('stores an empty message as git does', async () => {
+    const h = await harness()
+    expect(await h.run("tag -a v1.2 -m ''")).toEqual([0, '', ''])
+    expect(await h.run('tag -n')).toEqual([0, 'v1.2            \n', ''])
+    expect(git(await h.drain(), ['tag', '-n'])).toBe('v1.2            \n')
+  })
+
+  it('lists in byte order and filters with -l', async () => {
+    const h = await harness()
+    for (const name of ['a10', 'a9', 'B']) await h.run(`tag ${name}`)
+    expect(await h.run('tag')).toEqual([0, 'B\na10\na9\n', ''])
+    expect(await h.run("tag -l 'a*'")).toEqual([0, 'a10\na9\n', ''])
+  })
+
+  it('refuses a duplicate, a bad object and a bad name', async () => {
+    const h = await harness()
+    await h.run('tag v1.0')
+    expect(await h.run('tag v1.0')).toEqual([128, '', "fatal: tag 'v1.0' already exists\n"])
+    expect(await h.run('tag v2 nosuch')).toEqual([
+      128,
+      '',
+      "fatal: Failed to resolve 'nosuch' as a valid ref.\n",
+    ])
+    expect(await h.run("tag 'bad name'")).toEqual([
+      128,
+      '',
+      "fatal: 'bad name' is not a valid tag name.\n",
+    ])
+    expect(await h.run('tag -a v3')).toEqual([
+      128,
+      '',
+      'fatal: no tag message supplied (mirage has no editor to open; pass -m)\n',
+    ])
+  })
+
+  it('deletes, reporting a miss without stopping', async () => {
+    const h = await harness()
+    await h.run('tag v1.0')
+    const [code, out, err] = await h.run('tag -d nosuch v1.0')
+    expect(code).toBe(1)
+    expect(out).toBe("Deleted tag 'v1.0' (was 8ef2542)\n")
+    expect(err).toBe("error: tag 'nosuch' not found.\n")
+    expect(await h.run('tag')).toEqual([0, '', ''])
+  })
+
+  it('moves a tag under -f', async () => {
+    const h = await harness()
+    await h.run('tag v1.0 HEAD~1')
+    expect(await h.run('tag -f v1.0')).toEqual([0, "Updated tag 'v1.0' (was 225f39c)\n", ''])
   })
 })

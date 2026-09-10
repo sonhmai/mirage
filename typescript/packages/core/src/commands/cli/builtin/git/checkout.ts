@@ -18,6 +18,7 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
 import type { CLIInvocation } from '../../types.ts'
+import { headCommit } from './branch.ts'
 import { headEntries, workChanges } from './changes.ts'
 import {
   BadStartPointError,
@@ -37,8 +38,8 @@ import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import { restored } from './reset.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
-import type { LinkView } from '../../../../ops/types.ts'
-import type { Dispatch, IndexEntry } from './types.ts'
+import type { LinkView, StatPath } from '../../../../ops/types.ts'
+import type { Dispatch, HeadRef, IndexEntry } from './types.ts'
 import { checkOperands, fatal } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -158,13 +159,102 @@ async function switchTo(
 }
 
 /**
+ * git's line for leaving a detached HEAD, empty when it was on a branch.
+ *
+ * Printed before the line saying where HEAD went, because a commit made while
+ * detached is reachable from nothing once HEAD moves, and this is the one place
+ * its id is still written down for the caller.
+ */
+export async function previousPosition(repo: Repo, head: HeadRef): Promise<string> {
+  if (head.commit === null) return ''
+  const { commit } = await git.readCommit({ ...repoArgs(repo), oid: head.commit })
+  const subject = commit.message.split('\n')[0] ?? ''
+  return `Previous HEAD position was ${short(head.commit, repo.abbrev)} ${subject}\n`
+}
+
+/**
+ * Move HEAD, the index and the working tree to a commit.
+ *
+ * The one procedure `checkout` and `switch` share, since the two differ only in
+ * what they accept and how they word a miss. Refuses rather than overwriting
+ * when the move would destroy work that is not committed, whether that is an
+ * edit to a tracked file or an untracked file the target holds. That check is
+ * the whole reason either verb is safe to offer: without it a branch switch
+ * silently throws away whatever was changed and not staged, and there is no
+ * reflog here to get it back from.
+ *
+ * @param dispatch workspace op dispatcher
+ * @param statPath dispatcher-backed stat, both channels
+ * @param links the name plane's link facts, null outside a workspace
+ * @param repo the opened repository
+ * @param known every ref the repository publishes
+ * @param head what HEAD pointed at before the move
+ * @param oid the commit to move to
+ * @param target the operand as the user spelled it, for the reflog
+ * @param ref the branch to attach HEAD to, null to detach it at the commit
+ * @param creating whether `ref` is a new branch to write first
+ * @returns the paths whose uncommitted changes were carried across
+ */
+export async function moveHead(
+  dispatch: Dispatch,
+  statPath: StatPath,
+  links: LinkView | null,
+  repo: Repo,
+  known: ReadonlyMap<string, string>,
+  head: HeadRef,
+  oid: string,
+  target: string,
+  ref: string | null,
+  creating: boolean,
+): Promise<Set<string>> {
+  const before = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
+  const after = await commitEntries(repo, oid)
+  const state = await readIndex(repo, dispatch)
+  const tracked = new Set(state.entries.keys())
+  // UNTRACKED_ALL, not the mode status uses: "normal" collapses a wholly
+  // untracked directory to one `dir/` entry, and a collision has to be
+  // decided per file. git names the file inside such a directory, so the
+  // list has to hold it.
+  const found = await scan(dispatch, statPath, repo.location, tracked, UNTRACKED_ALL, links)
+  const unstaged = await workChanges(repo, dispatch, repo.location.worktree, state.entries, found)
+  // Both kinds of uncommitted change count: an edit in the working tree, and
+  // one already staged. Leaving the staged ones out is what silently threw
+  // them away.
+  const stagedPaths = [...state.entries.entries()]
+    .filter(([path, entry]) => {
+      const recorded = before.get(path)
+      return recorded?.oid !== entry.oid || Number.parseInt(recorded.mode, 8) !== entry.mode
+    })
+    .map(([path]) => path)
+  const dirty = new Set([...unstaged.keys(), ...stagedPaths])
+  const blocked = conflicts(before, after, dirty)
+  const clobbered = overwritten(after, found.untracked)
+  if (blocked.length > 0 || clobbered.length > 0) {
+    throw new CheckoutConflictError(blocked, clobbered)
+  }
+  await switchTo(repo, dispatch, before, after, dirty, state.entries, links)
+  if (creating && ref !== null) await writeRef(dispatch, repo.location.commondir, ref, oid)
+  if (ref !== null) await setHead(dispatch, repo.location.gitdir, ref)
+  else await detachHead(dispatch, repo.location.gitdir, oid)
+  const where = head.branch ?? short(head.commit ?? '', repo.abbrev)
+  await record(
+    dispatch,
+    repo.location.gitdir,
+    ref,
+    headCommit(known, head),
+    oid,
+    IDENTITY,
+    Math.floor(Date.now() / 1000),
+    `checkout: moving from ${where} to ${target}`,
+  )
+  return dirty
+}
+
+/**
  * Switch the working tree to another branch or commit.
  *
  * Refuses rather than overwriting when the switch would destroy work that is not
- * committed, whether that is an edit to a tracked file or an untracked file the
- * target branch happens to hold. That check is the whole reason this verb is
- * safe to offer: without it a branch switch silently throws away whatever was
- * changed and not staged, and there is no reflog here to get it back from.
+ * committed; see `moveHead`, which does the moving for `switch` as well.
  */
 export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
   const doors = inv.doors ?? {}
@@ -212,65 +302,31 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     } else {
       oid = await resolveCommit(repo, creating ? 'HEAD' : target)
     }
-    const before = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
-    const after = await commitEntries(repo, oid)
-    const state = await readIndex(repo, dispatch)
-    const tracked = new Set(state.entries.keys())
-    // UNTRACKED_ALL, not the mode status uses: "normal" collapses a wholly
-    // untracked directory to one `dir/` entry, and a collision has to be
-    // decided per file. git names the file inside such a directory, so the
-    // list has to hold it.
-    const found = await scan(
+    const attached = creating || known.has(ref)
+    const dirty = await moveHead(
       dispatch,
       statPath,
-      repo.location,
-      tracked,
-      UNTRACKED_ALL,
       doors.ns?.links ?? null,
-    )
-    const unstaged = await workChanges(repo, dispatch, repo.location.worktree, state.entries, found)
-    // Both kinds of uncommitted change count: an edit in the working tree, and
-    // one already staged. Leaving the staged ones out is what silently threw
-    // them away.
-    const stagedPaths = [...state.entries.entries()]
-      .filter(([path, entry]) => {
-        const recorded = before.get(path)
-        return recorded?.oid !== entry.oid || Number.parseInt(recorded.mode, 8) !== entry.mode
-      })
-      .map(([path]) => path)
-    const dirty = new Set([...unstaged.keys(), ...stagedPaths])
-    const blocked = conflicts(before, after, dirty)
-    const clobbered = overwritten(after, found.untracked)
-    if (blocked.length > 0 || clobbered.length > 0) {
-      throw new CheckoutConflictError(blocked, clobbered)
-    }
-    await switchTo(repo, dispatch, before, after, dirty, state.entries, doors.ns?.links ?? null)
-    const attached = creating || known.has(ref)
-    if (creating) await writeRef(dispatch, repo.location.commondir, ref, oid)
-    if (attached) await setHead(dispatch, repo.location.gitdir, ref)
-    else await detachHead(dispatch, repo.location.gitdir, oid)
-    const where = head.branch ?? short(head.commit ?? '', repo.abbrev)
-    await record(
-      dispatch,
-      repo.location.gitdir,
-      attached ? ref : null,
-      head.commit ?? (head.ref !== null ? (known.get(head.ref) ?? null) : null),
+      repo,
+      known,
+      head,
       oid,
-      IDENTITY,
-      Math.floor(Date.now() / 1000),
-      `checkout: moving from ${where} to ${target}`,
+      target,
+      attached ? ref : null,
+      creating,
     )
     carried = [...dirty]
       .sort(compareCodePoints)
       .map((path) => `M\t${path}\n`)
       .join('')
+    note = await previousPosition(repo, head)
     if (attached) {
       const verb = creating ? 'Switched to a new branch' : 'Switched to branch'
-      note = `${verb} '${target}'\n`
+      note += `${verb} '${target}'\n`
     } else {
       const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
       const subject = commit.message.split('\n')[0] ?? ''
-      note =
+      note +=
         `Note: switching to '${target}'.\n\n${DETACHED_ADVICE}\n` +
         `HEAD is now at ${short(oid, repo.abbrev)} ${subject}\n`
     }

@@ -207,3 +207,49 @@ export async function removeFile(dispatch: Dispatch, path: string): Promise<void
 export function under(base: string, ...parts: string[]): string {
   return posixNormpath(`${base}/${parts.join('/')}`)
 }
+
+/**
+ * Move one virtual path, file or directory, to another name.
+ *
+ * The mount's own rename, so a directory moves with everything under it,
+ * tracked or not, which is what `git mv` does with a directory. The
+ * destination's directory is not created: git's rename fails when it is
+ * missing, and the caller words that failure.
+ */
+export async function renamePath(
+  dispatch: Dispatch,
+  source: string,
+  target: string,
+): Promise<void> {
+  await dispatch('rename', PathSpec.fromStrPath(source), [PathSpec.fromStrPath(target)])
+}
+
+/**
+ * Drop the directories a deletion left empty, up to a root.
+ *
+ * git removes a directory the moment its last tracked file is deleted or
+ * restored away, so `rm -r docs` leaves no `docs/` behind. The walk stops at the
+ * first directory that still holds something and never touches `stop` itself.
+ *
+ * @param dispatch workspace op dispatcher
+ * @param path the file that was removed
+ * @param stop the working tree root
+ */
+export async function removeEmptyParents(
+  dispatch: Dispatch,
+  path: string,
+  stop: string,
+): Promise<void> {
+  const root = stop.replace(/\/+$/, '') || '/'
+  let current = parent(path)
+  while (current !== root && current.startsWith(root)) {
+    if ((await readNames(dispatch, current)).length > 0) return
+    try {
+      await dispatch('rmdir', PathSpec.fromStrPath(current))
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
+      return
+    }
+    current = parent(current)
+  }
+}

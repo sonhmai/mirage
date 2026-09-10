@@ -78,7 +78,7 @@ async function create(
  * HEAD carries an object id only when detached; attached it names a ref, which
  * is unset until the first commit.
  */
-function headCommit(refs: ReadonlyMap<string, string>, head: HeadRef): string | null {
+export function headCommit(refs: ReadonlyMap<string, string>, head: HeadRef): string | null {
   if (head.commit !== null) return head.commit
   if (head.ref === null) return null
   return refs.get(head.ref) ?? null

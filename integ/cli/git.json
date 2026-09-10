@@ -1301,6 +1301,818 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_rm_stages_a_deletion",
+      "seq": 568252,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rm letters.txt && git -C /repo status --porcelain && git -C /repo restore --staged letters.txt && git -C /repo restore letters.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "rm 'letters.txt'\nD  letters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rm_refuses_a_directory_without_r",
+      "seq": 568253,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rm docs",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: not removing 'docs' recursively without -r\n"
+      }
+    },
+    {
+      "id": "git_rm_r_removes_a_directory_and_its_empty_parent",
+      "seq": 568254,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rm -r docs && test -e /repo/docs || echo gone; git -C /repo restore --staged docs && git -C /repo restore docs && cat /repo/docs/readme.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "rm 'docs/readme.md'\ngone\nnotes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rm_refuses_an_unknown_path",
+      "seq": 568255,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rm nosuch",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: pathspec 'nosuch' did not match any files\n"
+      }
+    },
+    {
+      "id": "git_rm_refuses_a_local_modification",
+      "seq": 568256,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'x\\n' >> /repo/letters.txt && git -C /repo rm letters.txt; git -C /repo restore letters.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "error: the following file has local modifications:\n    letters.txt\n(use --cached to keep the file, or -f to force removal)\n"
+      }
+    },
+    {
+      "id": "git_rm_refuses_a_staged_change",
+      "seq": 568257,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'x\\n' >> /repo/letters.txt && git -C /repo add letters.txt && git -C /repo rm letters.txt; git -C /repo restore -SW letters.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "error: the following file has changes staged in the index:\n    letters.txt\n(use --cached to keep the file, or -f to force removal)\n"
+      }
+    },
+    {
+      "id": "git_rm_refuses_staged_content_different_from_both",
+      "seq": 568258,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'x\\n' >> /repo/letters.txt && git -C /repo add letters.txt && printf 'y\\n' >> /repo/letters.txt && git -C /repo rm --cached letters.txt; git -C /repo restore -SW letters.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "error: the following file has staged content different from both the\nfile and the HEAD:\n    letters.txt\n(use -f to force removal)\n"
+      }
+    },
+    {
+      "id": "git_rm_cached_keeps_the_file",
+      "seq": 568259,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rm --cached numbers.txt && git -C /repo status --porcelain && git -C /repo add numbers.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "rm 'numbers.txt'\nD  numbers.txt\n?? numbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rm_force_removes_a_modified_file",
+      "seq": 568260,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'x\\n' >> /repo/letters.txt && git -C /repo rm -f letters.txt && git -C /repo status --porcelain && git -C /repo restore -SW letters.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "rm 'letters.txt'\nD  letters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rm_quiet_and_two_operands_with_one_missing",
+      "seq": 568261,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rm -q letters.txt nosuch; git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "fatal: pathspec 'nosuch' did not match any files\n"
+      }
+    },
+    {
+      "id": "git_rm_with_no_pathspec",
+      "seq": 568262,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rm",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: No pathspec was given. Which files should I remove?\n"
+      }
+    },
+    {
+      "id": "git_mv_renames_a_file",
+      "seq": 568263,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo mv letters.txt moved.txt && git -C /repo status --porcelain && git -C /repo mv moved.txt letters.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "R  letters.txt -> moved.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_mv_verbose",
+      "seq": 568264,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo mv -v letters.txt moved.txt && git -C /repo mv -v moved.txt letters.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "Renaming letters.txt to moved.txt\nRenaming moved.txt to letters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_mv_refuses_a_bad_source",
+      "seq": 568265,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo mv nosuch dest",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: bad source, source=nosuch, destination=dest\n"
+      }
+    },
+    {
+      "id": "git_mv_refuses_an_untracked_source",
+      "seq": 568266,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'u\\n' > /repo/u.txt && git -C /repo mv u.txt dest; rm /repo/u.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "fatal: not under version control, source=u.txt, destination=dest\n"
+      }
+    },
+    {
+      "id": "git_mv_refuses_an_existing_destination",
+      "seq": 568267,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo mv letters.txt numbers.txt",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: destination exists, source=letters.txt, destination=numbers.txt\n"
+      }
+    },
+    {
+      "id": "git_mv_force_overwrites",
+      "seq": 568268,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo mv -f letters.txt numbers.txt && git -C /repo status --porcelain && git -C /repo restore -SW letters.txt numbers.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "D  letters.txt\nM  numbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_mv_into_a_directory",
+      "seq": 568269,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo mv letters.txt docs && git -C /repo status --porcelain && git -C /repo mv docs/letters.txt letters.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "R  letters.txt -> docs/letters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_mv_a_directory",
+      "seq": 568270,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo mv docs moved && git -C /repo status --porcelain && ls /repo/moved && git -C /repo mv moved docs && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "R  docs/readme.md -> moved/readme.md\nreadme.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_mv_several_need_a_directory",
+      "seq": 568271,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo mv letters.txt numbers.txt nowhere",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: destination 'nowhere' is not a directory\n"
+      }
+    },
+    {
+      "id": "git_mv_with_one_operand",
+      "seq": 568272,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo mv letters.txt",
+      "expect": {
+        "exit": 129,
+        "stdout": "",
+        "stderr": "usage: git mv [-v] [-f] [-n] [-k] <source> <destination>\n   or: git mv [-v] [-f] [-n] [-k] <source>... <destination-directory>\n"
+      }
+    },
+    {
+      "id": "git_mv_keeps_an_edit",
+      "seq": 568273,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'x\\n' >> /repo/letters.txt && git -C /repo mv letters.txt moved.txt && git -C /repo status --porcelain && git -C /repo mv moved.txt letters.txt && git -C /repo restore letters.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "RM letters.txt -> moved.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_mv_dry_run",
+      "seq": 568274,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo mv -n letters.txt moved.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "Checking rename of 'letters.txt' to 'moved.txt'\nRenaming letters.txt to moved.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_mv_into_a_missing_directory",
+      "seq": 568275,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo mv letters.txt nodir/moved.txt; git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "fatal: renaming 'letters.txt' failed: No such file or directory\n"
+      }
+    },
+    {
+      "id": "git_mv_a_directory_carries_untracked_files",
+      "seq": 568276,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'u\\n' > /repo/docs/u.txt && git -C /repo mv docs moved && git -C /repo status --porcelain && ls /repo/moved && git -C /repo mv moved docs && rm /repo/docs/u.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "R  docs/readme.md -> moved/readme.md\n?? moved/u.txt\nreadme.md\nu.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_restore_a_worktree_edit",
+      "seq": 568277,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'x\\n' >> /repo/letters.txt && git -C /repo status --porcelain && git -C /repo restore letters.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": " M letters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_restore_staged",
+      "seq": 568278,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'x\\n' >> /repo/letters.txt && git -C /repo add letters.txt && git -C /repo restore --staged letters.txt && git -C /repo status --porcelain && git -C /repo restore letters.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " M letters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_restore_both",
+      "seq": 568279,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'x\\n' >> /repo/letters.txt && git -C /repo add letters.txt && printf 'y\\n' >> /repo/letters.txt && git -C /repo restore -SW letters.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_restore_refuses_an_unknown_path",
+      "seq": 568280,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo restore nosuch",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: pathspec 'nosuch' did not match any file(s) known to git\n"
+      }
+    },
+    {
+      "id": "git_restore_needs_a_pathspec",
+      "seq": 568281,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo restore",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: you must specify path(s) to restore\n"
+      }
+    },
+    {
+      "id": "git_restore_from_a_source",
+      "seq": 568282,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo restore --source 98b4ffe numbers.txt && git -C /repo status --porcelain && cat /repo/numbers.txt && git -C /repo restore numbers.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": " M numbers.txt\none\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_restore_refuses_a_bad_source",
+      "seq": 568283,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo restore -s nosuch numbers.txt",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: could not resolve nosuch\n"
+      }
+    },
+    {
+      "id": "git_restore_staged_turns_an_add_back_into_untracked",
+      "seq": 568284,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'n\\n' > /repo/new.txt && git -C /repo add new.txt && git -C /repo restore --staged new.txt && git -C /repo status --porcelain && rm /repo/new.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "?? new.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_restore_a_deleted_file",
+      "seq": 568285,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "rm /repo/numbers.txt && git -C /repo restore numbers.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_restore_source_lacking_the_path_removes_it",
+      "seq": 568286,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo restore -s 265ec3a -SW docs/readme.md && git -C /repo status --porcelain && test -e /repo/docs || echo gone; git -C /repo restore -SW docs/readme.md && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "D  docs/readme.md\ngone\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_switch_moves_the_working_tree",
+      "seq": 568287,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch topic && cat /repo/numbers.txt && git -C /repo switch main",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\n",
+        "stderr": "Switched to branch 'topic'\nSwitched to branch 'main'\n"
+      }
+    },
+    {
+      "id": "git_switch_already_on",
+      "seq": 568288,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch main",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "Already on 'main'\n"
+      }
+    },
+    {
+      "id": "git_switch_creates",
+      "seq": 568289,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch -c fresh && git -C /repo branch && git -C /repo switch main > /dev/null 2>&1 && git -C /repo branch -d fresh | cut -d' ' -f1-3",
+      "expect": {
+        "exit": 0,
+        "stdout": "* fresh\n  main\n  topic\nDeleted branch fresh\n",
+        "stderr": "Switched to a new branch 'fresh'\n"
+      }
+    },
+    {
+      "id": "git_switch_creates_at_a_start_point",
+      "seq": 568290,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch -c older 225f39c && git -C /repo log --oneline -n 1 && git -C /repo switch main > /dev/null 2>&1 && git -C /repo branch -d older",
+      "expect": {
+        "exit": 0,
+        "stdout": "225f39c add docs\nDeleted branch older (was 225f39c).\n",
+        "stderr": "Switched to a new branch 'older'\n"
+      }
+    },
+    {
+      "id": "git_switch_refuses_an_unknown_branch",
+      "seq": 568291,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch nosuchbranch",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: invalid reference: nosuchbranch\n"
+      }
+    },
+    {
+      "id": "git_switch_refuses_a_commit_without_detach",
+      "seq": 568292,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch 265ec3a",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: a branch is expected, got commit '265ec3a'\nhint: If you want to detach HEAD at the commit, try again with the --detach option.\n"
+      }
+    },
+    {
+      "id": "git_switch_detaches",
+      "seq": 568293,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch --detach 225f39c && git -C /repo status -b --porcelain && git -C /repo switch main",
+      "expect": {
+        "exit": 0,
+        "stdout": "## HEAD (no branch)\n",
+        "stderr": "HEAD is now at 225f39c add docs\nPrevious HEAD position was 225f39c add docs\nSwitched to branch 'main'\n"
+      }
+    },
+    {
+      "id": "git_switch_from_detached_names_the_previous_position",
+      "seq": 568294,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch --detach 265ec3a > /dev/null 2>&1 && git -C /repo switch -d 98b4ffe && git -C /repo switch main",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "Previous HEAD position was 265ec3a add delta\nHEAD is now at 98b4ffe first commit\nPrevious HEAD position was 98b4ffe first commit\nSwitched to branch 'main'\n"
+      }
+    },
+    {
+      "id": "git_switch_refuses_to_lose_an_edit",
+      "seq": 568295,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'precious\\n' > /repo/numbers.txt && git -C /repo switch topic; git -C /repo restore numbers.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "error: Your local changes to the following files would be overwritten by checkout:\n\tnumbers.txt\nPlease commit your changes or stash them before you switch branches.\nAborting\n"
+      }
+    },
+    {
+      "id": "git_switch_needs_an_operand",
+      "seq": 568296,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: missing branch or commit argument\n"
+      }
+    },
+    {
+      "id": "git_tag_lists_nothing",
+      "seq": 568297,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_creates_and_lists",
+      "seq": 568298,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag v1.0 225f39c && git -C /repo tag v0.9 265ec3a && git -C /repo tag && git -C /repo log --oneline -n 1 v0.9",
+      "expect": {
+        "exit": 0,
+        "stdout": "v0.9\nv1.0\n265ec3a add delta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_list_pattern",
+      "seq": 568299,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag -l 'v1*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "v1.0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_refuses_a_name_that_exists",
+      "seq": 568300,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag v1.0",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: tag 'v1.0' already exists\n"
+      }
+    },
+    {
+      "id": "git_tag_refuses_a_bad_object",
+      "seq": 568301,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag v2 nosuchrev",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: Failed to resolve 'nosuchrev' as a valid ref.\n"
+      }
+    },
+    {
+      "id": "git_tag_annotated_with_message",
+      "seq": 568302,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag -a v1.1 -m 'release one point one' && git -C /repo tag -n",
+      "expect": {
+        "exit": 0,
+        "stdout": "v0.9            add delta\nv1.0            add docs\nv1.1            release one point one\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_annotated_needs_a_message",
+      "seq": 568303,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag -a v1.2",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: no tag message supplied (mirage has no editor to open; pass -m)\n"
+      }
+    },
+    {
+      "id": "git_tag_refuses_an_invalid_name",
+      "seq": 568304,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag 'bad name'",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: 'bad name' is not a valid tag name.\n"
+      }
+    },
+    {
+      "id": "git_tag_force_moves_a_tag",
+      "seq": 568305,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag -f v0.9 225f39c | cut -d' ' -f1-3 && git -C /repo log --oneline -n 1 v0.9",
+      "expect": {
+        "exit": 0,
+        "stdout": "Updated tag 'v0.9'\n225f39c add docs\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_decorates_the_log",
+      "seq": 568306,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --format='%h%d' -n 1 225f39c",
+      "expect": {
+        "exit": 0,
+        "stdout": "225f39c (tag: v1.0, tag: v0.9, topic)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_delete",
+      "seq": 568307,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag -d v0.9 && git -C /repo tag -d nosuch; git -C /repo tag -d v1.0 v1.1 | cut -d' ' -f1-3 && git -C /repo tag",
+      "expect": {
+        "exit": 0,
+        "stdout": "Deleted tag 'v0.9' (was 225f39c)\nDeleted tag 'v1.0'\nDeleted tag 'v1.1'\n",
+        "stderr": "error: tag 'nosuch' not found.\n"
+      }
+    },
+    {
+      "id": "git_tag_sort_order",
+      "seq": 568308,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag a10 && git -C /repo tag a9 && git -C /repo tag B && git -C /repo tag && git -C /repo tag -d a10 a9 B > /dev/null && git -C /repo tag",
+      "expect": {
+        "exit": 0,
+        "stdout": "B\na10\na9\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_new_verbs_leave_the_tree_clean",
+      "seq": 568309,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo status --porcelain && git -C /repo branch",
+      "expect": {
+        "exit": 0,
+        "stdout": "* main\n  topic\n",
+        "stderr": ""
+      }
     }
   ]
 }

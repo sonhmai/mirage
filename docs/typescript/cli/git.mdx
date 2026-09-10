@@ -97,15 +97,32 @@ git -C /repo branch topic
 git -C /repo branch -d topic
 git -C /repo branch -D topic
 git -C /repo checkout topic
+git -C /repo switch topic
+git -C /repo switch -c feature HEAD~1
+git -C /repo switch --detach HEAD~1
+git -C /repo restore src/main.ts
+git -C /repo restore --staged src/main.ts
+git -C /repo restore --source HEAD~1 -SW src/main.ts
+git -C /repo rm old.ts
+git -C /repo rm -r --cached build
+git -C /repo mv src/old.ts src/new.ts
+git -C /repo tag v1.0
+git -C /repo tag -a v1.1 -m "release"
+git -C /repo tag -d v1.0
 ```
 
-| Verb       | Notes                                                            |
-| ---------- | ---------------------------------------------------------------- |
-| `add`      | `-A` everything, `-u` tracked only, `-f` to stage an ignored path |
-| `reset`    | mixed only, from HEAD; a pathspec limits it to those paths        |
-| `commit`   | `-m` required, `--author "Name <email>"` optional                 |
-| `branch`   | `-d` deletes a merged branch, `-D` any branch                     |
-| `checkout` | refuses rather than overwrite work you have not committed         |
+| Verb       | Notes                                                                                                                                  |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `add`      | `-A` everything, `-u` tracked only, `-f` to stage an ignored path                                                                       |
+| `reset`    | mixed only, from HEAD; a pathspec limits it to those paths                                                                              |
+| `restore`  | worktree by default, `--staged` the index, `-SW` both; `--source` names the tree, and a path it lacks is removed from the target        |
+| `rm`       | refuses a path with uncommitted work unless `-f`; `--cached` keeps the file; `-r` for a directory; `-q`, `--ignore-unmatch`             |
+| `mv`       | files and directories, `-f` over an existing file, `-k` skips what cannot move, `-n` dry run, `-v`                                      |
+| `commit`   | `-m` required, `--author "Name <email>"` optional                                                                                       |
+| `branch`   | `-d` deletes a merged branch, `-D` any branch                                                                                           |
+| `checkout` | refuses rather than overwrite work you have not committed                                                                              |
+| `switch`   | the same move for a branch only; `-c` creates, `--detach` is the only way onto a bare commit                                            |
+| `tag`      | lists sorted, `-l <pattern>`, `-n[<num>]`; a name is a lightweight tag, `-a`/`-m` an annotated one; `-d`, `-f`                          |
 
 `commit` records `mirage <mirage@localhost>` unless `--author` says
 otherwise: git reads `user.name` from config files that a mount does not
@@ -115,7 +132,13 @@ serve, and inventing a name would put an unreviewed one into history.
 
 - **No network verbs.** `clone`, `fetch`, `pull` and `push` are absent.
 - **No `reset --hard`.** It destroys uncommitted work with no reflog here
-  to recover it from.
+  to recover it from. `rm` and `restore` are the way to discard a file's
+  changes on purpose, and `rm` refuses unless `-f` says so.
+- **No `switch -`.** The previous branch lives in the reflog, which this
+  build writes but does not read back.
+- **`tag -a` needs `-m`**, for the reason `commit` does: there is no
+  editor to open. `mv` prints only its two usage lines for a missing
+  operand, not git's option table.
 - **`reset` takes no revision.** Real git resets the index to any commit
   named as an operand; this build resets it from HEAD only and refuses a
   revision by name rather than doing nothing quietly.

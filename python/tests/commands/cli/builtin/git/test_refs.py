@@ -14,7 +14,8 @@
 
 import pytest
 
-from mirage.commands.cli.builtin.git.refs import load_refs, read_head
+from mirage.commands.cli.builtin.git.refs import (load_refs, read_head,
+                                                  valid_ref_name)
 from mirage.io import IOResult
 
 from .conftest import make_branch, mounted, pack_refs
@@ -100,3 +101,18 @@ async def test_load_refs_walks_nested_ref_names(repo_path, workspace):
 async def test_head_symref_resolves_through_the_container(workspace):
     refs = await load_refs(workspace.dispatch, "/repo/.git")
     assert refs[b"HEAD"] == refs[b"refs/heads/main"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["v1.0", "feat/git-cli", "a10", "B", "@", "x-y_z", "release-2026.01"])
+def test_names_git_accepts_are_valid(name: str):
+    assert valid_ref_name(name)
+
+
+@pytest.mark.parametrize("name", [
+    "", "bad name", "bad..name", "x.lock", ".x", "x/", "/x", "a//b", "x.",
+    "a@{b", "a~b", "a^b", "a:b", "a?b", "a*b", "a[b", "a\\b", "a\tb"
+])
+def test_names_git_refuses_are_invalid(name: str):
+    assert not valid_ref_name(name)

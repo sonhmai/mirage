@@ -18,28 +18,29 @@ import time
 
 from dulwich.index import IndexEntry
 from dulwich.object_store import iter_tree_contents
-from dulwich.objects import Blob, ObjectID
+from dulwich.objects import Blob, Commit, ObjectID
 from dulwich.objectspec import parse_commit
 from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 
+from mirage.commands.cli.builtin.git.branch import head_commit
 from mirage.commands.cli.builtin.git.changes import head_entries, work_changes
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     BadStartPointError, BranchExistsError, CheckoutConflictError, GitError,
     NoWorkspaceError, UnknownPathspecError, UnknownSwitchError)
-from mirage.commands.cli.builtin.git.format import short
+from mirage.commands.cli.builtin.git.format import short, subject
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import remove_file, restore_entry
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.reflog import record
-from mirage.commands.cli.builtin.git.refs import (BRANCH_PREFIX, HEAD_REF,
-                                                  detach_head, read_head,
-                                                  set_head, write_ref)
+from mirage.commands.cli.builtin.git.refs import (BRANCH_PREFIX, detach_head,
+                                                  read_head, set_head,
+                                                  write_ref)
 from mirage.commands.cli.builtin.git.reset import restored
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.types import RepoLocation
+from mirage.commands.cli.builtin.git.types import HeadRef, RepoLocation
 from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
                                                   links_of)
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
@@ -47,7 +48,7 @@ from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
+from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 
 Tree = dict[bytes, tuple[int, bytes]]
@@ -203,16 +204,112 @@ async def _switch(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
     await write_index(dispatch, location.gitdir, state)
 
 
+def previous_position(repo: BaseRepo, head: HeadRef) -> str:
+    """git's line for leaving a detached HEAD, empty when it was on a branch.
+
+    Printed before the line saying where HEAD went, because a commit made
+    while detached is reachable from nothing once HEAD moves, and this is
+    the one place its id is still written down for the caller.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        head (HeadRef): what HEAD pointed at before the move.
+    """
+    if head.commit is None:
+        return ""
+    commit = repo.object_store[ObjectID(head.commit.encode())]
+    if not isinstance(commit, Commit):
+        return ""
+    return (f"Previous HEAD position was "
+            f"{short(commit.id, abbrev_for(repo))} {subject(commit)}\n")
+
+
+async def move_head(dispatch: DispatchFn, stat_path: StatPath,
+                    links: LinkView | None, repo: BaseRepo,
+                    location: RepoLocation, head: HeadRef, commit: Commit,
+                    target: str, ref: Ref | None, creating: bool) -> set[str]:
+    """Move HEAD, the index and the working tree to a commit.
+
+    The one procedure ``checkout`` and ``switch`` share, since the two
+    differ only in what they accept and how they word a miss. Refuses
+    rather than overwriting when the move would destroy work that is
+    not committed, whether that is an edit to a tracked file or an
+    untracked file the target holds. That check is the whole reason
+    either verb is safe to offer: without it a branch switch silently
+    throws away whatever was changed and not staged, and there is no
+    reflog here to get it back from.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        stat_path (StatPath): dispatcher-backed stat, both channels.
+        links (LinkView | None): the name plane's link facts, None
+            outside a workspace.
+        repo (BaseRepo): the opened repository.
+        location (RepoLocation): the discovered repository.
+        head (HeadRef): what HEAD pointed at before the move.
+        commit (Commit): the commit to move to.
+        target (str): the operand as the user spelled it, for the
+            reflog.
+        ref (Ref | None): the branch to attach HEAD to, None to detach
+            it at the commit.
+        creating (bool): whether ``ref`` is a new branch to write first.
+
+    Returns:
+        set[str]: paths whose uncommitted changes were carried across.
+    """
+    before = await asyncio.to_thread(head_entries, repo) or {}
+    after = await asyncio.to_thread(tree_of, repo, commit.id)
+    state = await read_index(dispatch, location.gitdir)
+    tracked = {
+        path.decode("utf-8", errors="replace")
+        for path in state.entries
+    }
+    # UNTRACKED_ALL, not the mode status uses: "normal" collapses a
+    # wholly untracked directory to one ``dir/`` entry, and a
+    # collision has to be decided per file. git names the file
+    # inside such a directory, so the list has to hold it.
+    found = await scan(dispatch, stat_path, location, tracked, UNTRACKED_ALL,
+                       links)
+    unstaged = await work_changes(dispatch, location.worktree, state.entries,
+                                  found)
+    # Both kinds of uncommitted change count: an edit in the working
+    # tree, and one already staged. Leaving the staged ones out is
+    # what silently threw them away.
+    staged = {
+        path.decode("utf-8", errors="replace")
+        for path, entry in state.entries.items()
+        if before.get(path) != (entry.mode, entry.sha)
+    }
+    dirty = set(unstaged) | staged
+    blocked = _conflicts(before, after, dirty)
+    overwritten = _overwritten(after, found.untracked)
+    if blocked or overwritten:
+        raise CheckoutConflictError(blocked, overwritten)
+    await _switch(dispatch, repo, location, before, after, dirty,
+                  state.entries, links)
+    if creating and ref is not None:
+        await write_ref(dispatch, location.commondir, ref.decode(), commit.id)
+    if ref is not None:
+        await set_head(dispatch, location.gitdir, ref.decode())
+    else:
+        await detach_head(dispatch, location.gitdir, commit.id)
+    where = head.branch if head.branch is not None else short(
+        (head.commit or "").encode(), abbrev_for(repo))
+    await record(dispatch, location.gitdir,
+                 ref.decode() if ref is not None else None,
+                 head_commit(repo,
+                             head), commit.id, IDENTITY, int(time.time()),
+                 f"checkout: moving from {where} to {target}")
+    return dirty
+
+
 async def checkout(
         inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     """Switch the working tree to another branch or commit.
 
     Refuses rather than overwriting when the switch would destroy work
-    that is not committed, whether that is an edit to a tracked file or
-    an untracked file the target branch happens to hold. That check is
-    the whole reason this verb is safe to offer: without it a branch
-    switch silently throws away whatever was changed and not staged, and
-    there is no reflog here to get it back from.
+    that is not committed; see ``move_head``, which does the moving for
+    ``switch`` as well.
 
     Args:
         inv (CLIInvocation[None]): the line's invocation record.
@@ -259,62 +356,19 @@ async def checkout(
                 raise BadStartPointError(start, target) from exc
         else:
             commit = resolve_commit(repo, target if not creating else HEAD)
-        before = await asyncio.to_thread(head_entries, repo) or {}
-        after = await asyncio.to_thread(tree_of, repo, commit.id)
-        state = await read_index(dispatch, location.gitdir)
-        tracked = {
-            path.decode("utf-8", errors="replace")
-            for path in state.entries
-        }
-        # UNTRACKED_ALL, not the mode status uses: "normal" collapses a
-        # wholly untracked directory to one ``dir/`` entry, and a
-        # collision has to be decided per file. git names the file
-        # inside such a directory, so the list has to hold it.
-        found = await scan(dispatch, stat_path, location, tracked,
-                           UNTRACKED_ALL, links_of(doors))
-        unstaged = await work_changes(dispatch, location.worktree,
-                                      state.entries, found)
-        # Both kinds of uncommitted change count: an edit in the working
-        # tree, and one already staged. Leaving the staged ones out is
-        # what silently threw them away.
-        staged = {
-            path.decode("utf-8", errors="replace")
-            for path, entry in state.entries.items()
-            if before.get(path) != (entry.mode, entry.sha)
-        }
-        dirty = set(unstaged) | staged
-        blocked = _conflicts(before, after, dirty)
-        overwritten = _overwritten(after, found.untracked)
-        if blocked or overwritten:
-            raise CheckoutConflictError(blocked, overwritten)
-        await _switch(dispatch, repo, location, before, after, dirty,
-                      state.entries, links_of(doors))
         attached = creating or ref in known
-        if creating:
-            await write_ref(dispatch, location.commondir, ref.decode(),
-                            commit.id)
-        if attached:
-            await set_head(dispatch, location.gitdir, ref.decode())
-        else:
-            await detach_head(dispatch, location.gitdir, commit.id)
-        where = head.branch if head.branch is not None else short(
-            (head.commit or "").encode(), abbrev_for(repo))
-        await record(
-            dispatch, location.gitdir,
-            ref.decode() if attached else None,
-            head.commit.encode() if head.commit else
-            (repo.refs[HEAD_REF] if head.ref in known else None), commit.id,
-            IDENTITY, int(time.time()),
-            f"checkout: moving from {where} to {target}")
+        dirty = await move_head(dispatch, stat_path, links_of(doors), repo,
+                                location, head, commit, target,
+                                ref if attached else None, creating)
     except GitError as exc:
         return fatal(exc)
     carried = "".join(f"M\t{path}\n" for path in sorted(dirty))
+    note = previous_position(repo, head)
     if attached:
         verb = "Switched to a new branch" if creating else "Switched to branch"
-        note = f"{verb} '{target}'\n"
+        note += f"{verb} '{target}'\n"
     else:
-        subject = commit.message.decode(errors="replace").splitlines()[0]
-        note = (f"Note: switching to '{target}'.\n\n{DETACHED_ADVICE}\n"
-                f"HEAD is now at {short(commit.id, abbrev_for(repo))} "
-                f"{subject}\n")
+        note += (f"Note: switching to '{target}'.\n\n{DETACHED_ADVICE}\n"
+                 f"HEAD is now at {short(commit.id, abbrev_for(repo))} "
+                 f"{subject(commit)}\n")
     return yield_bytes(carried.encode()), IOResult(stderr=note.encode())

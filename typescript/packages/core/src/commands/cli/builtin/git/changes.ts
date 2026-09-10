@@ -35,7 +35,7 @@ import { scan } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const UNCHANGED = ' '
-const MODIFIED = 'M'
+export const MODIFIED = 'M'
 const ADDED = 'A'
 const DELETED = 'D'
 const RENAMED = 'R'

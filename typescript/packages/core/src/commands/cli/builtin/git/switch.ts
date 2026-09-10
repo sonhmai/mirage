@@ -25,6 +25,7 @@ import {
   BranchExpectedError,
   DetachWithCreateError,
   GitError,
+  InvalidBranchNameError,
   InvalidReferenceError,
   MissingBranchArgumentError,
   NoWorkspaceError,
@@ -32,7 +33,7 @@ import {
   UnknownSwitchError,
 } from './errors.ts'
 import { short } from './format.ts'
-import { BRANCH_PREFIX, loadRefs, readHead, TAG_PREFIX } from './refs.ts'
+import { BRANCH_PREFIX, loadRefs, readHead, TAG_PREFIX, validRefName } from './refs.ts'
 import { opened, repoArgs } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import { checkOperands, fatal } from './util.ts'
@@ -112,6 +113,11 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       } catch {
         throw new InvalidReferenceError(start)
       }
+      // After the start point and before anything is written, which is git's
+      // own order. A ref is a path below .git, so an unchecked name reaches
+      // writeRef as one: -c ../../config would land on the repository's own
+      // configuration rather than on a branch.
+      if (!validRefName(target)) throw new InvalidBranchNameError(target)
       attached = true
     } else {
       target = first ?? ''

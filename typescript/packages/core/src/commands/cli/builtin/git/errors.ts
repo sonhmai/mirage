@@ -31,6 +31,8 @@ const ADVICE_IGNORED =
   'hint: Disable this message with "git config set advice.addIgnoredFile false"'
 const ADVICE_EMPTY_PATHSPEC =
   'hint: Disable this message with "git config set advice.addEmptyPathspec false"'
+const ADVICE_REF_FORMAT = 'hint: See `man git check-ref-format`'
+const ADVICE_REF_SYNTAX = 'hint: Disable this message with "git config set advice.refSyntax false"'
 
 /**
  * Base for a git fatal: rendered as `fatal: <message>`, exit 128.
@@ -291,6 +293,21 @@ export class UnmergedIndexError extends GitError {
 export class BranchExistsError extends GitError {
   constructor(name: string) {
     super(`a branch named '${name}' already exists`)
+  }
+}
+
+/**
+ * A branch name git's ref rules refuse.
+ *
+ * Refused before the name reaches a ref file, because a ref is written as a path
+ * below `.git`: `../../config` would land on the repository's own configuration
+ * rather than on a branch. git closes the refusal with the two hint lines kept
+ * here, and words it without the full stop its tag twin carries. Pinned against
+ * git 2.50.1.
+ */
+export class InvalidBranchNameError extends GitError {
+  constructor(name: string) {
+    super(`'${name}' is not a valid branch name\n${ADVICE_REF_FORMAT}\n${ADVICE_REF_SYNTAX}`)
   }
 }
 
@@ -662,6 +679,30 @@ export class InvalidTagNameError extends GitError {
 export class UnresolvedRefError extends GitError {
   constructor(revision: string) {
     super(`Failed to resolve '${revision}' as a valid ref.`)
+  }
+}
+
+/**
+ * `tag` given a creation option with no tag name to create.
+ *
+ * `-a`, `-m` and `-f` are creation options, so git refuses them on a line that
+ * lists or deletes instead: no operand at all lists, and `-l` or `-d` says so
+ * outright. It prints its usage and exits 129, where an operand-free `git tag`
+ * or `git tag -d` lists and exits 0. The synopsis is trimmed to the options this
+ * build has, the way `mv`'s is: git's own lines advertise `-s`, `-u`, `-F`, `-e`
+ * and `-v`, which would be a promise nothing here keeps. Pinned against git
+ * 2.50.1.
+ */
+export class TagUsageError extends GitError {
+  override readonly prefix = null
+  override readonly code = OPTION_EXIT
+
+  constructor() {
+    super(
+      'usage: git tag [-a] [-f] [-m <msg>] <tagname> [<commit> | <object>]\n' +
+        '   or: git tag -d <tagname>...\n' +
+        '   or: git tag [-n[<num>]] -l [<pattern>...]',
+    )
   }
 }
 

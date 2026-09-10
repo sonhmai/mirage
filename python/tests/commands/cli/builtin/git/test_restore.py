@@ -15,7 +15,7 @@
 from pathlib import Path
 
 import pytest
-from dulwich.index import IndexEntry
+from dulwich.index import ConflictedIndexEntry, Index, IndexEntry
 
 from mirage.commands.cli.builtin.git.restore import index_tree, parse_flags
 from mirage.commands.spec.types import FlagView
@@ -140,3 +140,33 @@ async def test_a_deleted_file_comes_back(git_rw, repo_path: Path):
     await git_rw.execute("ls /repo")
     assert await run(git_rw, "restore a.txt") == (0, b"", b"")
     assert (repo_path / "a.txt").read_text() == "one changed\n"
+
+
+def conflict_the_index(repo_path: Path, name: str) -> None:
+    """Turn one staged path into an unmerged one, stages 1 to 3.
+
+    Written straight into the index because reaching this state through
+    the CLI would need a merge, and what is under test is what
+    ``restore`` does to a path that is already conflicted.
+
+    Args:
+        repo_path (Path): the repository's working tree.
+        name (str): the path to conflict, repository-relative.
+    """
+    index = Index(str(repo_path / ".git" / "index"))
+    entry = index[name.encode()]
+    assert isinstance(entry, IndexEntry)
+    index[name.encode()] = ConflictedIndexEntry(ancestor=entry,
+                                                this=entry,
+                                                other=entry)
+    index.write()
+
+
+@pytest.mark.asyncio
+async def test_restoring_the_index_clears_the_conflict_stages(
+        git_rw, repo_path: Path):
+    conflict_the_index(repo_path, "a.txt")
+    assert await run(git_rw, "restore --staged a.txt") == (0, b"", b"")
+    index = Index(str(repo_path / ".git" / "index"))
+    assert not index.has_conflicts()
+    assert isinstance(index[b"a.txt"], IndexEntry)

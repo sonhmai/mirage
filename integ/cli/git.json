@@ -2113,6 +2113,48 @@
         "stdout": "* main\n  topic\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_switch_c_refuses_an_invalid_branch_name",
+      "seq": 568310,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch -c ../../config",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: '../../config' is not a valid branch name\nhint: See `man git check-ref-format`\nhint: Disable this message with \"git config set advice.refSyntax false\"\n"
+      }
+    },
+    {
+      "id": "git_mv_refuses_two_sources_for_one_target",
+      "seq": 568311,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo mv letters.txt letters.txt docs",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: multiple sources for the same target, source=letters.txt, destination=docs/letters.txt\n"
+      }
+    },
+    {
+      "id": "git_tag_creation_option_needs_a_name",
+      "seq": 568312,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag -a",
+      "expect": {
+        "exit": 129,
+        "stdout": "",
+        "stderr": "usage: git tag [-a] [-f] [-m <msg>] <tagname> [<commit> | <object>]\n   or: git tag -d <tagname>...\n   or: git tag [-n[<num>]] -l [<pattern>...]\n"
+      }
     }
   ]
 }

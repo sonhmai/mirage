@@ -15,7 +15,8 @@
 import pytest
 
 from mirage.commands.cli.builtin.git.refs import (load_refs, read_head,
-                                                  valid_ref_name)
+                                                  valid_ref_name,
+                                                  without_packed)
 from mirage.io import IOResult
 
 from .conftest import make_branch, mounted, pack_refs
@@ -116,3 +117,30 @@ def test_names_git_accepts_are_valid(name: str):
 ])
 def test_names_git_refuses_are_invalid(name: str):
     assert not valid_ref_name(name)
+
+
+PACKED = ("# pack-refs with: peeled fully-peeled sorted \n"
+          "1111111111111111111111111111111111111111 refs/heads/main\n"
+          "2222222222222222222222222222222222222222 refs/tags/ann\n"
+          "^3333333333333333333333333333333333333333\n"
+          "4444444444444444444444444444444444444444 refs/tags/lw\n")
+
+
+def test_dropping_a_packed_tag_drops_its_peeled_line():
+    rewritten = without_packed(PACKED.encode(), "refs/tags/ann")
+    assert rewritten is not None
+    assert b"refs/tags/ann" not in rewritten
+    assert b"^3333" not in rewritten
+    assert b"refs/tags/lw" in rewritten
+    assert b"refs/heads/main" in rewritten
+
+
+def test_dropping_the_last_ref_keeps_the_header():
+    rewritten = without_packed(PACKED.encode(), "refs/tags/lw")
+    assert rewritten is not None
+    assert rewritten.startswith(b"# pack-refs with:")
+    assert b"^3333" in rewritten
+
+
+def test_a_ref_the_file_does_not_hold_rewrites_nothing():
+    assert without_packed(PACKED.encode(), "refs/heads/other") is None

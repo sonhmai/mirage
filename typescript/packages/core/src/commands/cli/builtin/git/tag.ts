@@ -28,6 +28,7 @@ import {
   NoWorkspaceError,
   TagExistsError,
   TagNotFoundError,
+  TagUsageError,
   TooManyArgumentsError,
   UnknownSwitchError,
   UnresolvedRefError,
@@ -218,6 +219,16 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
     checkOperands(texts, UnknownSwitchError)
     const flags = parseFlags(fl)
     if (flags.listing && flags.remove) throw new IncompatibleOptionsError('-l', '-d')
+    // -a, -m and -f create a tag, so a line that lists or deletes instead has
+    // nothing for them to do: git prints its usage and exits 129, where the
+    // same line without them lists or deletes and exits 0. No operand at all is
+    // a listing, which is why it counts here too.
+    if (
+      (flags.annotate || flags.force) &&
+      (flags.listing || flags.remove || flags.lines !== undefined || texts.length === 0)
+    ) {
+      throw new TagUsageError()
+    }
     const repo = await opened(fl, doors)
     abbrev = repo.abbrev
     const known = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)

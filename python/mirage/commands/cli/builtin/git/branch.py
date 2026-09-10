@@ -22,12 +22,12 @@ from dulwich.walk import Walker
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     BranchExistsError, BranchNameRequiredError, CheckedOutBranchError,
-    GitError, NoBranchError, NoWorkspaceError, UnknownSwitchError,
-    UnmergedBranchError)
+    GitError, InvalidBranchNameError, NoBranchError, NoWorkspaceError,
+    UnknownSwitchError, UnmergedBranchError)
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.refs import (delete_ref, read_head,
-                                                  write_ref)
+                                                  valid_ref_name, write_ref)
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import HeadRef, RepoLocation
@@ -77,6 +77,11 @@ async def _create(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
         name (str): the branch name.
         start (str | None): the revision to start it at, HEAD when None.
     """
+    # Before the start point resolves, which is git's order here and
+    # the opposite of switch's. A ref is a path below .git, so an
+    # unchecked name reaches write_ref as one.
+    if not valid_ref_name(name):
+        raise InvalidBranchNameError(name)
     ref = f"{HEADS_PREFIX.decode()}{name}"
     if Ref(ref.encode()) in repo.refs.allkeys():
         raise BranchExistsError(name)

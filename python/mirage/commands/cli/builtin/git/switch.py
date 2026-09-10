@@ -21,12 +21,12 @@ from mirage.commands.cli.builtin.git.checkout import (move_head,
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     BranchExistsError, BranchExpectedError, DetachWithCreateError, GitError,
-    InvalidReferenceError, MissingBranchArgumentError, NoWorkspaceError,
-    OneReferenceError, UnknownSwitchError)
+    InvalidBranchNameError, InvalidReferenceError, MissingBranchArgumentError,
+    NoWorkspaceError, OneReferenceError, UnknownSwitchError)
 from mirage.commands.cli.builtin.git.format import short, subject
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.refs import (BRANCH_PREFIX, TAG_PREFIX,
-                                                  read_head)
+                                                  read_head, valid_ref_name)
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
@@ -128,6 +128,13 @@ async def switch(
                 commit = resolve_commit(repo, start)
             except GitError as exc:
                 raise InvalidReferenceError(start) from exc
+            # After the start point and before anything is written,
+            # which is git's own order. A ref is a path below .git, so
+            # an unchecked name reaches write_ref as one: -c
+            # ../../config would land on the repository's own
+            # configuration rather than on a branch.
+            if not valid_ref_name(target):
+                raise InvalidBranchNameError(target)
             attached = True
         else:
             target = texts[0]

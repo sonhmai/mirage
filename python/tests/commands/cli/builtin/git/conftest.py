@@ -148,6 +148,22 @@ def mounted(repo_path: Path):
         yield ws
 
 
+@contextlib.contextmanager
+def mounted_rw(repo_path: Path):
+    """Mount a repository writably at /repo, with ``git`` installed.
+
+    The writable twin of ``mounted``, for a test that has to reshape the
+    repository on disk between two runs of a verb that writes.
+
+    Args:
+        repo_path (Path): the repository's working tree.
+    """
+    with Workspace({MOUNT: DiskResource(root=str(repo_path))},
+                   mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        yield ws
+
+
 @pytest.fixture
 def workspace(repo_path: Path):
     """A workspace with the fixture repository mounted at /repo.

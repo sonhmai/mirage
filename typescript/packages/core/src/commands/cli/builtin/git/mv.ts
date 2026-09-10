@@ -47,6 +47,7 @@ const DESTINATION_EXISTS = 'destination exists'
 const DESTINATION_ALREADY_EXISTS = 'destination already exists'
 const SOURCE_DIRECTORY_EMPTY = 'source directory is empty'
 const NOT_UNDER_VERSION_CONTROL = 'not under version control'
+const MULTIPLE_SOURCES = 'multiple sources for the same target'
 
 /** The parsed shape of a `git mv` invocation. */
 export interface MvFlags {
@@ -118,6 +119,22 @@ export function movedPath(move: Move, path: string): string {
   return `${move.destination}${path.slice(move.source.length)}`
 }
 
+/**
+ * The first path in a move that lands where an earlier one already does.
+ *
+ * Landings are compared one tracked path at a time rather than one operand at a
+ * time, because a directory operand moves every path under it and two
+ * directories sharing a child name collide there and nowhere else. git reports
+ * that collision by the colliding path too, not by the operand that carried it.
+ */
+export function clashing(move: Move, claimed: ReadonlySet<string>): [string, string] | null {
+  for (const path of move.paths) {
+    const landing = movedPath(move, path)
+    if (claimed.has(landing)) return [path, landing]
+  }
+  return null
+}
+
 /** Whether one source can move, in git's own order of refusals. */
 export async function check(
   statPath: StatPath,
@@ -169,6 +186,7 @@ export async function plan(
   const into = destination === '' || target?.type === FileType.DIRECTORY
   if (operands.length > 2 && !into) throw new NotADirectoryDestinationError(destination)
   const moves: Move[] = []
+  const claimed = new Set<string>()
   for (const operand of operands.slice(0, -1)) {
     const source = repoRelative(location, start, operand)
     const landing = into
@@ -177,11 +195,30 @@ export async function plan(
         : `${destination}/${basename(source)}`
       : destination
     const verdict = await check(statPath, links, location, source, landing, tracked, flags.force)
-    if (verdict.reason !== null) {
-      if (flags.skip) continue
-      throw new MoveRefusedError(verdict.reason, source, landing)
+    const move: Move = {
+      source,
+      destination: landing,
+      paths: verdict.paths,
+      directory: verdict.directory,
     }
-    moves.push({ source, destination: landing, paths: verdict.paths, directory: verdict.directory })
+    let reason = verdict.reason
+    let named: [string, string] = [source, landing]
+    if (reason === null) {
+      // Last of the per-source refusals, which is git's order: a source with a
+      // fault of its own is refused for that fault even when it also collides
+      // with an earlier one.
+      const clash = clashing(move, claimed)
+      if (clash !== null) {
+        reason = MULTIPLE_SOURCES
+        named = clash
+      }
+    }
+    if (reason !== null) {
+      if (flags.skip) continue
+      throw new MoveRefusedError(reason, named[0], named[1])
+    }
+    for (const path of move.paths) claimed.add(movedPath(move, path))
+    moves.push(move)
   }
   return moves
 }

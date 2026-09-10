@@ -143,3 +143,50 @@ async def test_a_missing_destination_directory_is_the_renames_failure(git_rw):
     assert code == 128
     assert err == (b"fatal: renaming 'a.txt' failed: No such file or "
                    b"directory\n")
+
+
+@pytest.mark.asyncio
+async def test_two_sources_cannot_land_on_one_name(git_rw, repo_path: Path):
+    await git_rw.execute("mkdir -p /repo/a /repo/b /repo/dest")
+    await git_rw.execute("echo ax > /repo/a/x && echo bx > /repo/b/x")
+    await run(git_rw, "add a b")
+    await run(git_rw, "commit -m two")
+    code, _out, err = await run(git_rw, "mv a/x b/x dest")
+    assert code == 128
+    assert err == (b"fatal: multiple sources for the same target, "
+                   b"source=b/x, destination=dest/x\n")
+    assert (repo_path / "a" / "x").exists()
+    assert not (repo_path / "dest" / "x").exists()
+
+
+@pytest.mark.asyncio
+async def test_two_directories_collide_at_the_path_that_collides(git_rw):
+    await git_rw.execute("mkdir -p /repo/a/sub /repo/b/sub /repo/dest")
+    await git_rw.execute("echo 1 > /repo/a/sub/f && echo 2 > /repo/b/sub/f")
+    await run(git_rw, "add a b")
+    await run(git_rw, "commit -m dirs")
+    _code, _out, err = await run(git_rw, "mv a/sub b/sub dest")
+    assert err == (b"fatal: multiple sources for the same target, "
+                   b"source=b/sub/f, destination=dest/sub/f\n")
+
+
+@pytest.mark.asyncio
+async def test_a_sources_own_fault_outranks_the_collision(git_rw):
+    await git_rw.execute("mkdir -p /repo/a /repo/b /repo/dest")
+    await git_rw.execute("echo ax > /repo/a/x && echo bx > /repo/b/x")
+    await run(git_rw, "add a")
+    await run(git_rw, "commit -m one")
+    _code, _out, err = await run(git_rw, "mv a/x b/x dest")
+    assert err == (b"fatal: not under version control, source=b/x, "
+                   b"destination=dest/x\n")
+
+
+@pytest.mark.asyncio
+async def test_k_skips_the_source_that_would_collide(git_rw, repo_path: Path):
+    await git_rw.execute("mkdir -p /repo/a /repo/b /repo/dest")
+    await git_rw.execute("echo ax > /repo/a/x && echo bx > /repo/b/x")
+    await run(git_rw, "add a b")
+    await run(git_rw, "commit -m two")
+    assert await run(git_rw, "mv -k a/x b/x dest") == (0, b"", b"")
+    assert (repo_path / "dest" / "x").read_text() == "ax\n"
+    assert (repo_path / "b" / "x").exists()

@@ -99,14 +99,51 @@ export async function writeRef(
 }
 
 /**
- * Remove a loose ref file.
+ * `packed-refs` with one ref's lines removed, null if it held none.
  *
- * Only the loose copy is removed. A ref that also sits in `packed-refs` would
- * come back, which is a real gap rather than a silent one: `branch -d` refuses
- * unless the loose file is what actually holds the branch.
+ * A packed ref is two lines rather than one when it is an annotated tag: the tag
+ * object's own id, then a `^` line holding the commit it peels to. The peeled
+ * line belongs to the ref above it, so dropping a ref drops the `^` line that
+ * follows it and nothing else.
+ */
+export function withoutPacked(text: string, ref: string): string | null {
+  const kept: string[] = []
+  let dropped = false
+  let found = false
+  for (const line of text.split('\n')) {
+    if (line.startsWith('^')) {
+      if (!dropped) kept.push(line)
+      continue
+    }
+    dropped = false
+    if (line !== '' && !line.startsWith('#')) {
+      const space = line.indexOf(' ')
+      if (space !== -1 && line.slice(space + 1).trim() === ref) {
+        dropped = true
+        found = true
+        continue
+      }
+    }
+    kept.push(line)
+  }
+  return found ? kept.join('\n') : null
+}
+
+/**
+ * Remove a ref, loose copy and packed copy alike.
+ *
+ * Both are removed because either alone can be what holds the ref, and removing
+ * only the loose one would report a deletion the next read undoes: after
+ * `git pack-refs` a ref exists nowhere else, and a force-updated one exists in
+ * both, where dropping the loose file would resurrect the older packed value.
  */
 export async function deleteRef(dispatch: Dispatch, commondir: string, ref: string): Promise<void> {
   await removeFile(dispatch, under(commondir, ref))
+  const path = under(commondir, PACKED_REFS)
+  const data = await readOptional(dispatch, path)
+  if (data === null) return
+  const rewritten = withoutPacked(DEC.decode(data), ref)
+  if (rewritten !== null) await writeFile(dispatch, path, ENC.encode(rewritten))
 }
 
 /** Point HEAD at a branch, symbolically. */

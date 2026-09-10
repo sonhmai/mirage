@@ -147,6 +147,12 @@ async def restore(
                 state.entries[name.encode()] = restored(ObjectID(sha), mode)
             for name in absent:
                 state.entries.pop(name.encode(), None)
+            # A restored path is no longer unmerged, and saying so is
+            # not optional: write_index lays the conflict stages over
+            # the entries, so a stage left behind both keeps the path
+            # conflicted and discards the entry just written for it.
+            for name in selected:
+                state.conflicts.pop(name.encode(), None)
             await write_index(dispatch, location.gitdir, state)
         if flags.worktree:
             blobs = await asyncio.to_thread(

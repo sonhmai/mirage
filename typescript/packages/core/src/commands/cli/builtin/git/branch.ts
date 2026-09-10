@@ -24,13 +24,14 @@ import {
   BranchNameRequiredError,
   CheckedOutBranchError,
   GitError,
+  InvalidBranchNameError,
   NoBranchError,
   NoWorkspaceError,
   UnknownSwitchError,
   UnmergedBranchError,
 } from './errors.ts'
 import { short } from './format.ts'
-import { deleteRef, loadRefs, readHead, writeRef, SYMREF_PREFIX } from './refs.ts'
+import { deleteRef, loadRefs, readHead, validRefName, writeRef, SYMREF_PREFIX } from './refs.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import type { Dispatch, HeadRef } from './types.ts'
@@ -66,6 +67,10 @@ async function create(
   name: string,
   start: string | undefined,
 ): Promise<void> {
+  // Before the start point resolves, which is git's order here and the
+  // opposite of switch's. A ref is a path below .git, so an unchecked name
+  // reaches writeRef as one.
+  if (!validRefName(name)) throw new InvalidBranchNameError(name)
   const ref = `${HEADS_PREFIX}${name}`
   if (refs.has(ref)) throw new BranchExistsError(name)
   const oid = await resolveCommit(repo, start ?? HEAD)

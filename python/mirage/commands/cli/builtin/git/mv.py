@@ -42,6 +42,7 @@ DESTINATION_EXISTS = "destination exists"
 DESTINATION_ALREADY_EXISTS = "destination already exists"
 SOURCE_DIRECTORY_EMPTY = "source directory is empty"
 NOT_UNDER_VERSION_CONTROL = "not under version control"
+MULTIPLE_SOURCES = "multiple sources for the same target"
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +124,29 @@ def moved_path(move: Move, path: str) -> str:
     return f"{move.destination}{path[len(move.source):]}"
 
 
+def clashing(move: Move, claimed: set[str]) -> tuple[str, str] | None:
+    """The first path in a move that lands where an earlier one already does.
+
+    Landings are compared one tracked path at a time rather than one
+    operand at a time, because a directory operand moves every path
+    under it and two directories sharing a child name collide there and
+    nowhere else. git reports that collision by the colliding path too,
+    not by the operand that carried it.
+
+    Args:
+        move (Move): the move being planned.
+        claimed (set[str]): every landing the earlier moves take.
+
+    Returns:
+        tuple: the source path and the landing it wanted, or None.
+    """
+    for path in move.paths:
+        landing = moved_path(move, path)
+        if landing in claimed:
+            return path, landing
+    return None
+
+
 async def check(stat_path: StatPath, links: LinkView | None,
                 location: RepoLocation, source: str, destination: str,
                 tracked: set[str],
@@ -190,6 +214,7 @@ async def plan(stat_path: StatPath, links: LinkView | None,
     if len(operands) > 2 and not into:
         raise NotADirectoryDestinationError(destination)
     moves: list[Move] = []
+    claimed: set[str] = set()
     for operand in operands[:-1]:
         source = repo_relative(location, start, operand)
         landing = (posixpath.join(destination, posixpath.basename(source))
@@ -197,11 +222,21 @@ async def plan(stat_path: StatPath, links: LinkView | None,
         reason, paths, directory = await check(stat_path, links, location,
                                                source, landing, tracked,
                                                flags.force)
+        move = Move(source, landing, paths, directory)
+        named = (source, landing)
+        if reason is None:
+            # Last of the per-source refusals, which is git's order:
+            # a source with a fault of its own is refused for that
+            # fault even when it also collides with an earlier one.
+            clash = clashing(move, claimed)
+            if clash is not None:
+                reason, named = MULTIPLE_SOURCES, clash
         if reason is not None:
             if flags.skip:
                 continue
-            raise MoveRefusedError(reason, source, landing)
-        moves.append(Move(source, landing, paths, directory))
+            raise MoveRefusedError(reason, named[0], named[1])
+        claimed.update(moved_path(move, path) for path in move.paths)
+        moves.append(move)
     return moves
 
 

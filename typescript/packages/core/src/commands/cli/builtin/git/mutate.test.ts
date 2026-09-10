@@ -94,10 +94,19 @@ interface Harness {
   drain(): Promise<string>
 }
 
-async function harness(): Promise<Harness> {
+/**
+ * A workspace holding the fixture repository, copied into a RAM mount.
+ *
+ * `prepare` runs against the repository on disk, before the copy, so a test
+ * needing a shape only the real binary can build (packed refs, an unmerged
+ * index) starts from one git itself wrote rather than from bytes this file
+ * hand-rolled.
+ */
+async function harness(prepare?: (repo: string) => void): Promise<Harness> {
   const repo = mkdtempSync(join(tmp, 'repo-'))
   roots.push(repo)
   execFileSync('bash', [BUILDER, repo], { stdio: 'ignore' })
+  prepare?.(repo)
 
   const ram = new RAMResource()
   const registry = new OpsRegistry()
@@ -1151,5 +1160,160 @@ describe('git tag', () => {
     const h = await harness()
     await h.run('tag v1.0 HEAD~1')
     expect(await h.run('tag -f v1.0')).toEqual([0, "Updated tag 'v1.0' (was 225f39c)\n", ''])
+  })
+})
+
+describe('a name that escapes the ref tree', () => {
+  it('is refused by switch -c, leaving the config alone', async () => {
+    const h = await harness()
+    const before = await readOptional(h.dispatch, '/repo/.git/config')
+    expect(await h.run('switch -c ../../config')).toEqual([
+      128,
+      '',
+      "fatal: '../../config' is not a valid branch name\n" +
+        'hint: See `man git check-ref-format`\n' +
+        'hint: Disable this message with "git config set advice.refSyntax false"\n',
+    ])
+    expect(await readOptional(h.dispatch, '/repo/.git/config')).toEqual(before)
+  })
+
+  it('is refused by branch, before its start point resolves', async () => {
+    const h = await harness()
+    const [code, , err] = await h.run('branch ../../config nosuchstart')
+    expect(code).toBe(128)
+    expect(err.startsWith("fatal: '../../config' is not a valid branch name")).toBe(true)
+  })
+
+  it('lets switch name an unresolvable start point first', async () => {
+    const h = await harness()
+    expect(await h.run('switch -c ../../config nosuchstart')).toEqual([
+      128,
+      '',
+      'fatal: invalid reference: nosuchstart\n',
+    ])
+  })
+})
+
+describe('two mv sources landing on one name', () => {
+  async function withTwo(): Promise<Harness> {
+    const h = await harness()
+    await write(h, 'a/x', 'ax\n')
+    await write(h, 'b/x', 'bx\n')
+    await write(h, 'dest/keep.txt', 'k\n')
+    await h.run('add a b')
+    await h.run('commit -m two')
+    return h
+  }
+
+  it('is refused, and nothing moves', async () => {
+    const h = await withTwo()
+    expect(await h.run('mv a/x b/x dest')).toEqual([
+      128,
+      '',
+      'fatal: multiple sources for the same target, source=b/x, destination=dest/x\n',
+    ])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('?? dest/\n')
+  })
+
+  it('is reported by the colliding path when directories carry it', async () => {
+    const h = await harness()
+    await write(h, 'a/sub/f', '1\n')
+    await write(h, 'b/sub/f', '2\n')
+    await write(h, 'dest/keep.txt', 'k\n')
+    await h.run('add a b')
+    await h.run('commit -m dirs')
+    const [, , err] = await h.run('mv a/sub b/sub dest')
+    expect(err).toBe(
+      'fatal: multiple sources for the same target, source=b/sub/f, destination=dest/sub/f\n',
+    )
+  })
+
+  it('is skipped under -k, moving the first', async () => {
+    const h = await withTwo()
+    expect(await h.run('mv -k a/x b/x dest')).toEqual([0, '', ''])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe(
+      'R  a/x -> dest/x\n?? dest/keep.txt\n',
+    )
+  })
+})
+
+describe('git tag creation options', () => {
+  it.each(['tag -a', 'tag -m msg', 'tag -f'])('need a name: %s', async (line) => {
+    const h = await harness()
+    expect(await h.run(line)).toEqual([
+      129,
+      '',
+      'usage: git tag [-a] [-f] [-m <msg>] <tagname> [<commit> | <object>]\n' +
+        '   or: git tag -d <tagname>...\n' +
+        '   or: git tag [-n[<num>]] -l [<pattern>...]\n',
+    ])
+  })
+
+  it.each(['tag -l -a v1', 'tag -d -a v1', 'tag -n -f'])(
+    'cannot list or delete: %s',
+    async (line) => {
+      const h = await harness()
+      const [code, , err] = await h.run(line)
+      expect(code).toBe(129)
+      expect(err.startsWith('usage: git tag [-a] [-f] [-m <msg>]')).toBe(true)
+    },
+  )
+
+  it('leave listing and deleting able to take no name', async () => {
+    const h = await harness()
+    expect(await h.run('tag')).toEqual([0, '', ''])
+    expect(await h.run('tag -d')).toEqual([0, '', ''])
+  })
+})
+
+describe('a ref that lives only in packed-refs', () => {
+  it('is really deleted by tag -d', async () => {
+    const h = await harness((repo) => {
+      git(repo, ['tag', 'lw'])
+      git(repo, ['tag', '-a', 'ann', '-m', 'msg'])
+      git(repo, ['pack-refs', '--all'])
+      // One loose ref, made after the pack, so `.git/refs` still holds a file:
+      // a directory with none is not copied out of the mount, and git reads a
+      // tree without `refs/` as not a repository at all.
+      git(repo, ['branch', 'keepme'])
+    })
+    expect(await h.run('tag')).toEqual([0, 'ann\nlw\n', ''])
+    expect((await h.run('tag -d lw'))[0]).toBe(0)
+    expect((await h.run('tag -d ann'))[0]).toBe(0)
+    expect(await h.run('tag')).toEqual([0, '', ''])
+    const packed = DEC.decode(
+      (await readOptional(h.dispatch, '/repo/.git/packed-refs')) ?? undefined,
+    )
+    expect(packed).not.toContain('refs/tags/')
+    expect(packed).not.toContain('^')
+    expect(packed).toContain('refs/heads/main')
+    expect(git(await h.drain(), ['tag', '-l'])).toBe('')
+  })
+
+  it('is really deleted by branch -D', async () => {
+    const h = await harness((repo) => {
+      git(repo, ['pack-refs', '--all'])
+      git(repo, ['branch', 'keepme'])
+    })
+    expect((await h.run('branch -D topic'))[0]).toBe(0)
+    expect(await h.run('branch')).toEqual([0, '  keepme\n* main\n', ''])
+    expect(git(await h.drain(), ['branch', '--list'])).toBe('  keepme\n* main\n')
+  })
+})
+
+describe('restoring an unmerged path', () => {
+  it('clears its conflict stages', async () => {
+    const h = await harness((repo) => {
+      const blob = git(repo, ['rev-parse', 'HEAD:letters.txt']).trim()
+      const stages = [1, 2, 3].map((stage) => `100644 ${blob} ${String(stage)}\tletters.txt`)
+      execFileSync('git', ['-C', repo, 'update-index', '--index-info'], {
+        input: `${stages.join('\n')}\n`,
+      })
+    })
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('UU letters.txt\n')
+    expect(await h.run('restore --staged letters.txt')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['ls-files', '-u'])).toBe('')
+    expect(git(drained, ['status', '--porcelain'])).toBe('')
   })
 })

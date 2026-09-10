@@ -105,13 +105,47 @@ async def write_ref(dispatch: DispatchFn, commondir: str, ref: str,
     await write_file(dispatch, posixpath.join(commondir, ref), sha + b"\n")
 
 
-async def delete_ref(dispatch: DispatchFn, commondir: str, ref: str) -> None:
-    """Remove a loose ref file.
+def without_packed(data: bytes, ref: str) -> bytes | None:
+    """``packed-refs`` with one ref's lines removed, None if it held none.
 
-    Only the loose copy is removed. A ref that also sits in
-    ``packed-refs`` would come back, which is a real gap rather than a
-    silent one: ``branch -d`` refuses below unless the loose file is
-    what actually holds the branch.
+    A packed ref is two lines rather than one when it is an annotated
+    tag: the tag object's own id, then a ``^`` line holding the commit
+    it peels to. The peeled line belongs to the ref above it, so
+    dropping a ref drops the ``^`` line that follows it and nothing
+    else.
+
+    Args:
+        data (bytes): the file as it stands.
+        ref (str): full ref name to drop.
+    """
+    wanted = ref.encode()
+    kept: list[bytes] = []
+    dropped = False
+    found = False
+    for line in data.split(b"\n"):
+        if line.startswith(b"^"):
+            if not dropped:
+                kept.append(line)
+            continue
+        dropped = False
+        if line and not line.startswith(b"#"):
+            space = line.find(b" ")
+            if space != -1 and line[space + 1:].strip() == wanted:
+                dropped = True
+                found = True
+                continue
+        kept.append(line)
+    return b"\n".join(kept) if found else None
+
+
+async def delete_ref(dispatch: DispatchFn, commondir: str, ref: str) -> None:
+    """Remove a ref, loose copy and packed copy alike.
+
+    Both are removed because either alone can be what holds the ref,
+    and removing only the loose one would report a deletion the next
+    read undoes: after ``git pack-refs`` a ref exists nowhere else, and
+    a force-updated one exists in both, where dropping the loose file
+    would resurrect the older packed value.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
@@ -120,6 +154,13 @@ async def delete_ref(dispatch: DispatchFn, commondir: str, ref: str) -> None:
         ref (str): full ref name.
     """
     await remove_file(dispatch, posixpath.join(commondir, ref))
+    path = posixpath.join(commondir, PACKED_REFS)
+    data = await read_optional(dispatch, path)
+    if data is None:
+        return
+    rewritten = without_packed(data, ref)
+    if rewritten is not None:
+        await write_file(dispatch, path, rewritten)
 
 
 async def set_head(dispatch: DispatchFn, gitdir: str, ref: str) -> None:

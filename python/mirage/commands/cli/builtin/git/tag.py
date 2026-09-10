@@ -26,8 +26,8 @@ from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import GitError  # yapf: disable
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     IncompatibleOptionsError, InvalidTagNameError, MissingTagMessageError,
-    NoWorkspaceError, TagExistsError, TagNotFoundError, TooManyArgumentsError,
-    UnknownSwitchError, UnresolvedRefError)
+    NoWorkspaceError, TagExistsError, TagNotFoundError, TagUsageError,
+    TooManyArgumentsError, UnknownSwitchError, UnresolvedRefError)
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.refs import (TAG_PREFIX, delete_ref,
@@ -230,6 +230,16 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         flags = parse_flags(fl)
         if flags.listing and flags.delete:
             raise IncompatibleOptionsError("-l", "-d")
+        # -a, -m and -f create a tag, so a line that lists or deletes
+        # instead has nothing for them to do: git prints its usage and
+        # exits 129, where the same line without them lists or deletes
+        # and exits 0. No operand at all is a listing, which is why it
+        # counts here too.
+        creating = flags.annotate or flags.force
+        reading = (flags.listing or flags.delete or flags.lines is not None
+                   or not texts)
+        if creating and reading:
+            raise TagUsageError()
         repo, location = await opened(fl, doors)
         known = repo.refs.allkeys()
         if flags.delete:

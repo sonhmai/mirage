@@ -160,3 +160,29 @@ async def test_create_and_detach_do_not_mix(git_rw):
     code, _out, err = await run(git_rw, "switch -c x -d")
     assert code == 128
     assert err == b"fatal: '--detach' cannot be used with '-b/-B/--orphan'\n"
+
+
+@pytest.mark.asyncio
+async def test_switch_c_refuses_a_name_that_escapes_the_ref_tree(
+        git_rw, repo_path: Path):
+    before = (repo_path / ".git" / "config").read_bytes()
+    code, _out, err = await run(git_rw, "switch -c ../../config")
+    assert code == 128
+    assert err == (b"fatal: '../../config' is not a valid branch name\n"
+                   b"hint: See `man git check-ref-format`\n"
+                   b'hint: Disable this message with "git config set '
+                   b'advice.refSyntax false"\n')
+    assert (repo_path / ".git" / "config").read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_switch_c_refuses_a_name_holding_a_space(git_rw):
+    code, _out, err = await run(git_rw, "switch -c 'bad name'")
+    assert code == 128
+    assert err.startswith(b"fatal: 'bad name' is not a valid branch name\n")
+
+
+@pytest.mark.asyncio
+async def test_an_unresolvable_start_point_is_named_first(git_rw):
+    _code, _out, err = await run(git_rw, "switch -c ../../config nosuchstart")
+    assert err == b"fatal: invalid reference: nosuchstart\n"

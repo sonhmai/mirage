@@ -22,6 +22,7 @@ from dulwich.repo import Repo
 from mirage.commands.cli.builtin.git.tag import (parse_flags, render_listing,
                                                  selected_names, tag_names)
 from mirage.commands.spec.types import FlagView
+from tests.commands.cli.builtin.git.conftest import mounted_rw, pack_refs
 
 
 async def run(ws, line: str) -> tuple[int, bytes, bytes]:
@@ -197,3 +198,53 @@ async def test_a_tag_resolves_as_a_revision(git_rw):
     await run(git_rw, "tag old HEAD~1")
     assert (await run(git_rw,
                       "log --oneline -n 1 old"))[1].endswith(b" second\n")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["tag -a", "tag -m msg", "tag -f"])
+async def test_a_creation_option_needs_a_name(git_rw, line: str):
+    code, _out, err = await run(git_rw, line)
+    assert code == 129
+    assert err == (b"usage: git tag [-a] [-f] [-m <msg>] <tagname> "
+                   b"[<commit> | <object>]\n"
+                   b"   or: git tag -d <tagname>...\n"
+                   b"   or: git tag [-n[<num>]] -l [<pattern>...]\n")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["tag -l -a v1", "tag -d -a v1", "tag -n -f"])
+async def test_a_creation_option_cannot_list_or_delete(git_rw, line: str):
+    code, _out, err = await run(git_rw, line)
+    assert code == 129
+    assert err.startswith(b"usage: git tag [-a] [-f] [-m <msg>]")
+
+
+@pytest.mark.asyncio
+async def test_listing_and_deleting_still_take_no_name(git_rw):
+    assert await run(git_rw, "tag") == (0, b"", b"")
+    assert await run(git_rw, "tag -d") == (0, b"", b"")
+
+
+@pytest.mark.asyncio
+async def test_force_still_creates_when_a_name_is_given(git_rw):
+    assert await run(git_rw, "tag -f v1") == (0, b"", b"")
+    assert (await run(git_rw, "tag"))[1] == b"v1\n"
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_packed_tag_removes_it(repo_path: Path):
+    with mounted_rw(repo_path) as ws:
+        await run(ws, "tag lw")
+        await run(ws, "tag -a ann -m msg")
+    pack_refs(repo_path)
+    loose = repo_path / ".git" / "refs" / "tags"
+    assert not loose.exists() or not any(loose.iterdir())
+    with mounted_rw(repo_path) as ws:
+        code, out, _err = await run(ws, "tag -d lw")
+        assert (code, out.split(b" (was")[0]) == (0, b"Deleted tag 'lw'")
+        assert (await run(ws, "tag -d ann"))[0] == 0
+        assert (await run(ws, "tag"))[1] == b""
+    packed = (repo_path / ".git" / "packed-refs").read_text()
+    assert "refs/tags/" not in packed
+    assert "^" not in packed
+    assert "refs/heads/main" in packed

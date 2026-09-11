@@ -78,7 +78,13 @@ export { EVALUATOR, LINE_EXECUTOR, PROCESS_EXECUTOR } from './runtime/mixin.ts'
 export type { Evaluator, LineExecutor, ProcessExecutor } from './runtime/mixin.ts'
 export { ScriptSource } from './runtime/routing/index.ts'
 export { buildRuntime } from './runtime/table.ts'
-export type { EvalResult, EvalValue, RunResult, FilesystemOperation } from './runtime/types.ts'
+export type {
+  EvalResult,
+  EvalValue,
+  RunResult,
+  FilesystemOperation,
+  ProcessExecution,
+} from './runtime/types.ts'
 export { JobConsole } from './shell/console/index.ts'
 export type { ConsoleFactory } from './shell/job_table/index.ts'
 export {

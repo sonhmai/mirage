@@ -48,8 +48,13 @@ import {
 } from '@struktoai/mirage-node'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
-import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core'
-import type { ProcessExecution, RuntimeLanguage } from '@struktoai/mirage-core/runtime/types'
+import {
+  EXTERNAL_COMMANDS,
+  PROCESS_EXECUTOR,
+  type ProcessExecution,
+  type ProcessExecutor,
+} from '@struktoai/mirage-core'
+import type { RuntimeLanguage } from '@struktoai/mirage-core/runtime/types'
 
 const HOST = 'typescript'
 const SUITE_DIR = dirname(fileURLToPath(import.meta.url))

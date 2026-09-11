@@ -32,6 +32,21 @@ export const COMMENT_PRECEDERS: ReadonlySet<string> = new Set([
   '>',
 ])
 
+// What a command may follow, so where `case` and `esac` are reserved
+// words rather than ordinary ones (`grep case f` names a file).
+export const COMMAND_PRECEDERS: ReadonlySet<string> = new Set(['\n', ';', '|', '&', '(', ')'])
+
+// What still opens a quote inside an expanding one: a backtick takes
+// both quotes and a double quote takes a backtick, while a `'` inside
+// double quotes is an ordinary character (`"it's"` is one word).
+export const NESTED_QUOTES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['"', new Set(['`'])],
+  ['`', new Set(["'", '"'])],
+])
+
+export const CASE = 'case'
+export const ESAC = 'esac'
+
 // Characters the heredoc scanner skips at the start of the body's first line.
 export const LINE_BLANKS: ReadonlySet<string> = new Set([' ', '\t', '\r'])
 

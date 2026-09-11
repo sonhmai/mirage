@@ -36,6 +36,21 @@ SUBSTITUTION_OPENERS = frozenset((DOLLAR, LESS, GREATER))
 # metacharacter, never inside a word (`a#b`, `$#`).
 COMMENT_PRECEDERS = frozenset(b" \t\n;|&()<>")
 
+# What a command may follow, so where `case` and `esac` are reserved
+# words rather than ordinary ones (`grep case f` names a file).
+COMMAND_PRECEDERS = frozenset(b"\n;|&()")
+
+# What still opens a quote inside an expanding one: a backtick takes
+# both quotes and a double quote takes a backtick, while a `'` inside
+# double quotes is an ordinary byte (`"it's"` is one word).
+NESTED_QUOTES = {
+    DOUBLE_QUOTE: frozenset((BACKTICK, )),
+    BACKTICK: frozenset((SINGLE_QUOTE, DOUBLE_QUOTE)),
+}
+
+CASE = b"case"
+ESAC = b"esac"
+
 # Bytes the heredoc scanner skips at the start of the body's first line.
 LINE_BLANKS = frozenset(b" \t\r")
 

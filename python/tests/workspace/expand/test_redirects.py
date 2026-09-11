@@ -446,3 +446,42 @@ async def test_heredoc_continued_delimiter_with_an_escape_is_quoted():
 async def test_heredoc_body_expanding_to_the_delimiter_is_kept():
     ws = await _workspace_at("/data")
     assert await _stdout(ws, "hb=END; cat <<END\n$hb\nEND") == "END\n"
+
+
+# The operator line runs past a `)` that closes a case pattern and past
+# the quotes a substitution inside double quotes holds, so the body it
+# opens is the one bash reads (issue #1050).
+
+
+@pytest.mark.asyncio
+async def test_heredoc_body_after_a_case_pattern_paren():
+    ws = await _workspace_at("/data")
+    line = ("cat <<EOF $(case x in\nx)\n  :\n  ;;\nesac\n)\n"
+            "\\first\nsecond\nEOF\n")
+    assert await _stdout(ws, line) == "\\first\nsecond\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_body_after_a_case_pattern_keeps_indentation():
+    ws = await _workspace_at("/data")
+    line = ("cat <<EOF $(case x in\nx)\n  :\n  ;;\nesac\n)\n"
+            "  spaced\nsecond\nEOF\n")
+    assert await _stdout(ws, line) == "  spaced\nsecond\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_body_after_a_quote_inside_a_substitution():
+    ws = await _workspace_at("/data")
+    line = ('cat <<EOF >"$( : "a\n  b"; echo /data/HB8)"\n'
+            "\\first\nsecond\nEOF\n")
+    await ws.execute(line)
+    assert await _stdout(ws, "cat /data/HB8") == "\\first\nsecond\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_body_after_a_quote_inside_a_backtick():
+    ws = await _workspace_at("/data")
+    line = ('cat <<EOF >"`  : "a\n  b"; echo /data/HB9 `"\n'
+            "\\first\nsecond\nEOF\n")
+    await ws.execute(line)
+    assert await _stdout(ws, "cat /data/HB9") == "\\first\nsecond\n"

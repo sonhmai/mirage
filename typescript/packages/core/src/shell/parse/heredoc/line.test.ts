@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { operatorLineEnd, quoteEnd } from './line.ts'
+import { operatorLineEnd, quoteEnd, reservedWord } from './line.ts'
 
 function end(command: string, word = 'EOF'): number | null {
   return operatorLineEnd(command, command.indexOf(word) + word.length)
@@ -120,6 +120,72 @@ describe('operatorLineEnd', () => {
 
   it('never ends without a newline', () => {
     expect(end('cat <<EOF')).toBeNull()
+  })
+
+  // A `)` closing a case pattern closes no substitution, and a quote
+  // inside one is the substitution's own.
+
+  it('does not close a substitution at a case pattern paren', () => {
+    const cmd = 'cat <<EOF $(case x in\nx)\n  :\n  ;;\nesac\n)\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf(')\nbody') + 1)
+  })
+
+  it('lets a parenthesized case pattern balance itself', () => {
+    const cmd = 'cat <<EOF $(case x in\n(x)\n  :\n  ;;\nesac\n)\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf(')\nbody') + 1)
+  })
+
+  it('closes nested case statements one at a time', () => {
+    const cmd =
+      'cat <<EOF $(case x in\nx)\n  case y in\n  y) : ;;\n  esac\n  ;;\nesac\n)\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf(')\nbody') + 1)
+  })
+
+  it('closes a substitution holding case as an ordinary word', () => {
+    const cmd = 'cat <<EOF $(grep case f)\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf('f)\n') + 2)
+  })
+
+  it('reads a case assignment as an ordinary word', () => {
+    const cmd = 'cat <<EOF $(case=1; echo ok)\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf('ok)\n') + 3)
+  })
+
+  it('keeps the quotes of a substitution inside double quotes', () => {
+    const cmd = 'cat <<EOF >"$( : "a\n  b"; echo /out)"\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf(')"\n') + 2)
+  })
+
+  it('keeps the quotes of a backtick inside double quotes', () => {
+    const cmd = 'cat <<EOF >"`  : "a\n  b"; echo /out `"\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf('`"\n') + 2)
+  })
+
+  it('reads an apostrophe inside double quotes as ordinary', () => {
+    const cmd = 'cat <<EOF >"/it\'s"\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf('"\nbody') + 1)
+  })
+
+  it('reads a paren inside double quotes as ordinary', () => {
+    const cmd = 'cat <<EOF >"/out(1)"\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf('"\nbody') + 1)
+  })
+
+  it('never ends after an unterminated case', () => {
+    expect(end('cat <<EOF $(case x in\nbody\nEOF\n')).toBeNull()
+  })
+})
+
+describe('reservedWord', () => {
+  it('needs a command position', () => {
+    expect(reservedWord('$(case x in', 2, 'case')).toBe(true)
+    expect(reservedWord('$(: ; case x in', 6, 'case')).toBe(true)
+    expect(reservedWord('$(grep case f', 7, 'case')).toBe(false)
+  })
+
+  it('needs the whole word', () => {
+    expect(reservedWord('$(esacs', 2, 'esac')).toBe(false)
+    expect(reservedWord('$(case=1', 2, 'case')).toBe(false)
   })
 })
 

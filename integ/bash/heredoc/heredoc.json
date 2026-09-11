@@ -1822,6 +1822,68 @@
         "stdout": "END\nafter\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "heredoc_body_after_a_case_pattern_paren",
+      "seq": 501278,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<EOF $(case x in\nx)\n  :\n  ;;\nesac\n)\n\\first\nsecond\nEOF\necho after",
+      "expect": {
+        "exit": 0,
+        "stdout": "\\first\nsecond\nafter\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_body_after_a_quote_inside_a_substitution",
+      "seq": 501279,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<EOF | tr \"$( : \"a\n  b\"; echo z)\" y\n\\first\nsecond\nEOF\necho after",
+      "expect": {
+        "exit": 0,
+        "stdout": "\\first\nsecond\nafter\n",
+        "stderr": ""
+      }
     }
   ]
 }

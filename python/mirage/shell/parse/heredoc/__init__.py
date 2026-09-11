@@ -16,7 +16,9 @@ from mirage.shell.parse.heredoc.body import (heredoc_bodies, next_line,
                                              terminator_line)
 from mirage.shell.parse.heredoc.delimiter import (ansi_c_end, clean_delimiter,
                                                   delimiter_quoted)
-from mirage.shell.parse.heredoc.line import operator_line_end, quote_end
+from mirage.shell.parse.heredoc.line import (construct_closer, construct_end,
+                                             operator_line_end, quote_end,
+                                             reserved_word)
 from mirage.shell.parse.heredoc.prefix import body_prefix, tree_root
 from mirage.shell.parse.heredoc.shield import (first_content_line,
                                                heredoc_operators,
@@ -28,6 +30,8 @@ __all__ = [
     "ansi_c_end",
     "body_prefix",
     "clean_delimiter",
+    "construct_closer",
+    "construct_end",
     "delimiter_quoted",
     "first_content_line",
     "heredoc_bodies",
@@ -36,6 +40,7 @@ __all__ = [
     "operator_line_end",
     "protected_source",
     "quote_end",
+    "reserved_word",
     "same_shape",
     "terminator_line",
     "tree_root",

@@ -14,7 +14,8 @@
 
 import pytest
 
-from mirage.shell.parse.heredoc import operator_line_end, quote_end
+from mirage.shell.parse.heredoc import (operator_line_end, quote_end,
+                                        reserved_word)
 
 
 def _end(command: str, word: str = "EOF") -> int | None:
@@ -122,6 +123,72 @@ def test_unterminated_quote_never_ends_the_line():
 
 def test_line_without_a_newline_never_ends():
     assert _end("cat <<EOF") is None
+
+
+# A `)` closing a case pattern closes no substitution, and a quote
+# inside one is the substitution's own.
+
+
+def test_case_pattern_paren_does_not_close_a_substitution():
+    cmd = "cat <<EOF $(case x in\nx)\n  :\n  ;;\nesac\n)\nbody\nEOF\n"
+    assert _end(cmd) == cmd.index(")\nbody") + 1
+
+
+def test_parenthesized_case_pattern_balances_itself():
+    cmd = "cat <<EOF $(case x in\n(x)\n  :\n  ;;\nesac\n)\nbody\nEOF\n"
+    assert _end(cmd) == cmd.index(")\nbody") + 1
+
+
+def test_nested_case_statements_close_one_at_a_time():
+    cmd = ("cat <<EOF $(case x in\nx)\n  case y in\n  y) : ;;\n  esac\n"
+           "  ;;\nesac\n)\nbody\nEOF\n")
+    assert _end(cmd) == cmd.index(")\nbody") + 1
+
+
+def test_case_as_an_ordinary_word_closes_its_substitution():
+    # Only a command position makes `case` a reserved word.
+    cmd = "cat <<EOF $(grep case f)\nbody\nEOF\n"
+    assert _end(cmd) == cmd.index("f)\n") + 2
+
+
+def test_case_assignment_is_not_a_reserved_word():
+    cmd = "cat <<EOF $(case=1; echo ok)\nbody\nEOF\n"
+    assert _end(cmd) == cmd.index("ok)\n") + 3
+
+
+def test_substitution_inside_double_quotes_keeps_its_own_quotes():
+    cmd = 'cat <<EOF >"$( : "a\n  b"; echo /out)"\nbody\nEOF\n'
+    assert _end(cmd) == cmd.index(')"\n') + 2
+
+
+def test_backtick_inside_double_quotes_keeps_its_own_quotes():
+    cmd = 'cat <<EOF >"`  : "a\n  b"; echo /out `"\nbody\nEOF\n'
+    assert _end(cmd) == cmd.index('`"\n') + 2
+
+
+def test_apostrophe_inside_double_quotes_is_ordinary():
+    cmd = "cat <<EOF >\"/it's\"\nbody\nEOF\n"
+    assert _end(cmd) == cmd.index('"\nbody') + 1
+
+
+def test_paren_inside_double_quotes_is_ordinary():
+    cmd = 'cat <<EOF >"/out(1)"\nbody\nEOF\n'
+    assert _end(cmd) == cmd.index('"\nbody') + 1
+
+
+def test_unterminated_case_never_ends_the_line():
+    assert _end("cat <<EOF $(case x in\nbody\nEOF\n") is None
+
+
+def test_reserved_word_needs_a_command_position():
+    assert reserved_word(b"$(case x in", 2, b"case")
+    assert reserved_word(b"$(: ; case x in", 6, b"case")
+    assert not reserved_word(b"$(grep case f", 7, b"case")
+
+
+def test_reserved_word_needs_the_whole_word():
+    assert not reserved_word(b"$(esacs", 2, b"esac")
+    assert not reserved_word(b"$(case=1", 2, b"case")
 
 
 def test_quote_end_skips_an_escaped_double_quote():

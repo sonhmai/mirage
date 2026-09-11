@@ -427,3 +427,42 @@ describe('workspace: heredoc continued delimiters', () => {
     await ws.close()
   })
 })
+
+// The operator line runs past a `)` that closes a case pattern and past
+// the quotes a substitution inside double quotes holds, so the body it
+// opens is the one bash reads (issue #1050).
+describe('workspace: heredoc operator lines that hold a case or a nested quote', () => {
+  it('keeps a backslash line after a case pattern paren', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute(
+      'cat <<EOF $(case x in\nx)\n  :\n  ;;\nesac\n)\n\\first\nsecond\nEOF\n',
+    )
+    expect(stdoutStr(io)).toBe('\\first\nsecond\n')
+    await ws.close()
+  })
+
+  it('keeps indentation after a case pattern paren', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute(
+      'cat <<EOF $(case x in\nx)\n  :\n  ;;\nesac\n)\n  spaced\nsecond\nEOF\n',
+    )
+    expect(stdoutStr(io)).toBe('  spaced\nsecond\n')
+    await ws.close()
+  })
+
+  it('keeps a backslash line after a quote inside a substitution', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute('cat <<EOF >"$( : "a\n  b"; echo /disk/HB8)"\n\\first\nsecond\nEOF\n')
+    const io = await ws.execute('cat /disk/HB8')
+    expect(stdoutStr(io)).toBe('\\first\nsecond\n')
+    await ws.close()
+  })
+
+  it('keeps a backslash line after a quote inside a backtick', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute('cat <<EOF >"`  : "a\n  b"; echo /disk/HB9 `"\n\\first\nsecond\nEOF\n')
+    const io = await ws.execute('cat /disk/HB9')
+    expect(stdoutStr(io)).toBe('\\first\nsecond\n')
+    await ws.close()
+  })
+})

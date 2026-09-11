@@ -12,13 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from contextlib import asynccontextmanager
 
 import pytest
 import yaml
 
-from mirage import EXTERNAL_COMMANDS, MountMode, RAMResource, Workspace
+from mirage import EXTERNAL_COMMANDS, Limit, MountMode, RAMResource, Workspace
 from mirage.config import _build_runtime_entries
+from mirage.policy.builtin.output_cap import DEFAULT_COMMAND_LIMITS
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.types import ProcessExecution, RunResult
@@ -37,6 +39,19 @@ class ProcessProbe(Runtime, ProcessExecutorMixin):
         return RunResult(stdout=request.stdin or b"GPU ready\nother\n",
                          stderr=None,
                          exit_code=0)
+
+
+class DelayedProcessProbe(ProcessProbe):
+    cancelled = False
+
+    async def run_process(self, request: ProcessExecution) -> RunResult:
+        self.requests.append(request)
+        try:
+            await asyncio.sleep(0.15)
+            return RunResult(stdout=b"completed\n", stderr=None, exit_code=0)
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
 
 
 @asynccontextmanager
@@ -140,3 +155,46 @@ async def test_shell_function_precedes_external_and_discovery_names_the_route(
 def test_yaml_external_capture_matches_the_sdk_default(entry):
     entries = _build_runtime_entries(yaml.safe_load(entry))
     assert entries[0].captures == (EXTERNAL_COMMANDS, )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["native-tool", "python3"])
+@pytest.mark.parametrize("timeout", [1, 0, None])
+async def test_external_mount_timeout_replaces_default(monkeypatch, name,
+                                                       timeout):
+    monkeypatch.setitem(DEFAULT_COMMAND_LIMITS, name,
+                        Limit(timeout_seconds=0.05))
+    probe = DelayedProcessProbe(captures=("python3", EXTERNAL_COMMANDS))
+    async with workspace({"/": RAMResource()},
+                         mode=MountMode.EXEC,
+                         runtimes=[probe]) as ws:
+        for mount in ws._registry.mounts():
+            mount.command_limits[name] = Limit(timeout_seconds=timeout)
+        result = await ws.execute(f"PROGRAM={name}; $PROGRAM")
+        assert result.exit_code == 0
+        assert await result.stdout_str() == "completed\n"
+        assert len(probe.requests) == 1
+        assert not probe.cancelled
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["default", "mount"])
+async def test_external_timeout_cancels_process(monkeypatch, source):
+    monkeypatch.setitem(
+        DEFAULT_COMMAND_LIMITS,
+        "native-tool",
+        Limit(timeout_seconds=0.05 if source == "default" else 1),
+    )
+    overrides = ({
+        "native-tool": Limit(timeout_seconds=0.05)
+    } if source == "mount" else {})
+    probe = DelayedProcessProbe()
+    async with workspace({"/": (RAMResource(), MountMode.EXEC, overrides)},
+                         mode=MountMode.EXEC,
+                         runtimes=[probe]) as ws:
+        result = await ws.execute("native-tool")
+        assert result.exit_code == 124
+        assert "native-tool: timed out after 0.05s" in await result.stderr_str(
+        )
+        assert len(probe.requests) == 1
+        assert probe.cancelled

@@ -303,7 +303,10 @@ async def _dispatch_command_body(
 
     # Limits resolve against the expanded name, so `$CMD`-style
     # invocations get their real command's policy.
-    resolved = resolve_limit(argv.name) if argv.name else None
+    # External execution owns its mount-resolved deadline and cancellation.
+    external = ("/" not in argv.name and lookup(
+        argv.name, session, registry, routing_decision) is Consumer.EXTERNAL)
+    resolved = resolve_limit(argv.name) if argv.name and not external else None
     timeout = (resolved.timeout_seconds if resolved is not None else None)
     body = _run_argv(recurse,
                      dispatch,

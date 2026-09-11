@@ -12,13 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { Runtime } from '../../../runtime/base.ts'
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '../../../runtime/mixin.ts'
 import type { ProcessExecution, RunResult, RuntimeOptions } from '../../../runtime/types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
-import { MountMode } from '../../../types.ts'
+import { Limit, MountMode } from '../../../types.ts'
+import { sleep } from '../../abort.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { getTestParser } from '../../fixtures/workspace_fixture.ts'
 
@@ -39,6 +41,21 @@ class ProcessProbe extends Runtime implements ProcessExecutor {
       stderr: null,
       exitCode: 0,
     })
+  }
+}
+
+class DelayedProcessProbe extends ProcessProbe {
+  aborted = false
+
+  override async runProcess(request: ProcessExecution): Promise<RunResult> {
+    this.requests.push(request)
+    try {
+      await sleep(150, request.signal)
+      return { stdout: ENC.encode('completed\n'), stderr: null, exitCode: 0 }
+    } catch (err) {
+      this.aborted = request.signal?.aborted ?? false
+      throw err
+    }
   }
 }
 
@@ -151,6 +168,60 @@ describe('external program capture', () => {
       await ws.execute('native-tool() { echo function; }')
       expect(DEC.decode((await ws.execute('native-tool')).stdout)).toBe('function\n')
       expect(probe.requests).toHaveLength(0)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('external program timeout', () => {
+  afterEach(() => {
+    delete DEFAULT_COMMAND_LIMITS['native-tool']
+    delete DEFAULT_COMMAND_LIMITS.python3
+  })
+
+  it.each([
+    ['native-tool', 1],
+    ['native-tool', 0],
+    ['native-tool', null],
+    ['python3', 1],
+    ['python3', 0],
+    ['python3', null],
+  ] as const)('honors %s mount timeout %s beyond the default', async (name, timeout) => {
+    DEFAULT_COMMAND_LIMITS[name] = new Limit({ timeoutSeconds: 0.05 })
+    const probe = new DelayedProcessProbe({ captures: ['python3', EXTERNAL_COMMANDS] })
+    const ws = await workspace(probe)
+    for (const mount of ws.registry.allMounts()) {
+      mount.commandLimits.set(name, new Limit({ timeoutSeconds: timeout }))
+    }
+    try {
+      const result = await ws.execute(`PROGRAM=${name}; $PROGRAM`)
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe('completed\n')
+      expect(probe.requests).toHaveLength(1)
+      expect(probe.aborted).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each(['default', 'mount'])('aborts the process when the %s timeout fires', async (source) => {
+    DEFAULT_COMMAND_LIMITS['native-tool'] = new Limit({
+      timeoutSeconds: source === 'default' ? 0.05 : 1,
+    })
+    const probe = new DelayedProcessProbe()
+    const ws = await workspace(probe)
+    if (source === 'mount') {
+      for (const mount of ws.registry.allMounts()) {
+        mount.commandLimits.set('native-tool', new Limit({ timeoutSeconds: 0.05 }))
+      }
+    }
+    try {
+      const result = await ws.execute('native-tool')
+      expect(result.exitCode).toBe(124)
+      expect(DEC.decode(result.stderr)).toContain('native-tool: timed out after 0.05s')
+      expect(probe.requests).toHaveLength(1)
+      expect(probe.aborted).toBe(true)
     } finally {
       await ws.close()
     }

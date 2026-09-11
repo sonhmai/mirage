@@ -407,7 +407,11 @@ async function runCommandBody(
 
   // Limits resolve against the expanded name, so `$CMD`-style
   // invocations get their real command's policy.
-  const resolved = argv.name !== '' ? resolveLimit(argv.name) : null
+  // External execution owns its mount-resolved deadline and cancellation.
+  const external =
+    !argv.name.includes('/') &&
+    lookup(argv.name, session, registry, routingDecision) === Consumer.EXTERNAL
+  const resolved = argv.name !== '' && !external ? resolveLimit(argv.name) : null
   const timeout = resolved !== null ? resolved.timeoutSeconds : null
   // Capture xtrace before the body runs so `set -x` itself is not
   // traced (bash enables tracing only for the following commands).

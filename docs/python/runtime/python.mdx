@@ -1,6 +1,6 @@
 ---
 title: Python
-description: Choose the interpreter that runs python3 inside the workspace, monty (sandboxed, default), wasi (sandboxed full CPython), sandlock (the host interpreter, confined), or the host interpreter.
+description: Choose the interpreter that runs python3 inside the workspace, monty (sandboxed, default), wasi (sandboxed full CPython), or the host interpreter.
 icon: python
 ---
 
@@ -12,13 +12,12 @@ ship today:
 | --- | --- | --- | --- |
 | `monty` | [Pydantic Monty](https://github.com/pydantic/monty), a sandboxed Python interpreter written in Rust | Workspace mounts only, bridged through Mirage | Yes |
 | `wasi` | Full CPython compiled to WebAssembly, run in-process on [wasmtime](https://wasmtime.dev) | Workspace mounts only, bridged through Mirage; no host filesystem, no network | No |
-| [`sandlock`](/python/runtime/sandbox/sandlock) | The host `python` interpreter, confined by [sandlock](https://github.com/multikernel/sandlock) (Landlock + seccomp). Linux only | Only the host paths the config grants | No |
 | `local` | The host `python` interpreter, as a subprocess | The host filesystem | No |
 
 The first two bridge file I/O through the workspace, so code sees your
-mounts and nothing else. The last two run real CPython on the host and see
-the host filesystem instead — `sandlock` bounded to the paths you name,
-`local` unbounded.
+mounts and nothing else. `local` runs CPython against the host filesystem.
+For confined native processes, including Python, use the
+[Sandlock adapter](/python/runtime/sandbox/sandlock).
 
 ## Monty (default)
 
@@ -158,9 +157,6 @@ runtimes:
 
 Note that `local` code does **not** see workspace mounts; it sees the real
 host filesystem.
-
-For setup and its host-path security model, see the dedicated
-[Sandlock page](/python/runtime/sandbox/sandlock) under **Sandbox**.
 
 ## Selecting in YAML
 

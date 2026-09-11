@@ -12,4 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { E2BRuntime, type E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
+import type { SandboxConfig } from '@struktoai/mirage-core/runtime/sandbox/config'
+
+export interface SandlockConfig extends SandboxConfig {
+  fsReadable?: readonly string[]
+  fsWritable?: readonly string[]
+  maxMemory?: string
+}
+
+export const SANDLOCK_CONFIG_KEYS: readonly string[] = [
+  'env',
+  'fsReadable',
+  'fsWritable',
+  'maxMemory',
+]

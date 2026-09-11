@@ -44,6 +44,7 @@ import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
+import { runExternal } from '../executor/command/external.ts'
 import { handleCommand } from '../executor/command.ts'
 import type { ExecuteNodeOpts } from '../executor/jobs.ts'
 import { type AliasMark, aliasCommandText } from '../executor/builtins/alias/index.ts'
@@ -71,7 +72,14 @@ import { globPattern } from '../../utils/glob_walk.ts'
 import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS, followsLastComponent } from '../lookup/index.ts'
+import {
+  Consumer,
+  lookup,
+  runtimeRefused,
+  SLASH_KEEPS_LAST,
+  UNSUPPORTED_BUILTINS,
+  followsLastComponent,
+} from '../lookup/index.ts'
 import { Admitted, admit } from './admission.ts'
 import type { Session } from '../session/session.ts'
 import { ensureVarVisible, sessionView } from '../session/state.ts'
@@ -395,11 +403,16 @@ async function runCommandBody(
     registry,
     namespace,
     sessionView(session, registry.policies),
+    routingDecision,
   )
 
   // Limits resolve against the expanded name, so `$CMD`-style
   // invocations get their real command's policy.
-  const resolved = argv.name !== '' ? resolveLimit(argv.name) : null
+  // External execution owns its mount-resolved deadline and cancellation.
+  const external =
+    !argv.name.includes('/') &&
+    lookup(argv.name, session, registry, routingDecision) === Consumer.EXTERNAL
+  const resolved = argv.name !== '' && !external ? resolveLimit(argv.name) : null
   const timeout = resolved !== null ? resolved.timeoutSeconds : null
   // Capture xtrace before the body runs so `set -x` itself is not
   // traced (bash enables tracing only for the following commands).
@@ -503,7 +516,10 @@ async function runArgv(
   // MountRootPolicy cannot recognize a mount root inside one, so
   // `tar -cf out.tar /base/*` would archive a whole backend the same
   // operand typed by hand is refused for.
-  const boundary = await expandBoundaryGlobs(argv.operands, registry, namespace)
+  const refusedExternal = runtimeRefused(name, session, registry, routingDecision)
+  const boundary = refusedExternal
+    ? [...argv.operands]
+    : await expandBoundaryGlobs(argv.operands, registry, namespace)
   const expandedWords = boundary.map(wordText)
   // Compared as words, not as a count: a glob that matches exactly one
   // name (`du /base/i*` where only the mount root matches) is still an
@@ -514,7 +530,7 @@ async function runArgv(
     expandedWords.length !== typedWords.length ||
     expandedWords.some((w, i) => w !== typedWords[i])
   ) {
-    argv = new Argv(argv.name, expandedWords, boundary)
+    argv = new Argv(argv.name, expandedWords, boundary, argv.prefix)
   }
 
   // Visibility and admission. The one chokepoint every command class
@@ -656,6 +672,11 @@ async function routeArgv(
       new IOResult({ exitCode: 2, stderr: err }),
       new ExecutionNode({ command: name, exitCode: 2, stderr: err }),
     ]
+  }
+
+  const consumer = lookup(name, session, registry, routingDecision)
+  if (consumer === Consumer.EXTERNAL) {
+    return runExternal(argv, stdin, session, registry, routingDecision, signal)
   }
 
   // Shell builtins. One lookup: every executor-run builtin word maps to

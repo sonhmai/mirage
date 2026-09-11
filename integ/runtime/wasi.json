@@ -164,6 +164,13 @@
     },
     {
       "id": "listdir_classifies_through_stat",
+      "filesystem": {
+        "wasi": {
+          "list": true,
+          "stat": true,
+          "glob": true
+        }
+      },
       "hosts": [
         "python"
       ],

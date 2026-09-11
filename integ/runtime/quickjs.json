@@ -540,6 +540,11 @@
     },
     {
       "id": "fs_list",
+      "filesystem": {
+        "quickjs": {
+          "list": true
+        }
+      },
       "world": {
         "runtimes": [
           "quickjs",
@@ -568,6 +573,11 @@
     },
     {
       "id": "fs_stat",
+      "filesystem": {
+        "quickjs": {
+          "stat": true
+        }
+      },
       "world": {
         "runtimes": [
           "quickjs",
@@ -596,6 +606,11 @@
     },
     {
       "id": "fs_glob",
+      "filesystem": {
+        "quickjs": {
+          "glob": false
+        }
+      },
       "world": {
         "runtimes": [
           "quickjs",

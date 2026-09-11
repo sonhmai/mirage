@@ -12,4 +12,5 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { E2B_CONFIG_KEYS, type E2BConfig } from '@struktoai/mirage-core/runtime/sandbox/e2b/config'
+/** Capture unresolved program names without taking over the workspace shell. */
+export const EXTERNAL_COMMANDS = '@external'

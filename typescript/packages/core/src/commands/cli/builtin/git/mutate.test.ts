@@ -2298,6 +2298,44 @@ describe('a switch onto a branch recording a directory', () => {
     expect((await h.ws.execute('readlink /repo/slot')).exitCode).not.toBe(0)
   })
 
+  it('replaces an ignored regular file the same way', async () => {
+    const h = await harness()
+    await write(h, '.gitignore', 'slot\n')
+    expect((await h.run('add .gitignore'))[0]).toBe(0)
+    expect((await h.run('commit -m ignore'))[0]).toBe(0)
+    expect((await h.run('switch -c other'))[0]).toBe(0)
+    await write(h, 'slot/child', 'kid\n')
+    expect((await h.run('add -f slot/child'))[0]).toBe(0)
+    expect((await h.run('commit -m child'))[0]).toBe(0)
+    expect((await h.run('switch main'))[0]).toBe(0)
+    await write(h, 'slot', 'ignored\n')
+    expect((await h.run('switch other'))[0]).toBe(0)
+    const kid = await readOptional(h.dispatch, '/repo/slot/child')
+    expect(kid === null ? '' : DEC.decode(kid)).toBe('kid\n')
+    expect((await h.run('status --short'))[1]).toBe('')
+  })
+
+  it('still refuses an untracked file standing in the way', async () => {
+    // Untracked and not ignored is the case git does refuse, with its own
+    // wording: the replacement above must not reach it.
+    const h = await harness()
+    expect((await h.run('switch -c other'))[0]).toBe(0)
+    await write(h, 'slot/child', 'kid\n')
+    expect((await h.run('add slot/child'))[0]).toBe(0)
+    expect((await h.run('commit -m child'))[0]).toBe(0)
+    expect((await h.run('switch main'))[0]).toBe(0)
+    await write(h, 'slot', 'untracked\n')
+    expect(await h.run('switch other')).toEqual([
+      1,
+      '',
+      'error: The following untracked working tree files would be overwritten by checkout:\n' +
+        '\tslot\n' +
+        'Please move or remove them before you switch branches.\nAborting\n',
+    ])
+    const kept = await readOptional(h.dispatch, '/repo/slot')
+    expect(kept === null ? '' : DEC.decode(kept)).toBe('untracked\n')
+  })
+
   it('refuses a staged file standing in the way', async () => {
     // git allows this and discards the staged addition in silence; this
     // refuses and names it. What must not happen either way is the old

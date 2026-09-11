@@ -2449,6 +2449,34 @@
         "stdout": "exit=1\nA  sslot\n",
         "stderr": "error: Your local changes to the following files would be overwritten by checkout:\n\tsslot\nPlease commit your changes or stash them before you switch branches.\nAborting\n"
       }
+    },
+    {
+      "id": "git_switch_still_refuses_an_untracked_file_in_the_way",
+      "seq": 568334,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo restore --staged sslot && git -C /repo switch -c ubase > /dev/null 2>&1 && git -C /repo switch -c ufile > /dev/null 2>&1 && mkdir -p /repo/uslot && echo kid > /repo/uslot/child && git -C /repo add uslot/child && git -C /repo commit -m ukid > /dev/null && git -C /repo switch ubase > /dev/null 2>&1 && echo untracked > /repo/uslot && git -C /repo switch ufile; echo exit=$?; cat /repo/uslot",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\nuntracked\n",
+        "stderr": "error: The following untracked working tree files would be overwritten by checkout:\n\tuslot\nPlease move or remove them before you switch branches.\nAborting\n"
+      }
+    },
+    {
+      "id": "git_switch_replaces_an_ignored_file_ancestor",
+      "seq": 568335,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'fslot\\n' >> /repo/.gitignore && git -C /repo add .gitignore && git -C /repo commit -m ign2 > /dev/null && git -C /repo switch -c fbase > /dev/null 2>&1 && git -C /repo switch -c ffile > /dev/null 2>&1 && mkdir -p /repo/fslot && echo kid > /repo/fslot/child && git -C /repo add -f fslot/child && git -C /repo commit -m fkid > /dev/null && git -C /repo switch fbase > /dev/null 2>&1 && echo ignored > /repo/fslot && git -C /repo switch ffile > /dev/null 2>&1 && cat /repo/fslot/child; git -C /repo status --short | grep fslot; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "kid\nexit=1\n",
+        "stderr": ""
+      }
     }
   ]
 }

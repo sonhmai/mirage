@@ -14,10 +14,10 @@
 
 import { CLISpec } from '../../../commands/cli/types.ts'
 import { command } from '../../../commands/config.ts'
-import { CommandSpec } from '../../../commands/spec/types.ts'
+import { CommandSpec, Operand } from '../../../commands/spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RulePolicy } from '../../../policy/rule.ts'
 import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
@@ -31,6 +31,7 @@ import {
 import type { ProcessExecution, RunResult, RuntimeOptions } from '../../../runtime/types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import { Limit, MountMode } from '../../../types.ts'
+import * as globs from '../../expand/globs.ts'
 import { Consumer, SHELL_NAMES, lookup, lookupAll } from '../../lookup/index.ts'
 import { Session } from '../../session/session.ts'
 import { sleep } from '../../abort.ts'
@@ -255,7 +256,7 @@ function registerBoardList(ws: Workspace): void {
   for (const registered of command({
     name: 'trello board list',
     resource: 'ram',
-    spec: new CommandSpec(),
+    spec: new CommandSpec({ positional: [new Operand()], rest: new Operand({ type: 'str' }) }),
     fn: () => [ENC.encode('ok\n'), new IOResult()],
   }))
     ws.registry.mountForPrefix('/').register(registered)
@@ -281,6 +282,44 @@ describe('external command routing regressions', () => {
     } finally {
       await ws.close()
     }
+  })
+
+  describe.each([
+    ['process', 'trello board list', ['trello', 'board', 'list']],
+    ['shell', 'trello board list', ['trello', 'board', 'list']],
+    ['process', "'trello board list'", ['trello board list']],
+    ['shell', "'trello board list'", ['trello board list']],
+  ] as const)('%s boundary expansion for %s', (kind, head, prefix) => {
+    it.each([
+      ['/base/i*', ['/base/inner']],
+      ['/base/*', ['/base/inner', '/base/other']],
+    ] as const)('preserves command tokens when expanding %s', async (pattern, matches) => {
+      const options = { captures: ['trello board list'] }
+      const probe = kind === 'process' ? new ProcessProbe(options) : new ShellProbe(options)
+      const ws = new Workspace(
+        {
+          '/': new RAMResource(),
+          '/base/inner': new RAMResource(),
+          '/base/other': new RAMResource(),
+        },
+        { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [probe] },
+      )
+      registerBoardList(ws)
+      // Leave the glob pending so command dispatch owns boundary expansion.
+      const deferred = vi
+        .spyOn(globs, 'resolveGlobs')
+        .mockImplementationOnce((parts) => Promise.resolve([...parts]))
+      try {
+        const result = await ws.execute(`${head} ${pattern} 'a b' ''`)
+        expect(result.exitCode).toBe(0)
+        const tokens = [...prefix, ...matches, 'a b', '']
+        if (probe instanceof ProcessProbe) expect(probe.requests[0]?.argv).toEqual(tokens)
+        else expect(probe.lines[0]).toBe(shellJoin(tokens))
+      } finally {
+        deferred.mockRestore()
+        await ws.close()
+      }
+    })
   })
 
   it.each(['echo ok', 'cat /input', 'custom-stage', 'trello board list', 'custom-cli', 'python3'])(

@@ -526,7 +526,7 @@ async function runArgv(
     expandedWords.length !== typedWords.length ||
     expandedWords.some((w, i) => w !== typedWords[i])
   ) {
-    argv = new Argv(argv.name, expandedWords, boundary)
+    argv = new Argv(argv.name, expandedWords, boundary, argv.prefix)
   }
 
   // Visibility and admission. The one chokepoint every command class

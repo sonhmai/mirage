@@ -22,7 +22,7 @@ import yaml
 from mirage import EXTERNAL_COMMANDS, Limit, MountMode, RAMResource, Workspace
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.config import command
-from mirage.commands.spec.types import CommandSpec
+from mirage.commands.spec.types import CommandSpec, Operand
 from mirage.config import _build_runtime_entries
 from mirage.io import IOResult
 from mirage.policy import CommandRule
@@ -31,6 +31,7 @@ from mirage.policy.rule import RulePolicy
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import ProcessExecution, RunResult
+from mirage.workspace.expand import argv as argv_module
 from mirage.workspace.lookup import SHELL_NAMES, Consumer, lookup, lookup_all
 from mirage.workspace.session import Session
 
@@ -221,7 +222,9 @@ class ShellProbe(Runtime, LineExecutorMixin):
         return RunResult(stdout=b"ok\n", stderr=None, exit_code=0)
 
 
-@command("trello board list", resource="ram", spec=CommandSpec())
+@command("trello board list",
+         resource="ram",
+         spec=CommandSpec(positional=(Operand(), ), rest=Operand(type="str")))
 async def board_list(accessor, paths, texts, opts):
     return b"ok\n", IOResult()
 
@@ -240,6 +243,50 @@ async def test_native_execution_preserves_command_tokens(kind, head, expected):
         result = await ws.execute(head + " 'a b' '$(echo literal)' ''")
         assert result.exit_code == 0
         tokens = (*expected, "a b", "$(echo literal)", "")
+        if isinstance(probe, ProcessProbe):
+            assert probe.requests[0].argv == tokens
+        else:
+            assert shlex.split(probe.lines[0]) == list(tokens)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [ProcessProbe, ShellProbe])
+@pytest.mark.parametrize("head, prefix", [
+    ("trello board list", ("trello", "board", "list")),
+    ("'trello board list'", ("trello board list", )),
+])
+@pytest.mark.parametrize("pattern, matches", [
+    ("/base/i*", ("/base/inner", )),
+    ("/base/*", ("/base/inner", "/base/other")),
+])
+async def test_boundary_expansion_preserves_command_tokens(
+        kind, head, prefix, pattern, matches, monkeypatch):
+    probe = kind(captures=("trello board list", ))
+    ram = RAMResource()
+    ram.register(board_list)
+    resolve_globs = argv_module.resolve_globs
+    pending = True
+
+    async def defer_once(parts, *args, **kwargs):
+        nonlocal pending
+        if pending:
+            pending = False
+            return list(parts)
+        return await resolve_globs(parts, *args, **kwargs)
+
+    async with workspace(
+        {
+            "/": ram,
+            "/base/inner": RAMResource(),
+            "/base/other": RAMResource(),
+        },
+            mode=MountMode.EXEC,
+            runtimes=[probe]) as ws:
+        # Leave the glob pending so command dispatch owns boundary expansion.
+        monkeypatch.setattr(argv_module, "resolve_globs", defer_once)
+        result = await ws.execute(f"{head} {pattern} 'a b' ''")
+        assert result.exit_code == 0
+        tokens = (*prefix, *matches, "a b", "")
         if isinstance(probe, ProcessProbe):
             assert probe.requests[0].argv == tokens
         else:

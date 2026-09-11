@@ -106,7 +106,7 @@ else {
   it('registers process and shell support without claiming language or workspace filesystem APIs', () => {
     const runtime = buildRuntime('sandlock')
     expect(runtime).toBeInstanceOf(SandlockRuntime)
-    expect(runtime.captures).toEqual(['*'])
+    expect(runtime.captures).toEqual(['@external'])
     expect(runtime.capabilities).toMatchObject({
       process: true,
       shell: true,

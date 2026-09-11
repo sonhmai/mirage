@@ -15,7 +15,14 @@
       "id": "sys_argv",
       "world": {
         "runtimes": [
-          "sandlock"
+          {
+            "name": "sandlock",
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
+          }
         ]
       },
       "steps": [
@@ -32,7 +39,14 @@
       "id": "real_cpython_not_a_subset",
       "world": {
         "runtimes": [
-          "sandlock"
+          {
+            "name": "sandlock",
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
+          }
         ]
       },
       "steps": [
@@ -55,7 +69,12 @@
               "fs_writable": [
                 "/tmp"
               ]
-            }
+            },
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
           }
         ]
       },
@@ -79,7 +98,12 @@
               "fs_writable": [
                 "/tmp"
               ]
-            }
+            },
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
           }
         ]
       },
@@ -103,7 +127,12 @@
               "env": {
                 "BOX_MARKER": "from-config"
               }
-            }
+            },
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
           }
         ]
       },
@@ -121,7 +150,14 @@
       "id": "node_argv",
       "world": {
         "runtimes": [
-          "sandlock"
+          {
+            "name": "sandlock",
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
+          }
         ]
       },
       "steps": [
@@ -130,6 +166,30 @@
           "expect": {
             "exit": 0,
             "stdout": "[\"a b\",\"$(echo literal)\",\"\"]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_fallback_preserves_vfs_pipeline",
+      "world": {
+        "runtimes": [
+          "sandlock"
+        ]
+      },
+      "steps": [
+        {
+          "command": "getconf LONG_BIT | grep 64 > /ram/wordsize.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /ram/wordsize.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "64\n"
           }
         }
       ]

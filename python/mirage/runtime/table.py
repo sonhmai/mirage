@@ -18,8 +18,9 @@ from typing import Any, Callable
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.js.quickjs import QuickJsRuntime
-from mirage.runtime.mixin import LineExecutorMixin
+from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.wasi import WasiRuntime
@@ -224,6 +225,9 @@ def bind_commands(entries: list[Runtime]) -> dict[str, Runtime]:
     bindings: dict[str, Runtime] = {}
     seen: set[str] = set()
     for entry in entries:
+        if EXTERNAL_COMMANDS in entry.captures and not isinstance(
+                entry, (LineExecutorMixin, ProcessExecutorMixin)):
+            raise ValueError("@external requires process or shell execution")
         if entry.name in seen:
             raise ValueError(f"duplicate runtime entry: {entry.name!r}")
         seen.add(entry.name)
@@ -233,25 +237,19 @@ def bind_commands(entries: list[Runtime]) -> dict[str, Runtime]:
     return bindings
 
 
-def whole_line_runtime(bindings: Mapping[str, Runtime | None],
-                       commands: Sequence[str]) -> LineExecutorMixin | None:
+def whole_line_runtime(
+    bindings: Mapping[str, Runtime | None], ) -> LineExecutorMixin | None:
     """The runtime that runs this entire line, if any.
 
-    A runtime inheriting LineExecutorMixin takes the raw line when it
-    captures one of the line's commands; a "*" capture claims any
-    line. A specific capture beats "*". The vfs runtime never matches
+    Only an explicit "*" capture claims a whole line. Named captures
+    and EXTERNAL_COMMANDS execute individual commands. Vfs never matches
     here because it carries no mixin: the workspace executor IS the
     path a vfs-resolved line takes anyway, so there is no delegate.
 
     Args:
         bindings (Mapping[str, Runtime | None]): the line's resolved
             command bindings (a RouteDecision's or the registry's).
-        commands (Sequence[str]): the line's stage command names.
     """
-    for command in commands:
-        runtime = bindings.get(command)
-        if isinstance(runtime, LineExecutorMixin):
-            return runtime
     star = bindings.get("*")
     if isinstance(star, LineExecutorMixin):
         return star

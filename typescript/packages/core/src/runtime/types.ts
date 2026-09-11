@@ -270,7 +270,8 @@ export interface EvalResult {
 /** Constructor options every runtime accepts (a yaml entry's keys). */
 export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown>> {
   /**
-   * Commands this runtime claims, overriding the class default; ["*"]
+   * Commands this runtime claims; EXTERNAL_COMMANDS captures unresolved
+   * program names. ["*"]
    * claims every line for a line-executing runtime.
    */
   captures?: readonly string[]

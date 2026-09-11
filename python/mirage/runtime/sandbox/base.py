@@ -17,13 +17,17 @@ from collections.abc import Sequence
 from typing import Any, Callable, ClassVar
 
 from mirage.runtime.base import Runtime
+from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.sandbox.config import SandboxConfig
 from mirage.runtime.types import RunResult, RuntimeReach, ScriptSource
 
 
 class RemoteSandbox(Runtime, LineExecutorMixin):
-    """A runtime that runs whole lines inside a sandbox the user runs.
+    """A runtime that executes programs in a sandbox the user runs.
+
+    Captures default to unresolved program names. An explicit "*"
+    delegates whole shell lines.
 
     Mirage never creates, provisions, or deletes sandboxes: you bring
     your own (a running container, a live Daytona or E2B sandbox) and
@@ -46,7 +50,7 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
     # gate never sees those effects, however well isolated the
     # sandbox itself is.
     reach: RuntimeReach = "remote"
-    captures: tuple[str, ...] = ("*", )
+    captures: tuple[str, ...] = (EXTERNAL_COMMANDS, )
     config_cls: ClassVar[type[SandboxConfig]] = SandboxConfig
     config: SandboxConfig
 

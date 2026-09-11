@@ -37,11 +37,12 @@ from mirage.workspace.executor.builtins.alias import alias_command_text
 from mirage.workspace.executor.builtins.table import BUILTINS
 from mirage.workspace.executor.builtins.types import BuiltinCall
 from mirage.workspace.executor.command import handle_command
+from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.globs import expand_boundary_globs
 from mirage.workspace.lookup import (SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS,
-                                     follows_last_component)
+                                     Consumer, follows_last_component, lookup)
 from mirage.workspace.node.admission import Admitted, Refused, admit
 from mirage.workspace.node.occurrence import claimant_for, evaluated_from
 from mirage.workspace.session.state import (ensure_var_visible,
@@ -297,7 +298,8 @@ async def _dispatch_command_body(
                              call_stack,
                              registry,
                              namespace,
-                             view=session_view(session, registry.policies))
+                             view=session_view(session, registry.policies),
+                             routing=routing_decision)
 
     # Limits resolve against the expanded name, so `$CMD`-style
     # invocations get their real command's policy.
@@ -519,6 +521,10 @@ async def _route_argv(
                               stderr=err), ExecutionNode(command=name,
                                                          exit_code=2,
                                                          stderr=err)
+
+    if lookup(name, session, registry, routing_decision) is Consumer.EXTERNAL:
+        return await run_external(argv, stdin, session, registry,
+                                  routing_decision)
 
     # ── shell builtins ──────────────────────────
     # One lookup: every executor-run builtin word maps to a handler that

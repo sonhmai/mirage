@@ -44,6 +44,7 @@ import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
+import { runExternal } from '../executor/command/external.ts'
 import { handleCommand } from '../executor/command.ts'
 import type { ExecuteNodeOpts } from '../executor/jobs.ts'
 import { type AliasMark, aliasCommandText } from '../executor/builtins/alias/index.ts'
@@ -71,7 +72,13 @@ import { globPattern } from '../../utils/glob_walk.ts'
 import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS, followsLastComponent } from '../lookup/index.ts'
+import {
+  Consumer,
+  lookup,
+  SLASH_KEEPS_LAST,
+  UNSUPPORTED_BUILTINS,
+  followsLastComponent,
+} from '../lookup/index.ts'
 import { Admitted, admit } from './admission.ts'
 import type { Session } from '../session/session.ts'
 import { ensureVarVisible, sessionView } from '../session/state.ts'
@@ -395,6 +402,7 @@ async function runCommandBody(
     registry,
     namespace,
     sessionView(session, registry.policies),
+    routingDecision,
   )
 
   // Limits resolve against the expanded name, so `$CMD`-style
@@ -656,6 +664,10 @@ async function routeArgv(
       new IOResult({ exitCode: 2, stderr: err }),
       new ExecutionNode({ command: name, exitCode: 2, stderr: err }),
     ]
+  }
+
+  if (lookup(name, session, registry, routingDecision) === Consumer.EXTERNAL) {
+    return runExternal(argv, stdin, session, registry, routingDecision, signal)
   }
 
   // Shell builtins. One lookup: every executor-run builtin word maps to

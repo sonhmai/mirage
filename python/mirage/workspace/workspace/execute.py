@@ -295,7 +295,7 @@ async def execute_line(
                                agent_id=agent or ""), timeout, name)
         held = False
         try:
-            line_runtime = ws._runtimes.whole_line(ast, decision)
+            line_runtime = ws._runtimes.whole_line(decision)
             if line_runtime is not None:
                 # A whole line is a command like any other: the same
                 # visibility and admission gate as the tree, per parsed

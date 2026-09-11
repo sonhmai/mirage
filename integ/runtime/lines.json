@@ -2,7 +2,7 @@
   "suite": "lines",
   "cases": [
     {
-      "id": "whole_line_capture",
+      "id": "captured_program_pipeline",
       "world": {
         "runtimes": [
           {
@@ -18,10 +18,17 @@
       },
       "steps": [
         {
-          "command": "nvidia-smi -L | grep GPU",
+          "command": "nvidia-smi -L | grep box > /ram/output.txt",
           "expect": {
             "exit": 0,
-            "stdout": "box:nvidia-smi -L | grep GPU\n"
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /ram/output.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nvidia-smi -L\n"
           }
         },
         {
@@ -29,6 +36,42 @@
           "expect": {
             "exit": 0,
             "stdout": "still-the-workspace\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_fallback_keeps_mirage_commands",
+      "world": {
+        "runtimes": [
+          {
+            "name": "echobox",
+            "captures": [
+              "@external"
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "native-tool --version | grep box > /ram/version.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /ram/version.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:native-tool --version\n"
+          }
+        },
+        {
+          "command": "echo mirage",
+          "expect": {
+            "exit": 0,
+            "stdout": "mirage\n"
           }
         }
       ]

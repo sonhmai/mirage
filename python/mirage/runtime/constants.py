@@ -12,21 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from enum import StrEnum
+from typing import Final
 
-
-class NameKind(StrEnum):
-    """What a command name resolves to, spelled as ``type -t`` prints it.
-
-    "cli" and "external" identify configured routes. Neither promises
-    a local executable path for ``type -p``.
-
-    Members are ordered as ``type -a`` prints them, which is also the
-    order the layers resolve in.
-    """
-    ALIAS = "alias"
-    KEYWORD = "keyword"
-    FUNCTION = "function"
-    EXTERNAL = "external"
-    CLI = "cli"
-    BUILTIN = "builtin"
+# Capture unresolved program names without taking over the workspace shell.
+EXTERNAL_COMMANDS: Final = "@external"

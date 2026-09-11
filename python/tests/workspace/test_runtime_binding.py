@@ -481,16 +481,20 @@ class LineBox(Runtime, LineExecutorMixin):
 
 
 @pytest.mark.asyncio
-async def test_whole_line_goes_to_the_capturing_runtime():
+async def test_named_capture_keeps_pipeline_and_redirects_in_mirage():
     box = LineBox()
     ws = Workspace({"/ram": RAMResource()},
                    mode=MountMode.EXEC,
                    runtimes=[box, "vfs"])
-    io = await ws.execute("nvidia-smi -L | grep GPU > /out.txt")
-    assert await materialize(io.stdout
-                             ) == b"box:nvidia-smi -L | grep GPU > /out.txt"
-    assert box.lines[0][0] == "nvidia-smi -L | grep GPU > /out.txt"
-    await ws.close()
+    try:
+        io = await ws.execute("nvidia-smi -L | grep box > /ram/out.txt")
+        assert io.exit_code == 0
+        assert await materialize(io.stdout) == b""
+        assert box.lines[0][0] == "nvidia-smi -L"
+        saved = await ws.execute("cat /ram/out.txt")
+        assert await materialize(saved.stdout) == b"box:nvidia-smi -L\n"
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,7 @@ from typing import Any, Callable
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.sandlock.config import SandlockConfig
 from mirage.runtime.sandbox.sandlock.constants import (SANDLOCK_CLI_HINT,
@@ -36,7 +37,7 @@ class SandlockRuntime(Runtime, LineExecutorMixin, ProcessExecutorMixin):
     """
 
     name = "sandlock"
-    captures = ("*", )
+    captures = (EXTERNAL_COMMANDS, )
     config_cls = SandlockConfig
     config: SandlockConfig
 

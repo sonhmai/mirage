@@ -160,7 +160,7 @@ describe('SmolvmRuntime', () => {
   it("registers under the config name 'smolvm'", () => {
     const runtime = buildRuntime('smolvm', { config: { machine: 'vm' } })
     expect(runtime).toBeInstanceOf(SmolvmRuntime)
-    expect(runtime.captures).toEqual(['*'])
+    expect(runtime.captures).toEqual(['@external'])
   })
 })
 

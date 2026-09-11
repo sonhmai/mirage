@@ -197,7 +197,7 @@ describe('E2BRuntime', () => {
   it('registers under e2b', () => {
     const runtime = buildRuntime('e2b', { config: { sandboxId: 'sb-live' } })
     expect(runtime).toBeInstanceOf(E2BRuntime)
-    expect(runtime.captures).toEqual(['*'])
+    expect(runtime.captures).toEqual(['@external'])
   })
 })
 
@@ -308,7 +308,7 @@ describe('E2B cancellation and validation', () => {
   })
 
   it.each(['caller', 'timeout'])('propagates %s cancellation from a workspace', async (kind) => {
-    const runtime = makeRuntime()
+    const runtime = new FakedE2BRuntime({ captures: ['sleep'], config: { sandboxId: 'sb-live' } })
     const abort = new AbortController()
     const workspace = new Workspace(
       { '/data': new RAMResource() },

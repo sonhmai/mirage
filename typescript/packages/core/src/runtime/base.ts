@@ -80,6 +80,7 @@ export abstract class Runtime {
     if (typeof options.script === 'string') throw scriptStringError()
     this.captures =
       options.captures !== undefined ? options.captures.slice() : defaultCaptures.slice()
+
     this.config = coerceRuntimeConfig(options.config, configKeys)
     if (typeof options.script === 'function' || options.script instanceof ScriptSource) {
       this.script = options.script

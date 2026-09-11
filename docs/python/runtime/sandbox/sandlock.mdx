@@ -21,8 +21,9 @@ runtimes:
   - vfs
 ```
 
-Sandlock captures whole shell lines by default. `captures` can restrict which
-commands select it. Direct `runtime.execute(ProcessExecution(...))` calls take
+Sandlock defaults to `captures: ["@external"]`, delegating unresolved program
+names while Mirage keeps its commands, pipes and redirects. Use
+`captures: ["python3", "node", "@external"]` to select native interpreters too. Direct `runtime.execute(ProcessExecution(...))` calls take
 an argv array without shell interpretation. Choose the interpreter in argv;
 there is no Python-specific `home` setting.
 

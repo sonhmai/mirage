@@ -67,8 +67,9 @@ class LineExecutorMixin(ABC):
     also inherits this owns any line routed to it wholesale: pipes,
     redirects, and every command in the line run inside the runtime's
     world (its own cat, its own grep), the workspace shell never
-    splits the line. A line lands on it when the runtime captures one
-    of the line's commands or "*". Interpreter runtimes never inherit
+    splits the line. Only an explicit "*" capture delegates a whole
+    workspace line. Named captures receive one safely quoted command.
+    Interpreter runtimes never inherit
     it: they are the engine inside one command (python3, node), never
     the line. The vfs runtime does not either: a line resolved to vfs
     runs on the workspace executor inline, so there is no delegate to

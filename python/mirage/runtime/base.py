@@ -79,7 +79,8 @@ class Runtime(ABC):
 
         Args:
             captures (Sequence[str] | None): commands this runtime
-                claims, overriding the class default; ("*",) claims
+                claims, overriding the class default; EXTERNAL_COMMANDS
+                captures unresolved program names. ("*",) claims
                 every line for a line-executing runtime. None keeps
                 the default.
             config (RuntimeConfig | dict[str, Any] | None): the

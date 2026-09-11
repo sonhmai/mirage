@@ -78,15 +78,15 @@ async def test_argv_environment_cwd_and_stdin_reach_cli(cli, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_workspace_routes_python_and_node_as_whole_lines(cli):
-    runtime = SandlockRuntime()
+async def test_workspace_routes_named_programs_as_argv(cli):
+    runtime = SandlockRuntime(captures=("python3", "node"))
     ws = Workspace({"/": RAMResource()}, runtimes=[runtime])
     try:
         for line in ("python3 --version", "node --version"):
             io = await ws.execute(line)
             assert io.exit_code == 0
             data = json.loads(await io.stdout_str())
-            assert data["argv"][-4:] == ["--", "/bin/sh", "-c", line]
+            assert data["argv"][-3:] == ["--", *line.split()]
     finally:
         await ws.close()
 
@@ -95,7 +95,7 @@ def test_registry_declares_process_and_shell_without_language_or_workspace_fs(
 ):
     runtime = build_runtime("sandlock")
     assert isinstance(runtime, SandlockRuntime)
-    assert runtime.captures == ("*", )
+    assert runtime.captures == ("@external", )
     assert runtime.capabilities.process and runtime.capabilities.shell
     assert runtime.capabilities.languages == ()
     assert runtime.capabilities.filesystem == ()

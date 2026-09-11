@@ -55,6 +55,7 @@ from mirage.resource.registry import (build_resource, known_resources,
                                       register_resource)
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
@@ -148,6 +149,7 @@ __all__ = [
     "RunResult",
     "Runtime",
     "RuntimeConfig",
+    "EXTERNAL_COMMANDS",
     "SPECS",
     "SandboxConfig",
     "Scope",

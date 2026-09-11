@@ -12,13 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RouteDecision } from '../../runtime/routing/types.ts'
 import type { SessionView } from '../../ops/types.ts'
 import { scopesPaths } from '../../policy/match/reads.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { literalWord, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { WordPolicy, endOptionsAfterProgram, lookup, wordPolicy } from '../lookup/index.ts'
+import {
+  Consumer,
+  WordPolicy,
+  endOptionsAfterProgram,
+  lookup,
+  wordPolicy,
+} from '../lookup/index.ts'
 import type { Session } from '../session/session.ts'
 import { classifyParts } from './classify/index.ts'
 import type { NamespaceLinks } from '../../ops/config.ts'
@@ -84,6 +91,7 @@ export async function expandArgv(
   registry: MountRegistry,
   namespace: NamespaceLinks | null = null,
   view?: SessionView,
+  routing?: RouteDecision,
 ): Promise<Argv> {
   let expanded = await expandWords(parts, session, executeFn, callStack, view)
   if (expanded.length === 0) return new Argv('', [], [])
@@ -103,12 +111,13 @@ export async function expandArgv(
   // function for its inner run, which is exactly when the rewrite
   // applies again. A CLI cannot reach here at all, since registerCli
   // refuses a shell builtin's name.
-  const shadowed = Object.hasOwn(session.functions, name)
+  const consumer = lookup(name, session, registry, routing)
+  const shadowed = Object.hasOwn(session.functions, name) || consumer === Consumer.EXTERNAL
   const line = expanded.slice(consumed)
   const tail = shadowed ? line : endOptionsAfterProgram(name, line)
   const lineWords = [...expanded.slice(0, consumed), ...tail]
 
-  const policy = wordPolicy(lookup(name, session, registry))
+  const policy = wordPolicy(consumer)
   let wordKinds: (ValueType | null)[] | null = null
   let wordBases: (string | null)[] | null = null
   if (policy === WordPolicy.MOUNT) {

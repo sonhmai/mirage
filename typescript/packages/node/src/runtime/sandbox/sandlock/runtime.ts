@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { EXTERNAL_COMMANDS } from '@struktoai/mirage-core/runtime/constants'
 import { type ChildProcess, spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { PathSpec } from '@struktoai/mirage-core/types'
@@ -40,7 +41,7 @@ export class SandlockRuntime extends Runtime implements LineExecutor, ProcessExe
   private readonly children = new Set<ChildProcess>()
 
   constructor(options: RuntimeOptions<SandlockConfig> = {}) {
-    super(options, ['*'], SANDLOCK_CONFIG_KEYS)
+    super(options, [EXTERNAL_COMMANDS], SANDLOCK_CONFIG_KEYS)
   }
 
   policyArgv(): string[] {

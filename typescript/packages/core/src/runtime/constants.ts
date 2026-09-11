@@ -12,22 +12,5 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-/**
- * What a command name resolves to, spelled as `type -t` prints it.
- *
- * "cli" and "external" identify configured routes. Neither promises
- * a local executable path for `type -p`.
- *
- * Members are ordered as `type -a` prints them, which is also the order
- * the layers resolve in.
- */
-export const NameKind = Object.freeze({
-  ALIAS: 'alias',
-  KEYWORD: 'keyword',
-  FUNCTION: 'function',
-  EXTERNAL: 'external',
-  CLI: 'cli',
-  BUILTIN: 'builtin',
-} as const)
-
-export type NameKind = (typeof NameKind)[keyof typeof NameKind]
+/** Capture unresolved program names without taking over the workspace shell. */
+export const EXTERNAL_COMMANDS = '@external'

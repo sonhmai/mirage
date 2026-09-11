@@ -31,10 +31,12 @@ import {
   UnknownPathspecError,
   UnknownSwitchError,
 } from './errors.ts'
+import { GITLINK_MODE } from './constants.ts'
 import { short } from './format.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import {
   blockingAncestor,
+  keepGitlink,
   refuseReplacedMounts,
   removeEmptyParents,
   removeFile,
@@ -258,11 +260,15 @@ async function switchTo(
   mounts: MountView | null,
 ): Promise<void> {
   const changed = written(before, after)
+  // A gitlink is not written into the working tree at all, so it is neither
+  // read as a blob nor allowed to clear what stands at the name; keepGitlink is
+  // the whole of what the entry asks for.
+  const replacing = [...changed.keys()].filter((path) => changed.get(path)?.mode !== GITLINK_MODE)
   // Before the first removal, not at the entry that meets it: a refusal
   // halfway through leaves the entries already written holding the target's
   // content while HEAD and the index still name the branch being left, which
   // is the half-switch every other check above exists to prevent.
-  await refuseReplacedMounts(statPath, repo.location.worktree, [...changed.keys()], links, mounts)
+  await refuseReplacedMounts(statPath, repo.location.worktree, replacing, links, mounts)
   // Removals first, and the emptied directories with them, because the two
   // sets name the same place whenever a branch records a file where the other
   // records a directory: writing `slot/child` while the file `slot` is still
@@ -278,6 +284,10 @@ async function switchTo(
   for (const path of [...changed.keys()].sort(compareCodePoints)) {
     const entry = changed.get(path)
     if (entry === undefined) continue
+    if (entry.mode === GITLINK_MODE) {
+      await keepGitlink(dispatch, statPath, under(repo.location.worktree, path), links)
+      continue
+    }
     const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
     // Whatever the removals above did not take, a component above the entry
     // may still not be a directory: an ignored file or link is in neither tree

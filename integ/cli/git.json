@@ -2771,6 +2771,48 @@
         "stdout": "exit=128\ntannn\n",
         "stderr": "fatal: the '-n' option is only allowed in list mode\n"
       }
+    },
+    {
+      "id": "git_tag_refuses_an_ancestry_suffix_that_is_not_a_step",
+      "seq": 568357,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag zrelease 'HEAD^x'; echo exit=$?; git -C /repo tag -l zrelease",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=128\n",
+        "stderr": "fatal: Failed to resolve 'HEAD^x' as a valid ref.\n"
+      }
+    },
+    {
+      "id": "git_tag_counts_ascii_digits_only_in_an_ancestry_step",
+      "seq": 568358,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag zunicode 'HEAD~\u0663'; echo exit=$?; git -C /repo tag -l zunicode",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=128\n",
+        "stderr": "fatal: Failed to resolve 'HEAD~\u0663' as a valid ref.\n"
+      }
+    },
+    {
+      "id": "git_tag_still_takes_the_ancestry_steps_git_takes",
+      "seq": 568359,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag zfirst 'HEAD^' && git -C /repo tag zhere 'HEAD^0' && git -C /repo tag zmixed 'HEAD^~'; echo exit=$?; git -C /repo tag -l 'z*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=0\nzfirst\nzhere\nzmixed\n",
+        "stderr": ""
+      }
     }
   ]
 }

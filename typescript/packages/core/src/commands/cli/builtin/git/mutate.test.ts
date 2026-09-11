@@ -200,6 +200,27 @@ function conflictIndex(repo: string, path: string, stages: number[] = [1, 2, 3])
   })
 }
 
+/**
+ * Record a gitlink at a path and commit it, with content under the name.
+ *
+ * It points at this repository's own HEAD so the commit it names resolves
+ * here: an ordinary submodule's does not, and the two failure modes differ.
+ */
+function gitlinkIndex(repo: string, path: string): void {
+  const head = git(repo, ['rev-parse', 'HEAD']).trim()
+  mkdirSync(join(repo, path), { recursive: true })
+  writeFileSync(join(repo, path, 'keep.md'), 'keep\n')
+  execFileSync('git', [
+    '-C',
+    repo,
+    'update-index',
+    '--add',
+    '--cacheinfo',
+    `160000,${head},${path}`,
+  ])
+  execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'gitlink'], { stdio: 'ignore' })
+}
+
 /** Write into the mount, which is where the verbs under test read from. */
 async function write(h: Harness, path: string, text: string): Promise<void> {
   const target = `/repo/${path}`
@@ -1696,6 +1717,68 @@ describe('a working-tree removal that would take a mount with it', () => {
     expect((await h.run('commit -m inside'))[0]).toBe(0)
     expect((await h.run('rm slot/data/x.md'))[0]).toBe(0)
     expect(await readNames(h.dispatch, '/repo/slot/data')).toEqual([])
+  })
+})
+
+describe('a gitlink in the tree', () => {
+  it('leaves the working tree it already has alone', async () => {
+    // A 160000 entry names a commit in another repository. git checks out no
+    // submodule content without --recurse-submodules, so all the entry asks of
+    // the working tree is that a directory stand at the name: reading it as a
+    // blob wrote an empty file over the whole directory, untracked work
+    // included.
+    const h = await harness((repo) => {
+      gitlinkIndex(repo, 'sub')
+    })
+    expect(await h.run('restore sub')).toEqual([0, '', ''])
+    expect(await readOptional(h.dispatch, '/repo/sub/keep.md')).not.toBeNull()
+  })
+
+  it('makes a directory when nothing is there', async () => {
+    const h = await harness((repo) => {
+      gitlinkIndex(repo, 'sub')
+    })
+    await removeTree(h.dispatch, '/repo/sub', null, null)
+    expect(await h.run('restore sub')).toEqual([0, '', ''])
+    expect(await readNames(h.dispatch, '/repo/sub')).toEqual([])
+    // A directory, not a file: readNames answers empty for both, so the write
+    // that used to land here is ruled out by asking for the file back.
+    expect(await readOptional(h.dispatch, '/repo/sub')).toBeNull()
+  })
+
+  it('replaces a regular file standing at the name', async () => {
+    const h = await harness((repo) => {
+      gitlinkIndex(repo, 'sub')
+    })
+    await removeTree(h.dispatch, '/repo/sub', null, null)
+    await h.ws.execute("printf 'i am a file\\n' > /repo/sub")
+    expect(await h.run('restore sub')).toEqual([0, '', ''])
+    expect(await readOptional(h.dispatch, '/repo/sub')).toBeNull()
+  })
+})
+
+describe('an ancestry suffix that is not a step', () => {
+  it('writes no tag', async () => {
+    // Every character used to count as another first-parent hop, so `HEAD^x`
+    // resolved to `HEAD^^` and the tag landed on a commit nobody named.
+    const h = await harness()
+    expect(await h.run('tag release HEAD^x')).toEqual([
+      128,
+      '',
+      "fatal: Failed to resolve 'HEAD^x' as a valid ref.\n",
+    ])
+    expect(await h.run('tag -l')).toEqual([0, '', ''])
+    // The unicode digit is the same refusal: the count scans ASCII only, so
+    // what is left over is not another step either.
+    expect((await h.run('tag release main~٣'))[0]).toBe(128)
+  })
+
+  it('still takes the steps git does take', async () => {
+    const h = await harness()
+    expect(await h.run('tag first HEAD^')).toEqual([0, '', ''])
+    expect(await h.run('tag here HEAD^0')).toEqual([0, '', ''])
+    expect(await h.run('tag mixed HEAD^~')).toEqual([0, '', ''])
+    expect(await h.run('tag -l')).toEqual([0, 'first\nhere\nmixed\n', ''])
   })
 })
 

@@ -518,3 +518,22 @@ async def test_minus_n_one_is_not_an_n_at_all(git_rw):
 async def test_minus_n_one_lists_names_alone(git_rw):
     assert await run(git_rw, "tag -a v -m body") == (0, b"", b"")
     assert (await run(git_rw, "tag -n-1"))[1] == b"v\n"
+
+
+@pytest.mark.asyncio
+async def test_a_suffix_that_is_not_a_step_writes_no_tag(git_rw):
+    # Every character used to count as another first-parent hop, so
+    # ``HEAD^x`` resolved to ``HEAD^^`` and the tag landed on a commit
+    # nobody named. git refuses the expression instead.
+    code, out, err = await run(git_rw, "tag release HEAD^x")
+    assert (code, out) == (128, b"")
+    assert err == b"fatal: Failed to resolve 'HEAD^x' as a valid ref.\n"
+    assert (await run(git_rw, "tag -l"))[1] == b""
+
+
+@pytest.mark.asyncio
+async def test_the_steps_git_does_take_still_tag(git_rw):
+    assert await run(git_rw, "tag first HEAD^") == (0, b"", b"")
+    assert await run(git_rw, "tag here HEAD^0") == (0, b"", b"")
+    assert await run(git_rw, "tag mixed HEAD^~") == (0, b"", b"")
+    assert (await run(git_rw, "tag -l"))[1] == b"first\nhere\nmixed\n"

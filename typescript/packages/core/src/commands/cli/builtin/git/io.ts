@@ -101,6 +101,37 @@ export async function restoreEntry(
   })
 }
 
+/**
+ * Leave a submodule's working tree alone, but make sure it has one.
+ *
+ * A 160000 entry names a commit in another repository, which this one does not
+ * hold: reading it as a blob is either a miss (an ordinary submodule keeps its
+ * objects in its own store) or, when the id does happen to resolve here, an
+ * empty string written over the directory. git does neither. It checks out no
+ * submodule content at all without `--recurse-submodules`, and all the entry
+ * asks of the working tree is that a directory stand at the name: an existing
+ * one is left exactly as it is, untracked work included, a regular file or a
+ * link is replaced by an empty one, and a missing one is created. Pinned
+ * against git 2.50.1.
+ *
+ * @param dispatch workspace op dispatcher
+ * @param statPath the data plane's stat, which dereferences
+ * @param path absolute virtual path of the submodule
+ * @param links the name plane's link facts, null when no namespace is wired
+ */
+export async function keepGitlink(
+  dispatch: Dispatch,
+  statPath: StatPath,
+  path: string,
+  links: LinkView | null,
+): Promise<void> {
+  const linked = (links?.statAt(path) ?? null) !== null
+  const info = linked ? null : await statPath(path)
+  if (info !== null && info.type === FileType.DIRECTORY) return
+  if (linked || info !== null) await removeFile(dispatch, path)
+  await ensureDir(dispatch, path)
+}
+
 /** Read a byte range of one virtual path. */
 export async function readRange(
   dispatch: Dispatch,

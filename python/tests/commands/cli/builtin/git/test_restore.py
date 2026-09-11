@@ -24,7 +24,8 @@ from mirage.commands.spec.types import FlagView
 from mirage.resource.disk import DiskResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
-from tests.commands.cli.builtin.git.conftest import conflict_index
+from tests.commands.cli.builtin.git.conftest import (commit_gitlink,
+                                                     conflict_index)
 
 
 async def run(ws, line: str) -> tuple[int, bytes, bytes]:
@@ -586,3 +587,43 @@ async def test_the_staged_half_alone_is_untouched_by_the_preflight(
         assert (await run(ws, "rm --cached slot"))[0] == 0
         assert await run(ws, "restore --staged slot") == (0, b"", b"")
         assert (await run(ws, "status --short"))[1].startswith(b" D slot\n")
+
+
+@pytest.mark.asyncio
+async def test_a_gitlink_keeps_the_working_tree_it_already_has(
+        git_rw, repo_path: Path):
+    # A 160000 entry names a commit in another repository. git checks
+    # out no submodule content without --recurse-submodules, so all the
+    # entry asks of the working tree is that a directory stand at the
+    # name: reading it as a blob wrote an empty file over the whole
+    # directory, untracked work included.
+    await git_rw.execute("mkdir /repo/sub && echo keep > /repo/sub/keep.txt")
+    commit_gitlink(repo_path, "sub")
+    assert await run(git_rw, "restore sub") == (0, b"", b"")
+    assert (repo_path / "sub").is_dir()
+    assert (repo_path / "sub" /
+            "keep.txt").read_text(encoding="utf-8") == "keep\n"
+
+
+@pytest.mark.asyncio
+async def test_a_gitlink_with_nothing_there_gets_a_directory(
+        git_rw, repo_path: Path):
+    await git_rw.execute("mkdir /repo/sub && echo keep > /repo/sub/keep.txt")
+    commit_gitlink(repo_path, "sub")
+    await git_rw.execute("rm -rf /repo/sub")
+    assert await run(git_rw, "restore sub") == (0, b"", b"")
+    assert (repo_path / "sub").is_dir()
+    assert sorted(p.name for p in (repo_path / "sub").iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_a_file_standing_where_a_gitlink_belongs_is_replaced(
+        git_rw, repo_path: Path):
+    # git's own answer: the file goes and an empty directory takes its
+    # place, which is what it does to any non-directory at the name.
+    await git_rw.execute("mkdir /repo/sub && echo keep > /repo/sub/keep.txt")
+    commit_gitlink(repo_path, "sub")
+    await git_rw.execute("rm -rf /repo/sub")
+    await git_rw.execute("printf 'i am a file\n' > /repo/sub")
+    assert await run(git_rw, "restore sub") == (0, b"", b"")
+    assert (repo_path / "sub").is_dir()

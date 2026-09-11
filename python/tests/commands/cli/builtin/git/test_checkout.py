@@ -25,7 +25,8 @@ from mirage.commands.cli.builtin.git.checkout import (_blocked_ancestors,
 from mirage.resource.disk import DiskResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
-from tests.commands.cli.builtin.git.conftest import conflict_index
+from tests.commands.cli.builtin.git.conftest import (branch_with_gitlink,
+                                                     conflict_index)
 
 MODE = 0o100644
 
@@ -668,3 +669,16 @@ async def test_a_mount_further_down_the_switch_stops_it_before_it_starts(
         assert (repo_path / "a.txt").read_text(encoding="utf-8") == before
         assert (await run(ws, "status --short"))[1] == b""
     assert inner.is_dir()
+
+
+@pytest.mark.asyncio
+async def test_a_branch_that_adds_a_gitlink_makes_a_directory_for_it(
+        git_rw, repo_path: Path):
+    # The same rule the write loop follows for restore: a 160000 entry
+    # asks only that a directory stand at the name, so a branch adding
+    # one must not read it as a blob and write an empty file. Reached
+    # with nothing at the name, which is the one shape no collision
+    # check refuses first.
+    branch_with_gitlink(repo_path, "linked", "sub")
+    assert (await run(git_rw, "checkout linked"))[0] == 0
+    assert (repo_path / "sub").is_dir()

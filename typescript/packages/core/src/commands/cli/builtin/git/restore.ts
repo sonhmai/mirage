@@ -20,7 +20,7 @@ import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { headEntries } from './changes.ts'
-import { HEAD } from './constants.ts'
+import { GITLINK_MODE, HEAD } from './constants.ts'
 import {
   GitError,
   NoRestorePathsError,
@@ -34,6 +34,7 @@ import {
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import {
   blockingAncestor,
+  keepGitlink,
   refuseReplacedMounts,
   removeEmptyParents,
   removeFile,
@@ -177,8 +178,13 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
     // stages first and restores after, so a refusal in the working-tree pass
     // would leave the index moved and the tree exactly as it was, which is the
     // one outcome this verb has no wording for.
+    // A gitlink is not written into the working tree at all, so it is neither
+    // read as a blob nor allowed to clear what stands at the name; keepGitlink
+    // is the whole of what the entry asks for, and the preflight has nothing
+    // to say about it either.
+    const replacing = present.filter((name) => tree.get(name)?.mode !== GITLINK_MODE)
     if (flags.worktree) {
-      await refuseReplacedMounts(statPath, repo.location.worktree, present, links, mounts)
+      await refuseReplacedMounts(statPath, repo.location.worktree, replacing, links, mounts)
     }
     if (flags.staged) {
       const staged = new Map<string, StagedEntry>()
@@ -210,8 +216,12 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
       for (const name of present) {
         const entry = tree.get(name)
         if (entry === undefined) continue
-        const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
         const where = under(repo.location.worktree, name)
+        if (entry.mode === GITLINK_MODE) {
+          await keepGitlink(dispatch, statPath, where, links)
+          continue
+        }
+        const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
         // The write direction takes the same component the other way round:
         // the entry needs a directory where it stands, so git replaces it with
         // one rather than writing through it. A link's target tree is left

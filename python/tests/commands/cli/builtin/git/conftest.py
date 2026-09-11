@@ -19,9 +19,11 @@ from pathlib import Path
 import pytest
 from dulwich import porcelain
 from dulwich.index import ConflictedIndexEntry, Index, IndexEntry
+from dulwich.objects import Commit, Tree
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
+from mirage.commands.cli.builtin.git.constants import GITLINK
 from mirage.commands.cli.types import CLIDoors
 from mirage.resource.disk import DiskResource
 from mirage.types import MountMode
@@ -132,6 +134,67 @@ def make_branch(repo_path: Path, name: str) -> None:
         name (str): branch name, e.g. ``feat/git-cli``.
     """
     porcelain.branch_create(str(repo_path), name.encode())
+
+
+def commit_gitlink(repo_path: Path, name: str) -> None:
+    """Record a gitlink at a path and commit it.
+
+    Written straight into the index because reaching this state through
+    the CLI would need a submodule, and what the callers exercise is
+    what a verb does to a 160000 entry. It points at this repository's
+    own HEAD so the commit it names resolves here: an ordinary
+    submodule's does not, and the two failure modes differ.
+
+    Args:
+        repo_path (Path): the repository's working tree.
+        name (str): the path to record, repository-relative.
+    """
+    with Repo(str(repo_path)) as repo:
+        head = repo.refs[b"HEAD"]
+        index = repo.open_index()
+        index[name.encode()] = IndexEntry(ctime=0,
+                                          mtime=0,
+                                          dev=0,
+                                          ino=0,
+                                          mode=GITLINK,
+                                          uid=0,
+                                          gid=0,
+                                          size=0,
+                                          sha=head)
+        index.write()
+    porcelain.commit(str(repo_path),
+                     message=b"gitlink",
+                     author=AUTHOR,
+                     committer=AUTHOR)
+
+
+def branch_with_gitlink(repo_path: Path, branch: str, name: str) -> None:
+    """Write a branch whose tree records a gitlink, leaving HEAD alone.
+
+    The index is untouched on purpose: a branch switch onto a gitlink
+    is only reachable while the current branch does not carry one, and
+    committing it here would put it in HEAD's tree as well.
+
+    Args:
+        repo_path (Path): the repository's working tree.
+        branch (str): the branch to write, created from HEAD.
+        name (str): the path to record, repository-relative.
+    """
+    with Repo(str(repo_path)) as repo:
+        head = repo.refs[b"HEAD"]
+        tree = repo[repo[head].tree]
+        assert isinstance(tree, Tree)
+        tree.add(name.encode(), GITLINK, head)
+        repo.object_store.add_object(tree)
+        commit = Commit()
+        commit.tree = tree.id
+        commit.parents = [head]
+        commit.author = commit.committer = AUTHOR
+        commit.commit_time = commit.author_time = 0
+        commit.commit_timezone = commit.author_timezone = 0
+        commit.message = b"gitlink"
+        repo.object_store.add_object(commit)
+        repo.refs[f"refs/heads/{branch}".encode()] = commit.id
 
 
 def conflict_index(repo_path: Path, name: str) -> None:

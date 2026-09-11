@@ -24,7 +24,7 @@ from dulwich.repo import BaseRepo
 from mirage.commands.cli.builtin.git.changes import head_entries
 from mirage.commands.cli.builtin.git.checkout import (Tree, contents,
                                                       flat_tree, tree_of)
-from mirage.commands.cli.builtin.git.constants import HEAD
+from mirage.commands.cli.builtin.git.constants import GITLINK, HEAD
 from mirage.commands.cli.builtin.git.errors import GitError  # yapf: disable
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     NoRestorePathsError, NoWorkspaceError, UnknownPathspecError,
@@ -32,6 +32,7 @@ from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     UnresolvableSourceError)
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import (blocking_ancestor,
+                                                keep_gitlink,
                                                 refuse_replaced_mounts,
                                                 remove_empty_parents,
                                                 remove_file, remove_tree,
@@ -215,9 +216,15 @@ async def restore(
         # working-tree pass would leave the index moved and the tree
         # exactly as it was, which is the one outcome this verb has no
         # wording for.
+        # A gitlink is not written into the working tree at all, so it
+        # is neither read as a blob nor allowed to clear what stands at
+        # the name; keep_gitlink is the whole of what the entry asks
+        # for, and the preflight has nothing to say about it either.
+        replacing = sorted(name for name in present
+                           if tree[name.encode()][0] != GITLINK)
         if flags.worktree:
             await refuse_replaced_mounts(stat_path, location.worktree,
-                                         sorted(present), links, mounts)
+                                         replacing, links, mounts)
         if flags.staged:
             for name in present:
                 mode, sha = tree[name.encode()]
@@ -233,7 +240,7 @@ async def restore(
             await write_index(dispatch, location.gitdir, state)
         if flags.worktree:
             blobs = await asyncio.to_thread(
-                contents, repo, [tree[name.encode()][1] for name in present])
+                contents, repo, [tree[name.encode()][1] for name in replacing])
             # Removals first, because the two sets can name the same
             # place: restoring a directory over a file writes
             # ``slot/child`` where the file ``slot`` still sits, and the
@@ -257,6 +264,9 @@ async def restore(
             for name in sorted(present):
                 mode, sha = tree[name.encode()]
                 where = posixpath.join(location.worktree, name)
+                if mode == GITLINK:
+                    await keep_gitlink(dispatch, stat_path, where, links)
+                    continue
                 # The write direction takes the same component the
                 # other way round: the entry needs a directory where it
                 # stands, so git replaces it with one rather than

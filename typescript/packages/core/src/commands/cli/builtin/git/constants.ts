@@ -30,6 +30,12 @@ export const PERMISSION_BITS = 0o777
 // records a number and a tree records git's octal string, so both spellings
 // are real here and neither is a stand-in for the other.
 export const SYMLINK_MODE = '120000'
+/**
+ * A gitlink: the commit another repository is checked out at. It is not an
+ * object this repository holds, so nothing about it is written into the working
+ * tree; git only makes sure a directory stands at the name.
+ */
+export const GITLINK_MODE = '160000'
 
 // The symbolic ref every verb resolves first.
 export const HEAD = 'HEAD'

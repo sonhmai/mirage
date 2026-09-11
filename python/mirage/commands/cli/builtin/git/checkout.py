@@ -27,7 +27,7 @@ from mirage.commands.cli.builtin.git.branch import head_commit
 from mirage.commands.cli.builtin.git.changes import (ADDED, DELETED, MODIFIED,
                                                      head_entries,
                                                      work_changes)
-from mirage.commands.cli.builtin.git.constants import HEAD
+from mirage.commands.cli.builtin.git.constants import GITLINK, HEAD
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     BadStartPointError, BranchExistsError, CheckoutConflictError, GitError,
     NoWorkspaceError, RefLockError, ResolveIndexError, UnknownPathspecError,
@@ -35,6 +35,7 @@ from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
 from mirage.commands.cli.builtin.git.format import short, subject
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import (blocking_ancestor,
+                                                keep_gitlink,
                                                 refuse_replaced_mounts,
                                                 remove_empty_parents,
                                                 remove_file, remove_tree,
@@ -313,6 +314,10 @@ async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
     state = await read_index(dispatch, location.gitdir)
     state.conflicts.clear()
     changed = sorted(_written(before, after))
+    # A gitlink is not written into the working tree at all, so it is
+    # neither read as a blob nor allowed to clear what stands at the
+    # name; keep_gitlink is the whole of what the entry asks for.
+    replacing = [path for path in changed if after[path][0] != GITLINK]
     # Before the first removal, not at the entry that meets it: a
     # refusal halfway through leaves the entries already written
     # holding the target's content while HEAD and the index still name
@@ -321,9 +326,9 @@ async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
     await refuse_replaced_mounts(
         stat_path, location.worktree,
         [path.decode("utf-8", errors="replace")
-         for path in changed], links, mounts)
+         for path in replacing], links, mounts)
     blobs = await asyncio.to_thread(contents, repo,
-                                    [after[path][1] for path in changed])
+                                    [after[path][1] for path in replacing])
     # Removals first, and the emptied directories with them, because
     # the two sets name the same place whenever a branch records a file
     # where the other records a directory: writing ``slot/child`` while
@@ -339,6 +344,10 @@ async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
     for path in changed:
         name = path.decode("utf-8", errors="replace")
         mode, sha = after[path]
+        if mode == GITLINK:
+            await keep_gitlink(dispatch, stat_path,
+                               posixpath.join(location.worktree, name), links)
+            continue
         # Whatever the removals above did not take, a component above
         # the entry may still not be a directory: an ignored file or
         # link is in neither tree and in no collision list, so it

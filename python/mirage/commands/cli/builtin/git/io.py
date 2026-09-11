@@ -117,6 +117,37 @@ async def restore_entry(dispatch: DispatchFn,
                    mode=mode & PERMISSION_BITS)
 
 
+async def keep_gitlink(dispatch: DispatchFn, stat_path: StatPath, path: str,
+                       links: LinkView | None) -> None:
+    """Leave a submodule's working tree alone, but make sure it has one.
+
+    A 160000 entry names a commit in another repository, which this one
+    does not hold: reading it as a blob is either a miss (an ordinary
+    submodule keeps its objects in its own store) or, when the id does
+    happen to resolve here, an empty string written over the directory.
+    git does neither. It checks out no submodule content at all without
+    ``--recurse-submodules``, and all the entry asks of the working tree
+    is that a directory stand at the name: an existing one is left
+    exactly as it is, untracked work included, a regular file or a link
+    is replaced by an empty one, and a missing one is created. Pinned
+    against git 2.50.1.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        stat_path (StatPath): the data plane's stat, which dereferences.
+        path (str): absolute virtual path of the submodule.
+        links (LinkView | None): the name plane's link facts, None when
+            no namespace is wired.
+    """
+    linked = links is not None and links.stat_at(path) is not None
+    info = None if linked else await stat_path(path)
+    if info is not None and info.type is FileType.DIRECTORY:
+        return
+    if linked or info is not None:
+        await remove_file(dispatch, path)
+    await ensure_dir(dispatch, path)
+
+
 async def read_range(dispatch: DispatchFn, path: str, offset: int,
                      size: int) -> bytes:
     """Read a byte range of one virtual path.

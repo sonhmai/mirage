@@ -73,6 +73,10 @@ def split_revision(revision: str) -> tuple[str, tuple[AncestryStep, ...]]:
 
     Args:
         revision (str): revision as the user spelled it.
+
+    Raises:
+        AmbiguousArgumentError: when the suffix holds anything but
+            ancestry steps.
     """
     index = next(
         (i for i, ch in enumerate(revision) if ch in SUFFIXES),
@@ -83,6 +87,14 @@ def split_revision(revision: str) -> tuple[str, tuple[AncestryStep, ...]]:
     position = 0
     while position < len(rest):
         kind = rest[position]
+        # Only ``~`` and ``^`` are ancestry steps, and reading anything
+        # else as one is silent rather than loud: every other character
+        # counted as another first-parent hop, so ``HEAD^x`` resolved to
+        # ``HEAD^^`` and the caller was handed a commit it never named.
+        # git refuses the whole expression instead, and refuses
+        # ``main~٣`` with it, since the digits it counts are ASCII.
+        if kind not in SUFFIXES:
+            raise AmbiguousArgumentError(revision)
         position += 1
         digits = ""
         while position < len(rest) and rest[position] in "0123456789":

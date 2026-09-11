@@ -61,7 +61,15 @@ function splitPeel(revision: string): [string, string | null] {
  * because git forbids both characters in ref names, so neither can belong to the
  * base.
  *
+ * Only `~` and `^` are ancestry steps, and reading anything else as one is
+ * silent rather than loud: every other character counted as another
+ * first-parent hop, so `HEAD^x` resolved to `HEAD^^` and the caller was handed a
+ * commit it never named. git refuses the whole expression instead, and refuses
+ * `main~٣` with it, since the digits it counts are ASCII.
+ *
  * @param revision revision as the user spelled it
+ * @throws AmbiguousArgumentError when the suffix holds anything but ancestry
+ *   steps
  */
 function splitRevision(revision: string): [string, AncestryStep[]] {
   let index = revision.length
@@ -77,6 +85,7 @@ function splitRevision(revision: string): [string, AncestryStep[]] {
   let position = 0
   while (position < rest.length) {
     const kind = rest.charAt(position)
+    if (!SUFFIXES.includes(kind)) throw new AmbiguousArgumentError(revision)
     position += 1
     let digits = ''
     while (position < rest.length && /[0-9]/.test(rest.charAt(position))) {

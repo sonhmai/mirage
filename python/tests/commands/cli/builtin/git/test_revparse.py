@@ -45,11 +45,28 @@ def test_numeric_suffix_is_read():
 
 def test_unicode_digit_suffix_is_not_a_count():
     # python's \d and int() both read '٣' as 3, which TypeScript's [0-9]
-    # scan never consumes — the ancestry count stops at ASCII digits in
-    # both languages.
-    _base, steps = split_revision("main~٣")
-    assert [(s.first_parent, s.count) for s in steps] == [(True, 1),
-                                                          (False, 1)]
+    # scan never consumes: the ancestry count stops at ASCII digits in
+    # both languages. What is left over is not another step either, so
+    # the whole expression is refused, which is git's own answer.
+    with pytest.raises(AmbiguousArgumentError):
+        split_revision("main~٣")
+
+
+@pytest.mark.parametrize("revision",
+                         ["HEAD^x", "HEAD~x", "HEAD^-1", "HEAD~1z"])
+def test_a_suffix_that_is_not_a_step_is_refused(revision: str):
+    # Every character used to count as another first-parent hop, so
+    # ``HEAD^x`` resolved to ``HEAD^^`` and a tag was written at a
+    # commit nobody named.
+    with pytest.raises(AmbiguousArgumentError):
+        split_revision(revision)
+
+
+@pytest.mark.parametrize(
+    "revision",
+    ["HEAD^", "HEAD~", "HEAD^0", "HEAD^~", "HEAD~2^2~1", "HEAD^12"])
+def test_the_steps_git_does_take_still_parse(revision: str):
+    split_revision(revision)
 
 
 def test_parent_suffix_is_distinguished_from_ancestor():

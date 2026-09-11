@@ -115,7 +115,7 @@ git -C /repo tag -d v1.0
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `add`      | `-A` everything, `-u` tracked only, `-f` to stage an ignored path                                                                       |
 | `reset`    | mixed only, from HEAD; a pathspec limits it to those paths                                                                              |
-| `restore`  | worktree by default, `--staged` the index, `-SW` both; `--source` takes any tree-ish, spelled as a peel (`HEAD^{tree}`), a subtree (`HEAD:sub`) or a raw id, and is required before the first commit since the implicit HEAD source has nothing to read; a path it lacks is removed from the target, a path still in conflict is named rather than half-restored, and a file replaces a directory standing in its place, as it replaces a symlink standing on one of its parents |
+| `restore`  | worktree by default, `--staged` the index, `-SW` both; `--source` takes any tree-ish, spelled as a peel (`HEAD^{tree}`), a subtree (`HEAD:sub`) or a raw id, and is required before the first commit since the implicit HEAD source has nothing to read; a path it lacks is removed from the target, a path still in conflict is named rather than half-restored, a file replaces a directory standing in its place, as it replaces a symlink standing on one of its parents, and a gitlink keeps whatever working tree it has |
 | `rm`       | refuses a path with uncommitted work unless `-f`, a path a symlinked ancestor now hides included; `--cached` keeps the file; `-r` for a directory; `-q`, `--ignore-unmatch`; the index is written only once the working tree is done with, so a deletion the mount refuses leaves the entry staged as it stood |
 | `mv`       | files and directories, `-f` over an existing file and over the conflict stages it was holding, `-k` skips what cannot move, `-n` dry run, `-v`; two sources cannot land on one name, a directory and something inside it cannot both move, an unmerged path moves nowhere as a source, and a move that would cross a mount boundary at either end is refused rather than half-moved |
 | `commit`   | `-m` required, `--author "Name <email>"` optional                                                                                       |
@@ -312,6 +312,29 @@ serve, and inventing a name would put an unreviewed one into history.
   over the entry and the blob that just moved is the copy that
   disappears. An unmerged *source* still moves nowhere, and a plain `mv`
   onto an occupied destination is still the ordinary refusal.
+- **An ancestry suffix is only `~` and `^`.** Every other character
+  used to count as another first-parent hop, so `HEAD^x` resolved to
+  `HEAD^^` and `git tag release HEAD^x` wrote the tag at a commit
+  nobody named. The whole expression is refused now, which is git's own
+  answer, and `main~٣` goes with it: the count scans ASCII digits, so
+  what a unicode digit leaves behind is not a step either. The wording
+  follows the verb, since git's does: `tag` says
+  `Failed to resolve '<rev>' as a valid ref.` and `log` and `show` say
+  `ambiguous argument '<rev>'`. `HEAD^0`, `HEAD^~` and `HEAD~2^2~1` are
+  steps git takes and still parse.
+- **A gitlink is a directory placeholder, not a blob.** A `160000`
+  entry names a commit in another repository, which this one does not
+  hold, so reading it as content is either a miss or, when the id does
+  happen to resolve here, an empty string written over the whole
+  directory. git checks out no submodule content at all without
+  `--recurse-submodules`; all the entry asks of the working tree is
+  that a directory stand at the name, so an existing one is left
+  exactly as it is with its untracked work, a regular file or a link is
+  replaced by an empty directory, and a missing one is created. Nothing
+  else about a submodule is supported: `status` still reads the
+  directory as an ordinary untracked one, which is why a branch switch
+  onto a gitlink the current branch also carries is refused before it
+  gets this far.
 - **`reset` takes no revision.** Real git resets the index to any commit
   named as an operand; this build resets it from HEAD only and refuses a
   revision by name rather than doing nothing quietly.

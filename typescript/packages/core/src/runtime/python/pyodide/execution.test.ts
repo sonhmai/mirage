@@ -20,6 +20,105 @@ import { PrefixResolver } from '../../resolver.ts'
 import { loadPyodideRuntime } from './loader.ts'
 import { PyodideExecution } from './execution.ts'
 describe('Python guest module', { timeout: 120_000 }, () => {
+  it('restores process globals after closing output and reporting SystemExit', async () => {
+    const pyodide = await loadPyodideRuntime()
+    const guest = new PyodideExecution(pyodide)
+    pyodide.runPython(`
+import os, sys, warnings
+def process_state():
+    return (dict(os.environ), list(sys.path), list(sys.argv), os.getcwd(),
+            sys.dont_write_bytecode, dict(sys._xoptions), list(warnings.filters),
+            sys.stdin, sys.stdout, sys.stderr)
+saved_state = process_state()
+`)
+    try {
+      const result = guest.run(
+        {
+          code: "import os, sys; os.environ['CHANGED'] = '1'; sys.path.append('/changed'); os.chdir('/tmp'); print('saved'); sys.stdout.close(); sys.stderr.close(); sys.exit('original exit')",
+          argv: ['probe'],
+          cwd: '/',
+          flags: { B: true, X: ['probe=1'], W: ['ignore'] },
+          script_cli: false,
+          env: {},
+          stdin: null,
+        },
+        () => undefined,
+        () => undefined,
+      )
+      expect(result[2]).toBe(1)
+      expect(new TextDecoder().decode(result[0])).toBe('saved\n')
+      expect(new TextDecoder().decode(result[1])).toBe('original exit\n')
+      expect(pyodide.runPython('process_state() == saved_state')).toBe(true)
+    } finally {
+      guest.close()
+    }
+  })
+
+  it('preserves closed and detached output in run, eval and REPL and restores streams', async () => {
+    const pyodide = await loadPyodideRuntime()
+    const guest = new PyodideExecution(pyodide)
+    const decode = (data: Uint8Array) => new TextDecoder().decode(data)
+    pyodide.runPython('import sys; saved_streams = (sys.stdin, sys.stdout, sys.stderr)')
+    try {
+      for (const mode of ['run', 'eval', 'repl']) {
+        for (const operation of [
+          'sys.stdout.close(); sys.stderr.close()',
+          'sys.stdout.buffer.close(); sys.stderr.buffer.close()',
+          'sys.stdout.detach().close(); sys.stderr.detach().close()',
+          'sys.stdout = None; sys.stderr = None',
+          "sys.stdout.reconfigure(write_through=False, line_buffering=False); sys.stdout.write('buffered')",
+        ]) {
+          const code = `import sys; print('out'); sys.stderr.write('err'); ${operation}`
+          let stdout: Uint8Array
+          let stderr: Uint8Array
+          if (mode === 'run') {
+            const result = guest.run(
+              { code, argv: [], cwd: '', flags: {}, script_cli: false, env: {}, stdin: null },
+              () => undefined,
+              () => undefined,
+            )
+            expect(result[2]).toBe(0)
+            ;[stdout, stderr] = result
+          } else if (mode === 'eval') {
+            const result = guest.evaluate(`${code}; None`, {})
+            expect(result[3]).toBe(true)
+            ;[, stdout, stderr] = result
+          } else {
+            // An exec statement avoids REPL displayhook output for write()'s return value.
+            const result = guest.repl(`exec(${JSON.stringify(code)})`, 'streams', {})
+            expect(result[2]).toBe(0)
+            ;[stdout, stderr] = result
+          }
+          expect(decode(stdout)).toBe(`out\n${operation.includes('reconfigure') ? 'buffered' : ''}`)
+          expect(decode(stderr)).toBe('err')
+          expect(pyodide.runPython('saved_streams == (sys.stdin, sys.stdout, sys.stderr)')).toBe(
+            true,
+          )
+          expect(decode(guest.evaluate("print('next')", {})[1])).toBe('next\n')
+        }
+      }
+      for (const code of [
+        "import sys; sys.stderr.close(); raise ValueError('original failure')",
+        "import sys; sys.stderr.detach(); raise ValueError('original failure')",
+      ]) {
+        const result = guest.evaluate(code, {})
+        expect(result[3]).toBe(false)
+        expect(decode(result[2])).toContain('ValueError: original failure')
+      }
+      const binary = guest.evaluate(
+        'import sys; sys.stdout.buffer.write(bytes([0, 255])); sys.stdout.close()',
+        {},
+      )
+      expect([...binary[1]]).toEqual([0, 255])
+      expect(binary[3]).toBe(true)
+      const closed = guest.evaluate("import sys; sys.stdout.close(); print('refused')", {})
+      expect(closed[3]).toBe(false)
+      expect(decode(closed[2])).toContain('ValueError: I/O operation on closed file')
+    } finally {
+      guest.close()
+    }
+  })
+
   it('releases converted arguments and keeps helper globals outside guest programs', async () => {
     const pyodide = await loadPyodideRuntime()
     const toPy = pyodide.toPy

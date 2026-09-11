@@ -808,6 +808,33 @@
           }
         }
       ]
+    },
+    {
+      "id": "output_survives_failure_and_reuse",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print('before failure'); raise ValueError('original failure')\"",
+          "expect": {
+            "exit": 1,
+            "stdout": "before failure\n",
+            "stderr_contains": "original failure"
+          }
+        },
+        {
+          "command": "python3 -c \"print('next')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "next\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

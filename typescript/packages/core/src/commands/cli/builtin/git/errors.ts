@@ -637,6 +637,33 @@ export class RemovePathError extends GitError {
 }
 
 /**
+ * A working-tree removal that would take a nested mount with it.
+ *
+ * A mount nested inside the repository is served by another resource entirely,
+ * so removing the directory it stands in empties that backend rather than the
+ * repository: the store behind it is gone, and no branch ever recorded a line
+ * of it. mirage refuses instead, which is the rule `MountRootPolicy` already
+ * enforces for `rm` and `mv` at the command tier; a git verb reaches the
+ * dispatcher directly, so it has to ask for itself.
+ *
+ * The mount is named only when the session may be told about it. A hidden one
+ * blocks the removal just the same, because avoiding a boundary and naming it
+ * are two different questions, and naming a hidden mount is the one thing the
+ * hide exists to prevent.
+ */
+export class MountInWayError extends GitError {
+  constructor(path: string, mount: string | null = null) {
+    const held =
+      mount === null
+        ? 'it holds a mount root'
+        : mount === path
+          ? 'it is a mount root'
+          : `'${mount}' is a mount root`
+    super(`cannot remove '${path}': ${held}`)
+  }
+}
+
+/**
  * `mv` with fewer than two operands.
  *
  * git prints its usage and exits 129. Only the two synopsis lines are kept: the
@@ -810,6 +837,23 @@ export class TagNotFoundError extends GitError {
 export class ListModeOnlyError extends GitError {
   constructor() {
     super("the '-n' option is only allowed in list mode")
+  }
+}
+
+/**
+ * `tag -n<num>` with a count below the one git reserves.
+ *
+ * `-n` carries an optional count, and git's parser starts that count at -1 to
+ * mean "not given at all". `-n-1` is therefore not a listing flag at all:
+ * `git tag -d -n-1 v` deletes and `git tag -n-1 -a v -m m` creates, where a
+ * real `-n` refuses both. Anything below -1 is a count, and a count has to be
+ * positive, which git discovers while parsing the format it lists with rather
+ * than while parsing the option: the list-mode refusal outranks this one, and
+ * it fires in a repository holding no tags at all. Pinned against git 2.50.1.
+ */
+export class TagLinesError extends GitError {
+  constructor(lines: number) {
+    super(`positive value expected contents:lines=${String(lines)}`)
   }
 }
 

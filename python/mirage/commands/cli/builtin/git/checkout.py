@@ -49,13 +49,13 @@ from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import HeadRef, RepoLocation
 from mirage.commands.cli.builtin.git.util import (  # yapf: disable
-    check_operands, escaped, fatal, links_of)
+    check_operands, escaped, fatal, links_of, mounts_of)
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatPath
+from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType
 
@@ -284,7 +284,7 @@ def _lost_directories(writing: Tree, untracked: list[str]) -> list[str]:
 
 async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
                   location: RepoLocation, before: Tree, after: Tree,
-                  links: LinkView | None) -> None:
+                  links: LinkView | None, mounts: MountView | None) -> None:
     """Make the working tree and index match the tree being switched to.
 
     Only paths the two trees disagree about are touched, so a file that
@@ -305,6 +305,9 @@ async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
         links (LinkView | None): the name plane's link facts, so an
             entry that changes between a link and a file replaces what
             is there rather than writing through it.
+        mounts (MountView | None): the name plane's mount boundaries,
+            so a directory holding a nested mount is refused rather
+            than emptied of a backend no branch recorded.
     """
     state = await read_index(dispatch, location.gitdir)
     state.conflicts.clear()
@@ -322,7 +325,7 @@ async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
         name = path.decode("utf-8", errors="replace")
         where = posixpath.join(location.worktree, name)
         await remove_file(dispatch, where)
-        await remove_empty_parents(dispatch, where, location.worktree)
+        await remove_empty_parents(dispatch, where, location.worktree, mounts)
     for path in changed:
         name = path.decode("utf-8", errors="replace")
         mode, sha = after[path]
@@ -347,7 +350,7 @@ async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
         if links is None or links.stat_at(where) is None:
             info = await stat_path(where)
             if info is not None and info.type is FileType.DIRECTORY:
-                await remove_tree(dispatch, where, links)
+                await remove_tree(dispatch, where, links, mounts)
         await restore_entry(dispatch, where, mode, blobs[sha], links)
     # The index is git's two-way merge, not a copy of the target tree:
     # only a path the two trees disagree about is decided by the
@@ -453,10 +456,10 @@ def _stage_letters(before: Tree, entries: dict[bytes,
 
 
 async def move_head(dispatch: DispatchFn, stat_path: StatPath,
-                    links: LinkView | None, repo: BaseRepo,
-                    location: RepoLocation, head: HeadRef, commit: Commit,
-                    target: str, ref: Ref | None, creating: bool,
-                    in_place: bool) -> dict[str, str]:
+                    links: LinkView | None, mounts: MountView | None,
+                    repo: BaseRepo, location: RepoLocation, head: HeadRef,
+                    commit: Commit, target: str, ref: Ref | None,
+                    creating: bool, in_place: bool) -> dict[str, str]:
     """Move HEAD, the index and the working tree to a commit.
 
     The one procedure ``checkout`` and ``switch`` share, since the two
@@ -474,6 +477,8 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
         stat_path (StatPath): dispatcher-backed stat, both channels.
         links (LinkView | None): the name plane's link facts, None
             outside a workspace.
+        mounts (MountView | None): the name plane's mount boundaries,
+            None outside a workspace.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD pointed at before the move.
@@ -542,7 +547,8 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
     lost = _lost_directories(writing, found.untracked)
     if blocked or overwritten or lost:
         raise CheckoutConflictError(blocked, overwritten, lost)
-    await _switch(dispatch, stat_path, repo, location, before, after, links)
+    await _switch(dispatch, stat_path, repo, location, before, after, links,
+                  mounts)
     await _attach(dispatch, repo, location, head, commit, target, ref,
                   creating)
     return carried
@@ -608,10 +614,10 @@ async def checkout(
         if held is not None:
             raise RefLockError(ref.decode(), held)
         attached = creating or ref in known
-        moved = await move_head(dispatch, stat_path, links_of(doors), repo,
-                                location, head, commit, target,
-                                ref if attached else None, creating, creating
-                                and start is None)
+        moved = await move_head(dispatch, stat_path, links_of(doors),
+                                mounts_of(doors), repo, location, head, commit,
+                                target, ref if attached else None, creating,
+                                creating and start is None)
     except GitError as exc:
         return fatal(exc)
     carried = "".join(f"{letter}\t{path}\n"

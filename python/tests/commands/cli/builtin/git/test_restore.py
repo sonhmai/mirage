@@ -18,8 +18,12 @@ import pytest
 from dulwich.index import Index, IndexEntry
 from dulwich.repo import Repo
 
+from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.restore import index_tree, parse_flags
 from mirage.commands.spec.types import FlagView
+from mirage.resource.disk import DiskResource
+from mirage.types import MountMode
+from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import conflict_index
 
 
@@ -473,3 +477,55 @@ async def test_the_bit_is_cleared_the_other_way_too(git_rw):
     listed = await git_rw.execute("ls -l /repo/p.txt")
     assert (listed.stdout or b"").startswith(b"-rw-r--r--")
     assert (await run(git_rw, "status --short"))[1] == b""
+
+
+@pytest.mark.asyncio
+async def test_a_directory_holding_a_nested_mount_is_refused(
+        repo_path: Path, tmp_path: Path):
+    # The tree records a file where the working tree has a directory,
+    # so restoring it means removing the directory whole. A nested
+    # mount inside it is a different backend entirely: readdir merges
+    # it into the listing, so the walk would empty a store no branch
+    # ever recorded and then take its root with it.
+    inner = tmp_path / "inner"
+    inner.mkdir()
+    (inner / "precious.txt").write_text("precious\n", encoding="utf-8")
+    with Workspace(
+        {
+            "/repo/": DiskResource(root=str(repo_path)),
+            "/repo/slot/data/": DiskResource(root=str(inner)),
+        },
+            mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        await ws.execute("printf 'i am a file\n' > /repo/slot")
+        assert (await run(ws, "add slot"))[0] == 0
+        assert (await run(ws, "commit -m slotted"))[0] == 0
+        await ws.execute("rm /repo/slot")
+        await ws.execute("mkdir /repo/slot")
+        code, _out, err = await run(ws, "restore slot")
+        assert code == 128
+        assert err == (b"fatal: cannot remove '/repo/slot': "
+                       b"'/repo/slot/data' is a mount root\n")
+    assert (inner / "precious.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_pruning_a_parent_leaves_a_mount_root_alone(
+        repo_path: Path, tmp_path: Path):
+    # The other removal path: git drops a directory the moment its last
+    # tracked file leaves it, and the mount root is the one directory
+    # that is not git's to drop.
+    inner = tmp_path / "held"
+    inner.mkdir()
+    with Workspace(
+        {
+            "/repo/": DiskResource(root=str(repo_path)),
+            "/repo/slot/data/": DiskResource(root=str(inner)),
+        },
+            mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        await ws.execute("printf 'x\n' > /repo/slot/data/x.txt")
+        assert (await run(ws, "add slot/data/x.txt"))[0] == 0
+        assert (await run(ws, "commit -m inside"))[0] == 0
+        assert (await run(ws, "rm slot/data/x.txt"))[0] == 0
+    assert inner.is_dir()

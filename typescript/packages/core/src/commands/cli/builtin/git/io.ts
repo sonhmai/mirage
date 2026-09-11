@@ -16,8 +16,10 @@ import { FileType, LINK_TARGET_KEY, PathSpec } from '../../../../types.ts'
 import type { FileStat } from '../../../../types.ts'
 import { parent, posixNormpath } from '../../../../utils/path.ts'
 import { isMissingPath } from '../../../../utils/errors.ts'
-import type { LinkView, StatPath } from '../../../../ops/types.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
+import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
 import { PERMISSION_BITS, SYMLINK_MODE } from './constants.ts'
+import { MountInWayError } from './errors.ts'
 import { basename } from './path.ts'
 import type { Dispatch } from './types.ts'
 
@@ -282,6 +284,32 @@ export async function renamePath(
 }
 
 /**
+ * Refuse a removal that would take a nested mount with it.
+ *
+ * A mount nested inside the working tree is served by another resource, and
+ * `readdir` merges it into the parent's listing, so a walk that empties a
+ * directory walks straight into the child backend and unlinks what is in it.
+ * No branch ever recorded any of that, and the `rmdir` that follows takes the
+ * mount root itself. Asking the mount table is the only way to see the
+ * boundary: the parent backend cannot.
+ *
+ * Two questions, two fields, the way `MountView` says: the boundary is
+ * *avoided* by the unfiltered list, so a mount this session cannot see still
+ * blocks the removal, and it is *named* from the visible one, since naming a
+ * hidden mount is what the hide exists to prevent.
+ *
+ * @param mounts the name plane's mount boundaries, null when none is wired
+ * @param path absolute virtual path about to be removed
+ */
+export function refuseMount(mounts: MountView | null, path: string): void {
+  if (mounts === null) return
+  if (mounts.isRoot(path)) throw new MountInWayError(path, path)
+  if (mounts.descendants(path).length === 0) return
+  const named = [...mounts.visibleDescendants(path)].sort(compareCodePoints)
+  throw new MountInWayError(path, named[0] ?? null)
+}
+
+/**
  * Delete a path and everything under it, tracked or not.
  *
  * git replaces a tree entry rather than merging with it, so a directory
@@ -304,12 +332,18 @@ export async function renamePath(
  * @param dispatch workspace op dispatcher
  * @param path absolute virtual path to clear
  * @param links the name plane's link facts, null when no namespace is wired
+ * @param mounts the name plane's mount boundaries, null when none is wired
  */
 export async function removeTree(
   dispatch: Dispatch,
   path: string,
   links: LinkView | null,
+  mounts: MountView | null,
 ): Promise<void> {
+  // Before the first deletion rather than at the boundary itself, so a mount
+  // deep under the directory costs the caller nothing: the scan sees every
+  // depth at once and the tree is still whole when it refuses.
+  refuseMount(mounts, path)
   let entries: string[] = []
   try {
     entries = await readNames(dispatch, path)
@@ -330,7 +364,7 @@ export async function removeTree(
       await removeFile(dispatch, child)
       continue
     }
-    await removeTree(dispatch, child, links)
+    await removeTree(dispatch, child, links, mounts)
   }
   try {
     await dispatch('rmdir', PathSpec.fromStrPath(path))
@@ -354,15 +388,22 @@ export async function removeTree(
  * @param dispatch workspace op dispatcher
  * @param path the file that was removed
  * @param stop the working tree root
+ * @param mounts the name plane's mount boundaries, null when none is wired
  */
 export async function removeEmptyParents(
   dispatch: Dispatch,
   path: string,
   stop: string,
+  mounts: MountView | null,
 ): Promise<void> {
   const root = stop.replace(/\/+$/, '') || '/'
   let current = parent(path)
   while (current !== root && current.startsWith(root)) {
+    // A mount root is not a directory git made, and an empty one is still a
+    // whole backend: removing it here would destroy the store behind it as a
+    // side effect of tidying up. The walk stops rather than refusing, because
+    // nothing the caller asked for has failed.
+    if (mounts?.isRoot(current) === true) return
     if ((await readNames(dispatch, current)).length > 0) return
     try {
       await dispatch('rmdir', PathSpec.fromStrPath(current))

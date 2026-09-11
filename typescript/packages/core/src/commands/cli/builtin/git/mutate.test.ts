@@ -37,7 +37,15 @@ import { MountMode } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
 import { blockingRef } from './refs.ts'
-import { ensureDir, readNames, readOptional, removeTree } from './io.ts'
+import {
+  ensureDir,
+  readNames,
+  readOptional,
+  refuseMount,
+  removeEmptyParents,
+  removeTree,
+} from './io.ts'
+import type { MountView } from '../../../../ops/types.ts'
 import type { Dispatch } from './types.ts'
 
 const BUILDER = fileURLToPath(
@@ -1639,6 +1647,111 @@ describe('a rename that would leave a mount behind', () => {
   })
 })
 
+describe('a working-tree removal that would take a mount with it', () => {
+  it('refuses to replace a directory holding one', async () => {
+    // The tree records a file where the working tree has a directory, so
+    // restoring it means removing the directory whole. A nested mount inside
+    // is another backend entirely: readdir merges it into the listing, so the
+    // walk would empty a store no branch recorded and then take its root.
+    const h = await harness(undefined, '/repo/slot/data')
+    await write(h, 'slot/data/precious.md', 'precious\n')
+    // The harness creates the mount's parent so `ensureDir` cannot stop at
+    // it; dropped again here, because what is committed at this name is a
+    // file and only the parent backend can hold it.
+    await h.ws.dispatch('rmdir', '/repo/slot')
+    await h.ws.execute("printf 'i am a file\n' > /repo/slot")
+    expect((await h.run('add slot'))[0]).toBe(0)
+    expect((await h.run('commit -m slotted'))[0]).toBe(0)
+    await h.ws.dispatch('unlink', '/repo/slot')
+    await h.ws.dispatch('mkdir', '/repo/slot')
+    const [code, , err] = await h.run('restore slot')
+    expect([code, err]).toEqual([
+      128,
+      "fatal: cannot remove '/repo/slot': '/repo/slot/data' is a mount root\n",
+    ])
+    expect(await readOptional(h.dispatch, '/repo/slot/data/precious.md')).not.toBeNull()
+  })
+
+  it('leaves a mount root alone when pruning empty parents', async () => {
+    // The other removal path: git drops a directory the moment its last
+    // tracked file leaves it, and the mount root is not git's to drop.
+    const h = await harness(undefined, '/repo/slot/data')
+    await write(h, 'slot/data/x.md', 'x\n')
+    expect((await h.run('add slot/data/x.md'))[0]).toBe(0)
+    expect((await h.run('commit -m inside'))[0]).toBe(0)
+    expect((await h.run('rm slot/data/x.md'))[0]).toBe(0)
+    expect(await readNames(h.dispatch, '/repo/slot/data')).toEqual([])
+  })
+})
+
+describe('git rm meeting a link above the tracked path', () => {
+  it('refuses it as a local modification', async () => {
+    // The walk lstats, so the link hides the tracked file and the path reads
+    // as deleted, which is what git's own status says too. git rm does not
+    // read it that way: its lstat resolves the leading component and finds
+    // another file entirely.
+    const h = await harness()
+    await h.ws.execute('mkdir /repo/slot')
+    await write(h, 'slot/child', 'tracked\n')
+    await h.ws.execute('mkdir /repo/away')
+    await h.ws.execute("printf 'other\n' > /repo/away/child")
+    expect((await h.run('add slot/child'))[0]).toBe(0)
+    expect((await h.run('commit -m slotted'))[0]).toBe(0)
+    await h.ws.execute('rm -rf /repo/slot')
+    await h.ws.execute('ln -s /repo/away /repo/slot')
+    expect((await h.run('status --short'))[1]).toContain(' D slot/child\n')
+    const [code, , err] = await h.run('rm slot/child')
+    expect([code, err]).toEqual([
+      1,
+      'error: the following file has local modifications:\n' +
+        '    slot/child\n' +
+        '(use --cached to keep the file, or -f to force removal)\n',
+    ])
+    expect(await readOptional(h.dispatch, '/repo/away/child')).not.toBeNull()
+  })
+
+  it('removes it when the link points past it', async () => {
+    // Nothing at the other end, so git has nothing to lose and stages the
+    // deletion.
+    const h = await harness()
+    await h.ws.execute('mkdir /repo/slot')
+    await write(h, 'slot/child', 'tracked\n')
+    await h.ws.execute('mkdir /repo/away')
+    expect((await h.run('add slot/child'))[0]).toBe(0)
+    expect((await h.run('commit -m slotted'))[0]).toBe(0)
+    await h.ws.execute('rm -rf /repo/slot')
+    await h.ws.execute('ln -s /repo/away /repo/slot')
+    expect(await h.run('rm slot/child')).toEqual([0, "rm 'slot/child'\n", ''])
+  })
+})
+
+describe('git tag -n with a count git reserves', () => {
+  it('refuses anything below the sentinel', async () => {
+    const h = await harness()
+    await h.run('tag v1')
+    expect(await h.run('tag -n-2')).toEqual([
+      128,
+      '',
+      'fatal: positive value expected contents:lines=-2\n',
+    ])
+    // The format is parsed before any ref is read, so a pattern matching
+    // nothing does not get the line off the hook.
+    expect((await h.run('tag -n-5 nosuch'))[0]).toBe(128)
+    // And the list-mode refusal still outranks it.
+    expect((await h.run('tag -d -n-2 v1'))[2]).toBe(
+      "fatal: the '-n' option is only allowed in list mode\n",
+    )
+  })
+
+  it('reads -n-1 as no -n at all', async () => {
+    const h = await harness()
+    await h.run('tag v1')
+    expect((await h.run('tag -d -n-1 v1'))[0]).toBe(0)
+    expect(await h.run('tag -n-1 -a later -m m')).toEqual([0, '', ''])
+    expect(await h.run('tag -n-1')).toEqual([0, 'later\n', ''])
+  })
+})
+
 describe('a restore source spelled as a tree expression', () => {
   it('takes a tree peel', async () => {
     // git's own help says --source <tree-ish>, and a peel is the ordinary way
@@ -2069,7 +2182,7 @@ describe('removeTree meeting a link', () => {
 
   it('unlinks it without descending', async () => {
     const { calls, dispatch } = recorder()
-    await removeTree(dispatch, '/repo/slot', links)
+    await removeTree(dispatch, '/repo/slot', links, null)
     expect(calls).toContainEqual(['unlink', '/repo/slot/link'])
     // The whole point: readdir dereferences, so listing the link at all is the
     // walk stepping outside the directory being replaced.
@@ -2079,8 +2192,100 @@ describe('removeTree meeting a link', () => {
 
   it('has nothing to ask without a namespace', async () => {
     const { calls, dispatch } = recorder()
-    await removeTree(dispatch, '/repo/slot', null)
+    await removeTree(dispatch, '/repo/slot', null, null)
     expect(calls).toContainEqual(['readdir', '/repo/slot/link'])
+  })
+})
+
+describe('a removal meeting a mount boundary', () => {
+  /** A mount view over a fixed list of roots. */
+  function mountsOver(roots: string[], hidden: string[] = []): MountView {
+    const unseen = new Set(hidden)
+    return {
+      descendants: (path: string) => roots.filter((root) => root.startsWith(`${path}/`)),
+      visibleDescendants: (path: string) =>
+        roots.filter((root) => root.startsWith(`${path}/`) && !unseen.has(root)),
+      isRoot: (path: string) => roots.includes(path),
+      rootOf: () => null,
+    } as unknown as MountView
+  }
+
+  it('refuses the mount root itself', () => {
+    expect(() => {
+      refuseMount(mountsOver(['/repo/slot']), '/repo/slot')
+    }).toThrow("cannot remove '/repo/slot': it is a mount root")
+  })
+
+  it('names a nested mount, in order', () => {
+    expect(() => {
+      refuseMount(mountsOver(['/repo/slot/z', '/repo/slot/a']), '/repo/slot')
+    }).toThrow("cannot remove '/repo/slot': '/repo/slot/a' is a mount root")
+  })
+
+  it('refuses a hidden mount without naming it', () => {
+    // Avoiding a boundary and naming one are two different questions, and a
+    // hidden mount's name is what the hide exists to withhold.
+    expect(() => {
+      refuseMount(mountsOver(['/repo/slot/data'], ['/repo/slot/data']), '/repo/slot')
+    }).toThrow("cannot remove '/repo/slot': it holds a mount root")
+  })
+
+  it('lets an unobstructed path through', () => {
+    expect(() => {
+      refuseMount(mountsOver(['/other/mount']), '/repo/slot')
+    }).not.toThrow()
+    expect(() => {
+      refuseMount(null, '/repo/slot')
+    }).not.toThrow()
+  })
+
+  it('refuses before the walk deletes anything', async () => {
+    const { calls, dispatch } = (() => {
+      const seen: [string, string][] = []
+      const fn = ((op: string, path: unknown) => {
+        const where = typeof path === 'string' ? path : (path as { virtual: string }).virtual
+        seen.push([op, where])
+        if (op === 'readdir') return Promise.resolve([[], new IOResult()])
+        return Promise.resolve([null, new IOResult()])
+      }) as unknown as Dispatch
+      return { calls: seen, dispatch: fn }
+    })()
+    await expect(
+      removeTree(dispatch, '/repo/slot', null, mountsOver(['/repo/slot/data'])),
+    ).rejects.toThrow('is a mount root')
+    // Nothing at all: the refusal is the first thing the walk does, so the
+    // directory is still whole when the caller hears about it.
+    expect(calls).toEqual([])
+  })
+
+  it('stops pruning empty parents at a mount root', async () => {
+    const calls: [string, string][] = []
+    const dispatch = ((op: string, path: unknown) => {
+      const where = typeof path === 'string' ? path : (path as { virtual: string }).virtual
+      calls.push([op, where])
+      if (op === 'readdir') return Promise.resolve([[], new IOResult()])
+      return Promise.resolve([null, new IOResult()])
+    }) as unknown as Dispatch
+    await removeEmptyParents(
+      dispatch,
+      '/repo/slot/data/x.txt',
+      '/repo',
+      mountsOver(['/repo/slot/data']),
+    )
+    expect(calls).not.toContainEqual(['rmdir', '/repo/slot/data'])
+    expect(calls).not.toContainEqual(['rmdir', '/repo/slot'])
+  })
+
+  it('still prunes an ordinary directory', async () => {
+    const calls: [string, string][] = []
+    const dispatch = ((op: string, path: unknown) => {
+      const where = typeof path === 'string' ? path : (path as { virtual: string }).virtual
+      calls.push([op, where])
+      if (op === 'readdir') return Promise.resolve([[], new IOResult()])
+      return Promise.resolve([null, new IOResult()])
+    }) as unknown as Dispatch
+    await removeEmptyParents(dispatch, '/repo/docs/x.txt', '/repo', mountsOver([]))
+    expect(calls).toContainEqual(['rmdir', '/repo/docs'])
   })
 })
 

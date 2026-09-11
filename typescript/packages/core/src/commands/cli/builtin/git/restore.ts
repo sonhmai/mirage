@@ -186,6 +186,7 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
       // where the directory still sits. Nothing is read back from the
       // working tree, so emptying it first is free.
       const links = doors.ns?.links ?? null
+      const mounts = doors.ns?.mounts ?? null
       for (const name of absent) {
         const path = under(repo.location.worktree, name)
         // A component above the entry that is not a directory is not a way
@@ -196,7 +197,7 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
         const blocked = await blockingAncestor(statPath, repo.location.worktree, name, links)
         if (blocked !== null) continue
         await removeFile(dispatch, path)
-        await removeEmptyParents(dispatch, path, repo.location.worktree)
+        await removeEmptyParents(dispatch, path, repo.location.worktree, mounts)
       }
       for (const name of present) {
         const entry = tree.get(name)
@@ -220,7 +221,7 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
         if ((links?.statAt(where) ?? null) === null) {
           const info = await statPath(where)
           if (info !== null && info.type === FileType.DIRECTORY) {
-            await removeTree(dispatch, where, links)
+            await removeTree(dispatch, where, links, mounts)
           }
         }
         await restoreEntry(dispatch, where, entry.mode, blob, links)

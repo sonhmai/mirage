@@ -18,7 +18,8 @@ from dataclasses import dataclass
 
 from dulwich.index import IndexEntry
 
-from mirage.commands.cli.builtin.git.changes import (MODIFIED, head_entries,
+from mirage.commands.cli.builtin.git.changes import (DELETED, MODIFIED,
+                                                     head_entries,
                                                      work_changes)
 from mirage.commands.cli.builtin.git.errors import GitError  # yapf: disable
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
@@ -31,13 +32,13 @@ from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
 from mirage.commands.cli.builtin.git.util import (  # yapf: disable
-    check_operands, escaped, fatal, links_of, start_point)
+    check_operands, escaped, fatal, links_of, mounts_of, start_point)
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatPath
+from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType
 
@@ -111,10 +112,46 @@ def select(location: RepoLocation, start: str, operands: tuple[str, ...],
     return sorted(selected)
 
 
+async def shadowed(links: LinkView | None, worktree: str, paths: list[str],
+                   missing: dict[str, str]) -> set[str]:
+    """Which absent paths a link above them is only hiding.
+
+    git lstats a tracked path to decide whether it still has local work
+    to lose, and that lstat resolves every component above the file, so
+    a symlink standing where a directory was does not hide the file: it
+    points the check at whatever lies at the other end, which is some
+    other file entirely and therefore a local change. The walk answers
+    the opposite way on purpose, because git's own diff refuses to
+    follow a leading link and reports the path deleted, which is why
+    ``git status`` says ``D`` here and ``git rm`` still refuses.
+    Nothing is compared: two files agreeing byte for byte are still two
+    files, and git refuses that case too. Pinned against git 2.50.1.
+
+    Args:
+        links (LinkView | None): the name plane's link facts, None when
+            no namespace is wired.
+        worktree (str): absolute virtual path of the working tree root.
+        paths (list[str]): the selected paths that hold an index entry.
+        missing (dict[str, str]): what the walk said about each path.
+    """
+    if links is None:
+        return set()
+    found: set[str] = set()
+    for path in paths:
+        if missing.get(path) != DELETED:
+            continue
+        absolute = posixpath.join(worktree, path)
+        if links.resolve(absolute) == absolute:
+            continue
+        if await links.exists(absolute):
+            found.add(path)
+    return found
+
+
 async def refuse_lost_work(dispatch: DispatchFn, location: RepoLocation,
                            tree: Tree, entries: dict[bytes, IndexEntry],
-                           found: WorkTree, paths: list[str],
-                           cached: bool) -> None:
+                           found: WorkTree, paths: list[str], cached: bool,
+                           links: LinkView | None) -> None:
     """Refuse a removal that would throw away uncommitted work.
 
     git's own three-way test per path: whether the index differs from
@@ -133,9 +170,12 @@ async def refuse_lost_work(dispatch: DispatchFn, location: RepoLocation,
         found (WorkTree): what the walk of the working tree found.
         paths (list[str]): the selected paths that hold an index entry.
         cached (bool): whether ``--cached`` was given.
+        links (LinkView | None): the name plane's link facts, None when
+            no namespace is wired.
     """
     chosen = {path.encode(): entries[path.encode()] for path in paths}
     unstaged = await work_changes(dispatch, location.worktree, chosen, found)
+    hidden = await shadowed(links, location.worktree, paths, unstaged)
     both: list[str] = []
     staged: list[str] = []
     local: list[str] = []
@@ -144,7 +184,7 @@ async def refuse_lost_work(dispatch: DispatchFn, location: RepoLocation,
         recorded = tree.get(path.encode())
         staged_changes = (recorded is None or recorded[1] != entry.sha
                           or recorded[0] != entry.mode)
-        local_changes = unstaged.get(path) == MODIFIED
+        local_changes = unstaged.get(path) == MODIFIED or path in hidden
         if local_changes and staged_changes:
             both.append(path)
         elif not cached:
@@ -158,7 +198,8 @@ async def refuse_lost_work(dispatch: DispatchFn, location: RepoLocation,
 
 async def clear_worktree(dispatch: DispatchFn, stat_path: StatPath,
                          location: RepoLocation, selected: list[str],
-                         lines: str, links: LinkView | None) -> None:
+                         lines: str, links: LinkView | None,
+                         mounts: MountView | None) -> None:
     """Delete every selected path from the working tree.
 
     A directory standing where a tracked file was is the one deletion a
@@ -185,6 +226,8 @@ async def clear_worktree(dispatch: DispatchFn, stat_path: StatPath,
             carry on stdout the way git prints them anyway.
         links (LinkView | None): the name plane's link facts, None when
             no namespace is wired.
+        mounts (MountView | None): the name plane's mount boundaries,
+            None when no namespace is wired.
     """
     removed = False
     for path in selected:
@@ -196,7 +239,8 @@ async def clear_worktree(dispatch: DispatchFn, stat_path: StatPath,
                     raise RemovePathError(path, lines)
                 continue
         await remove_file(dispatch, absolute)
-        await remove_empty_parents(dispatch, absolute, location.worktree)
+        await remove_empty_parents(dispatch, absolute, location.worktree,
+                                   mounts)
         removed = True
 
 
@@ -241,12 +285,13 @@ async def rm(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                                UNTRACKED_NO, links_of(doors))
             tree = await asyncio.to_thread(head_entries, repo) or {}
             await refuse_lost_work(dispatch, location, tree, state.entries,
-                                   found, checkable, flags.cached)
+                                   found, checkable, flags.cached,
+                                   links_of(doors))
         lines = "" if flags.quiet else "".join(f"rm '{path}'\n"
                                                for path in selected)
         if not flags.cached:
             await clear_worktree(dispatch, stat_path, location, selected,
-                                 lines, links_of(doors))
+                                 lines, links_of(doors), mounts_of(doors))
         # Last, because the deletions above can fail: git writes the
         # index only once the working tree is done with, so a refused
         # deletion leaves the entry staged exactly as it stood rather

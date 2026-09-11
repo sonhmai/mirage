@@ -16,9 +16,11 @@ from pathlib import Path
 
 import pytest
 
+from mirage.commands.cli.builtin.git.changes import DELETED, MODIFIED
 from mirage.commands.cli.builtin.git.errors import (NotRecursiveError,
                                                     PathspecError)
-from mirage.commands.cli.builtin.git.rm import RmFlags, parse_flags, select
+from mirage.commands.cli.builtin.git.rm import (RmFlags, parse_flags, select,
+                                                shadowed)
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.spec.types import FlagView
 
@@ -247,3 +249,116 @@ async def test_a_tracked_link_to_a_directory_is_removed_as_a_link(
     await run(git_rw, "commit -m linked")
     assert await run(git_rw, "rm slot") == (0, b"rm 'slot'\n", b"")
     assert (repo_path / "real" / "child").exists()
+
+
+class Hiding:
+    """A link view where ``slot`` is a link and ``slot/child`` is live.
+
+    ``resolve`` is the name plane's own walk, so a path under the link
+    comes back respelled; ``exists`` answers through the dispatcher, so
+    a target that is not there answers False.
+    """
+
+    def __init__(self, present: bool = True) -> None:
+        self.present = present
+
+    def resolve(self, path: str) -> str:
+        """Where a path really points.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        if path.startswith("/repo/slot"):
+            return path.replace("/repo/slot", "/away", 1)
+        return path
+
+    async def exists(self, path: str) -> bool:
+        """Whether anything is there once the links are resolved.
+
+        Asked with the path as typed, since the real view resolves for
+        itself: that is what lets a link across mounts answer at all.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        return self.present and self.resolve(path).startswith("/away")
+
+
+@pytest.mark.asyncio
+async def test_a_link_above_a_deleted_path_makes_it_a_local_change():
+    hidden = await shadowed(Hiding(), "/repo", ["slot/child"],
+                            {"slot/child": DELETED})
+    assert hidden == {"slot/child"}
+
+
+@pytest.mark.asyncio
+async def test_a_link_pointing_at_nothing_leaves_the_path_deleted():
+    # git lstats through the leading link and gets ENOENT, so there is
+    # no local change to lose and the removal goes through.
+    hidden = await shadowed(Hiding(present=False), "/repo", ["slot/child"],
+                            {"slot/child": DELETED})
+    assert hidden == set()
+
+
+@pytest.mark.asyncio
+async def test_a_path_the_walk_found_is_never_shadowed():
+    hidden = await shadowed(Hiding(), "/repo", ["slot/child"],
+                            {"slot/child": MODIFIED})
+    assert hidden == set()
+
+
+@pytest.mark.asyncio
+async def test_without_a_namespace_nothing_is_shadowed():
+    assert await shadowed(None, "/repo", ["slot/child"],
+                          {"slot/child": DELETED}) == set()
+
+
+@pytest.mark.asyncio
+async def test_a_tracked_path_behind_a_link_is_refused_as_a_local_change(
+        git_rw, repo_path: Path):
+    # The walk lstats, so the link hides the tracked file and the path
+    # reads as deleted, which is what git's own status says too. git
+    # rm does not read it that way: its lstat resolves the leading
+    # component and finds another file entirely.
+    await git_rw.execute("mkdir /repo/slot && echo t > /repo/slot/child")
+    await git_rw.execute("mkdir /repo/away && echo o > /repo/away/child")
+    await run(git_rw, "add slot/child")
+    await run(git_rw, "commit -m slotted")
+    await git_rw.execute("rm -rf /repo/slot")
+    await git_rw.execute("ln -s /repo/away /repo/slot")
+    assert await run(git_rw, "status --short") == (0, b" D slot/child\n"
+                                                   b"?? away/\n?? slot\n", b"")
+    code, _out, err = await run(git_rw, "rm slot/child")
+    assert code == 1
+    assert err == (b"error: the following file has local modifications:\n"
+                   b"    slot/child\n"
+                   b"(use --cached to keep the file, or -f to force "
+                   b"removal)\n")
+    assert (repo_path / "away" / "child").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_link_pointing_past_the_tracked_path_removes_it(
+        git_rw, repo_path: Path):
+    # Nothing at the other end, so git has nothing to lose and stages
+    # the deletion.
+    await git_rw.execute("mkdir /repo/slot && echo t > /repo/slot/child")
+    await git_rw.execute("mkdir /repo/away")
+    await run(git_rw, "add slot/child")
+    await run(git_rw, "commit -m slotted")
+    await git_rw.execute("rm -rf /repo/slot")
+    await git_rw.execute("ln -s /repo/away /repo/slot")
+    assert await run(git_rw, "rm slot/child") == (0, b"rm 'slot/child'\n", b"")
+
+
+@pytest.mark.asyncio
+async def test_cached_keeps_the_file_a_link_hides(git_rw):
+    await git_rw.execute("mkdir /repo/slot && echo t > /repo/slot/child")
+    await git_rw.execute("mkdir /repo/away && echo o > /repo/away/child")
+    await run(git_rw, "add slot/child")
+    await run(git_rw, "commit -m slotted")
+    await git_rw.execute("rm -rf /repo/slot")
+    await git_rw.execute("ln -s /repo/away /repo/slot")
+    assert await run(git_rw,
+                     "rm --cached slot/child") == (0, b"rm 'slot/child'\n",
+                                                   b"")

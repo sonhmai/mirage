@@ -25,6 +25,7 @@ import {
   IncompatibleOptionsError,
   InvalidTagNameError,
   ListModeOnlyError,
+  TagLinesError,
   MissingTagMessageError,
   NoWorkspaceError,
   RefLockError,
@@ -64,7 +65,7 @@ interface TagFlags {
   readonly force: boolean
   /**
    * `-n[<num>]`, how many message lines to print per tag when listing;
-   * undefined when not listing that way.
+   * undefined when `-n` was not given, which `-n-1` also means.
    */
   readonly lines: number | undefined
 }
@@ -79,6 +80,10 @@ interface TagFlags {
 function parseFlags(fl: FlagView): TagFlags {
   let lines = fl.asInt('n')
   if (lines === undefined && fl.asBool('n')) lines = 1
+  // -1 is where git's own parser starts the count, so it reads as "-n was
+  // never given" rather than as a count of -1: `-n-1` deletes and creates
+  // where any real `-n` refuses both.
+  if (lines === -1) lines = undefined
   // Several -m are several paragraphs, joined the way git joins them.
   const paragraphs = fl.asList('message')
   const message = paragraphs.length > 0 ? paragraphs.join('\n\n') : undefined
@@ -242,6 +247,10 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
     // is the incompatible pair and `-d -f -n1` the usage, both exiting 129,
     // where `-d -n1` alone dies here.
     if (flags.remove && flags.lines !== undefined) throw new ListModeOnlyError()
+    // git reads the count while parsing the format it lists with, which is
+    // after both usage refusals above and before any ref is read: a repository
+    // holding no tags refuses this one too.
+    if (flags.lines !== undefined && flags.lines < 0) throw new TagLinesError(flags.lines)
     const repo = await opened(fl, doors)
     abbrev = repo.abbrev
     const known = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)

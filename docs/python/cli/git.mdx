@@ -117,13 +117,13 @@ git -C /repo tag -d v1.0
 | `add`      | `-A` everything, `-u` tracked only, `-f` to stage an ignored path                                                                       |
 | `reset`    | mixed only, from HEAD; a pathspec limits it to those paths                                                                              |
 | `restore`  | worktree by default, `--staged` the index, `-SW` both; `--source` takes any tree-ish, spelled as a peel (`HEAD^{tree}`), a subtree (`HEAD:sub`) or a raw id, and is required before the first commit since the implicit HEAD source has nothing to read; a path it lacks is removed from the target, a path still in conflict is named rather than half-restored, and a file replaces a directory standing in its place, as it replaces a symlink standing on one of its parents |
-| `rm`       | refuses a path with uncommitted work unless `-f`; `--cached` keeps the file; `-r` for a directory; `-q`, `--ignore-unmatch`; the index is written only once the working tree is done with, so a deletion the mount refuses leaves the entry staged as it stood |
+| `rm`       | refuses a path with uncommitted work unless `-f`, a path a symlinked ancestor now hides included; `--cached` keeps the file; `-r` for a directory; `-q`, `--ignore-unmatch`; the index is written only once the working tree is done with, so a deletion the mount refuses leaves the entry staged as it stood |
 | `mv`       | files and directories, `-f` over an existing file, `-k` skips what cannot move, `-n` dry run, `-v`; two sources cannot land on one name, a directory and something inside it cannot both move, an unmerged path moves nowhere, and a move that would cross a mount boundary at either end is refused rather than half-moved |
 | `commit`   | `-m` required, `--author "Name <email>"` optional                                                                                       |
 | `branch`   | `-d` deletes a merged branch, `-D` any branch; a name whose ref path another branch already holds is refused                             |
 | `checkout` | refuses rather than overwrite work you have not committed, an untracked file the target needs the room for included and an index still holding conflict stages too |
 | `switch`   | the same move for a branch only; `-c` creates and checks the name against git's ref rules and works before the first commit, `--detach` is the only way onto a bare commit and takes HEAD when nothing is named; a staged addition, deletion or edit both branches agree about is carried across and reported with its status letter |
-| `tag`      | lists sorted, `-l <pattern>`, `-n[<num>]`; a name is a lightweight tag, `-a`/`-m` an annotated one; any object is a legal target, `HEAD^{tree}`, `HEAD:a.txt`, `v1^{tag}` and `v1^{object}` included, and the type recorded is the one the target really is; a name whose ref path another tag already holds is refused; `-d` deletes atomically, `-f`; a creation option needs a name, and `-n` needs a listing |
+| `tag`      | lists sorted, `-l <pattern>`, `-n[<num>]`, where `-n-1` says nothing at all and any count below it is refused; a name is a lightweight tag, `-a`/`-m` an annotated one; any object is a legal target, `HEAD^{tree}`, `HEAD:a.txt`, `v1^{tag}` and `v1^{object}` included, and the type recorded is the one the target really is; a name whose ref path another tag already holds is refused; `-d` deletes atomically, `-f`; a creation option needs a name, and `-n` needs a listing |
 
 `commit` records `mirage <mirage@localhost>` unless `--author` says
 otherwise: git reads `user.name` from config files that a mount does not
@@ -268,6 +268,37 @@ serve, and inventing a name would put an unreviewed one into history.
   the transaction at all. The one divergence is the wording of the
   `-l`/`-d` refusal: git names the two options in the order they were
   typed and in the spelling used, where this build has one fixed order.
+- **`tag -n-1` is not a `-n` at all.** git's option parser starts the
+  count at -1 to mean "never given", so the sentinel reaches the verb
+  looking like an absent flag: `tag -d -n-1 v` deletes and
+  `tag -n-1 -a v -m m` creates, where either line with a real `-n`
+  refuses. Anything below -1 is a count, and a count has to be positive:
+  the refusal names the format field git was building
+  (`positive value expected contents:lines=-2`) rather than the option,
+  because that is where git discovers it, which is also why it fires in
+  a repository holding no tags and why `-d -n-2` still dies on the
+  list-mode refusal first.
+- **A symlinked ancestor hides a tracked file from the walk, not from
+  `rm`.** git's own diff refuses to follow a link in a leading path and
+  reports the file deleted, which is why `status` shows `D` for it; `rm`
+  lstats instead, and that lstat resolves the link and finds whatever
+  lies at the other end. So a tracked `slot/child` behind
+  `slot -> /elsewhere` is a local modification and is refused without
+  `-f`, even when the file at the other end is byte for byte the same
+  one: two files agreeing is still two files. A link pointing past the
+  name entirely leaves nothing to lose, and the removal goes through.
+- **A nested mount stops a working-tree removal.** Replacing a directory
+  with a file takes the whole directory, and `readdir` merges a mount
+  nested inside it into the listing, so the walk would empty a backend
+  no branch ever recorded and then remove its root. The mount table is
+  asked first and the verb refuses, naming the mount when the session
+  may be told about it and saying only that one is there when it may
+  not. The same boundary stops the tidying pass that drops a directory
+  emptied by `rm`: it halts at the mount root rather than removing it,
+  since nothing the caller asked for has failed. This is the rule
+  `MountRootPolicy` already applies to `rm` and `mv` at the command
+  tier, which a git verb reaching the dispatcher directly has to ask for
+  itself.
 - **`reset` takes no revision.** Real git resets the index to any commit
   named as an operand; this build resets it from HEAD only and refuses a
   revision by name rather than doing nothing quietly.

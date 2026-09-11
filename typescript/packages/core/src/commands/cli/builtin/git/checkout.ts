@@ -56,7 +56,7 @@ import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import { restored } from './reset.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
-import type { LinkView, StatPath } from '../../../../ops/types.ts'
+import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
 import { FileType } from '../../../../types.ts'
 import type { Dispatch, HeadRef, IndexEntry } from './types.ts'
 import { checkOperands, escaped, fatal } from './util.ts'
@@ -254,6 +254,7 @@ async function switchTo(
   before: ReadonlyMap<string, TreeEntry>,
   after: ReadonlyMap<string, TreeEntry>,
   links: LinkView | null,
+  mounts: MountView | null,
 ): Promise<void> {
   // Removals first, and the emptied directories with them, because the two
   // sets name the same place whenever a branch records a file where the other
@@ -265,7 +266,7 @@ async function switchTo(
     if (after.has(path)) continue
     const where = under(repo.location.worktree, path)
     await removeFile(dispatch, where)
-    await removeEmptyParents(dispatch, where, repo.location.worktree)
+    await removeEmptyParents(dispatch, where, repo.location.worktree, mounts)
   }
   const changed = written(before, after)
   for (const path of [...changed.keys()].sort(compareCodePoints)) {
@@ -289,7 +290,7 @@ async function switchTo(
     if ((links?.statAt(where) ?? null) === null) {
       const info = await statPath(where)
       if (info !== null && info.type === FileType.DIRECTORY) {
-        await removeTree(dispatch, where, links)
+        await removeTree(dispatch, where, links, mounts)
       }
     }
     await restoreEntry(dispatch, where, entry.mode, blob, links)
@@ -399,6 +400,7 @@ function stageLetters(
  * @param dispatch workspace op dispatcher
  * @param statPath dispatcher-backed stat, both channels
  * @param links the name plane's link facts, null outside a workspace
+ * @param mounts the name plane's mount boundaries, null outside a workspace
  * @param repo the opened repository
  * @param known every ref the repository publishes
  * @param head what HEAD pointed at before the move
@@ -415,6 +417,7 @@ export async function moveHead(
   dispatch: Dispatch,
   statPath: StatPath,
   links: LinkView | null,
+  mounts: MountView | null,
   repo: Repo,
   known: ReadonlyMap<string, string>,
   head: HeadRef,
@@ -469,7 +472,7 @@ export async function moveHead(
   if (blocked.length > 0 || clobbered.length > 0 || lost.length > 0) {
     throw new CheckoutConflictError(blocked, clobbered, lost)
   }
-  await switchTo(repo, dispatch, statPath, before, after, links)
+  await switchTo(repo, dispatch, statPath, before, after, links, mounts)
   await attach(dispatch, repo, known, head, oid, target, ref, creating)
   return carried
 }
@@ -536,6 +539,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
       dispatch,
       statPath,
       doors.ns?.links ?? null,
+      doors.ns?.mounts ?? null,
       repo,
       known,
       head,

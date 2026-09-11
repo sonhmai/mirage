@@ -2659,6 +2659,118 @@
         "stdout": "z\no\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_rm_refuses_a_tracked_path_a_link_now_hides",
+      "seq": 568349,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "mkdir -p /repo/zslot /repo/zaway && echo t > /repo/zslot/child && echo o > /repo/zaway/child && git -C /repo add zslot/child && git -C /repo commit -m zslot > /dev/null && rm -rf /repo/zslot && ln -s /repo/zaway /repo/zslot && git -C /repo rm zslot/child; echo exit=$?; cat /repo/zaway/child",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\no\n",
+        "stderr": "error: the following file has local modifications:\n    zslot/child\n(use --cached to keep the file, or -f to force removal)\n"
+      }
+    },
+    {
+      "id": "git_rm_cached_unstages_the_path_a_link_hides",
+      "seq": 568350,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo rm --cached zslot/child; echo exit=$?; cat /repo/zaway/child",
+      "expect": {
+        "exit": 0,
+        "stdout": "rm 'zslot/child'\nexit=0\no\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_rm_takes_a_path_whose_link_points_past_it",
+      "seq": 568351,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "mkdir -p /repo/znull /repo/zvoid && echo t > /repo/znull/child && git -C /repo add znull/child && git -C /repo commit -m znull > /dev/null && rm -rf /repo/znull && ln -s /repo/zvoid /repo/znull && git -C /repo rm znull/child; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rm 'znull/child'\nexit=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_refuses_a_message_count_below_minus_one",
+      "seq": 568352,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag -n-2; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=128\n",
+        "stderr": "fatal: positive value expected contents:lines=-2\n"
+      }
+    },
+    {
+      "id": "git_tag_reads_the_count_before_it_reads_a_tag",
+      "seq": 568353,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag -n-5 nosuchtag; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=128\n",
+        "stderr": "fatal: positive value expected contents:lines=-5\n"
+      }
+    },
+    {
+      "id": "git_tag_minus_n_one_is_not_a_listing_flag",
+      "seq": 568354,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag tnone && git -C /repo tag -d -n-1 tnone > /dev/null; echo exit=$?; git -C /repo tag -l tnone",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_minus_n_one_leaves_a_creation_alone",
+      "seq": 568355,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag -n-1 -a tannn -m body; echo exit=$?; git -C /repo tag -n1 tannn",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=0\ntannn           body\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_list_mode_outranks_the_message_count",
+      "seq": 568356,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag -d -n-2 tannn; echo exit=$?; git -C /repo tag -l tannn",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=128\ntannn\n",
+        "stderr": "fatal: the '-n' option is only allowed in list mode\n"
+      }
     }
   ]
 }

@@ -59,6 +59,16 @@ def test_no_n_means_no_message_lines():
     assert parse_flags(FlagView({})).lines is None
 
 
+def test_minus_one_is_where_gits_own_counter_starts():
+    # -1 is the sentinel git's parser initialises the count to, so
+    # ``-n-1`` says nothing at all rather than asking for -1 lines.
+    assert parse_flags(FlagView({"n": "-1"})).lines is None
+
+
+def test_a_count_below_the_sentinel_is_kept_for_the_refusal():
+    assert parse_flags(FlagView({"n": "-2"})).lines == -2
+
+
 def test_a_message_implies_an_annotated_tag():
     parsed = parse_flags(FlagView({"message": ["m"]}))
     assert parsed.annotate and parsed.message == "m"
@@ -463,3 +473,48 @@ async def test_force_does_not_open_a_colliding_path(git_rw):
     code, _out, err = await run(git_rw, "tag -f foo/bar")
     assert code == 128
     assert b"cannot lock ref 'refs/tags/foo/bar'" in err
+
+
+@pytest.mark.asyncio
+async def test_a_negative_count_is_fatal(git_rw):
+    # git parses the count while building the format it lists with, so
+    # the refusal names the format field rather than the option.
+    assert await run(git_rw, "tag v") == (0, b"", b"")
+    code, out, err = await run(git_rw, "tag -n-2")
+    assert (code, out) == (128, b"")
+    assert err == b"fatal: positive value expected contents:lines=-2\n"
+
+
+@pytest.mark.asyncio
+async def test_the_count_is_read_before_any_tag_is(git_rw):
+    # A pattern matching nothing would exit 0 on its own; the format is
+    # parsed first, so the refusal stands whatever the line selects.
+    code, _out, err = await run(git_rw, "tag -n-5 nosuch")
+    assert code == 128
+    assert err == b"fatal: positive value expected contents:lines=-5\n"
+
+
+@pytest.mark.asyncio
+async def test_the_list_mode_refusal_outranks_the_count(git_rw):
+    assert await run(git_rw, "tag v") == (0, b"", b"")
+    code, _out, err = await run(git_rw, "tag -d -n-2 v")
+    assert code == 128
+    assert err == b"fatal: the '-n' option is only allowed in list mode\n"
+    assert (await run(git_rw, "tag -l"))[1] == b"v\n"
+
+
+@pytest.mark.asyncio
+async def test_minus_n_one_is_not_an_n_at_all(git_rw):
+    # The sentinel reads as "-n was never given", so the two refusals a
+    # real -n earns here do not apply: the line deletes, and creates.
+    assert await run(git_rw, "tag v") == (0, b"", b"")
+    code, out, _err = await run(git_rw, "tag -d -n-1 v")
+    assert (code, out.startswith(b"Deleted tag 'v' (was ")) == (0, True)
+    assert await run(git_rw, "tag -n-1 -a later -m m") == (0, b"", b"")
+    assert (await run(git_rw, "tag -l"))[1] == b"later\n"
+
+
+@pytest.mark.asyncio
+async def test_minus_n_one_lists_names_alone(git_rw):
+    assert await run(git_rw, "tag -a v -m body") == (0, b"", b"")
+    assert (await run(git_rw, "tag -n-1"))[1] == b"v\n"

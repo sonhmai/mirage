@@ -181,6 +181,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       dispatch,
       statPath,
       doors.ns?.links ?? null,
+      doors.ns?.mounts ?? null,
       repo,
       known,
       head,

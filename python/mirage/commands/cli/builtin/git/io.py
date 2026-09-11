@@ -16,7 +16,8 @@ import logging
 import posixpath
 
 from mirage.commands.cli.builtin.git.constants import PERMISSION_BITS, SYMLINK
-from mirage.ops.types import LinkView, StatPath
+from mirage.commands.cli.builtin.git.errors import MountInWayError
+from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.errors import MISS_ERRORS
@@ -330,8 +331,40 @@ async def rename_path(dispatch: DispatchFn, source: str, target: str) -> None:
                    dst=PathSpec.from_str_path(target))
 
 
-async def remove_tree(dispatch: DispatchFn, path: str,
-                      links: LinkView | None) -> None:
+def refuse_mount(mounts: MountView | None, path: str) -> None:
+    """Refuse a removal that would take a nested mount with it.
+
+    A mount nested inside the working tree is served by another
+    resource, and ``readdir`` merges it into the parent's listing, so a
+    walk that empties a directory walks straight into the child backend
+    and unlinks what is in it. No branch ever recorded any of that, and
+    the ``rmdir`` that follows takes the mount root itself. Asking the
+    mount table is the only way to see the boundary: the parent
+    backend cannot.
+
+    Two questions, two fields, the way ``MountView`` says: the
+    boundary is *avoided* by the unfiltered list, so a mount this
+    session cannot see still blocks the removal, and it is *named*
+    from the visible one, since naming a hidden mount is what the hide
+    exists to prevent.
+
+    Args:
+        mounts (MountView | None): the name plane's mount boundaries,
+            None when no namespace is wired.
+        path (str): absolute virtual path about to be removed.
+    """
+    if mounts is None:
+        return
+    if mounts.is_root(path):
+        raise MountInWayError(path, path)
+    if not mounts.descendants(path):
+        return
+    named = sorted(mounts.visible_descendants(path))
+    raise MountInWayError(path, named[0] if named else None)
+
+
+async def remove_tree(dispatch: DispatchFn, path: str, links: LinkView | None,
+                      mounts: MountView | None) -> None:
     """Delete a path and everything under it, tracked or not.
 
     git replaces a tree entry rather than merging with it, so a
@@ -359,7 +392,14 @@ async def remove_tree(dispatch: DispatchFn, path: str,
         path (str): absolute virtual path to clear.
         links (LinkView | None): the name plane's link facts, None when
             no namespace is wired.
+        mounts (MountView | None): the name plane's mount boundaries,
+            None when no namespace is wired.
     """
+    # Before the first deletion rather than at the boundary itself, so
+    # a mount deep under the directory costs the caller nothing: the
+    # scan sees every depth at once and the tree is still whole when
+    # it refuses.
+    refuse_mount(mounts, path)
     for entry in await read_names(dispatch, path):
         # A listing answers in whole paths, so the child is rebuilt from
         # the basename the way every other walk here does.
@@ -370,7 +410,7 @@ async def remove_tree(dispatch: DispatchFn, path: str,
         if links is not None and links.stat_at(child) is not None:
             await remove_file(dispatch, child)
             continue
-        await remove_tree(dispatch, child, links)
+        await remove_tree(dispatch, child, links, mounts)
     try:
         await dispatch("rmdir", PathSpec.from_str_path(path))
     except MISS_ERRORS as exc:
@@ -382,8 +422,8 @@ async def remove_tree(dispatch: DispatchFn, path: str,
         await remove_file(dispatch, path)
 
 
-async def remove_empty_parents(dispatch: DispatchFn, path: str,
-                               stop: str) -> None:
+async def remove_empty_parents(dispatch: DispatchFn, path: str, stop: str,
+                               mounts: MountView | None) -> None:
     """Drop the directories a deletion left empty, up to a root.
 
     git removes a directory the moment its last tracked file is deleted
@@ -395,10 +435,19 @@ async def remove_empty_parents(dispatch: DispatchFn, path: str,
         dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path of the file that was removed.
         stop (str): absolute virtual path of the working tree root.
+        mounts (MountView | None): the name plane's mount boundaries,
+            None when no namespace is wired.
     """
     root = stop.rstrip("/") or "/"
     current = posixpath.dirname(path)
     while current != root and current.startswith(root):
+        # A mount root is not a directory git made, and an empty one is
+        # still a whole backend: removing it here would destroy the
+        # store behind it as a side effect of tidying up. The walk
+        # stops rather than refusing, because nothing the caller asked
+        # for has failed.
+        if mounts is not None and mounts.is_root(current):
+            return
         if await read_names(dispatch, current):
             return
         try:

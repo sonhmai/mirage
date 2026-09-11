@@ -28,8 +28,9 @@ from mirage.commands.cli.builtin.git.errors import GitError  # yapf: disable
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     IncompatibleOptionsError, InvalidTagNameError, ListModeOnlyError,
     MissingTagMessageError, NoWorkspaceError, RefLockError,
-    RefUpdateConflictError, TagExistsError, TagNotFoundError, TagUsageError,
-    TooManyArgumentsError, UnknownSwitchError, UnresolvedRefError)
+    RefUpdateConflictError, TagExistsError, TagLinesError, TagNotFoundError,
+    TagUsageError, TooManyArgumentsError, UnknownSwitchError,
+    UnresolvedRefError)
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.refs import (TAG_PREFIX, blocking_ref,
@@ -61,7 +62,8 @@ class TagFlags:
         message (str | None): ``-m``, the tag message.
         force (bool): ``-f``, replace a tag that exists.
         lines (int | None): ``-n[<num>]``, how many message lines to
-            print per tag when listing; None when not listing that way.
+            print per tag when listing; None when ``-n`` was not given,
+            which ``-n-1`` also means.
     """
     listing: bool
     delete: bool
@@ -85,6 +87,11 @@ def parse_flags(fl: FlagView) -> TagFlags:
     lines = fl.as_int("n")
     if lines is None and fl.as_bool("n"):
         lines = 1
+    # -1 is where git's own parser starts the count, so it reads as
+    # "-n was never given" rather than as a count of -1: ``-n-1``
+    # deletes and creates where any real ``-n`` refuses both.
+    if lines == -1:
+        lines = None
     # Several -m are several paragraphs, joined the way git joins them.
     paragraphs = fl.as_list("message")
     message = "\n\n".join(paragraphs) if paragraphs else None
@@ -252,6 +259,11 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         # usage, both exiting 129, where ``-d -n1`` alone dies here.
         if flags.delete and flags.lines is not None:
             raise ListModeOnlyError()
+        # git reads the count while parsing the format it lists with,
+        # which is after both usage refusals above and before any ref
+        # is read: a repository holding no tags refuses this one too.
+        if flags.lines is not None and flags.lines < 0:
+            raise TagLinesError(flags.lines)
         repo, location = await opened(fl, doors)
         known = repo.refs.allkeys()
         if flags.delete:

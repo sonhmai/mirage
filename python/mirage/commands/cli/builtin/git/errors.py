@@ -743,6 +743,38 @@ class RemovePathError(GitError):
         self.report = report
 
 
+class MountInWayError(GitError):
+    """A working-tree removal that would take a nested mount with it.
+
+    A mount nested inside the repository is served by another resource
+    entirely, so removing the directory it stands in empties that
+    backend rather than the repository: the store behind it is gone,
+    and no branch ever recorded a line of it. mirage refuses instead,
+    which is the rule ``MountRootPolicy`` already enforces for ``rm``
+    and ``mv`` at the command tier; a git verb reaches the dispatcher
+    directly, so it has to ask for itself.
+
+    The mount is named only when the session may be told about it. A
+    hidden one blocks the removal just the same, because avoiding a
+    boundary and naming it are two different questions, and naming a
+    hidden mount is the one thing the hide exists to prevent.
+
+    Args:
+        path (str): absolute virtual path being removed.
+        mount (str | None): the mount root in the way, None when the
+            session may not be told which one it is.
+    """
+
+    def __init__(self, path: str, mount: str | None = None) -> None:
+        if mount is None:
+            held = "it holds a mount root"
+        elif mount == path:
+            held = "it is a mount root"
+        else:
+            held = f"'{mount}' is a mount root"
+        super().__init__(f"cannot remove '{path}': {held}")
+
+
 class MoveUsageError(GitError):
     """``mv`` with fewer than two operands.
 
@@ -976,6 +1008,27 @@ class ListModeOnlyError(GitError):
 
     def __init__(self) -> None:
         super().__init__("the '-n' option is only allowed in list mode")
+
+
+class TagLinesError(GitError):
+    """``tag -n<num>`` with a count below the one git reserves.
+
+    ``-n`` carries an optional count, and git's parser starts that
+    count at -1 to mean "not given at all". ``-n-1`` is therefore not a
+    listing flag at all: ``git tag -d -n-1 v`` deletes and
+    ``git tag -n-1 -a v -m m`` creates, where a real ``-n`` refuses
+    both. Anything below -1 is a count, and a count has to be positive,
+    which git discovers while parsing the format it lists with rather
+    than while parsing the option: the list-mode refusal outranks this
+    one, and it fires in a repository holding no tags at all. Pinned
+    against git 2.50.1.
+
+    Args:
+        lines (int): the count as typed.
+    """
+
+    def __init__(self, lines: int) -> None:
+        super().__init__(f"positive value expected contents:lines={lines}")
 
 
 class RefUpdateConflictError(GitError):

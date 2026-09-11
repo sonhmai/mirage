@@ -41,7 +41,7 @@ from mirage.commands.cli.builtin.git.revparse import (TREE, resolve_object,
                                                       unwrapped)
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (  # yapf: disable
-    check_operands, escaped, fatal, links_of, start_point)
+    check_operands, escaped, fatal, links_of, mounts_of, start_point)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -222,6 +222,7 @@ async def restore(
             await write_index(dispatch, location.gitdir, state)
         if flags.worktree:
             links = links_of(doors)
+            mounts = mounts_of(doors)
             blobs = await asyncio.to_thread(
                 contents, repo, [tree[name.encode()][1] for name in present])
             # Removals first, because the two sets can name the same
@@ -242,7 +243,8 @@ async def restore(
                                            links):
                     continue
                 await remove_file(dispatch, path)
-                await remove_empty_parents(dispatch, path, location.worktree)
+                await remove_empty_parents(dispatch, path, location.worktree,
+                                           mounts)
             for name in sorted(present):
                 mode, sha = tree[name.encode()]
                 where = posixpath.join(location.worktree, name)
@@ -268,7 +270,7 @@ async def restore(
                 if links is None or links.stat_at(where) is None:
                     info = await stat_path(where)
                     if info is not None and info.type is FileType.DIRECTORY:
-                        await remove_tree(dispatch, where, links)
+                        await remove_tree(dispatch, where, links, mounts)
                 await restore_entry(dispatch, where, mode, blobs[sha], links)
     except GitError as exc:
         return fatal(exc)

@@ -31,7 +31,7 @@ from mirage.commands.cli.builtin.git.refs import (BRANCH_PREFIX, TAG_PREFIX,
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (  # yapf: disable
-    check_operands, escaped, fatal, links_of)
+    check_operands, escaped, fatal, links_of, mounts_of)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
@@ -181,10 +181,10 @@ async def switch(
             attached = not flags.detach and ref in known
             if not flags.detach and not attached:
                 raise BranchExpectedError(expected_kind(known, target), target)
-        moved = await move_head(dispatch, stat_path, links_of(doors), repo,
-                                location, head, commit, target,
-                                ref if attached else None, creating, creating
-                                and start is None)
+        moved = await move_head(dispatch, stat_path, links_of(doors),
+                                mounts_of(doors), repo, location, head, commit,
+                                target, ref if attached else None, creating,
+                                creating and start is None)
     except GitError as exc:
         return fatal(exc)
     carried = "".join(f"{letter}\t{path}\n"

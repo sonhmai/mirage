@@ -16,7 +16,7 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
 import type { CLIInvocation } from '../../types.ts'
-import { headEntries, MODIFIED, workChanges } from './changes.ts'
+import { DELETED, headEntries, MODIFIED, workChanges } from './changes.ts'
 import {
   GitError,
   NoPathspecRemoveError,
@@ -35,7 +35,7 @@ import type { TreeEntry } from './tree.ts'
 import type { Dispatch, IndexEntry, RepoLocation, WorkTree } from './types.ts'
 import { checkOperands, escaped, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
-import type { LinkView, StatPath } from '../../../../ops/types.ts'
+import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
 import { FileType } from '../../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -101,6 +101,41 @@ export function select(
 }
 
 /**
+ * Which absent paths a link above them is only hiding.
+ *
+ * git lstats a tracked path to decide whether it still has local work to lose,
+ * and that lstat resolves every component above the file, so a symlink standing
+ * where a directory was does not hide the file: it points the check at whatever
+ * lies at the other end, which is some other file entirely and therefore a
+ * local change. The walk answers the opposite way on purpose, because git's own
+ * diff refuses to follow a leading link and reports the path deleted, which is
+ * why `git status` says `D` here and `git rm` still refuses. Nothing is
+ * compared: two files agreeing byte for byte are still two files, and git
+ * refuses that case too. Pinned against git 2.50.1.
+ *
+ * @param links the name plane's link facts, null when no namespace is wired
+ * @param worktree absolute virtual path of the working tree root
+ * @param paths the selected paths that hold an index entry
+ * @param missing what the walk said about each path
+ */
+export async function shadowed(
+  links: LinkView | null,
+  worktree: string,
+  paths: readonly string[],
+  missing: ReadonlyMap<string, string>,
+): Promise<Set<string>> {
+  const found = new Set<string>()
+  if (links === null) return found
+  for (const path of paths) {
+    if (missing.get(path) !== DELETED) continue
+    const absolute = under(worktree, path)
+    if (links.resolve(absolute) === absolute) continue
+    if (await links.exists(absolute)) found.add(path)
+  }
+  return found
+}
+
+/**
  * Refuse a removal that would throw away uncommitted work.
  *
  * git's own three-way test per path: whether the index differs from HEAD, and
@@ -118,6 +153,7 @@ export async function refuseLostWork(
   found: WorkTree,
   paths: readonly string[],
   cached: boolean,
+  links: LinkView | null,
 ): Promise<void> {
   const chosen = new Map<string, IndexEntry>()
   for (const path of paths) {
@@ -125,6 +161,7 @@ export async function refuseLostWork(
     if (entry !== undefined) chosen.set(path, entry)
   }
   const unstaged = await workChanges(repo, dispatch, repo.location.worktree, chosen, found)
+  const hidden = await shadowed(links, repo.location.worktree, paths, unstaged)
   const both: string[] = []
   const staged: string[] = []
   const local: string[] = []
@@ -132,7 +169,7 @@ export async function refuseLostWork(
     const recorded = tree.get(path)
     const stagedChanges =
       recorded?.oid !== entry.oid || Number.parseInt(recorded.mode, 8) !== entry.mode
-    const localChanges = unstaged.get(path) === MODIFIED
+    const localChanges = unstaged.get(path) === MODIFIED || hidden.has(path)
     if (localChanges && stagedChanges) both.push(path)
     else if (!cached) {
       if (stagedChanges) staged.push(path)
@@ -168,6 +205,7 @@ export async function refuseLostWork(
  * @param lines the `rm` lines already printed, for a refusal to carry on stdout
  *   the way git prints them anyway
  * @param links the name plane's link facts, null when no namespace is wired
+ * @param mounts the name plane's mount boundaries, null when none is wired
  */
 export async function clearWorktree(
   dispatch: Dispatch,
@@ -176,6 +214,7 @@ export async function clearWorktree(
   selected: readonly string[],
   lines: string,
   links: LinkView | null,
+  mounts: MountView | null,
 ): Promise<void> {
   let removed = false
   for (const path of selected) {
@@ -188,7 +227,7 @@ export async function clearWorktree(
       }
     }
     await removeFile(dispatch, absolute)
-    await removeEmptyParents(dispatch, absolute, worktree)
+    await removeEmptyParents(dispatch, absolute, worktree, mounts)
     removed = true
   }
 }
@@ -231,7 +270,16 @@ export async function rm(inv: CLIInvocation): Promise<CommandFnResult> {
         doors.ns?.links ?? null,
       )
       const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
-      await refuseLostWork(repo, dispatch, tree, state.entries, found, checkable, flags.cached)
+      await refuseLostWork(
+        repo,
+        dispatch,
+        tree,
+        state.entries,
+        found,
+        checkable,
+        flags.cached,
+        doors.ns?.links ?? null,
+      )
     }
     const lines = flags.quiet ? '' : selected.map((path) => `rm '${path}'\n`).join('')
     if (!flags.cached) {
@@ -242,6 +290,7 @@ export async function rm(inv: CLIInvocation): Promise<CommandFnResult> {
         selected,
         lines,
         doors.ns?.links ?? null,
+        doors.ns?.mounts ?? null,
       )
     }
     // Last, because the deletions above can fail: git writes the index only

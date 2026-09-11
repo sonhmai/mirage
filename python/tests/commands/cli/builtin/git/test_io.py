@@ -14,9 +14,13 @@
 
 import pytest
 
+from mirage.commands.cli.builtin.git.errors import MountInWayError
 from mirage.commands.cli.builtin.git.io import (blocking_ancestor, read_file,
                                                 read_names, read_optional,
+                                                refuse_mount,
+                                                remove_empty_parents,
                                                 remove_tree)
+from mirage.ops.types import MountView
 from mirage.types import FileStat, FileType
 
 
@@ -168,7 +172,7 @@ class Recorder:
 @pytest.mark.asyncio
 async def test_removing_a_tree_unlinks_a_link_without_descending():
     calls = Recorder()
-    await remove_tree(calls, "/repo/slot", TreeLinks())
+    await remove_tree(calls, "/repo/slot", TreeLinks(), None)
     assert ("unlink", "/repo/slot/link") in calls.ops
     # The whole point: readdir dereferences, so listing the link at all
     # is the walk stepping outside the directory being replaced.
@@ -182,5 +186,109 @@ async def test_without_a_namespace_the_walk_has_nothing_to_ask():
     # Outside a workspace there is no name plane, so a link cannot be
     # told from a directory and the walk is the old one.
     calls = Recorder()
-    await remove_tree(calls, "/repo/slot", None)
+    await remove_tree(calls, "/repo/slot", None, None)
     assert ("readdir", "/repo/slot/link") in calls.ops
+
+
+def mounts(roots: list[str], hidden: list[str] | None = None) -> MountView:
+    """A mount view over a fixed list of roots.
+
+    Args:
+        roots (list[str]): every mount root, without a trailing slash.
+        hidden (list[str] | None): the ones this session may not be
+            told about, a subset of ``roots``.
+    """
+    unseen = set(hidden or [])
+    return MountView(descendants=lambda path:
+                     [root for root in roots if root.startswith(f"{path}/")],
+                     visible_descendants=lambda path: [
+                         root for root in roots
+                         if root.startswith(f"{path}/") and root not in unseen
+                     ],
+                     is_root=lambda path: path in roots,
+                     root_of=lambda path: None)
+
+
+def test_a_mount_root_is_refused_as_itself():
+    with pytest.raises(MountInWayError) as caught:
+        refuse_mount(mounts(["/repo/slot"]), "/repo/slot")
+    assert str(caught.value) == ("cannot remove '/repo/slot': it is a "
+                                 "mount root")
+
+
+def test_a_nested_mount_is_named():
+    with pytest.raises(MountInWayError) as caught:
+        refuse_mount(mounts(["/repo/slot/data"]), "/repo/slot")
+    assert str(caught.value) == ("cannot remove '/repo/slot': "
+                                 "'/repo/slot/data' is a mount root")
+
+
+def test_the_first_nested_mount_in_order_is_the_one_named():
+    with pytest.raises(MountInWayError) as caught:
+        refuse_mount(mounts(["/repo/slot/z", "/repo/slot/a"]), "/repo/slot")
+    assert "'/repo/slot/a'" in str(caught.value)
+
+
+def test_a_hidden_mount_blocks_the_removal_without_being_named():
+    # Avoiding a boundary and naming one are two different questions,
+    # and a hidden mount's name is what the hide exists to withhold.
+    view = mounts(["/repo/slot/data"], hidden=["/repo/slot/data"])
+    with pytest.raises(MountInWayError) as caught:
+        refuse_mount(view, "/repo/slot")
+    assert str(caught.value) == ("cannot remove '/repo/slot': it holds a "
+                                 "mount root")
+
+
+def test_nothing_in_the_way_is_no_refusal():
+    refuse_mount(mounts(["/other/mount"]), "/repo/slot")
+    refuse_mount(None, "/repo/slot")
+
+
+@pytest.mark.asyncio
+async def test_a_tree_holding_a_mount_is_refused_before_anything_is_deleted():
+    calls = Recorder()
+    with pytest.raises(MountInWayError):
+        await remove_tree(calls, "/repo/slot", TreeLinks(),
+                          mounts(["/repo/slot/data"]))
+    # Nothing at all: the refusal is the first thing the walk does, so
+    # the directory is still whole when the caller hears about it.
+    assert calls.ops == []
+
+
+class Parents:
+    """A dispatcher whose directories are all empty."""
+
+    def __init__(self) -> None:
+        self.ops: list[tuple[str, str]] = []
+
+    async def __call__(self, op: str, path, **kwargs):
+        """Record one op and answer an empty listing.
+
+        Args:
+            op (str): the op name.
+            path (PathSpec): the path it is asked for.
+            **kwargs (object): ignored.
+        """
+        self.ops.append((op, path.virtual))
+        if op == "readdir":
+            return [], None
+        return None, None
+
+
+@pytest.mark.asyncio
+async def test_pruning_empty_parents_stops_at_a_mount_root():
+    calls = Parents()
+    await remove_empty_parents(calls, "/repo/slot/data/x.txt", "/repo",
+                               mounts(["/repo/slot/data"]))
+    assert ("rmdir", "/repo/slot/data") not in calls.ops
+    # And it stops rather than skipping: the directories above the
+    # mount are the mount's parents, not git's to tidy either.
+    assert ("rmdir", "/repo/slot") not in calls.ops
+
+
+@pytest.mark.asyncio
+async def test_pruning_empty_parents_takes_an_ordinary_directory():
+    calls = Parents()
+    await remove_empty_parents(calls, "/repo/docs/x.txt", "/repo",
+                               mounts(["/repo/slot/data"]))
+    assert ("rmdir", "/repo/docs") in calls.ops

@@ -2247,3 +2247,76 @@ describe('a moved path that the node table knows about', () => {
     expect((await h.ws.execute('readlink /repo/notes/link')).exitCode).not.toBe(0)
   })
 })
+
+describe('a component on the way that is not a directory', () => {
+  it('replaces a regular file standing where a directory belongs', async () => {
+    // The symlink case's other half, and the commoner one. git's
+    // create_directories unlinks any leading non-directory and makes the
+    // directory, so the restore succeeds and the file is gone. Left
+    // unhandled, the write failed with a raw ENOTDIR.
+    const h = await harness()
+    await h.ws.execute('rm -r /repo/docs && echo untracked > /repo/docs')
+    expect(await h.run('restore docs/readme.md')).toEqual([0, '', ''])
+    const back = await readOptional(h.dispatch, '/repo/docs/readme.md')
+    expect(back === null ? '' : DEC.decode(back)).toBe('notes\n')
+  })
+
+  it('attempts no removal through one', async () => {
+    // The removal direction takes it the other way, exactly as it takes a
+    // link: git checks the leading path and removes nothing.
+    const h = await harness()
+    await h.ws.execute('rm -r /repo/docs && echo untracked > /repo/docs')
+    expect(await h.run('restore --source=HEAD~2 docs/readme.md')).toEqual([0, '', ''])
+    const kept = await readOptional(h.dispatch, '/repo/docs')
+    expect(kept === null ? '' : DEC.decode(kept)).toBe('untracked\n')
+  })
+})
+
+describe('a switch onto a branch recording a directory', () => {
+  it('replaces an ignored link rather than writing through it', async () => {
+    // An ignored path is in neither tree and in no collision list, so it
+    // reaches the write. Writing through the link landed the blob in the
+    // link's target, corrupting a path no branch named while the link
+    // survived; git replaces the link instead.
+    const h = await harness()
+    await write(h, '.gitignore', 'slot\n')
+    expect((await h.run('add .gitignore'))[0]).toBe(0)
+    expect((await h.run('commit -m ignore'))[0]).toBe(0)
+    expect((await h.run('switch -c other'))[0]).toBe(0)
+    await write(h, 'slot/child', 'kid\n')
+    expect((await h.run('add -f slot/child'))[0]).toBe(0)
+    expect((await h.run('commit -m child'))[0]).toBe(0)
+    expect((await h.run('switch main'))[0]).toBe(0)
+    await write(h, 'away/child', 'outside\n')
+    await h.ws.execute('ln -s /repo/away /repo/slot')
+    expect((await h.run('switch other'))[0]).toBe(0)
+    const kid = await readOptional(h.dispatch, '/repo/slot/child')
+    expect(kid === null ? '' : DEC.decode(kid)).toBe('kid\n')
+    // The link's target tree is untouched, and the link itself is gone.
+    const other = await readOptional(h.dispatch, '/repo/away/child')
+    expect(other === null ? '' : DEC.decode(other)).toBe('outside\n')
+    expect((await h.ws.execute('readlink /repo/slot')).exitCode).not.toBe(0)
+  })
+
+  it('refuses a staged file standing in the way', async () => {
+    // git allows this and discards the staged addition in silence; this
+    // refuses and names it. What must not happen either way is the old
+    // answer: a raw ENOTDIR after earlier entries were already written.
+    const h = await harness()
+    expect((await h.run('switch -c other'))[0]).toBe(0)
+    await write(h, 'slot/child', 'kid\n')
+    expect((await h.run('add slot/child'))[0]).toBe(0)
+    expect((await h.run('commit -m child'))[0]).toBe(0)
+    expect((await h.run('switch main'))[0]).toBe(0)
+    await write(h, 'slot', 'staged\n')
+    expect((await h.run('add slot'))[0]).toBe(0)
+    expect(await h.run('switch other')).toEqual([
+      1,
+      '',
+      'error: Your local changes to the following files would be overwritten by checkout:\n' +
+        '\tslot\n' +
+        'Please commit your changes or stash them before you switch branches.\nAborting\n',
+    ])
+    expect((await h.run('status --short'))[1]).toBe('A  slot\n')
+  })
+})

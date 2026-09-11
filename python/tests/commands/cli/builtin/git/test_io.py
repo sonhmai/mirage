@@ -14,8 +14,9 @@
 
 import pytest
 
-from mirage.commands.cli.builtin.git.io import (read_file, read_names,
-                                                read_optional)
+from mirage.commands.cli.builtin.git.io import (blocking_ancestor, read_file,
+                                                read_names, read_optional)
+from mirage.types import FileStat, FileType
 
 
 @pytest.mark.asyncio
@@ -52,3 +53,66 @@ async def test_read_names_lists_a_directory(workspace):
 @pytest.mark.asyncio
 async def test_read_names_is_empty_for_a_missing_directory(workspace):
     assert await read_names(workspace.dispatch, "/repo/nodir") == []
+
+
+class Links:
+    """A link view holding one link, at ``/repo/slot``."""
+
+    def stat_at(self, path: str) -> FileStat | None:
+        """What the namespace holds at a path, None when no link.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        if path != "/repo/slot":
+            return None
+        return FileStat(name="slot", type=FileType.SYMLINK)
+
+
+async def only_dirs(path: str) -> FileStat | None:
+    """A data plane in which every component is a directory.
+
+    Args:
+        path (str): absolute virtual path.
+    """
+    return FileStat(name=path.rsplit("/", 1)[-1], type=FileType.DIRECTORY)
+
+
+async def file_at_slot(path: str) -> FileStat | None:
+    """A data plane holding a regular file at ``/repo/slot``.
+
+    Args:
+        path (str): absolute virtual path.
+    """
+    kind = FileType.FILE if path == "/repo/slot" else FileType.DIRECTORY
+    return FileStat(name=path.rsplit("/", 1)[-1], type=kind)
+
+
+@pytest.mark.asyncio
+async def test_a_link_above_the_entry_is_found():
+    found = await blocking_ancestor(only_dirs, "/repo", "slot/child", Links())
+    assert found == "/repo/slot"
+    # The component itself is not an ancestor of itself, and a path with
+    # nothing but directories above it has none.
+    assert await blocking_ancestor(only_dirs, "/repo", "slot", Links()) is None
+    assert await blocking_ancestor(only_dirs, "/repo", "other/child",
+                                   Links()) is None
+
+
+@pytest.mark.asyncio
+async def test_a_regular_file_above_the_entry_is_found_too():
+    # No link anywhere: what is in the way is an ordinary file, which
+    # only the data plane can report.
+    found = await blocking_ancestor(file_at_slot, "/repo", "slot/child", None)
+    assert found == "/repo/slot"
+    assert await blocking_ancestor(only_dirs, "/repo", "slot/child",
+                                   None) is None
+
+
+@pytest.mark.asyncio
+async def test_the_namespace_is_asked_before_the_data_plane():
+    # stat_path dereferences, so a link to a directory stats as a
+    # directory: asking it first would walk straight through the link.
+    found = await blocking_ancestor(only_dirs, "/repo", "slot/deep/child",
+                                    Links())
+    assert found == "/repo/slot"

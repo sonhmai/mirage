@@ -2393,6 +2393,62 @@
         "stdout": "exit=1\ndupa\ndupb\n",
         "stderr": "error: could not delete references: multiple updates for ref 'refs/tags/dupa' not allowed\n"
       }
+    },
+    {
+      "id": "git_restore_replaces_a_file_standing_where_a_directory_belongs",
+      "seq": 568330,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "mkdir -p /repo/rslot && echo c > /repo/rslot/child && git -C /repo add rslot/child && git -C /repo commit -m rslot > /dev/null && rm -rf /repo/rslot && echo untracked > /repo/rslot && git -C /repo restore rslot/child && cat /repo/rslot/child",
+      "expect": {
+        "exit": 0,
+        "stdout": "c\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_restore_removes_nothing_through_a_file",
+      "seq": 568331,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "rm -rf /repo/rslot && echo untracked > /repo/rslot && git -C /repo restore --source=HEAD~1 rslot/child; echo exit=$?; cat /repo/rslot",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=0\nuntracked\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_switch_replaces_an_ignored_link_ancestor",
+      "seq": 568332,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'islot\\n' > /repo/.gitignore && git -C /repo add .gitignore && git -C /repo commit -m ign > /dev/null && git -C /repo switch -c ibase > /dev/null 2>&1 && git -C /repo switch -c ilink > /dev/null 2>&1 && mkdir -p /repo/islot && echo kid > /repo/islot/child && git -C /repo add -f islot/child && git -C /repo commit -m ikid > /dev/null && git -C /repo switch ibase > /dev/null 2>&1 && mkdir -p /repo/iaway && echo outside > /repo/iaway/child && ln -s /repo/iaway /repo/islot && git -C /repo switch ilink > /dev/null 2>&1 && cat /repo/islot/child && cat /repo/iaway/child; readlink /repo/islot; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "kid\noutside\nexit=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_switch_refuses_a_staged_file_in_the_way",
+      "seq": 568333,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch -c sbase > /dev/null 2>&1 && git -C /repo switch -c sstage > /dev/null 2>&1 && mkdir -p /repo/sslot && echo kid > /repo/sslot/child && git -C /repo add sslot/child && git -C /repo commit -m skid > /dev/null && git -C /repo switch sbase > /dev/null 2>&1 && echo staged > /repo/sslot && git -C /repo add sslot && git -C /repo switch sstage; echo exit=$?; git -C /repo status --short | grep sslot",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\nA  sslot\n",
+        "stderr": "error: Your local changes to the following files would be overwritten by checkout:\n\tsslot\nPlease commit your changes or stash them before you switch branches.\nAborting\n"
+      }
     }
   ]
 }

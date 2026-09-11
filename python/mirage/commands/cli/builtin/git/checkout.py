@@ -34,7 +34,8 @@ from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     UnknownSwitchError)
 from mirage.commands.cli.builtin.git.format import short, subject
 from mirage.commands.cli.builtin.git.index import read_index, write_index
-from mirage.commands.cli.builtin.git.io import (remove_empty_parents,
+from mirage.commands.cli.builtin.git.io import (blocking_ancestor,
+                                                remove_empty_parents,
                                                 remove_file, restore_entry)
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.pathspec import under
@@ -204,6 +205,36 @@ def _overwritten(writing: Tree, untracked: list[str]) -> list[str]:
                   if path in names or any(under(name, path) for name in names))
 
 
+def _blocked_ancestors(writing: Tree, dirty: set[str]) -> list[str]:
+    """Which uncommitted paths stand where a written entry needs a directory.
+
+    The same shape as the untracked check above, over the other set: an
+    index entry at ``slot`` is in the way of a target recording
+    ``slot/child``, because the directory cannot be created without
+    removing the file. The exact-key comparison cannot see it, since
+    ``slot`` is in neither tree.
+
+    Deliberate divergence, and the same trade the staged case above
+    makes. git allows this and discards the staged addition in silence:
+    ``git switch`` onto a branch recording ``slot/child`` with ``slot``
+    staged succeeds, replaces the file with the directory and leaves a
+    clean status, with the staged blob reachable from nothing. Where the
+    working tree *also* differs from the index git refuses instead,
+    filed oddly under its untracked wording. mirage refuses both and
+    names the path: there is no reflog here to recover a staged blob
+    from, and a refusal the caller can act on beats a silent discard.
+    Pinned against git 2.50.1.
+
+    Args:
+        writing (Tree): the entries the switch writes, from ``_written``.
+        dirty (set[str]): paths whose working tree or index differs from
+            HEAD.
+    """
+    names = _tree_names(writing)
+    return sorted(path for path in dirty if any(
+        under(name, path) for name in names))
+
+
 def _lost_directories(writing: Tree, untracked: list[str]) -> list[str]:
     """Which directories the switch would empty of untracked files.
 
@@ -222,8 +253,9 @@ def _lost_directories(writing: Tree, untracked: list[str]) -> list[str]:
         under(path, name) for path in untracked))
 
 
-async def _switch(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
-                  before: Tree, after: Tree, links: LinkView | None) -> None:
+async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
+                  location: RepoLocation, before: Tree, after: Tree,
+                  links: LinkView | None) -> None:
     """Make the working tree and index match the tree being switched to.
 
     Only paths the two trees disagree about are touched, so a file that
@@ -236,6 +268,7 @@ async def _switch(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
+        stat_path (StatPath): the data plane's stat, which dereferences.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         before (Tree): the tree HEAD records.
@@ -264,6 +297,16 @@ async def _switch(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
     for path in changed:
         name = path.decode("utf-8", errors="replace")
         mode, sha = after[path]
+        # Whatever the removals above did not take, a component above
+        # the entry may still not be a directory: an ignored file or
+        # link is in neither tree and in no collision list, so it
+        # reaches here. git replaces it with the directory the entry
+        # needs rather than writing through it, which is what keeps a
+        # link's target tree, a path no branch named, out of the way.
+        above = await blocking_ancestor(stat_path, location.worktree, name,
+                                        links)
+        if above is not None:
+            await remove_file(dispatch, above)
         await restore_entry(dispatch, posixpath.join(location.worktree, name),
                             mode, blobs[sha], links)
     # The index is git's two-way merge, not a copy of the target tree:
@@ -451,12 +494,14 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
     carried = dict(unstaged) | staged
     dirty = set(carried)
     writing = _written(before, after)
-    blocked = _conflicts(before, after, dirty)
+    blocked = sorted(
+        set(_conflicts(before, after, dirty))
+        | set(_blocked_ancestors(writing, dirty)))
     overwritten = _overwritten(writing, found.untracked)
     lost = _lost_directories(writing, found.untracked)
     if blocked or overwritten or lost:
         raise CheckoutConflictError(blocked, overwritten, lost)
-    await _switch(dispatch, repo, location, before, after, links)
+    await _switch(dispatch, stat_path, repo, location, before, after, links)
     await _attach(dispatch, repo, location, head, commit, target, ref,
                   creating)
     return carried

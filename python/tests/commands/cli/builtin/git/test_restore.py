@@ -18,9 +18,7 @@ import pytest
 from dulwich.index import Index, IndexEntry
 from dulwich.repo import Repo
 
-from mirage.commands.cli.builtin.git.restore import (index_tree,
-                                                     linked_ancestor,
-                                                     parse_flags)
+from mirage.commands.cli.builtin.git.restore import index_tree, parse_flags
 from mirage.commands.spec.types import FlagView
 from tests.commands.cli.builtin.git.conftest import conflict_index
 
@@ -363,27 +361,6 @@ async def test_a_worktree_restore_before_the_first_commit_still_goes(
     assert (await unborn_rw.execute("cat /repo/f.txt")).stdout == b"hi\n"
 
 
-def test_a_link_above_the_entry_is_found():
-
-    class Links:
-        """A link view holding one link, at ``/repo/slot``."""
-
-        def stat_at(self, path: str):
-            """What the namespace holds at a path, None when no link.
-
-            Args:
-                path (str): absolute virtual path.
-            """
-            return object() if path == "/repo/slot" else None
-
-    assert linked_ancestor("/repo", "slot/child", Links()) == "/repo/slot"
-    # The link itself is not an ancestor of itself, and a path with no
-    # link above it has none.
-    assert linked_ancestor("/repo", "slot", Links()) is None
-    assert linked_ancestor("/repo", "other/child", Links()) is None
-    assert linked_ancestor("/repo", "slot/child", None) is None
-
-
 @pytest.mark.asyncio
 async def test_a_link_standing_where_a_directory_belongs_is_replaced(
         git_rw, repo_path: Path):
@@ -436,3 +413,32 @@ async def test_a_bare_tag_id_still_names_a_source_tree(git_rw,
     # unwraps it, so `--source=<tag-id>` reads what `--source=v1` reads.
     assert await run(git_rw, f"restore --source={held} a.txt") == (0, b"", b"")
     assert (repo_path / "a.txt").read_text() == "one changed\n"
+
+
+@pytest.mark.asyncio
+async def test_a_file_standing_where_a_directory_belongs_is_replaced(git_rw):
+    # The symlink case's other half, and the commoner one: an untracked
+    # regular file on the way to the entry. git's create_directories
+    # unlinks any leading non-directory and makes the directory, so the
+    # restore succeeds and the file is gone. Left unhandled, the write
+    # failed with a raw ENOTDIR the caller could do nothing with.
+    await git_rw.execute("mkdir /repo/slot && echo c > /repo/slot/child")
+    assert (await run(git_rw, "add slot/child"))[0] == 0
+    assert (await run(git_rw, "commit -m child"))[0] == 0
+    await git_rw.execute("rm -rf /repo/slot && echo untracked > /repo/slot")
+    assert await run(git_rw, "restore slot/child") == (0, b"", b"")
+    assert (await git_rw.execute("cat /repo/slot/child")).stdout == b"c\n"
+
+
+@pytest.mark.asyncio
+async def test_a_removal_is_not_attempted_through_a_file_either(git_rw):
+    # The removal direction takes it the other way, exactly as it takes
+    # a link: git checks the leading path and removes nothing, so the
+    # untracked file standing there is left alone.
+    await git_rw.execute("mkdir /repo/slot && echo c > /repo/slot/child")
+    assert (await run(git_rw, "add slot/child"))[0] == 0
+    assert (await run(git_rw, "commit -m child"))[0] == 0
+    await git_rw.execute("rm -rf /repo/slot && echo untracked > /repo/slot")
+    assert await run(git_rw,
+                     "restore --source=HEAD~1 slot/child") == (0, b"", b"")
+    assert (await git_rw.execute("cat /repo/slot")).stdout == b"untracked\n"

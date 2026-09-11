@@ -32,7 +32,7 @@ import {
 } from './errors.ts'
 import { short } from './format.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
-import { removeEmptyParents, removeFile, restoreEntry, under } from './io.ts'
+import { blockingAncestor, removeEmptyParents, removeFile, restoreEntry, under } from './io.ts'
 import { record } from './reflog.ts'
 import { BRANCH_PREFIX, detachHead, loadRefs, readHead, setHead, writeRef } from './refs.ts'
 import { under as inside } from './pathspec.ts'
@@ -149,6 +149,34 @@ function overwritten(
 }
 
 /**
+ * Which uncommitted paths stand where a written entry needs a directory.
+ *
+ * The same shape as the untracked check above, over the other set: an index
+ * entry at `slot` is in the way of a target recording `slot/child`, because the
+ * directory cannot be created without removing the file. The exact-key
+ * comparison cannot see it, since `slot` is in neither tree.
+ *
+ * Deliberate divergence, and the same trade the staged case above makes. git
+ * allows this and discards the staged addition in silence: `git switch` onto a
+ * branch recording `slot/child` with `slot` staged succeeds, replaces the file
+ * with the directory and leaves a clean status, with the staged blob reachable
+ * from nothing. Where the working tree *also* differs from the index git
+ * refuses instead, filed oddly under its untracked wording. mirage refuses both
+ * and names the path: there is no reflog here to recover a staged blob from,
+ * and a refusal the caller can act on beats a silent discard. Pinned against
+ * git 2.50.1.
+ */
+function blockedAncestors(
+  writing: ReadonlyMap<string, TreeEntry>,
+  dirty: ReadonlySet<string>,
+): string[] {
+  const names = [...writing.keys()]
+  return [...dirty]
+    .filter((path) => names.some((name) => inside(name, path)))
+    .sort(compareCodePoints)
+}
+
+/**
  * Which directories the switch would empty of untracked files.
  *
  * The mirror of the case above: the target records a *file* where the working
@@ -179,6 +207,7 @@ function lostDirectories(
 async function switchTo(
   repo: Repo,
   dispatch: Dispatch,
+  statPath: StatPath,
   before: ReadonlyMap<string, TreeEntry>,
   after: ReadonlyMap<string, TreeEntry>,
   links: LinkView | null,
@@ -200,6 +229,13 @@ async function switchTo(
     const entry = changed.get(path)
     if (entry === undefined) continue
     const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
+    // Whatever the removals above did not take, a component above the entry
+    // may still not be a directory: an ignored file or link is in neither tree
+    // and in no collision list, so it reaches here. git replaces it with the
+    // directory the entry needs rather than writing through it, which is what
+    // keeps a link's target tree, a path no branch named, out of the way.
+    const above = await blockingAncestor(statPath, repo.location.worktree, path, links)
+    if (above !== null) await removeFile(dispatch, above)
     await restoreEntry(dispatch, under(repo.location.worktree, path), entry.mode, blob, links)
   }
   // The index is git's two-way merge, not a copy of the target tree: only a
@@ -365,13 +401,15 @@ export async function moveHead(
   const carried = new Map([...unstaged, ...stageLetters(before, state.entries)])
   const dirty = new Set(carried.keys())
   const writing = written(before, after)
-  const blocked = conflicts(before, after, dirty)
+  const blocked = [
+    ...new Set([...conflicts(before, after, dirty), ...blockedAncestors(writing, dirty)]),
+  ].sort(compareCodePoints)
   const clobbered = overwritten(writing, found.untracked)
   const lost = lostDirectories(writing, found.untracked)
   if (blocked.length > 0 || clobbered.length > 0 || lost.length > 0) {
     throw new CheckoutConflictError(blocked, clobbered, lost)
   }
-  await switchTo(repo, dispatch, before, after, links)
+  await switchTo(repo, dispatch, statPath, before, after, links)
   await attach(dispatch, repo, known, head, oid, target, ref, creating)
   return carried
 }

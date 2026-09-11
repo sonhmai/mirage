@@ -31,7 +31,8 @@ from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     UnknownSwitchError, UnmergedPathError, UnreadableTreeError,
     UnresolvableSourceError)
 from mirage.commands.cli.builtin.git.index import read_index, write_index
-from mirage.commands.cli.builtin.git.io import (remove_empty_parents,
+from mirage.commands.cli.builtin.git.io import (blocking_ancestor,
+                                                remove_empty_parents,
                                                 remove_file, remove_tree,
                                                 restore_entry)
 from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
@@ -44,7 +45,6 @@ from mirage.commands.cli.builtin.git.util import (  # yapf: disable
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
 from mirage.types import FileType
 
 
@@ -128,41 +128,6 @@ def source_tree(repo: BaseRepo, revision: str) -> Tree:
     if found.type_name.decode() != TREE:
         raise UnreadableTreeError(found.id.decode())
     return flat_tree(repo, found.id)
-
-
-def linked_ancestor(worktree: str, name: str,
-                    links: LinkView | None) -> str | None:
-    """The nearest directory above an entry that is really a symlink.
-
-    An entry's path is only a way through the working tree while every
-    component above it is a directory. A link standing on one is not,
-    and neither a write nor a removal may be attempted through it: both
-    resolve past the link and land in whatever tree it points at,
-    damaging files no branch named while the link itself stays. git
-    checks the leading path for exactly this and takes the two
-    directions differently, which is what the callers do here.
-
-    Exact-path link lookups cannot see this, since the link sits above
-    the name being looked up rather than on it.
-
-    Args:
-        worktree (str): absolute virtual path of the working tree root.
-        name (str): the entry, repository-relative.
-        links (LinkView | None): the name plane's link facts, None when
-            no namespace is wired.
-
-    Returns:
-        str | None: absolute virtual path of the nearest such link,
-        None when every component above the entry is a directory.
-    """
-    if links is None:
-        return None
-    current = worktree
-    for part in name.split("/")[:-1]:
-        current = posixpath.join(current, part)
-        if links.stat_at(current) is not None:
-            return current
-    return None
 
 
 async def restore(
@@ -267,24 +232,29 @@ async def restore(
             # emptying it first is free.
             for name in sorted(absent):
                 path = posixpath.join(location.worktree, name)
-                # A link above the entry is not a way through to it:
-                # the unlink would resolve past the link and delete a
-                # file inside whatever it points at, which no branch
-                # named. git checks the leading path and removes
-                # nothing when it finds one, so neither does this.
-                if linked_ancestor(location.worktree, name, links):
+                # A component above the entry that is not a directory
+                # is not a way through to it: the unlink would resolve
+                # past it and delete a file inside whatever it points
+                # at, which no branch named. git checks the leading
+                # path and removes nothing when it finds one, so
+                # neither does this.
+                if await blocking_ancestor(stat_path, location.worktree, name,
+                                           links):
                     continue
                 await remove_file(dispatch, path)
                 await remove_empty_parents(dispatch, path, location.worktree)
             for name in sorted(present):
                 mode, sha = tree[name.encode()]
                 where = posixpath.join(location.worktree, name)
-                # The write direction takes the same link the other way
-                # round: the entry needs a directory where the link
-                # stands, so git replaces the link with one rather than
-                # writing through it. The tree the link pointed at is
-                # left exactly as it was.
-                above = linked_ancestor(location.worktree, name, links)
+                # The write direction takes the same component the
+                # other way round: the entry needs a directory where it
+                # stands, so git replaces it with one rather than
+                # writing through it. A link's target tree is left
+                # exactly as it was, and an untracked file standing
+                # there is replaced in silence, which is what git's
+                # create_directories does to any leading non-directory.
+                above = await blocking_ancestor(stat_path, location.worktree,
+                                                name, links)
                 if above is not None:
                     await remove_file(dispatch, above)
                 # A directory can still stand here after the loop

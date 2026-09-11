@@ -16,7 +16,7 @@ import logging
 import posixpath
 
 from mirage.commands.cli.builtin.git.constants import SYMLINK
-from mirage.ops.types import LinkView
+from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.errors import MISS_ERRORS
@@ -235,6 +235,50 @@ async def write_once(dispatch: DispatchFn, path: str, data: bytes) -> None:
     if await exists(dispatch, path):
         return
     await write_file(dispatch, path, data)
+
+
+async def blocking_ancestor(stat_path: StatPath, worktree: str, name: str,
+                            links: LinkView | None) -> str | None:
+    """The nearest component above an entry that is not a directory.
+
+    An entry's path is only a way through the working tree while every
+    component above it is a directory. Anything else standing on one --
+    a symlink, a regular file, tracked or not -- is not a way through,
+    and the two directions take it differently. Writing the entry
+    *replaces* it with the directory the entry needs, leaving whatever
+    a link pointed at exactly as it was; removing the entry does
+    nothing at all, because the path never led there. That is git's
+    ``create_directories`` and ``check_leading_path``, and both halves
+    were probed against git 2.50.1.
+
+    The namespace is asked before the data plane, and the order is the
+    whole point: ``stat_path`` dereferences, so a link to a directory
+    stats as a directory and the walk would carry on straight through
+    it. Only the name plane can say that the component is a link.
+
+    An exact-path lookup cannot see any of this, since what is in the
+    way sits above the name being looked up rather than on it.
+
+    Args:
+        stat_path (StatPath): the data plane's stat, which dereferences.
+        worktree (str): absolute virtual path of the working tree root.
+        name (str): the entry, repository-relative.
+        links (LinkView | None): the name plane's link facts, None when
+            no namespace is wired.
+
+    Returns:
+        str | None: absolute virtual path of the nearest such component,
+        None when every component above the entry is a directory.
+    """
+    current = worktree
+    for part in name.split("/")[:-1]:
+        current = posixpath.join(current, part)
+        if links is not None and links.stat_at(current) is not None:
+            return current
+        info = await stat_path(current)
+        if info is not None and info.type is not FileType.DIRECTORY:
+            return current
+    return None
 
 
 async def remove_file(dispatch: DispatchFn, path: str) -> None:

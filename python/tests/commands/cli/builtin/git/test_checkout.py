@@ -18,7 +18,8 @@ from pathlib import Path
 import pytest
 from dulwich.repo import Repo
 
-from mirage.commands.cli.builtin.git.checkout import _conflicts
+from mirage.commands.cli.builtin.git.checkout import (_blocked_ancestors,
+                                                      _conflicts)
 from tests.commands.cli.builtin.git.conftest import conflict_index
 
 MODE = 0o100644
@@ -422,3 +423,92 @@ async def test_branching_here_survives_an_unmerged_index(
     assert (await run(git_rw, "checkout -b topic"))[0] == 0
     with Repo(str(repo_path)) as repo:
         assert repo.open_index().has_conflicts()
+
+
+def test_an_uncommitted_path_above_a_written_entry_is_blocked():
+    writing = {b"slot/child": (MODE, b"0" * 40)}
+    assert _blocked_ancestors(writing, {"slot"}) == ["slot"]
+    # The entry itself is not its own ancestor, and an unrelated
+    # uncommitted path is in nobody's way.
+    assert _blocked_ancestors(writing, {"slot/child"}) == []
+    assert _blocked_ancestors(writing, {"other"}) == []
+
+
+async def branch_holding_a_child(ws) -> None:
+    """Put ``slot/child`` on a branch ``other`` and come back.
+
+    Args:
+        ws (Workspace): workspace with the repository and CLI.
+    """
+    assert (await run(ws, "switch -c other"))[0] == 0
+    await ws.execute("mkdir -p /repo/slot && echo kid > /repo/slot/child")
+    assert (await run(ws, "add -f slot/child"))[0] == 0
+    assert (await run(ws, "commit -m child"))[0] == 0
+    assert (await run(ws, "switch main"))[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_staged_file_where_the_target_records_a_directory(git_rw):
+    # git allows this and discards the staged addition in silence; this
+    # refuses and names it, the same trade _conflicts makes for a staged
+    # change. What must not happen either way is the old answer: a raw
+    # ENOTDIR after the earlier entries were already written.
+    await branch_holding_a_child(git_rw)
+    await git_rw.execute("echo staged > /repo/slot")
+    assert (await run(git_rw, "add slot"))[0] == 0
+    code, _out, err = await run(git_rw, "switch other")
+    assert code == 1
+    assert err == (b"error: Your local changes to the following files would "
+                   b"be overwritten by checkout:\n\tslot\n"
+                   b"Please commit your changes or stash them before you "
+                   b"switch branches.\nAborting\n")
+    # Nothing moved: still on main with the addition still staged.
+    assert (await run(git_rw, "status --short"))[1] == b"A  slot\n"
+
+
+@pytest.mark.asyncio
+async def test_an_ignored_link_where_the_target_records_a_directory(git_rw):
+    # An ignored path is in neither tree and in no collision list, so it
+    # reaches the write. Writing through the link landed the blob in the
+    # link's target, corrupting a path no branch named while the link
+    # itself survived; git replaces the link instead.
+    await git_rw.execute("printf 'slot\\n' > /repo/.gitignore")
+    assert (await run(git_rw, "add .gitignore"))[0] == 0
+    assert (await run(git_rw, "commit -m ignore"))[0] == 0
+    await branch_holding_a_child(git_rw)
+    await git_rw.execute(
+        "mkdir -p /repo/away && echo outside > /repo/away/child")
+    await git_rw.execute("ln -s /repo/away /repo/slot")
+    assert (await run(git_rw, "switch other"))[0] == 0
+    assert (await git_rw.execute("cat /repo/slot/child")).stdout == b"kid\n"
+    # The link's target tree is untouched, and the link itself is gone.
+    assert (await
+            git_rw.execute("cat /repo/away/child")).stdout == b"outside\n"
+    assert (await git_rw.execute("readlink /repo/slot")).exit_code != 0
+
+
+@pytest.mark.asyncio
+async def test_an_ignored_file_where_the_target_records_a_directory(git_rw):
+    await git_rw.execute("printf 'slot\\n' > /repo/.gitignore")
+    assert (await run(git_rw, "add .gitignore"))[0] == 0
+    assert (await run(git_rw, "commit -m ignore"))[0] == 0
+    await branch_holding_a_child(git_rw)
+    await git_rw.execute("echo ignored > /repo/slot")
+    assert (await run(git_rw, "switch other"))[0] == 0
+    assert (await git_rw.execute("cat /repo/slot/child")).stdout == b"kid\n"
+    assert (await run(git_rw, "status --short"))[1] == b""
+
+
+@pytest.mark.asyncio
+async def test_an_untracked_file_there_is_still_refused(git_rw):
+    # Untracked and not ignored is the case git does refuse, and the
+    # wording is its own: the replacement above must not reach it.
+    await branch_holding_a_child(git_rw)
+    await git_rw.execute("echo untracked > /repo/slot")
+    code, _out, err = await run(git_rw, "switch other")
+    assert code == 1
+    assert err == (b"error: The following untracked working tree files would "
+                   b"be overwritten by checkout:\n\tslot\n"
+                   b"Please move or remove them before you switch "
+                   b"branches.\nAborting\n")
+    assert (await git_rw.execute("cat /repo/slot")).stdout == b"untracked\n"

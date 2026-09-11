@@ -161,12 +161,25 @@ serve, and inventing a name would put an unreviewed one into history.
   `restore --source=v1` reads a tree; an id does not, which is how
   `git tag nested <tag-id>` records the nested tag git itself warns
   about rather than quietly flattening it.
-- **A path is only a way through while every parent is a directory.** A
-  symlink standing on one is not: `restore` replaces it with the
-  directory the entry needs rather than writing through it, and removes
-  nothing through it in the other direction, so the tree the link
-  pointed at is never touched by a path that only looked like it led
-  there.
+- **A path is only a way through while every parent is a directory.**
+  Anything else standing on one is not, whatever kind it is: a symlink,
+  a regular file, tracked or not. The two directions differ and both are
+  git's. Writing an entry *replaces* what stands above it with the
+  directory the entry needs, so `restore` and `switch` both land the
+  blob where the branch says and leave a link's target tree, a path no
+  branch named, untouched. Removing an entry does nothing at all,
+  because the path never led there. The checks are one helper, so a
+  third caller inherits both halves rather than re-deriving one.
+- **A switch replaces an ignored parent and refuses an uncommitted
+  one.** The untracked case git refuses by name, and that is unchanged.
+  An *ignored* file or link is in neither tree and on no collision list,
+  so it reaches the write and is replaced in silence, which is git's own
+  split. The deliberate divergence is the third: where an index entry
+  stands in the way of a directory the target records, git allows the
+  switch and discards the staged addition with nothing left pointing at
+  the blob, and this build refuses and names the path instead. Same
+  trade as the staged-change refusal above: no reflog here means a
+  silent discard cannot be undone, and a refusal can be acted on.
 - **A move never crosses a mount boundary**, at either end. The rename op
   binds to the backend serving the source, so a destination another mount
   serves would be written into the source's backend at a path it does not

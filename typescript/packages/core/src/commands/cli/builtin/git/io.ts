@@ -16,7 +16,7 @@ import { FileType, LINK_TARGET_KEY, PathSpec } from '../../../../types.ts'
 import type { FileStat } from '../../../../types.ts'
 import { parent, posixNormpath } from '../../../../utils/path.ts'
 import { isMissingPath } from '../../../../utils/errors.ts'
-import type { LinkView } from '../../../../ops/types.ts'
+import type { LinkView, StatPath } from '../../../../ops/types.ts'
 import { SYMLINK_MODE } from './constants.ts'
 import { basename } from './path.ts'
 import type { Dispatch } from './types.ts'
@@ -207,6 +207,49 @@ export async function removeFile(dispatch: Dispatch, path: string): Promise<void
 /** Join path segments below a git directory, POSIX style. */
 export function under(base: string, ...parts: string[]): string {
   return posixNormpath(`${base}/${parts.join('/')}`)
+}
+
+/**
+ * The nearest component above an entry that is not a directory.
+ *
+ * An entry's path is only a way through the working tree while every component
+ * above it is a directory. Anything else standing on one -- a symlink, a
+ * regular file, tracked or not -- is not a way through, and the two directions
+ * take it differently. Writing the entry *replaces* it with the directory the
+ * entry needs, leaving whatever a link pointed at exactly as it was; removing
+ * the entry does nothing at all, because the path never led there. That is
+ * git's `create_directories` and `check_leading_path`, and both halves were
+ * probed against git 2.50.1.
+ *
+ * The namespace is asked before the data plane, and the order is the whole
+ * point: `statPath` dereferences, so a link to a directory stats as a directory
+ * and the walk would carry on straight through it. Only the name plane can say
+ * that the component is a link.
+ *
+ * An exact-path lookup cannot see any of this, since what is in the way sits
+ * above the name being looked up rather than on it.
+ *
+ * @param statPath the data plane's stat, which dereferences
+ * @param worktree absolute virtual path of the working tree root
+ * @param name the entry, repository-relative
+ * @param links the name plane's link facts, null when no namespace is wired
+ * @returns the absolute virtual path of the nearest such component, null when
+ *   every component above the entry is a directory
+ */
+export async function blockingAncestor(
+  statPath: StatPath,
+  worktree: string,
+  name: string,
+  links: LinkView | null,
+): Promise<string | null> {
+  let current = worktree
+  for (const part of name.split('/').slice(0, -1)) {
+    current = under(current, part)
+    if ((links?.statAt(current) ?? null) !== null) return current
+    const info = await statPath(current)
+    if (info !== null && info.type !== FileType.DIRECTORY) return current
+  }
+  return null
 }
 
 /**

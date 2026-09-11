@@ -97,6 +97,19 @@ def verb_visible(head: str, path: Sequence[str], session: Session) -> bool:
     return node_visible((head, *path), session.commands)
 
 
+def runtime_refused(name: str,
+                    session: Session,
+                    registry: MountRegistry,
+                    routing: RouteDecision | None = None) -> bool:
+    """Whether routing explicitly refused the external runtime for ``name``."""
+    if routing is None:
+        return False
+    bindings = routing.bindings
+    key = name if name in bindings else EXTERNAL_COMMANDS
+    return (key in bindings and bindings[key] is None
+            and lookup(name, session, registry) is Consumer.EXTERNAL)
+
+
 def _layers(name: str,
             session: Session,
             registry: MountRegistry,
@@ -122,14 +135,14 @@ def _layers(name: str,
     found = False
     bindings = (routing.bindings
                 if routing is not None else registry.runtime_bindings)
-    bound = bindings.get(name)
-    if bound is None:
-        bound = registry.runtime_bindings.get(name)
+    bound = (bindings[name]
+             if name in bindings else registry.runtime_bindings.get(name))
     native = isinstance(bound, (LineExecutorMixin, ProcessExecutorMixin))
+    refused = runtime_refused(name, session, registry, routing)
     if name in SHELL_NAMES and installed:
         found = True
-        yield (Consumer.EXTERNAL
-               if native and name in INTERPRETER_NAMES else Consumer.SESSION)
+        yield (Consumer.EXTERNAL if (native or refused)
+               and name in INTERPRETER_NAMES else Consumer.SESSION)
     if installed and name in NAMESPACE_COMMANDS:
         found = True
         yield Consumer.NAMESPACE
@@ -139,19 +152,19 @@ def _layers(name: str,
     if installed and registry.clis.get(name) is not None:
         found = True
         yield Consumer.CLI
-    if installed and native and name not in SHELL_NAMES:
+    if installed and (native or refused) and name not in SHELL_NAMES:
         found = True
         yield Consumer.EXTERNAL
     if installed and registry.mount_for_command(name) is not None:
         found = True
         yield Consumer.MOUNT
-    fallback = bindings.get(EXTERNAL_COMMANDS)
-    if fallback is None:
-        fallback = registry.runtime_bindings.get(EXTERNAL_COMMANDS)
+    fallback = (bindings[EXTERNAL_COMMANDS] if EXTERNAL_COMMANDS in bindings
+                else registry.runtime_bindings.get(EXTERNAL_COMMANDS))
+    fallback_native = isinstance(fallback,
+                                 (LineExecutorMixin, ProcessExecutorMixin))
     if (installed and not found and name not in bindings
             and name not in registry.runtime_unavailable
-            and isinstance(fallback,
-                           (LineExecutorMixin, ProcessExecutorMixin))):
+            and (fallback_native or refused)):
         yield Consumer.EXTERNAL
 
 

@@ -42,7 +42,8 @@ from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.globs import expand_boundary_globs
 from mirage.workspace.lookup import (SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS,
-                                     Consumer, follows_last_component, lookup)
+                                     Consumer, follows_last_component, lookup,
+                                     runtime_refused)
 from mirage.workspace.node.admission import Admitted, Refused, admit
 from mirage.workspace.node.occurrence import claimant_for, evaluated_from
 from mirage.workspace.session.state import (ensure_var_visible,
@@ -384,8 +385,11 @@ async def _run_argv(
     # and `MountRootPolicy` cannot recognize a mount root inside one, so
     # `tar -cf out.tar /base/*` would archive a whole backend the same
     # operand typed by hand is refused for.
-    boundary = await expand_boundary_globs(list(argv.operands), registry,
-                                           namespace)
+    refused_external = runtime_refused(name, session, registry,
+                                       routing_decision)
+    boundary = (list(argv.operands)
+                if refused_external else await expand_boundary_globs(
+                    list(argv.operands), registry, namespace))
     expanded = [word_text(w) for w in boundary]
     # Compared as words, not as a count: a glob that matches exactly one
     # name (`du /base/i*` where only the mount root matches) is still an
@@ -525,7 +529,8 @@ async def _route_argv(
                                                          exit_code=2,
                                                          stderr=err)
 
-    if lookup(name, session, registry, routing_decision) is Consumer.EXTERNAL:
+    consumer = lookup(name, session, registry, routing_decision)
+    if consumer is Consumer.EXTERNAL:
         return await run_external(argv, stdin, session, registry,
                                   routing_decision)
 

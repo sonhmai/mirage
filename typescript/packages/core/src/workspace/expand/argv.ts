@@ -24,6 +24,7 @@ import {
   WordPolicy,
   endOptionsAfterProgram,
   lookup,
+  runtimeRefused,
   wordPolicy,
 } from '../lookup/index.ts'
 import type { Session } from '../session/session.ts'
@@ -126,6 +127,7 @@ export async function expandArgv(
   // applies again. A CLI cannot reach here at all, since registerCli
   // refuses a shell builtin's name.
   const consumer = lookup(name, session, registry, routing)
+  const refused = runtimeRefused(name, session, registry, routing)
   const shadowed = Object.hasOwn(session.functions, name) || consumer === Consumer.EXTERNAL
   const line = expanded.slice(consumed)
   const tail = shadowed ? line : endOptionsAfterProgram(name, line)
@@ -158,7 +160,8 @@ export async function expandArgv(
   // matches fail.
   const globOpts = globOptions(session)
   const words =
-    policy === WordPolicy.SHELL || globNeedsShell(globOpts) || scopesPaths(session.commands, name)
+    !refused &&
+    (policy === WordPolicy.SHELL || globNeedsShell(globOpts) || scopesPaths(session.commands, name))
       ? await resolveGlobs(classified, registry, false, namespace, globOpts)
       : // A pattern still owes its backend a resolution, so it travels
         // marked and the marks come off there; every other word is done

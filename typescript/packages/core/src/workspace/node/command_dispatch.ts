@@ -75,6 +75,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import {
   Consumer,
   lookup,
+  runtimeRefused,
   SLASH_KEEPS_LAST,
   UNSUPPORTED_BUILTINS,
   followsLastComponent,
@@ -515,7 +516,10 @@ async function runArgv(
   // MountRootPolicy cannot recognize a mount root inside one, so
   // `tar -cf out.tar /base/*` would archive a whole backend the same
   // operand typed by hand is refused for.
-  const boundary = await expandBoundaryGlobs(argv.operands, registry, namespace)
+  const refusedExternal = runtimeRefused(name, session, registry, routingDecision)
+  const boundary = refusedExternal
+    ? [...argv.operands]
+    : await expandBoundaryGlobs(argv.operands, registry, namespace)
   const expandedWords = boundary.map(wordText)
   // Compared as words, not as a count: a glob that matches exactly one
   // name (`du /base/i*` where only the mount root matches) is still an
@@ -670,7 +674,8 @@ async function routeArgv(
     ]
   }
 
-  if (lookup(name, session, registry, routingDecision) === Consumer.EXTERNAL) {
+  const consumer = lookup(name, session, registry, routingDecision)
+  if (consumer === Consumer.EXTERNAL) {
     return runExternal(argv, stdin, session, registry, routingDecision, signal)
   }
 

@@ -74,6 +74,22 @@ export function verbVisible(head: string, path: readonly string[], session: Sess
   return nodeVisible([head, ...path], session.commands)
 }
 
+/** Whether routing explicitly refused the external runtime for `name`. */
+export function runtimeRefused(
+  name: string,
+  session: Session,
+  registry: MountRegistry,
+  routing?: RouteDecision,
+): boolean {
+  if (routing === undefined) return false
+  const key = Object.hasOwn(routing.bindings, name) ? name : EXTERNAL_COMMANDS
+  return (
+    Object.hasOwn(routing.bindings, key) &&
+    routing.bindings[key] === null &&
+    lookup(name, session, registry) === Consumer.EXTERNAL
+  )
+}
+
 /**
  * Yield every layer holding the name, most-preferred first.
  *
@@ -95,11 +111,15 @@ function* layers(
   const installed = listed(name, session)
   let found = false
   const declared = registry.runtimeEntries.find((entry) => entry.captures.includes(name))
-  const bound = routing?.bindings[name] ?? declared
+  const bound =
+    routing !== undefined && Object.hasOwn(routing.bindings, name)
+      ? routing.bindings[name]
+      : declared
   const native = bound != null && (isLineExecutor(bound) || isProcessExecutor(bound))
+  const refused = runtimeRefused(name, session, registry, routing)
   if (SHELL_NAMES.has(name) && installed) {
     found = true
-    yield native && INTERPRETER_NAMES.has(name) ? Consumer.EXTERNAL : Consumer.SESSION
+    yield (native || refused) && INTERPRETER_NAMES.has(name) ? Consumer.EXTERNAL : Consumer.SESSION
   }
   if (installed && NAMESPACE_COMMANDS.has(name)) {
     found = true
@@ -113,7 +133,7 @@ function* layers(
     found = true
     yield Consumer.CLI
   }
-  if (installed && native && !SHELL_NAMES.has(name)) {
+  if (installed && (native || refused) && !SHELL_NAMES.has(name)) {
     found = true
     yield Consumer.EXTERNAL
   }
@@ -122,15 +142,16 @@ function* layers(
     yield Consumer.MOUNT
   }
   const fallback =
-    routing?.bindings[EXTERNAL_COMMANDS] ??
-    registry.runtimeEntries.find((entry) => entry.captures.includes(EXTERNAL_COMMANDS))
+    routing !== undefined && Object.hasOwn(routing.bindings, EXTERNAL_COMMANDS)
+      ? routing.bindings[EXTERNAL_COMMANDS]
+      : registry.runtimeEntries.find((entry) => entry.captures.includes(EXTERNAL_COMMANDS))
   if (
     installed &&
     !found &&
     declared === undefined &&
     (routing === undefined || !Object.hasOwn(routing.bindings, name)) &&
     fallback != null &&
-    (isLineExecutor(fallback) || isProcessExecutor(fallback))
+    (isLineExecutor(fallback) || isProcessExecutor(fallback) || refused)
   ) {
     yield Consumer.EXTERNAL
   }

@@ -164,13 +164,25 @@ describe('external program capture', () => {
     }
   })
 
-  it('keeps Mirage available when the external runtime refuses a line', async () => {
-    const probe = new ProcessProbe({ script: () => false })
+  it.each([
+    { kind: 'named', captures: ['native-tool'] },
+    { kind: 'fallback', captures: [EXTERNAL_COMMANDS] },
+  ])('does not expand globs for a refused $kind capture', async ({ captures }) => {
+    const probe = new ProcessProbe({ captures, script: () => false })
     const ws = await workspace(probe)
     try {
-      expect((await ws.execute('native-tool')).exitCode).toBe(126)
       expect(DEC.decode((await ws.execute('echo mirage')).stdout)).toBe('mirage\n')
-      expect(probe.requests).toHaveLength(0)
+      await ws.execute('shopt -s failglob')
+      const resolved = vi.spyOn(globs, 'resolveGlobs')
+      try {
+        const result = await ws.execute('native-tool /api/*')
+        expect(result.exitCode).toBe(126)
+        expect(DEC.decode(result.stderr)).toBe('native-tool: no runtime accepted this line\n')
+        expect(resolved).not.toHaveBeenCalled()
+        expect(probe.requests).toHaveLength(0)
+      } finally {
+        resolved.mockRestore()
+      }
     } finally {
       await ws.close()
     }

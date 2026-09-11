@@ -137,12 +137,30 @@ async def test_runtime_refusal_cannot_fall_through_to_external_capture():
 
 
 @pytest.mark.asyncio
-async def test_refused_external_fallback_leaves_mirage_available():
-    probe = ProcessProbe(script=lambda ctx: False)
+@pytest.mark.parametrize("captures", [("native-tool", ),
+                                      (EXTERNAL_COMMANDS, )],
+                         ids=["named", "fallback"])
+async def test_refused_external_capture_does_not_expand_globs(
+        monkeypatch, captures):
+    probe = ProcessProbe(captures=captures, script=lambda ctx: False)
     async with workspace({"/": RAMResource()}, runtimes=[probe]) as ws:
-        assert (await ws.execute("native-tool")).exit_code == 126
         assert await (await
                       ws.execute("echo mirage")).stdout_str() == "mirage\n"
+        await ws.execute("shopt -s failglob")
+        resolved = argv_module.resolve_globs
+        globbed = False
+
+        async def track_globs(*args, **kwargs):
+            nonlocal globbed
+            globbed = True
+            return await resolved(*args, **kwargs)
+
+        monkeypatch.setattr(argv_module, "resolve_globs", track_globs)
+        result = await ws.execute("native-tool /api/*")
+        assert result.exit_code == 126
+        assert await result.stderr_str(
+        ) == "native-tool: no runtime accepted this line\n"
+        assert not globbed
         assert not probe.requests
 
 

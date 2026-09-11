@@ -34,7 +34,7 @@ from mirage.workspace.expand.spec_hints import (spec_for_command,
                                                 spec_word_kinds)
 from mirage.workspace.lookup import (Consumer, WordPolicy,
                                      end_options_after_program, lookup,
-                                     word_policy)
+                                     runtime_refused, word_policy)
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
@@ -142,6 +142,7 @@ async def expand_argv(
     # when the rewrite applies again. A CLI cannot reach here at all,
     # since register_cli refuses a shell builtin's name.
     consumer = lookup(name, session, registry, routing)
+    refused = runtime_refused(name, session, registry, routing)
     if name not in session.functions and consumer is not Consumer.EXTERNAL:
         expanded = expanded[:consumed] + end_options_after_program(
             name, expanded[consumed:])
@@ -174,8 +175,8 @@ async def expand_argv(
     # patterns for backend pushdown; unknown names fail without
     # touching backends.
     glob_opts = glob_options(session)
-    if (policy is WordPolicy.SHELL or glob_opts.needs_shell
-            or scopes_paths(session.commands, name)):
+    if (not refused and (policy is WordPolicy.SHELL or glob_opts.needs_shell
+                         or scopes_paths(session.commands, name))):
         # A backend's resolve_glob speaks bash's defaults only, so a
         # session that turned on nullglob, failglob or globstar has its
         # mount-command globs expanded here too, and the command receives

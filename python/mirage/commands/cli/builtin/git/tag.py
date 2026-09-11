@@ -27,13 +27,14 @@ from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import GitError  # yapf: disable
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     IncompatibleOptionsError, InvalidTagNameError, ListModeOnlyError,
-    MissingTagMessageError, NoWorkspaceError, RefUpdateConflictError,
-    TagExistsError, TagNotFoundError, TagUsageError, TooManyArgumentsError,
-    UnknownSwitchError, UnresolvedRefError)
+    MissingTagMessageError, NoWorkspaceError, RefLockError,
+    RefUpdateConflictError, TagExistsError, TagNotFoundError, TagUsageError,
+    TooManyArgumentsError, UnknownSwitchError, UnresolvedRefError)
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.objects import abbrev_for
-from mirage.commands.cli.builtin.git.refs import (TAG_PREFIX, delete_ref,
-                                                  valid_ref_name, write_ref)
+from mirage.commands.cli.builtin.git.refs import (TAG_PREFIX, blocking_ref,
+                                                  delete_ref, valid_ref_name,
+                                                  write_ref)
 from mirage.commands.cli.builtin.git.revparse import resolve_object
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (  # yapf: disable
@@ -319,6 +320,12 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         else:
             pointed = target.id
         was = repo.refs[ref] if ref in known else None
+        # After the object is built, which is git's order: an annotated
+        # tag whose ref cannot be locked has already been written to the
+        # database and is left there unreferenced.
+        held = blocking_ref(known, ref.decode())
+        if held is not None:
+            raise RefLockError(ref.decode(), held)
         await write_ref(dispatch, location.commondir, ref.decode(), pointed)
     except GitError as exc:
         return fatal(exc)

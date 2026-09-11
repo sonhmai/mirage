@@ -27,6 +27,7 @@ import {
   ListModeOnlyError,
   MissingTagMessageError,
   NoWorkspaceError,
+  RefLockError,
   RefUpdateConflictError,
   TagExistsError,
   TagNotFoundError,
@@ -36,7 +37,7 @@ import {
   UnresolvedRefError,
 } from './errors.ts'
 import { short } from './format.ts'
-import { deleteRef, loadRefs, TAG_PREFIX, validRefName, writeRef } from './refs.ts'
+import { blockingRef, deleteRef, loadRefs, TAG_PREFIX, validRefName, writeRef } from './refs.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveObject } from './revparse.ts'
 import { checkOperands, escaped, fatal } from './util.ts'
@@ -314,6 +315,11 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
         Math.floor(Date.now() / 1000),
       )
     }
+    // After the object is built, which is git's order: an annotated tag whose
+    // ref cannot be locked has already been written to the database and is
+    // left there unreferenced.
+    const held = blockingRef(new Set(known.keys()), ref)
+    if (held !== null) throw new RefLockError(ref, held)
     await writeRef(dispatch, repo.location.commondir, ref, pointed)
   } catch (err) {
     if (err instanceof GitError) return fatal(err)

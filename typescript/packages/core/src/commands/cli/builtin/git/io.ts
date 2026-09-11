@@ -293,10 +293,23 @@ export async function renamePath(
  * A file and an absent path both walk out through the same two steps, since
  * `readdir` reads a non-directory as nothing there and `rmdir` refuses it.
  *
+ * A child that is a symlink is unlinked, never descended into. The name plane
+ * has to say so, because `readdir` dereferences: a link to a directory lists
+ * that directory's contents, and recursing on them deletes a tree outside the
+ * one being replaced. `rm -r` does not follow a link either, so a branch
+ * recording a file where the working tree has a directory takes the link away
+ * with the directory and leaves whatever it pointed at exactly as it was.
+ * Pinned against git 2.50.1.
+ *
  * @param dispatch workspace op dispatcher
  * @param path absolute virtual path to clear
+ * @param links the name plane's link facts, null when no namespace is wired
  */
-export async function removeTree(dispatch: Dispatch, path: string): Promise<void> {
+export async function removeTree(
+  dispatch: Dispatch,
+  path: string,
+  links: LinkView | null,
+): Promise<void> {
   let entries: string[] = []
   try {
     entries = await readNames(dispatch, path)
@@ -312,7 +325,12 @@ export async function removeTree(dispatch: Dispatch, path: string): Promise<void
     // basename the way every other walk here does.
     const name = basename(entry)
     if (name === '') continue
-    await removeTree(dispatch, under(path, name))
+    const child = under(path, name)
+    if ((links?.statAt(child) ?? null) !== null) {
+      await removeFile(dispatch, child)
+      continue
+    }
+    await removeTree(dispatch, child, links)
   }
   try {
     await dispatch('rmdir', PathSpec.fromStrPath(path))

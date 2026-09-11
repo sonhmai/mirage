@@ -16,8 +16,9 @@ import posixpath
 from dataclasses import dataclass
 
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
-    GitError, MoveRefusedError, MoveUsageError, NotADirectoryDestinationError,
-    NoWorkspaceError, RenameFailedError, UnknownSwitchError)
+    GitError, MoveOverlapError, MoveRefusedError, MoveUsageError,
+    NotADirectoryDestinationError, NoWorkspaceError, RenameFailedError,
+    UnknownSwitchError)
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import remove_file, rename_path
 from mirage.commands.cli.builtin.git.pathspec import repo_relative, under
@@ -256,6 +257,32 @@ async def check(stat_path: StatPath, links: LinkView | None,
     return None, (source, ), False
 
 
+def overlapping(moves: list[Move]) -> tuple[str, str] | None:
+    """The first source that sits inside another source in the same line.
+
+    git reads this off the whole line once every source has passed its
+    own checks, which is why a source with a fault of its own is still
+    refused for that fault first, and why ``-k`` skipping a source
+    takes it out of this comparison too. The pair reported is the first
+    directory source in operand order and the first source under it,
+    named child first whatever order the line put them in.
+
+    Args:
+        moves (list[Move]): the moves planned so far, in operand order.
+
+    Returns:
+        tuple: the source inside the other and the directory holding
+        it, or None when no source sits inside another.
+    """
+    for move in moves:
+        if not move.directory:
+            continue
+        for other in moves:
+            if under(other.source, move.source):
+                return other.source, move.source
+    return None
+
+
 async def plan(stat_path: StatPath, links: LinkView | None,
                mounts: MountView | None, location: RepoLocation, start: str,
                operands: tuple[str, ...], tracked: set[str],
@@ -324,6 +351,15 @@ async def plan(stat_path: StatPath, links: LinkView | None,
             raise MoveRefusedError(reason, named[0], named[1])
         claimed.update(moved_path(move, path) for path in move.paths)
         moves.append(move)
+    # After the per-source loop rather than inside it, which is git's
+    # order and observable twice over: a source with a fault of its own
+    # outranks this, and so does a same-target collision anywhere on
+    # the line. ``-k`` does not reach it, since an overlap is not a
+    # rename this source could survive being skipped for: moving the
+    # directory first is what makes the other source disappear.
+    overlap = overlapping(moves)
+    if overlap is not None:
+        raise MoveOverlapError(overlap[0], overlap[1])
     return moves
 
 

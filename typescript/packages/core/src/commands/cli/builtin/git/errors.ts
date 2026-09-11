@@ -661,6 +661,21 @@ export class MoveRefusedError extends GitError {
   }
 }
 
+/**
+ * `mv` given both a directory and something inside it.
+ *
+ * git refuses the whole line rather than one source, and `-k` does not skip it:
+ * the two moves would race for the same bytes, and the one that lost would be
+ * reported as a rename that failed after the other had already changed the
+ * working tree. The child is named first however the operands were ordered.
+ * Pinned against git 2.50.1.
+ */
+export class MoveOverlapError extends GitError {
+  constructor(child: string, parent: string) {
+    super(`cannot move both '${child}' and its parent directory '${parent}'`)
+  }
+}
+
 /** `mv` with several sources and a destination that is not a directory. */
 export class NotADirectoryDestinationError extends GitError {
   constructor(destination: string) {
@@ -815,6 +830,19 @@ export class RefUpdateConflictError extends GitError {
 
   constructor(ref: string) {
     super(`could not delete references: multiple updates for ref '${ref}' not allowed`)
+  }
+}
+
+/**
+ * A ref that cannot be written because another one holds its path.
+ *
+ * git reports this as a failure to take the lock rather than as a name that is
+ * already taken, and names the ref standing in the way. `-f` does not help: the
+ * obstacle is the path, not the value. Pinned against git 2.50.1.
+ */
+export class RefLockError extends GitError {
+  constructor(ref: string, held: string) {
+    super(`cannot lock ref '${ref}': '${held}' exists; cannot create '${ref}'`)
   }
 }
 

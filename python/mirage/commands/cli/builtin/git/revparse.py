@@ -33,6 +33,9 @@ PATH_MARK = ":"
 COMMIT = "commit"
 TREE = "tree"
 TAG = "tag"
+# Not a type any object reports: ``^{object}`` asks only that the name
+# resolve to something, and hands back whatever that is.
+OBJECT = "object"
 
 
 def split_peel(revision: str) -> tuple[str, str | None]:
@@ -153,7 +156,7 @@ def resolve_commit(repo: BaseRepo, revision: str) -> Commit:
         revision (str): revision as the user spelled it.
     """
     stem, want = split_peel(revision)
-    if want is not None and want not in ("", COMMIT):
+    if want is not None and want not in ("", COMMIT, OBJECT):
         raise AmbiguousArgumentError(revision)
     base, steps = split_revision(stem)
     try:
@@ -249,6 +252,13 @@ def _peeled(repo: BaseRepo, obj: ShaFile, want: str, revision: str) -> ShaFile:
         want (str): the type word inside the braces, empty for ``^{}``.
         revision (str): the whole revision, for error attribution.
     """
+    if want == OBJECT:
+        # An existence check, not a type. Every object reports a
+        # concrete type name, so comparing one against ``object``
+        # refuses every expression that spells it; gitrevisions(7) has
+        # it return the named object and nothing else, which for an
+        # annotated tag is the tag rather than the commit behind it.
+        return obj
     if want != TAG:
         obj = unwrapped(repo, obj, revision)
     if want == "":
@@ -374,7 +384,10 @@ def resolve_object(repo: BaseRepo, revision: str) -> ShaFile:
                 return object_at(repo, revision)
             except (KeyError, ValueError) as exc:
                 raise AmbiguousArgumentError(revision) from exc
-    if want == TAG:
+    if want in (TAG, OBJECT):
+        # The same reading ``^{tag}`` needs, for the same reason: the
+        # commit-ish route below peels an annotated tag before anything
+        # else sees it, and both spellings have to stop above it.
         found = _tag_object(repo, stem)
         if found is not None:
             return found

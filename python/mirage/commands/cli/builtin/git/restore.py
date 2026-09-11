@@ -268,7 +268,7 @@ async def restore(
                 if links is None or links.stat_at(where) is None:
                     info = await stat_path(where)
                     if info is not None and info.type is FileType.DIRECTORY:
-                        await remove_tree(dispatch, where)
+                        await remove_tree(dispatch, where, links)
                 await restore_entry(dispatch, where, mode, blobs[sha], links)
     except GitError as exc:
         return fatal(exc)

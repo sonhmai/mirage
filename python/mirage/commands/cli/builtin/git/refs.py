@@ -247,6 +247,40 @@ FORBIDDEN_IN_REF = frozenset(" ~^:?*[\\")
 LOCK_SUFFIX = ".lock"
 
 
+def blocking_ref(known: set[Ref], ref: str) -> str | None:
+    """The existing ref that stops a new one from being written.
+
+    A ref is a path, so two of them cannot coexist when one spells a
+    directory the other spells a file: with ``refs/tags/foo`` already
+    there, ``refs/tags/foo/bar`` has no directory to live in, and with
+    ``refs/tags/foo/bar`` there, ``refs/tags/foo`` has a directory
+    standing on its name. git refuses both and names the ref already
+    written; a repository can only ever hold one of the two shapes, so
+    the two searches cannot both answer.
+
+    Nothing below git's own storage can be relied on to say so. A disk
+    mount raises whatever its host filesystem raises, which reaches the
+    user as neither git's wording nor git's exit code, and a prefix
+    store takes both keys happily and leaves a ref the loose-ref walk
+    cannot find.
+
+    Args:
+        known (set[Ref]): every ref the repository holds.
+        ref (str): the full ref name about to be written.
+
+    Returns:
+        str | None: the ref standing in the way, None when none does.
+    """
+    parts = ref.split("/")
+    for depth in range(1, len(parts)):
+        above = "/".join(parts[:depth])
+        if Ref(above.encode()) in known:
+            return above
+    below = f"{ref}/".encode()
+    found = sorted(name for name in known if name.startswith(below))
+    return found[0].decode() if found else None
+
+
 def valid_ref_name(name: str) -> bool:
     """Whether a name passes git's ref rules (``git check-ref-format``).
 

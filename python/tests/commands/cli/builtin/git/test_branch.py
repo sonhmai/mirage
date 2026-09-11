@@ -241,3 +241,22 @@ async def test_a_bad_branch_name_is_named_before_its_start_point(git_rw):
         "git -C /repo branch ../../config nosuchstart")
     err = result.stderr or b""
     assert err.startswith(b"fatal: '../../config' is not a valid branch name")
+
+
+@pytest.mark.asyncio
+async def test_a_branch_cannot_be_made_below_one_that_exists(git_rw):
+    assert (await git_rw.execute("git -C /repo branch bb")).exit_code == 0
+    result = await git_rw.execute("git -C /repo branch bb/cc")
+    assert result.exit_code == 128
+    assert result.stderr == (b"fatal: cannot lock ref 'refs/heads/bb/cc': "
+                             b"'refs/heads/bb' exists; cannot create "
+                             b"'refs/heads/bb/cc'\n")
+
+
+@pytest.mark.asyncio
+async def test_a_bad_start_point_outranks_the_collision(git_rw):
+    assert (await git_rw.execute("git -C /repo branch bb")).exit_code == 0
+    # The lock is taken last, so a start point that resolves to nothing
+    # is reported first.
+    result = await git_rw.execute("git -C /repo branch bb/cc nosuchrev")
+    assert b"cannot lock ref" not in (result.stderr or b"")

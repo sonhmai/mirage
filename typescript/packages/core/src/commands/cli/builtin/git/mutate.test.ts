@@ -36,7 +36,8 @@ import { createShellParser, type ShellParser } from '../../../../shell/parse/ind
 import { MountMode } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
-import { ensureDir, readNames, readOptional } from './io.ts'
+import { blockingRef } from './refs.ts'
+import { ensureDir, readNames, readOptional, removeTree } from './io.ts'
 import type { Dispatch } from './types.ts'
 
 const BUILDER = fileURLToPath(
@@ -2012,6 +2013,220 @@ describe('git restore before the first commit', () => {
     await h.ws.execute('echo edited > /repo/f.txt')
     expect(await h.run('restore f.txt')).toEqual([0, '', ''])
     expect(DEC.decode((await h.ws.execute('cat /repo/f.txt')).stdout)).toBe('hi\n')
+  })
+})
+
+describe('blockingRef', () => {
+  it('finds a ref above the new one, at any depth', () => {
+    const known = new Set(['refs/tags/foo', 'refs/heads/main'])
+    expect(blockingRef(known, 'refs/tags/foo/bar')).toBe('refs/tags/foo')
+    expect(blockingRef(known, 'refs/tags/foo/bar/baz')).toBe('refs/tags/foo')
+  })
+
+  it('finds a ref below the new one, in an ordered walk', () => {
+    // git names one ref, so the answer must not depend on iteration order.
+    const known = new Set(['refs/tags/foo/c', 'refs/tags/foo/a'])
+    expect(blockingRef(known, 'refs/tags/foo')).toBe('refs/tags/foo/a')
+  })
+
+  it('leaves a ref with no collision alone', () => {
+    const known = new Set(['refs/tags/foo', 'refs/heads/main'])
+    expect(blockingRef(known, 'refs/tags/other')).toBeNull()
+    // A prefix that is not a whole path segment is not a collision, and the
+    // ref itself existing is a different refusal.
+    expect(blockingRef(known, 'refs/tags/foobar')).toBeNull()
+    expect(blockingRef(known, 'refs/tags/foo')).toBeNull()
+  })
+})
+
+describe('removeTree meeting a link', () => {
+  /** A dispatcher that lists one link and records every op it is asked for. */
+  function recorder(): { calls: [string, string][]; dispatch: Dispatch } {
+    const calls: [string, string][] = []
+    const dispatch = ((op: string, path: unknown) => {
+      const where = typeof path === 'string' ? path : (path as { virtual: string }).virtual
+      calls.push([op, where])
+      if (op === 'readdir') {
+        if (where === '/repo/slot') return Promise.resolve([['/repo/slot/link'], new IOResult()])
+        // readdir answers through the link the way the real one does: the name
+        // plane owns links, so the data plane resolves and lists the target.
+        if (where === '/repo/slot/link') {
+          return Promise.resolve([['/repo/outside/keep.txt'], new IOResult()])
+        }
+        return Promise.resolve([[], new IOResult()])
+      }
+      if (op === 'rmdir' && where !== '/repo/slot') {
+        return Promise.reject(Object.assign(new Error(where), { code: 'ENOTDIR' }))
+      }
+      return Promise.resolve([null, new IOResult()])
+    }) as unknown as Dispatch
+    return { calls, dispatch }
+  }
+
+  const links = {
+    statAt: (path: string) => (path === '/repo/slot/link' ? { name: 'link' } : null),
+  } as never
+
+  it('unlinks it without descending', async () => {
+    const { calls, dispatch } = recorder()
+    await removeTree(dispatch, '/repo/slot', links)
+    expect(calls).toContainEqual(['unlink', '/repo/slot/link'])
+    // The whole point: readdir dereferences, so listing the link at all is the
+    // walk stepping outside the directory being replaced.
+    expect(calls).not.toContainEqual(['readdir', '/repo/slot/link'])
+    expect(calls.every(([, where]) => !where.startsWith('/repo/outside'))).toBe(true)
+  })
+
+  it('has nothing to ask without a namespace', async () => {
+    const { calls, dispatch } = recorder()
+    await removeTree(dispatch, '/repo/slot', null)
+    expect(calls).toContainEqual(['readdir', '/repo/slot/link'])
+  })
+})
+
+describe('a staged path inside a directory the branch replaces', () => {
+  it('is refused, and the staged blob stays the only copy', async () => {
+    const h = await harness()
+    expect((await h.run('checkout -b filebranch'))[0]).toBe(0)
+    await write(h, 'slot', 'FILE\n')
+    expect((await h.run('add slot'))[0]).toBe(0)
+    expect((await h.run('commit -m file'))[0]).toBe(0)
+    expect((await h.run('checkout main'))[0]).toBe(0)
+    await h.ws.execute('rm /repo/slot')
+    await write(h, 'slot/child', 'c\n')
+    expect((await h.run('add slot/child'))[0]).toBe(0)
+    const [code, , err] = await h.run('checkout filebranch')
+    expect(code).toBe(1)
+    expect(err).toContain('slot/child')
+    expect(DEC.decode((await h.ws.execute('cat /repo/slot/child')).stdout)).toBe('c\n')
+  })
+})
+
+describe('a peel naming the object type', () => {
+  it('keeps whatever type it finds, unwrapping nothing', async () => {
+    const h = await harness()
+    expect((await h.run('tag -a v1 -m annotated'))[0]).toBe(0)
+    // `^{object}` is an existence check, not a type: every object reports a
+    // concrete type name, so comparing one against the word would refuse every
+    // expression that spells it.
+    expect(await h.run('tag copy HEAD^{object}')).toEqual([0, '', ''])
+    expect(await h.run('tag wrapped v1^{object}')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['cat-file', '-t', 'copy']).trim()).toBe('commit')
+    // The one thing that separates it from `^{}`: the named object comes back,
+    // so a tag stays a tag rather than being unwrapped.
+    expect(git(drained, ['cat-file', '-t', 'wrapped']).trim()).toBe('tag')
+    expect(git(drained, ['rev-parse', 'wrapped'])).toBe(git(drained, ['rev-parse', 'v1']))
+  })
+
+  it('is still a commit-ish where a commit is what is wanted', async () => {
+    const h = await harness()
+    expect((await h.run('tag -a v1 -m annotated'))[0]).toBe(0)
+    expect(await h.run('branch nb v1^{object}')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['rev-parse', 'nb'])).toBe(git(drained, ['rev-parse', 'HEAD']))
+  })
+})
+
+describe('a ref whose path another ref already holds', () => {
+  it('refuses a tag below one that exists', async () => {
+    const h = await harness()
+    expect((await h.run('tag foo'))[0]).toBe(0)
+    expect(await h.run('tag foo/bar')).toEqual([
+      128,
+      '',
+      "fatal: cannot lock ref 'refs/tags/foo/bar': 'refs/tags/foo' exists; " +
+        "cannot create 'refs/tags/foo/bar'\n",
+    ])
+  })
+
+  it('refuses a tag above one that exists', async () => {
+    const h = await harness()
+    expect((await h.run('tag baz/qux'))[0]).toBe(0)
+    expect(await h.run('tag baz')).toEqual([
+      128,
+      '',
+      "fatal: cannot lock ref 'refs/tags/baz': 'refs/tags/baz/qux' exists; " +
+        "cannot create 'refs/tags/baz'\n",
+    ])
+  })
+
+  it('is not opened by -f, since the obstacle is the path', async () => {
+    const h = await harness()
+    expect((await h.run('tag foo'))[0]).toBe(0)
+    expect((await h.run('tag -f foo/bar'))[0]).toBe(128)
+  })
+
+  it('refuses a branch below one that exists', async () => {
+    const h = await harness()
+    expect((await h.run('branch bb'))[0]).toBe(0)
+    expect(await h.run('branch bb/cc')).toEqual([
+      128,
+      '',
+      "fatal: cannot lock ref 'refs/heads/bb/cc': 'refs/heads/bb' exists; " +
+        "cannot create 'refs/heads/bb/cc'\n",
+    ])
+  })
+
+  it('refuses switch -c before the working tree moves', async () => {
+    const h = await harness()
+    expect((await h.run('branch bb'))[0]).toBe(0)
+    expect((await h.run('switch -c bb/cc'))[0]).toBe(128)
+    expect(git(await h.drain(), ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('main')
+  })
+
+  it('reports a bad start point first, since the lock is taken last', async () => {
+    const h = await harness()
+    expect((await h.run('branch bb'))[0]).toBe(0)
+    const [, , err] = await h.run('branch bb/cc nosuchrev')
+    expect(err).not.toContain('cannot lock ref')
+  })
+})
+
+describe('mv given a directory and something inside it', () => {
+  async function withOverlap(): Promise<Harness> {
+    const h = await harness()
+    await write(h, 'dir/file', 'z\n')
+    await write(h, 'dest/keep.txt', 'k\n')
+    await h.run('add dir dest')
+    await h.run('commit -m dir')
+    return h
+  }
+
+  it('is refused before anything moves', async () => {
+    const h = await withOverlap()
+    expect(await h.run('mv dir dir/file dest')).toEqual([
+      128,
+      '',
+      "fatal: cannot move both 'dir/file' and its parent directory 'dir'\n",
+    ])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('')
+  })
+
+  it('names the child first whatever the order', async () => {
+    const h = await withOverlap()
+    const [, , err] = await h.run('mv dir/file dir dest')
+    expect(err).toBe("fatal: cannot move both 'dir/file' and its parent directory 'dir'\n")
+  })
+
+  it('is not skipped by -k', async () => {
+    const h = await withOverlap()
+    expect((await h.run('mv -k dir dir/file dest'))[0]).toBe(128)
+  })
+
+  it("lets a source's own fault outrank it", async () => {
+    const h = await withOverlap()
+    const [, , err] = await h.run('mv dir dir/file nosuch dest')
+    expect(err).toBe('fatal: bad source, source=nosuch, destination=dest/nosuch\n')
+  })
+
+  it('is not reached for a source -k already took out', async () => {
+    const h = await withOverlap()
+    await write(h, 'dir/other', 'o\n')
+    expect(await h.run('mv -k dir dir/other dest')).toEqual([0, '', ''])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe(
+      'R  dir/file -> dest/dir/file\n?? dest/dir/other\n',
+    )
   })
 })
 

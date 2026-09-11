@@ -278,3 +278,40 @@ async def test_a_peel_through_a_bare_tag_id_still_reaches_the_tree(git_rw):
     held = repo.refs[b"refs/tags/v1"].decode()
     assert resolve_object(repo, f"{held}^{{tree}}").type_name == b"tree"
     assert resolve_object(repo, f"{held}^{{}}").type_name == b"commit"
+
+
+@pytest.mark.asyncio
+async def test_an_object_peel_keeps_whatever_type_it_finds(git_rw):
+    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    location = await discover(*repo_facts(git_rw), "/repo")
+    repo = await open_repo(git_rw.dispatch, location)
+    # ``^{object}`` is an existence check, not a type: every object
+    # reports a concrete type name, so comparing one against the word
+    # would refuse every expression that spells it.
+    assert resolve_object(repo, "HEAD^{object}").type_name == b"commit"
+    assert resolve_object(repo, "HEAD^{tree}^{object}").type_name == b"tree"
+
+
+@pytest.mark.asyncio
+async def test_an_object_peel_leaves_an_annotated_tag_wrapped(git_rw):
+    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    location = await discover(*repo_facts(git_rw), "/repo")
+    repo = await open_repo(git_rw.dispatch, location)
+    # The one thing that separates it from ``^{}``: the named object is
+    # returned, so a tag stays a tag rather than being unwrapped.
+    found = resolve_object(repo, "v1^{object}")
+    assert found.type_name == b"tag"
+    assert found.id == repo.refs[b"refs/tags/v1"]
+    assert resolve_object(repo, "v1^{}").type_name == b"commit"
+
+
+@pytest.mark.asyncio
+async def test_a_commit_ish_still_reads_an_object_peel(git_rw):
+    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    location = await discover(*repo_facts(git_rw), "/repo")
+    repo = await open_repo(git_rw.dispatch, location)
+    head = resolve_commit(repo, "HEAD")
+    # A caller that wants a commit takes the wrapper off, which is what
+    # lets ``git branch nb v1^{object}`` work.
+    assert resolve_commit(repo, "HEAD^{object}").id == head.id
+    assert resolve_commit(repo, "v1^{object}").id == head.id

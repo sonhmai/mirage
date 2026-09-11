@@ -19,6 +19,7 @@ import pytest
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git.checkout import (_blocked_ancestors,
+                                                      _blocked_descendants,
                                                       _conflicts)
 from tests.commands.cli.builtin.git.conftest import conflict_index
 
@@ -564,3 +565,60 @@ async def test_a_switch_puts_the_executable_bit_back(git_rw):
     listed = await git_rw.execute("ls -l /repo/s.sh")
     assert (listed.stdout or b"").startswith(b"-rwxr-xr-x")
     assert (await run(git_rw, "status --short"))[1] == b""
+
+
+def test_a_staged_file_under_a_written_file_blocks():
+    # The target records the file ``slot``; the index holds a staged
+    # ``slot/child`` that is in neither tree, so the exact-key
+    # comparison cannot see it and the directory would have to go.
+    writing = {b"slot": (MODE, b"a" * 40)}
+    assert _blocked_descendants(writing, {"slot/child"}) == ["slot/child"]
+    # The other direction is the ancestor check's, not this one's.
+    assert _blocked_descendants({b"slot/child": (MODE, b"a" * 40)},
+                                {"slot"}) == []
+    assert _blocked_descendants(writing, {"other/child"}) == []
+
+
+@pytest.mark.asyncio
+async def test_a_staged_file_inside_a_directory_the_branch_replaces(
+        git_rw, repo_path: Path):
+    assert (await run(git_rw, "checkout -b filebranch"))[0] == 0
+    await git_rw.execute("printf 'FILE\\n' > /repo/slot")
+    assert (await run(git_rw, "add slot"))[0] == 0
+    assert (await run(git_rw, "commit -m file"))[0] == 0
+    assert (await run(git_rw, "checkout main"))[0] == 0
+    await git_rw.execute("mkdir -p /repo/slot && printf 'c\\n' > "
+                         "/repo/slot/child")
+    assert (await run(git_rw, "add slot/child"))[0] == 0
+    code, _out, err = await run(git_rw, "checkout filebranch")
+    assert code == 1
+    assert b"slot/child" in err
+    # Nothing moved: the staged blob is still the only copy there is.
+    assert (repo_path / "slot" / "child").exists()
+
+
+@pytest.mark.asyncio
+async def test_replacing_a_directory_does_not_follow_a_link_out_of_it(
+        git_rw, repo_path: Path):
+    # git takes the link away with the directory and leaves what it
+    # pointed at exactly as it was. The link has to be ignored rather
+    # than untracked to get this far: an untracked one inside the
+    # directory is refused by name. What the walk does on the way is
+    # pinned in test_io, since the delete it used to attempt through
+    # the link is spelled with the link in the middle and the
+    # dispatcher does not resolve one there.
+    (repo_path / "outside").mkdir()
+    (repo_path / "outside" / "keep.txt").write_text("keep\n", encoding="utf-8")
+    assert (await run(git_rw, "checkout -b slotfile"))[0] == 0
+    await git_rw.execute("printf 'FILE\\n' > /repo/slot")
+    assert (await run(git_rw, "add slot"))[0] == 0
+    assert (await run(git_rw, "commit -m file"))[0] == 0
+    assert (await run(git_rw, "checkout main"))[0] == 0
+    await git_rw.execute("rm /repo/slot")
+    await git_rw.execute("printf 'link\\n' > /repo/.gitignore")
+    await git_rw.execute("mkdir -p /repo/slot")
+    await git_rw.execute("ln -s /repo/outside /repo/slot/link")
+    assert (await run(git_rw, "checkout slotfile"))[0] == 0
+    assert (repo_path / "outside" / "keep.txt").exists()
+    gone = await git_rw.execute("readlink /repo/slot/link")
+    assert gone.exit_code != 0

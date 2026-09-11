@@ -13,9 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
+from dulwich.refs import Ref
 
-from mirage.commands.cli.builtin.git.refs import (load_refs, read_head,
-                                                  valid_ref_name,
+from mirage.commands.cli.builtin.git.refs import (blocking_ref, load_refs,
+                                                  read_head, valid_ref_name,
                                                   without_packed)
 from mirage.io import IOResult
 
@@ -144,3 +145,26 @@ def test_dropping_the_last_ref_keeps_the_header():
 
 def test_a_ref_the_file_does_not_hold_rewrites_nothing():
     assert without_packed(PACKED.encode(), "refs/heads/other") is None
+
+
+def test_a_ref_above_the_new_one_blocks_it():
+    known = {Ref(b"refs/tags/foo"), Ref(b"refs/heads/main")}
+    assert blocking_ref(known, "refs/tags/foo/bar") == "refs/tags/foo"
+    # Every level above is searched, not just the parent.
+    assert blocking_ref(known, "refs/tags/foo/bar/baz") == "refs/tags/foo"
+
+
+def test_a_ref_below_the_new_one_blocks_it_too():
+    known = {Ref(b"refs/tags/foo/c"), Ref(b"refs/tags/foo/a")}
+    # git names one ref, and the walk that finds it is ordered, so the
+    # answer does not depend on how the set happens to iterate.
+    assert blocking_ref(known, "refs/tags/foo") == "refs/tags/foo/a"
+
+
+def test_a_ref_with_no_collision_is_free():
+    known = {Ref(b"refs/tags/foo"), Ref(b"refs/heads/main")}
+    assert blocking_ref(known, "refs/tags/other") is None
+    # A prefix that is not a whole path segment is not a collision.
+    assert blocking_ref(known, "refs/tags/foobar") is None
+    # And the ref itself existing is a different refusal, not this one.
+    assert blocking_ref(known, "refs/tags/foo") is None

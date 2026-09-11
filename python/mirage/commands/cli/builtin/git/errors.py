@@ -778,6 +778,25 @@ class MoveRefusedError(GitError):
                          f"destination={destination}")
 
 
+class MoveOverlapError(GitError):
+    """``mv`` given both a directory and something inside it.
+
+    git refuses the whole line rather than one source, and ``-k`` does
+    not skip it: the two moves would race for the same bytes, and the
+    one that lost would be reported as a rename that failed after the
+    other had already changed the working tree. The child is named
+    first however the operands were ordered. Pinned against git 2.50.1.
+
+    Args:
+        child (str): the source below the other, repository-relative.
+        parent (str): the directory source above it.
+    """
+
+    def __init__(self, child: str, parent: str) -> None:
+        super().__init__(f"cannot move both '{child}' and its parent "
+                         f"directory '{parent}'")
+
+
 class NotADirectoryDestinationError(GitError):
     """``mv`` with several sources and a destination that is not a directory.
 
@@ -980,6 +999,24 @@ class RefUpdateConflictError(GitError):
     def __init__(self, ref: str) -> None:
         super().__init__("could not delete references: multiple updates "
                          f"for ref '{ref}' not allowed")
+
+
+class RefLockError(GitError):
+    """A ref that cannot be written because another one holds its path.
+
+    git reports this as a failure to take the lock rather than as a
+    name that is already taken, and names the ref standing in the way.
+    ``-f`` does not help: the obstacle is the path, not the value.
+    Pinned against git 2.50.1.
+
+    Args:
+        ref (str): the full ref name that cannot be written.
+        held (str): the full ref name already there.
+    """
+
+    def __init__(self, ref: str, held: str) -> None:
+        super().__init__(f"cannot lock ref '{ref}': '{held}' exists; "
+                         f"cannot create '{ref}'")
 
 
 class InvalidTagNameError(GitError):

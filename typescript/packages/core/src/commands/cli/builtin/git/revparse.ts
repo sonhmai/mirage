@@ -30,6 +30,9 @@ const PATH_MARK = ':'
 export const COMMIT = 'commit'
 export const TREE = 'tree'
 export const TAG = 'tag'
+// Not a type any object reports: `^{object}` asks only that the name resolve to
+// something, and hands back whatever that is.
+export const OBJECT = 'object'
 
 /**
  * Split a trailing `^{<type>}` off a revision.
@@ -144,7 +147,9 @@ async function applyStep(
  */
 export async function resolveCommit(repo: Repo, revision: string): Promise<string> {
   const [stem, want] = splitPeel(revision)
-  if (want !== null && want !== '' && want !== COMMIT) throw new AmbiguousArgumentError(revision)
+  if (want !== null && want !== '' && want !== COMMIT && want !== OBJECT) {
+    throw new AmbiguousArgumentError(revision)
+  }
   const [base, steps] = splitRevision(stem)
   let oid: string
   try {
@@ -241,6 +246,11 @@ async function peeled(
   want: string,
   revision: string,
 ): Promise<GitObject> {
+  // An existence check, not a type. Every object reports a concrete type name,
+  // so comparing one against `object` refuses every expression that spells it;
+  // gitrevisions(7) has it return the named object and nothing else, which for
+  // an annotated tag is the tag rather than the commit behind it.
+  if (want === OBJECT) return found
   let { oid, type } = want === TAG ? found : await unwrapped(repo, found, revision)
   if (want === '') return { oid, type }
   if (want === TREE && type === COMMIT) {
@@ -374,7 +384,10 @@ export async function resolveObject(repo: Repo, revision: string): Promise<GitOb
       return { oid, type: await typeOf(repo, oid, revision) }
     }
   }
-  if (want === TAG) {
+  if (want === TAG || want === OBJECT) {
+    // The same reading `^{tag}` needs, for the same reason: the commit-ish
+    // route below peels an annotated tag before anything else sees it, and
+    // both spellings have to stop above it.
     const found = await tagObject(repo, stem)
     if (found !== null) return found
   }

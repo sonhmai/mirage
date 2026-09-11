@@ -23,11 +23,12 @@ from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     BranchExistsError, BranchNameRequiredError, CheckedOutBranchError,
     GitError, InvalidBranchNameError, NoBranchError, NoWorkspaceError,
-    UnknownSwitchError, UnmergedBranchError)
+    RefLockError, UnknownSwitchError, UnmergedBranchError)
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.objects import abbrev_for
-from mirage.commands.cli.builtin.git.refs import (delete_ref, read_head,
-                                                  valid_ref_name, write_ref)
+from mirage.commands.cli.builtin.git.refs import (blocking_ref, delete_ref,
+                                                  read_head, valid_ref_name,
+                                                  write_ref)
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import HeadRef, RepoLocation
@@ -87,6 +88,12 @@ async def _create(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
     if Ref(ref.encode()) in repo.refs.allkeys():
         raise BranchExistsError(name)
     commit = resolve_commit(repo, start or HEAD)
+    # Last, as it is for git: a ref whose path another ref already
+    # holds fails when the lock is taken, so a bad start point is
+    # reported first.
+    held = blocking_ref(repo.refs.allkeys(), ref)
+    if held is not None:
+        raise RefLockError(ref, held)
     await write_ref(dispatch, location.commondir, ref, commit.id)
 
 

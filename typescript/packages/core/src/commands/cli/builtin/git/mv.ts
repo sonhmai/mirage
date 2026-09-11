@@ -21,6 +21,7 @@ import { FlagView } from '../../../spec/types.ts'
 import type { CLIInvocation } from '../../types.ts'
 import {
   GitError,
+  MoveOverlapError,
   MoveRefusedError,
   MoveUsageError,
   NotADirectoryDestinationError,
@@ -145,6 +146,26 @@ export function clashing(move: Move, claimed: ReadonlySet<string>): [string, str
   for (const path of move.paths) {
     const landing = movedPath(move, path)
     if (claimed.has(landing)) return [path, landing]
+  }
+  return null
+}
+
+/**
+ * The first source that sits inside another source in the same line.
+ *
+ * git reads this off the whole line once every source has passed its own
+ * checks, which is why a source with a fault of its own is still refused for
+ * that fault first, and why `-k` skipping a source takes it out of this
+ * comparison too. The pair reported is the first directory source in operand
+ * order and the first source under it, named child first whatever order the
+ * line put them in.
+ */
+export function overlapping(moves: readonly Move[]): [string, string] | null {
+  for (const move of moves) {
+    if (!move.directory) continue
+    for (const other of moves) {
+      if (inside(other.source, move.source)) return [other.source, move.source]
+    }
   }
   return null
 }
@@ -300,6 +321,14 @@ export async function plan(
     for (const path of move.paths) claimed.add(movedPath(move, path))
     moves.push(move)
   }
+  // After the per-source loop rather than inside it, which is git's order and
+  // observable twice over: a source with a fault of its own outranks this, and
+  // so does a same-target collision anywhere on the line. `-k` does not reach
+  // it, since an overlap is not a rename this source could survive being
+  // skipped for: moving the directory first is what makes the other source
+  // disappear.
+  const overlap = overlapping(moves)
+  if (overlap !== null) throw new MoveOverlapError(overlap[0], overlap[1])
   return moves
 }
 

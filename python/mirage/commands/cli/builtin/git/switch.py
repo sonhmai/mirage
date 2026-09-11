@@ -22,12 +22,12 @@ from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     BranchExistsError, BranchExpectedError, DetachWithCreateError, GitError,
     InvalidBranchNameError, InvalidReferenceError, MissingBranchArgumentError,
-    NoWorkspaceError, OneReferenceError, UnknownSwitchError)
+    NoWorkspaceError, OneReferenceError, RefLockError, UnknownSwitchError)
 from mirage.commands.cli.builtin.git.format import short, subject
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.refs import (BRANCH_PREFIX, TAG_PREFIX,
-                                                  read_head, set_head,
-                                                  valid_ref_name)
+                                                  blocking_ref, read_head,
+                                                  set_head, valid_ref_name)
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (  # yapf: disable
@@ -149,6 +149,12 @@ async def switch(
             # configuration rather than on a branch.
             if not valid_ref_name(target):
                 raise InvalidBranchNameError(target)
+            # And before the working tree moves: git takes the ref lock
+            # first, so a name whose path another ref holds refuses with
+            # nothing checked out.
+            held = blocking_ref(known, ref.decode())
+            if held is not None:
+                raise RefLockError(ref.decode(), held)
             attached = True
             if unborn:
                 await set_head(dispatch, location.gitdir, ref.decode())

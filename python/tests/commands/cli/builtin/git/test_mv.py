@@ -402,3 +402,71 @@ async def test_a_link_below_a_moved_directory_travels_too(git_rw):
     assert await run(git_rw, "mv d notes") == (0, b"", b"")
     read = await git_rw.execute("readlink /repo/notes/link")
     assert (read.exit_code, read.stdout) == (0, b"/repo/t.txt\n")
+
+
+@pytest.mark.asyncio
+async def test_a_directory_and_something_inside_it_cannot_both_move(
+        git_rw, repo_path: Path):
+    await git_rw.execute("mkdir -p /repo/dir /repo/dest")
+    await git_rw.execute("echo z > /repo/dir/file")
+    await run(git_rw, "add dir")
+    await run(git_rw, "commit -m dir")
+    code, _out, err = await run(git_rw, "mv dir dir/file dest")
+    assert code == 128
+    assert err == (b"fatal: cannot move both 'dir/file' and its parent "
+                   b"directory 'dir'\n")
+    # Refused before anything moves, which is the whole point: moving
+    # the directory first is what makes the other source disappear.
+    assert (repo_path / "dir" / "file").exists()
+    assert not (repo_path / "dest" / "dir").exists()
+
+
+@pytest.mark.asyncio
+async def test_the_child_is_named_first_whatever_the_order(git_rw):
+    await git_rw.execute("mkdir -p /repo/dir /repo/dest")
+    await git_rw.execute("echo z > /repo/dir/file")
+    await run(git_rw, "add dir")
+    await run(git_rw, "commit -m dir")
+    _code, _out, err = await run(git_rw, "mv dir/file dir dest")
+    assert err == (b"fatal: cannot move both 'dir/file' and its parent "
+                   b"directory 'dir'\n")
+
+
+@pytest.mark.asyncio
+async def test_k_does_not_skip_an_overlapping_source(git_rw, repo_path: Path):
+    await git_rw.execute("mkdir -p /repo/dir /repo/dest")
+    await git_rw.execute("echo z > /repo/dir/file")
+    await run(git_rw, "add dir")
+    await run(git_rw, "commit -m dir")
+    code, _out, err = await run(git_rw, "mv -k dir dir/file dest")
+    assert code == 128
+    assert err == (b"fatal: cannot move both 'dir/file' and its parent "
+                   b"directory 'dir'\n")
+    assert (repo_path / "dir" / "file").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_sources_own_fault_outranks_the_overlap(git_rw):
+    await git_rw.execute("mkdir -p /repo/dir /repo/dest")
+    await git_rw.execute("echo z > /repo/dir/file")
+    await run(git_rw, "add dir")
+    await run(git_rw, "commit -m dir")
+    # The overlap is read off the whole line once every source has
+    # passed its own checks, so a later bad source is reported first.
+    _code, _out, err = await run(git_rw, "mv dir dir/file nosuch dest")
+    assert err == (b"fatal: bad source, source=nosuch, "
+                   b"destination=dest/nosuch\n")
+
+
+@pytest.mark.asyncio
+async def test_k_taking_a_source_out_takes_it_out_of_the_overlap(
+        git_rw, repo_path: Path):
+    await git_rw.execute("mkdir -p /repo/dir /repo/dest")
+    await git_rw.execute("echo z > /repo/dir/file")
+    await run(git_rw, "add dir")
+    await run(git_rw, "commit -m dir")
+    await git_rw.execute("echo o > /repo/dir/other")
+    # ``dir/other`` is untracked, so it is skipped before the overlap
+    # is looked at and the directory moves on its own.
+    assert await run(git_rw, "mv -k dir dir/other dest") == (0, b"", b"")
+    assert (repo_path / "dest" / "dir" / "file").exists()

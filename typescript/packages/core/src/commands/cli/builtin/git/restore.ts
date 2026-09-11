@@ -220,7 +220,7 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
         if ((links?.statAt(where) ?? null) === null) {
           const info = await statPath(where)
           if (info !== null && info.type === FileType.DIRECTORY) {
-            await removeTree(dispatch, where)
+            await removeTree(dispatch, where, links)
           }
         }
         await restoreEntry(dispatch, where, entry.mode, blob, links)

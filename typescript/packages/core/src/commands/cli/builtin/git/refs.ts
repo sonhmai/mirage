@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compareCodePoints } from '../../../../utils/sort.ts'
 import { basename } from './path.ts'
 import {
   isDirectory,
@@ -223,6 +224,35 @@ export const TAG_PREFIX = 'refs/tags/'
 // revision, and the backslash.
 const FORBIDDEN_IN_REF = new Set([' ', '~', '^', ':', '?', '*', '[', '\\'])
 const LOCK_SUFFIX = '.lock'
+
+/**
+ * The existing ref that stops a new one from being written.
+ *
+ * A ref is a path, so two of them cannot coexist when one spells a directory
+ * the other spells a file: with `refs/tags/foo` already there,
+ * `refs/tags/foo/bar` has no directory to live in, and with `refs/tags/foo/bar`
+ * there, `refs/tags/foo` has a directory standing on its name. git refuses both
+ * and names the ref already written; a repository can only ever hold one of the
+ * two shapes, so the two searches cannot both answer.
+ *
+ * Nothing below git's own storage can be relied on to say so. A disk mount
+ * raises whatever its host filesystem raises, which reaches the user as neither
+ * git's wording nor git's exit code, and a prefix store takes both keys happily
+ * and leaves a ref the loose-ref walk cannot find.
+ *
+ * @param known every ref the repository holds
+ * @param ref the full ref name about to be written
+ */
+export function blockingRef(known: ReadonlySet<string>, ref: string): string | null {
+  const parts = ref.split('/')
+  for (let depth = 1; depth < parts.length; depth += 1) {
+    const above = parts.slice(0, depth).join('/')
+    if (known.has(above)) return above
+  }
+  const below = `${ref}/`
+  const found = [...known].filter((name) => name.startsWith(below)).sort(compareCodePoints)
+  return found[0] ?? null
+}
 
 /**
  * Whether a name passes git's ref rules (`git check-ref-format`).

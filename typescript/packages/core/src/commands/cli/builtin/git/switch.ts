@@ -30,10 +30,19 @@ import {
   MissingBranchArgumentError,
   NoWorkspaceError,
   OneReferenceError,
+  RefLockError,
   UnknownSwitchError,
 } from './errors.ts'
 import { short } from './format.ts'
-import { BRANCH_PREFIX, loadRefs, readHead, setHead, TAG_PREFIX, validRefName } from './refs.ts'
+import {
+  BRANCH_PREFIX,
+  blockingRef,
+  loadRefs,
+  readHead,
+  setHead,
+  TAG_PREFIX,
+  validRefName,
+} from './refs.ts'
 import { opened, repoArgs } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import { checkOperands, escaped, fatal } from './util.ts'
@@ -135,6 +144,10 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       // writeRef as one: -c ../../config would land on the repository's own
       // configuration rather than on a branch.
       if (!validRefName(target)) throw new InvalidBranchNameError(target)
+      // And before the working tree moves: git takes the ref lock first, so a
+      // name whose path another ref holds refuses with nothing checked out.
+      const held = blockingRef(new Set(known.keys()), `${BRANCH_PREFIX}${target}`)
+      if (held !== null) throw new RefLockError(`${BRANCH_PREFIX}${target}`, held)
       attached = true
       if (unborn) {
         await setHead(dispatch, repo.location.gitdir, `${BRANCH_PREFIX}${target}`)

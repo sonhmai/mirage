@@ -330,7 +330,8 @@ async def rename_path(dispatch: DispatchFn, source: str, target: str) -> None:
                    dst=PathSpec.from_str_path(target))
 
 
-async def remove_tree(dispatch: DispatchFn, path: str) -> None:
+async def remove_tree(dispatch: DispatchFn, path: str,
+                      links: LinkView | None) -> None:
     """Delete a path and everything under it, tracked or not.
 
     git replaces a tree entry rather than merging with it, so a
@@ -344,9 +345,20 @@ async def remove_tree(dispatch: DispatchFn, path: str) -> None:
     since ``readdir`` reads a non-directory as nothing there and
     ``rmdir`` refuses it.
 
+    A child that is a symlink is unlinked, never descended into. The
+    name plane has to say so, because ``readdir`` dereferences: a link
+    to a directory lists that directory's contents, and recursing on
+    them deletes a tree outside the one being replaced. ``rm -r`` does
+    not follow a link either, so a branch recording a file where the
+    working tree has a directory takes the link away with the directory
+    and leaves whatever it pointed at exactly as it was. Pinned against
+    git 2.50.1.
+
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path to clear.
+        links (LinkView | None): the name plane's link facts, None when
+            no namespace is wired.
     """
     for entry in await read_names(dispatch, path):
         # A listing answers in whole paths, so the child is rebuilt from
@@ -354,7 +366,11 @@ async def remove_tree(dispatch: DispatchFn, path: str) -> None:
         name = entry.rstrip("/").rsplit("/", 1)[-1]
         if not name:
             continue
-        await remove_tree(dispatch, posixpath.join(path, name))
+        child = posixpath.join(path, name)
+        if links is not None and links.stat_at(child) is not None:
+            await remove_file(dispatch, child)
+            continue
+        await remove_tree(dispatch, child, links)
     try:
         await dispatch("rmdir", PathSpec.from_str_path(path))
     except MISS_ERRORS as exc:

@@ -27,11 +27,20 @@ import {
   InvalidBranchNameError,
   NoBranchError,
   NoWorkspaceError,
+  RefLockError,
   UnknownSwitchError,
   UnmergedBranchError,
 } from './errors.ts'
 import { short } from './format.ts'
-import { deleteRef, loadRefs, readHead, validRefName, writeRef, SYMREF_PREFIX } from './refs.ts'
+import {
+  blockingRef,
+  deleteRef,
+  loadRefs,
+  readHead,
+  validRefName,
+  writeRef,
+  SYMREF_PREFIX,
+} from './refs.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import type { Dispatch, HeadRef } from './types.ts'
@@ -74,6 +83,10 @@ async function create(
   const ref = `${HEADS_PREFIX}${name}`
   if (refs.has(ref)) throw new BranchExistsError(name)
   const oid = await resolveCommit(repo, start ?? HEAD)
+  // Last, as it is for git: a ref whose path another ref already holds fails
+  // when the lock is taken, so a bad start point is reported first.
+  const held = blockingRef(new Set(refs.keys()), ref)
+  if (held !== null) throw new RefLockError(ref, held)
   await writeRef(dispatch, repo.location.commondir, ref, oid)
 }
 

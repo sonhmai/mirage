@@ -15,7 +15,8 @@
 import pytest
 
 from mirage.commands.cli.builtin.git.io import (blocking_ancestor, read_file,
-                                                read_names, read_optional)
+                                                read_names, read_optional,
+                                                remove_tree)
 from mirage.types import FileStat, FileType
 
 
@@ -116,3 +117,70 @@ async def test_the_namespace_is_asked_before_the_data_plane():
     found = await blocking_ancestor(only_dirs, "/repo", "slot/deep/child",
                                     Links())
     assert found == "/repo/slot"
+
+
+class TreeLinks:
+    """A link view holding one link, at ``/repo/slot/link``."""
+
+    def stat_at(self, path: str) -> FileStat | None:
+        """What the namespace holds at a path, None when no link.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        if path != "/repo/slot/link":
+            return None
+        return FileStat(name="link", type=FileType.SYMLINK)
+
+
+class Recorder:
+    """A dispatcher that lists one link and records every op it is asked for.
+
+    ``readdir`` answers through the link the way the real one does: the
+    name plane owns links, so the data plane resolves the path and
+    lists what it points at.
+    """
+
+    def __init__(self) -> None:
+        self.ops: list[tuple[str, str]] = []
+
+    async def __call__(self, op: str, path, **kwargs):
+        """Record one op and answer the listings.
+
+        Args:
+            op (str): the op name.
+            path (PathSpec): the path it is asked for.
+            **kwargs (object): ignored.
+        """
+        where = path.virtual
+        self.ops.append((op, where))
+        if op == "readdir":
+            if where == "/repo/slot":
+                return ["/repo/slot/link"], None
+            if where == "/repo/slot/link":
+                return ["/repo/outside/keep.txt"], None
+            return [], None
+        if op == "rmdir" and where != "/repo/slot":
+            raise NotADirectoryError(where)
+        return None, None
+
+
+@pytest.mark.asyncio
+async def test_removing_a_tree_unlinks_a_link_without_descending():
+    calls = Recorder()
+    await remove_tree(calls, "/repo/slot", TreeLinks())
+    assert ("unlink", "/repo/slot/link") in calls.ops
+    # The whole point: readdir dereferences, so listing the link at all
+    # is the walk stepping outside the directory being replaced.
+    assert ("readdir", "/repo/slot/link") not in calls.ops
+    assert not any(
+        where.startswith("/repo/outside") for _op, where in calls.ops)
+
+
+@pytest.mark.asyncio
+async def test_without_a_namespace_the_walk_has_nothing_to_ask():
+    # Outside a workspace there is no name plane, so a link cannot be
+    # told from a directory and the walk is the old one.
+    calls = Recorder()
+    await remove_tree(calls, "/repo/slot", None)
+    assert ("readdir", "/repo/slot/link") in calls.ops

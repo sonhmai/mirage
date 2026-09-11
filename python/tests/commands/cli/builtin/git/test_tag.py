@@ -432,3 +432,34 @@ async def test_the_blamed_ref_is_the_first_in_ref_order(git_rw):
     _code, _out, err = await run(git_rw, "tag -d w w v v")
     assert err == (b"error: could not delete references: multiple updates "
                    b"for ref 'refs/tags/v' not allowed\n")
+
+
+@pytest.mark.asyncio
+async def test_a_tag_cannot_be_made_below_one_that_exists(git_rw):
+    assert (await run(git_rw, "tag foo"))[0] == 0
+    code, _out, err = await run(git_rw, "tag foo/bar")
+    assert code == 128
+    assert err == (b"fatal: cannot lock ref 'refs/tags/foo/bar': "
+                   b"'refs/tags/foo' exists; cannot create "
+                   b"'refs/tags/foo/bar'\n")
+    assert (await run(git_rw, "tag -l"))[1] == b"foo\n"
+
+
+@pytest.mark.asyncio
+async def test_a_tag_cannot_be_made_above_one_that_exists(git_rw):
+    assert (await run(git_rw, "tag baz/qux"))[0] == 0
+    code, _out, err = await run(git_rw, "tag baz")
+    assert code == 128
+    assert err == (b"fatal: cannot lock ref 'refs/tags/baz': "
+                   b"'refs/tags/baz/qux' exists; cannot create "
+                   b"'refs/tags/baz'\n")
+
+
+@pytest.mark.asyncio
+async def test_force_does_not_open_a_colliding_path(git_rw):
+    assert (await run(git_rw, "tag foo"))[0] == 0
+    # The obstacle is the path, not the value, so -f has nothing to
+    # overwrite.
+    code, _out, err = await run(git_rw, "tag -f foo/bar")
+    assert code == 128
+    assert b"cannot lock ref 'refs/tags/foo/bar'" in err

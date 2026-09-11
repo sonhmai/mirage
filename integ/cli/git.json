@@ -2533,6 +2533,132 @@
         "stdout": "exit=1\nkeep\n",
         "stderr": "error: Updating the following directories would lose untracked files in them:\n\tnslot\n\nAborting\n"
       }
+    },
+    {
+      "id": "git_switch_refuses_a_staged_path_inside_a_replaced_directory",
+      "seq": 568340,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch -c gbase > /dev/null 2>&1 && git -C /repo switch -c gfile > /dev/null 2>&1 && echo asfile > /repo/gslot && git -C /repo add gslot && git -C /repo commit -m gfile > /dev/null && git -C /repo switch gbase > /dev/null 2>&1 && mkdir -p /repo/gslot && echo kid > /repo/gslot/child && git -C /repo add gslot/child && git -C /repo switch gfile; echo exit=$?; cat /repo/gslot/child",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\nkid\n",
+        "stderr": "error: Your local changes to the following files would be overwritten by checkout:\n\tgslot/child\nPlease commit your changes or stash them before you switch branches.\nAborting\n"
+      }
+    },
+    {
+      "id": "git_switch_replaces_a_directory_without_following_a_link_out_of_it",
+      "seq": 568341,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'llink\\n' >> /repo/.gitignore && git -C /repo add .gitignore && git -C /repo commit -m ign4 > /dev/null && git -C /repo switch -c lbase > /dev/null 2>&1 && git -C /repo switch -c lfile > /dev/null 2>&1 && echo asfile > /repo/lslot && git -C /repo add lslot && git -C /repo commit -m lfile > /dev/null && git -C /repo switch lbase > /dev/null 2>&1 && mkdir -p /repo/laway && echo outside > /repo/laway/keep && mkdir -p /repo/lslot && ln -s /repo/laway /repo/lslot/llink && git -C /repo switch lfile > /dev/null 2>&1 && cat /repo/lslot && cat /repo/laway/keep",
+      "expect": {
+        "exit": 0,
+        "stdout": "asfile\noutside\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_refuses_a_ref_path_a_tag_above_it_holds",
+      "seq": 568342,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag tfoo && git -C /repo tag tfoo/bar; echo exit=$?; git -C /repo tag -l | grep tfoo",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=128\ntfoo\n",
+        "stderr": "fatal: cannot lock ref 'refs/tags/tfoo/bar': 'refs/tags/tfoo' exists; cannot create 'refs/tags/tfoo/bar'\n"
+      }
+    },
+    {
+      "id": "git_tag_refuses_a_ref_path_a_tag_below_it_holds",
+      "seq": 568343,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag tbaz/qux && git -C /repo tag tbaz; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=128\n",
+        "stderr": "fatal: cannot lock ref 'refs/tags/tbaz': 'refs/tags/tbaz/qux' exists; cannot create 'refs/tags/tbaz'\n"
+      }
+    },
+    {
+      "id": "git_branch_refuses_a_ref_path_another_branch_holds",
+      "seq": 568344,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo branch tbb && git -C /repo branch tbb/cc; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=128\n",
+        "stderr": "fatal: cannot lock ref 'refs/heads/tbb/cc': 'refs/heads/tbb' exists; cannot create 'refs/heads/tbb/cc'\n"
+      }
+    },
+    {
+      "id": "git_tag_reads_an_object_peel",
+      "seq": 568345,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag -a tv1 -m ann && git -C /repo tag ocopy 'HEAD^{object}' && git -C /repo tag owrap 'tv1^{object}' && git -C /repo tag -l | grep -E 'ocopy|owrap'",
+      "expect": {
+        "exit": 0,
+        "stdout": "ocopy\nowrap\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_mv_refuses_a_directory_and_something_inside_it",
+      "seq": 568346,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "mkdir -p /repo/mvdir /repo/mvdest && echo z > /repo/mvdir/file && git -C /repo add mvdir && git -C /repo commit -m mvdir > /dev/null && git -C /repo mv mvdir mvdir/file mvdest; echo exit=$?; cat /repo/mvdir/file",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=128\nz\n",
+        "stderr": "fatal: cannot move both 'mvdir/file' and its parent directory 'mvdir'\n"
+      }
+    },
+    {
+      "id": "git_mv_k_does_not_skip_an_overlapping_source",
+      "seq": 568347,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo mv -k mvdir/file mvdir mvdest; echo exit=$?; cat /repo/mvdir/file",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=128\nz\n",
+        "stderr": "fatal: cannot move both 'mvdir/file' and its parent directory 'mvdir'\n"
+      }
+    },
+    {
+      "id": "git_mv_k_taking_a_source_out_takes_it_out_of_the_overlap",
+      "seq": 568348,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "echo o > /repo/mvdir/other && git -C /repo mv -k mvdir mvdir/other mvdest && cat /repo/mvdest/mvdir/file && cat /repo/mvdest/mvdir/other",
+      "expect": {
+        "exit": 0,
+        "stdout": "z\no\n",
+        "stderr": ""
+      }
     }
   ]
 }

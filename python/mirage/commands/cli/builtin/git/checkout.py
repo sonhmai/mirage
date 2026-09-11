@@ -30,7 +30,7 @@ from mirage.commands.cli.builtin.git.changes import (ADDED, DELETED, MODIFIED,
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     BadStartPointError, BranchExistsError, CheckoutConflictError, GitError,
-    NoWorkspaceError, ResolveIndexError, UnknownPathspecError,
+    NoWorkspaceError, RefLockError, ResolveIndexError, UnknownPathspecError,
     UnknownSwitchError)
 from mirage.commands.cli.builtin.git.format import short, subject
 from mirage.commands.cli.builtin.git.index import read_index, write_index
@@ -41,9 +41,9 @@ from mirage.commands.cli.builtin.git.io import (blocking_ancestor,
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.pathspec import under
 from mirage.commands.cli.builtin.git.reflog import record
-from mirage.commands.cli.builtin.git.refs import (BRANCH_PREFIX, detach_head,
-                                                  read_head, set_head,
-                                                  write_ref)
+from mirage.commands.cli.builtin.git.refs import (BRANCH_PREFIX, blocking_ref,
+                                                  detach_head, read_head,
+                                                  set_head, write_ref)
 from mirage.commands.cli.builtin.git.reset import restored
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
@@ -237,6 +237,33 @@ def _blocked_ancestors(writing: Tree, dirty: set[str]) -> list[str]:
         under(name, path) for name in names))
 
 
+def _blocked_descendants(writing: Tree, dirty: set[str]) -> list[str]:
+    """Which uncommitted paths a written file's directory would take with it.
+
+    The other half of the check above, over the same set. A staged
+    ``slot/child`` is in the way of a target recording the *file*
+    ``slot``, because the file cannot be written without removing the
+    directory, and the index entry for the child would survive the
+    switch as one half of a shape git's index has no room for. The
+    exact-key comparison misses it for the same reason as the ancestor
+    case: ``slot/child`` is in neither tree.
+
+    The same deliberate divergence, and named the same way. git allows
+    it: switching onto a branch recording the file ``slot`` with
+    ``slot/child`` staged succeeds, removes the directory, and drops
+    the staged entry with nothing left pointing at its blob. mirage
+    refuses and names the path instead. Pinned against git 2.50.1.
+
+    Args:
+        writing (Tree): the entries the switch writes, from ``_written``.
+        dirty (set[str]): paths whose working tree or index differs from
+            HEAD.
+    """
+    names = _tree_names(writing)
+    return sorted(path for path in dirty if any(
+        under(path, name) for name in names))
+
+
 def _lost_directories(writing: Tree, untracked: list[str]) -> list[str]:
     """Which directories the switch would empty of untracked files.
 
@@ -320,7 +347,7 @@ async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
         if links is None or links.stat_at(where) is None:
             info = await stat_path(where)
             if info is not None and info.type is FileType.DIRECTORY:
-                await remove_tree(dispatch, where)
+                await remove_tree(dispatch, where, links)
         await restore_entry(dispatch, where, mode, blobs[sha], links)
     # The index is git's two-way merge, not a copy of the target tree:
     # only a path the two trees disagree about is decided by the
@@ -509,7 +536,8 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
     writing = _written(before, after)
     blocked = sorted(
         set(_conflicts(before, after, dirty))
-        | set(_blocked_ancestors(writing, dirty)))
+        | set(_blocked_ancestors(writing, dirty))
+        | set(_blocked_descendants(writing, dirty)))
     overwritten = _overwritten(writing, found.untracked)
     lost = _lost_directories(writing, found.untracked)
     if blocked or overwritten or lost:
@@ -573,6 +601,12 @@ async def checkout(
                 raise BadStartPointError(start, target) from exc
         else:
             commit = resolve_commit(repo, target if not creating else HEAD)
+        # Before the working tree moves, which is where git refuses it
+        # too: the ref is locked first and nothing is checked out when
+        # the lock cannot be taken.
+        held = blocking_ref(known, ref.decode()) if creating else None
+        if held is not None:
+            raise RefLockError(ref.decode(), held)
         attached = creating or ref in known
         moved = await move_head(dispatch, stat_path, links_of(doors), repo,
                                 location, head, commit, target,

@@ -26,6 +26,7 @@ import {
   CheckoutConflictError,
   GitError,
   NoWorkspaceError,
+  RefLockError,
   ResolveIndexError,
   UnknownPathspecError,
   UnknownSwitchError,
@@ -41,7 +42,15 @@ import {
   under,
 } from './io.ts'
 import { record } from './reflog.ts'
-import { BRANCH_PREFIX, detachHead, loadRefs, readHead, setHead, writeRef } from './refs.ts'
+import {
+  BRANCH_PREFIX,
+  blockingRef,
+  detachHead,
+  loadRefs,
+  readHead,
+  setHead,
+  writeRef,
+} from './refs.ts'
 import { under as inside } from './pathspec.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
@@ -185,6 +194,32 @@ function blockedAncestors(
 }
 
 /**
+ * Which uncommitted paths stand inside a directory a written file replaces.
+ *
+ * The other half of the check above, over the same set. A staged `slot/child`
+ * is in the way of a target recording the *file* `slot`, because the file
+ * cannot be written without removing the directory, and the index entry for the
+ * child would survive the switch as one half of a shape git's index has no room
+ * for. The exact-key comparison misses it for the same reason as the ancestor
+ * case: `slot/child` is in neither tree.
+ *
+ * The same deliberate divergence, and named the same way. git allows it:
+ * switching onto a branch recording the file `slot` with `slot/child` staged
+ * succeeds, removes the directory, and drops the staged entry with nothing left
+ * pointing at its blob. mirage refuses and names the path instead. Pinned
+ * against git 2.50.1.
+ */
+function blockedDescendants(
+  writing: ReadonlyMap<string, TreeEntry>,
+  dirty: ReadonlySet<string>,
+): string[] {
+  const names = [...writing.keys()]
+  return [...dirty]
+    .filter((path) => names.some((name) => inside(path, name)))
+    .sort(compareCodePoints)
+}
+
+/**
  * Which directories the switch would empty of untracked files.
  *
  * The mirror of the case above: the target records a *file* where the working
@@ -254,7 +289,7 @@ async function switchTo(
     if ((links?.statAt(where) ?? null) === null) {
       const info = await statPath(where)
       if (info !== null && info.type === FileType.DIRECTORY) {
-        await removeTree(dispatch, where)
+        await removeTree(dispatch, where, links)
       }
     }
     await restoreEntry(dispatch, where, entry.mode, blob, links)
@@ -423,7 +458,11 @@ export async function moveHead(
   const dirty = new Set(carried.keys())
   const writing = written(before, after)
   const blocked = [
-    ...new Set([...conflicts(before, after, dirty), ...blockedAncestors(writing, dirty)]),
+    ...new Set([
+      ...conflicts(before, after, dirty),
+      ...blockedAncestors(writing, dirty),
+      ...blockedDescendants(writing, dirty),
+    ]),
   ].sort(compareCodePoints)
   const clobbered = overwritten(writing, found.untracked)
   const lost = lostDirectories(writing, found.untracked)
@@ -487,6 +526,11 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     } else {
       oid = await resolveCommit(repo, creating ? 'HEAD' : target)
     }
+    // Before the working tree moves, which is where git refuses it too: the
+    // ref is locked first and nothing is checked out when the lock cannot be
+    // taken.
+    const held = creating ? blockingRef(new Set(known.keys()), ref) : null
+    if (held !== null) throw new RefLockError(ref, held)
     const attached = creating || known.has(ref)
     const moved = await moveHead(
       dispatch,

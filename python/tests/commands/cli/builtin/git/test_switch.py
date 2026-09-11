@@ -409,3 +409,17 @@ async def test_creating_from_an_unborn_head_still_works(unborn_rw):
     # same refusal rather than a special case of the first one.
     code, _out, err = await run(unborn_rw, "switch topic")
     assert (code, err) == (128, b"fatal: invalid reference: topic\n")
+
+
+@pytest.mark.asyncio
+async def test_creating_a_branch_below_one_that_exists_is_refused(
+        git_rw, repo_path: Path):
+    assert (await run(git_rw, "branch bb"))[0] == 0
+    code, _out, err = await run(git_rw, "switch -c bb/cc")
+    assert code == 128
+    assert err == (b"fatal: cannot lock ref 'refs/heads/bb/cc': "
+                   b"'refs/heads/bb' exists; cannot create "
+                   b"'refs/heads/bb/cc'\n")
+    # Refused before the working tree moves, so HEAD is where it was.
+    assert b"ref: refs/heads/main" in (repo_path / ".git" /
+                                       "HEAD").read_bytes()

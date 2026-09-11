@@ -57,7 +57,11 @@ def clean_delimiter(token: str) -> str:
     ``$'A\\tB'`` names the word its ANSI-C escapes build, and ``$"A"``
     names its double-quoted content, which is what a locale carrying no
     translation for it gives back. Every other ``$`` is literal, since a
-    delimiter is never expanded.
+    delimiter is never expanded. A backslash before a newline is the
+    reader's line continuation and takes the newline with it, outside
+    quotes and inside double quotes alike, so ``EO\\<newline>F`` names
+    ``EOF``; single quotes keep both characters, leaving a newline in
+    the delimiter that no single line can equal.
 
     Args:
         token (str): the heredoc_start token as typed.
@@ -75,6 +79,8 @@ def clean_delimiter(token: str) -> str:
         elif quote == '"':
             if char == '"':
                 quote = None
+            elif char == "\\" and token[index + 1:index + 2] == "\n":
+                index += 1
             elif (char == "\\" and index + 1 < len(token)
                   and token[index + 1] in DQUOTE_ESCAPABLE):
                 index += 1
@@ -90,6 +96,8 @@ def clean_delimiter(token: str) -> str:
             index += 1
         elif char in ("'", '"'):
             quote = char
+        elif char == "\\" and token[index + 1:index + 2] == "\n":
+            index += 1
         elif char == "\\" and index + 1 < len(token):
             index += 1
             out.append(token[index])

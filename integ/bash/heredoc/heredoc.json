@@ -1729,6 +1729,68 @@
         "stdout": "[b]",
         "stderr": ""
       }
+    },
+    {
+      "id": "heredoc_multiline_expansion",
+      "seq": 501275,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "hx=; cat <<END ${hx:-\n}\n\\first\nEND\necho after",
+      "expect": {
+        "exit": 0,
+        "stdout": "\\first\nafter\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_nested_multiline_expansion",
+      "seq": 501276,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "hx=; hy=; cat <<END ${hx:-${hy:-\n}}\nbody\nEND\necho after",
+      "expect": {
+        "exit": 0,
+        "stdout": "body\nafter\n",
+        "stderr": ""
+      }
     }
   ]
 }

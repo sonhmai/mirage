@@ -50,7 +50,11 @@ export function ansiCEnd(token: string, start: number): number {
  * itself, wherever in the word it sits: `$'A\tB'` names the word its
  * ANSI-C escapes build, and `$"A"` names its double-quoted content,
  * which is what a locale carrying no translation for it gives back.
- * Every other `$` is literal, since a delimiter is never expanded.
+ * Every other `$` is literal, since a delimiter is never expanded. A
+ * backslash before a newline is the reader's line continuation and takes
+ * the newline with it, outside quotes and inside double quotes alike, so
+ * `EO\<newline>F` names `EOF`; single quotes keep both characters,
+ * leaving a newline in the delimiter that no single line can equal.
  */
 export function cleanDelimiter(token: string): string {
   let out = ''
@@ -64,6 +68,8 @@ export function cleanDelimiter(token: string): string {
     } else if (quote === '"') {
       if (char === '"') {
         quote = null
+      } else if (char === '\\' && token[index + 1] === '\n') {
+        index += 1
       } else if (
         char === '\\' &&
         index + 1 < token.length &&
@@ -83,6 +89,8 @@ export function cleanDelimiter(token: string): string {
       index += 1
     } else if (char === "'" || char === '"') {
       quote = char
+    } else if (char === '\\' && token[index + 1] === '\n') {
+      index += 1
     } else if (char === '\\' && index + 1 < token.length) {
       index += 1
       out += token[index] ?? ''

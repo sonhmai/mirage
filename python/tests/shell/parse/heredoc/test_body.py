@@ -144,3 +144,15 @@ def test_dollar_quoted_delimiter_closes_its_own_body():
     assert _bodies(cmd, "$'A'",
                    "'B'") == [(cmd.index("first"), cmd.index("A\n")),
                               (cmd.index("\\second"), cmd.rindex("B"))]
+
+
+def test_continued_delimiter_closes_its_own_body():
+    # EO\<newline>F names EOF, so the body ends at the EOF line rather
+    # than running to the end of the source.
+    cmd = "cat <<EO\\\nF\nbody\nEOF\n"
+    assert _bodies(cmd, "EO\\\nF") == [(cmd.index("body"), cmd.index("EOF\n"))]
+
+
+def test_body_starts_after_a_multiline_parameter_expansion():
+    cmd = "cat <<EOF >${x:-\n/out}\nbody\nEOF\n"
+    assert _bodies(cmd, "EOF") == [(cmd.index("body"), cmd.index("EOF\n"))]

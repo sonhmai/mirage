@@ -85,6 +85,37 @@ def test_substitution_newline_is_not_the_line_end():
     assert _end(cmd) == cmd.index("cat)\n") + 4
 
 
+def test_parameter_expansion_newline_is_not_the_line_end():
+    # Bash reads no body until the word holding the expansion is whole.
+    cmd = "cat <<EOF >${x:-\n/out}\nbody\nEOF\n"
+    assert _end(cmd) == cmd.index("/out}\n") + 5
+
+
+def test_nested_parameter_expansions_span_their_newlines():
+    cmd = "cat <<EOF >${x:-${y:-\n/out}}\nbody\nEOF\n"
+    assert _end(cmd) == cmd.index("/out}}\n") + 6
+
+
+def test_hash_inside_a_parameter_expansion_is_not_a_comment():
+    # `${x:- #y}` expands to ` #y`; only a command may start after a blank.
+    cmd = "cat <<EOF ${x:- #y\n}\nbody\nEOF\n"
+    assert _end(cmd) == cmd.index("}\nbody") + 1
+
+
+def test_comment_inside_a_substitution_inside_an_expansion():
+    cmd = "cat <<EOF ${x:-$(: # c\n)}\nbody\nEOF\n"
+    assert _end(cmd) == cmd.index(")}\n") + 2
+
+
+def test_closing_brace_without_an_expansion_is_ordinary_text():
+    cmd = "cat <<EOF }\nbody\nEOF\n"
+    assert _end(cmd) == cmd.index("\n")
+
+
+def test_unterminated_parameter_expansion_never_ends_the_line():
+    assert _end("cat <<EOF >${x:-\nbody\nEOF\n") is None
+
+
 def test_unterminated_quote_never_ends_the_line():
     assert _end("cat <<EOF | tr 'a\nbody\nEOF\n") is None
 

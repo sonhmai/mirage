@@ -161,4 +161,16 @@ describe('heredocBodies', () => {
       [cmd.indexOf('\\second'), cmd.lastIndexOf('B')],
     ])
   })
+
+  it('closes the body of a continued delimiter', () => {
+    // EO\<newline>F names EOF, so the body ends at the EOF line rather
+    // than running to the end of the source.
+    const cmd = 'cat <<EO\\\nF\nbody\nEOF\n'
+    expect(bodies(cmd, ['EO\\\nF'])).toEqual([[cmd.indexOf('body'), cmd.indexOf('EOF\n')]])
+  })
+
+  it('starts the body after a multiline parameter expansion', () => {
+    const cmd = 'cat <<EOF >${x:-\n/out}\nbody\nEOF\n'
+    expect(bodies(cmd, ['EOF'])).toEqual([[cmd.indexOf('body'), cmd.indexOf('EOF\n')]])
+  })
 })

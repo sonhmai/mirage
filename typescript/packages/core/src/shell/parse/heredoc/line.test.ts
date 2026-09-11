@@ -84,6 +84,36 @@ describe('operatorLineEnd', () => {
     expect(end(cmd)).toBe(cmd.indexOf('cat)\n') + 4)
   })
 
+  it('does not end at a newline inside a parameter expansion', () => {
+    // Bash reads no body until the word holding the expansion is whole.
+    const cmd = 'cat <<EOF >${x:-\n/out}\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf('/out}\n') + 5)
+  })
+
+  it('spans the newlines of nested parameter expansions', () => {
+    const cmd = 'cat <<EOF >${x:-${y:-\n/out}}\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf('/out}}\n') + 6)
+  })
+
+  it('takes a hash inside a parameter expansion as text', () => {
+    const cmd = 'cat <<EOF ${x:- #y\n}\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf('}\nbody') + 1)
+  })
+
+  it('still reads a comment in a substitution inside an expansion', () => {
+    const cmd = 'cat <<EOF ${x:-$(: # c\n)}\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf(')}\n') + 2)
+  })
+
+  it('takes a closing brace with no expansion as ordinary text', () => {
+    const cmd = 'cat <<EOF }\nbody\nEOF\n'
+    expect(end(cmd)).toBe(cmd.indexOf('\n'))
+  })
+
+  it('never ends after an unterminated parameter expansion', () => {
+    expect(end('cat <<EOF >${x:-\nbody\nEOF\n')).toBeNull()
+  })
+
   it('never ends after an unterminated quote', () => {
     expect(end("cat <<EOF | tr 'a\nbody\nEOF\n")).toBeNull()
   })

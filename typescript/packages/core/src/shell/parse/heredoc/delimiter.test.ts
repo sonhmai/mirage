@@ -45,6 +45,11 @@ describe('cleanDelimiter', () => {
     ['"$\'EOF\'"', "$'EOF'"],
     ['$EOF', '$EOF'],
     ['EOF$', 'EOF$'],
+    ['EO\\\nF', 'EOF'],
+    ['"EO\\\nF"', 'EOF'],
+    ['$"EO\\\nF"', 'EOF'],
+    ["'EO\\\nF'", 'EO\\\nF'],
+    ["$'A\\\nB'", 'A\\\nB'],
   ])('reads %j as %j', (token, expected) => {
     expect(cleanDelimiter(token)).toBe(expected)
   })

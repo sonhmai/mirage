@@ -46,6 +46,11 @@ from mirage.shell.parse.heredoc import ansi_c_end, clean_delimiter
     ('"$\'EOF\'"', "$'EOF'"),
     ("$EOF", "$EOF"),
     ("EOF$", "EOF$"),
+    ("EO\\\nF", "EOF"),
+    ('"EO\\\nF"', "EOF"),
+    ('$"EO\\\nF"', "EOF"),
+    ("'EO\\\nF'", "EO\\\nF"),
+    ("$'A\\\nB'", "A\\\nB"),
 ])
 def test_clean_delimiter(token: str, expected: str):
     assert clean_delimiter(token) == expected

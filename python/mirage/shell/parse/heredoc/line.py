@@ -12,11 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.shell.parse.heredoc.constants import (BACKSLASH, CLOSE_PAREN,
-                                                  COMMENT_PRECEDERS, HASH,
-                                                  NEWLINE, OPEN_PAREN,
-                                                  QUOTE_OPENERS, SINGLE_QUOTE,
-                                                  SUBSTITUTION_OPENERS)
+from mirage.shell.parse.heredoc import constants
 
 
 def quote_end(data: bytes, start: int) -> int | None:
@@ -30,11 +26,11 @@ def quote_end(data: bytes, start: int) -> int | None:
         start (int): byte offset of the opening quote.
     """
     quote = data[start]
-    escapes = quote != SINGLE_QUOTE or data[start - 1:start] == b"$"
+    escapes = quote != constants.SINGLE_QUOTE or data[start - 1:start] == b"$"
     index = start + 1
     while index < len(data):
         byte = data[index]
-        if byte == BACKSLASH and escapes:
+        if byte == constants.BACKSLASH and escapes:
             index += 2
             continue
         if byte == quote:
@@ -49,11 +45,16 @@ def operator_line_end(data: bytes, start: int) -> int | None:
     Read forward from the end of the delimiter word the way bash's reader
     does: a backslash escapes the next byte, so ``\\<newline>`` continues
     the line; quotes and backticks hide their contents; ``$(``, ``<(`` and
-    ``>(`` run to their balancing paren; a ``#`` opening a word, which is
-    one after a blank or a metacharacter (``cat <<EOF;# don't``), starts
-    a comment that ends at the newline. A trailing ``|`` or ``&&`` does
-    not extend the line: bash gathers the body at the first newline and
-    reads the rest of the pipeline after the terminator.
+    ``>(`` run to their balancing paren and ``${`` to its balancing brace,
+    both across newlines, since no body is read until the word holding
+    them is whole; a ``#`` opening a word, which is one after a blank or a
+    metacharacter (``cat <<EOF;# don't``), starts a comment that ends at
+    the newline. The constructs still open are kept as the closers they
+    want, innermost last, because a ``#`` opens a comment only where a
+    command may start: inside ``$( )`` it does, inside ``${ }`` it is part
+    of the word (``${x:- #y}`` expands to `` #y``). A trailing ``|`` or
+    ``&&`` does not extend the line: bash gathers the body at the first
+    newline and reads the rest of the pipeline after the terminator.
 
     Args:
         data (bytes): the shell source.
@@ -63,36 +64,41 @@ def operator_line_end(data: bytes, start: int) -> int | None:
         int | None: offset of the newline, or None when the line never
         ends.
     """
-    depth = 0
+    closers: list[int] = []
     index = start
     while index < len(data):
         byte = data[index]
-        if byte == BACKSLASH:
+        top = closers[-1] if closers else None
+        if byte == constants.BACKSLASH:
             index += 2
-        elif byte in QUOTE_OPENERS:
+        elif byte in constants.QUOTE_OPENERS:
             end = quote_end(data, index)
             if end is None:
                 return None
             index = end
-        elif (byte in SUBSTITUTION_OPENERS
-              and data[index + 1:index + 2] == b"("):
-            depth += 1
+        elif data[index:index + 2] == b"${":
+            closers.append(constants.CLOSE_BRACE)
             index += 2
-        elif byte == OPEN_PAREN and depth > 0:
-            depth += 1
+        elif (byte in constants.SUBSTITUTION_OPENERS
+              and data[index + 1:index + 2] == b"("):
+            closers.append(constants.CLOSE_PAREN)
+            index += 2
+        elif byte == constants.OPEN_PAREN and top == constants.CLOSE_PAREN:
+            closers.append(constants.CLOSE_PAREN)
             index += 1
-        elif byte == CLOSE_PAREN and depth > 0:
-            depth -= 1
+        elif byte == top:
+            closers.pop()
             index += 1
-        elif (byte == HASH and index > 0
-              and data[index - 1] in COMMENT_PRECEDERS):
+        elif (byte == constants.HASH and index > 0
+              and data[index - 1] in constants.COMMENT_PRECEDERS
+              and top != constants.CLOSE_BRACE):
             newline = data.find(b"\n", index)
             if newline < 0:
                 return None
-            if depth == 0:
+            if not closers:
                 return newline
             index = newline + 1
-        elif byte == NEWLINE and depth == 0:
+        elif byte == constants.NEWLINE and not closers:
             return index
         else:
             index += 1

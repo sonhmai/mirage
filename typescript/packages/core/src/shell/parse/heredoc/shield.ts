@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Node } from 'web-tree-sitter'
+import type { TSNodeLike } from '../../types.ts'
 import { heredocBodies } from './body.ts'
 import {
   ALTERNATE_FILLER,
@@ -33,22 +34,22 @@ import type { HeredocOperator } from './types.ts'
  * token whose delimiter is empty once unquoted names no line and is left
  * out.
  */
-export function heredocOperators(root: Node): HeredocOperator[] {
+export function heredocOperators(root: TSNodeLike): HeredocOperator[] {
   const found: HeredocOperator[] = []
-  const stack: Node[] = [root]
+  const stack: TSNodeLike[] = [root]
   for (;;) {
     const node = stack.pop()
     if (node === undefined) break
     stack.push(...node.children)
     if (node.type !== HEREDOC_START) continue
+    if (node.startIndex === undefined || node.endIndex === undefined) continue
     const delimiter = cleanDelimiter(node.text)
     if (delimiter === '') continue
-    const previous = node.previousSibling
     found.push({
       wordStart: node.startIndex,
       wordEnd: node.endIndex,
       delimiter,
-      allowsIndent: previous !== null && previous.type === DASH_ARROW,
+      allowsIndent: node.previousSibling?.type === DASH_ARROW,
     })
   }
   return found.sort((a, b) => a.wordStart - b.wordStart)

@@ -92,11 +92,14 @@ def test_dash_body_allows_a_tab_indented_terminator():
 
 
 def test_dash_body_ignores_a_space_indented_terminator():
-    assert _bodies("cat <<-EOF\n  body\n  EOF\n", "EOF", dash=True) == [None]
+    # Only tabs are stripped, so the body runs on to the end.
+    assert _bodies("cat <<-EOF\n  body\n  EOF\n", "EOF",
+                   dash=True) == [(11, 24)]
 
 
-def test_unterminated_body_is_none():
-    assert _bodies("cat <<EOF\nbody\nmore\n", "EOF") == [None]
+def test_unterminated_body_runs_to_the_end_of_the_source():
+    # Bash reads it that way too, under a warning naming the delimiter.
+    assert _bodies("cat <<EOF\nbody\nmore\n", "EOF") == [(10, 20)]
 
 
 def test_body_without_a_body_line_is_none():
@@ -113,8 +116,8 @@ def test_bodies_keep_the_order_given():
                                                                   (12, 16)]
 
 
-def test_second_body_is_none_when_the_first_never_ends():
-    assert _bodies("cat <<A <<B\none\ntwo\nB\n", "A", "B") == [None, None]
+def test_second_body_never_starts_when_the_first_runs_to_the_end():
+    assert _bodies("cat <<A <<B\none\ntwo\nB\n", "A", "B") == [(12, 22), None]
 
 
 def test_second_body_is_none_when_the_first_terminator_ends_the_source():

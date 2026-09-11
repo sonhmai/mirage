@@ -147,9 +147,14 @@ def test_protected_source_dash_masks_the_leading_tab():
     assert _diff(cmd, out) == [(cmd.index("\t\\first"), "x")]
 
 
-def test_protected_source_leaves_an_unterminated_heredoc_alone():
+def test_protected_source_masks_an_unterminated_body_too():
+    # Bash reads the body to the end of the input, so the shield does;
+    # the masked copy still lacks heredoc_end, and _parse_bytes keeps
+    # the plain tree for it.
     cmd = "cat <<EOF\n\\first\nsecond\n"
-    assert protected_source(cmd.encode(), _root(cmd)) is None
+    out = protected_source(cmd.encode(), _root(cmd))
+    assert out is not None
+    assert _diff(cmd, out) == [(cmd.index("\\first"), "x")]
 
 
 def test_same_shape_true_for_equal_parses():

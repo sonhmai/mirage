@@ -55,11 +55,14 @@ export function nextLine(text: string, lineStart: number): number | null {
  * line, one after another in the order the operators appear on it, so the
  * second body of `cat <<A <<B` starts on the line after `A`'s terminator.
  * A body is every line strictly between where it starts and the line
- * holding its delimiter, which makes the span a property of the source
- * text, not of any token the parser produced. An operator that lies
- * inside an earlier body is text, not syntax. Returns `[bodyStart,
+ * holding its delimiter; when no line holds it, the body runs to the end
+ * of the source, which is how bash reads it too, under a warning that
+ * names the delimiter it wanted. That makes the span a property of the
+ * source text, not of any token the parser produced. An operator that
+ * lies inside an earlier body is text, not syntax, and one whose turn
+ * comes once the source has run out has no body. Returns `[bodyStart,
  * bodyEnd]` per operator, in the order given; null when the body never
- * starts or never ends.
+ * starts.
  */
 export function heredocBodies(
   text: string,
@@ -84,8 +87,8 @@ export function heredocBodies(
     previousLineEnd = lineEnd
     cursor = null
     if (bodyStart === null) continue
-    const bodyEnd = terminatorLine(text, bodyStart, operator.delimiter, operator.allowsIndent)
-    if (bodyEnd === null) continue
+    const bodyEnd =
+      terminatorLine(text, bodyStart, operator.delimiter, operator.allowsIndent) ?? text.length
     spans[position] = [bodyStart, bodyEnd]
     bodies.push([bodyStart, bodyEnd])
     cursor = nextLine(text, bodyEnd)

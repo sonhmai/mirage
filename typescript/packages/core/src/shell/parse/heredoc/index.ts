@@ -15,6 +15,6 @@
 export { heredocBodies, nextLine, terminatorLine } from './body.ts'
 export { cleanDelimiter } from './delimiter.ts'
 export { operatorLineEnd, quoteEnd } from './line.ts'
-export { bodyPrefix } from './prefix.ts'
+export { bodyPrefix, treeRoot } from './prefix.ts'
 export { firstContentLine, heredocOperators, protectedSource, sameShape } from './shield.ts'
 export type { HeredocOperator } from './types.ts'

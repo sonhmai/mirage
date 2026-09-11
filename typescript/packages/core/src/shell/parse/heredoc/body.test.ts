@@ -100,11 +100,13 @@ describe('heredocBodies', () => {
   })
 
   it('ignores a space-indented terminator under <<-', () => {
-    expect(bodies('cat <<-EOF\n  body\n  EOF\n', ['EOF'], true)).toEqual([null])
+    // Only tabs are stripped, so the body runs on to the end.
+    expect(bodies('cat <<-EOF\n  body\n  EOF\n', ['EOF'], true)).toEqual([[11, 24]])
   })
 
-  it('is null for an unterminated body', () => {
-    expect(bodies('cat <<EOF\nbody\nmore\n', ['EOF'])).toEqual([null])
+  it('runs an unterminated body to the end of the source', () => {
+    // Bash reads it that way too, under a warning naming the delimiter.
+    expect(bodies('cat <<EOF\nbody\nmore\n', ['EOF'])).toEqual([[10, 20]])
   })
 
   it('is null without a body line', () => {
@@ -125,8 +127,8 @@ describe('heredocBodies', () => {
     ])
   })
 
-  it('gives the second body null when the first never ends', () => {
-    expect(bodies('cat <<A <<B\none\ntwo\nB\n', ['A', 'B'])).toEqual([null, null])
+  it('never starts the second body when the first runs to the end', () => {
+    expect(bodies('cat <<A <<B\none\ntwo\nB\n', ['A', 'B'])).toEqual([[12, 22], null])
   })
 
   it('gives the second body null when the first terminator ends the source', () => {

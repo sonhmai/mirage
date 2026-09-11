@@ -74,9 +74,12 @@ def heredoc_bodies(
     line, one after another in the order the operators appear on it, so
     the second body of ``cat <<A <<B`` starts on the line after ``A``'s
     terminator. A body is every line strictly between where it starts
-    and the line holding its delimiter, which makes the span a property
-    of the source text, not of any token the parser produced. An
-    operator that lies inside an earlier body is text, not syntax.
+    and the line holding its delimiter; when no line holds it, the body
+    runs to the end of the source, which is how bash reads it too, under
+    a warning that names the delimiter it wanted. That makes the span a
+    property of the source text, not of any token the parser produced.
+    An operator that lies inside an earlier body is text, not syntax,
+    and one whose turn comes once the source has run out has no body.
 
     Args:
         data (bytes): the shell source.
@@ -86,7 +89,7 @@ def heredoc_bodies(
     Returns:
         list[tuple[int, int] | None]: ``(body_start, body_end)`` for
         each operator, in the order given; None when the body never
-        starts or never ends.
+        starts.
     """
     spans: list[tuple[int, int] | None] = [None] * len(operators)
     bodies: list[tuple[int, int]] = []
@@ -110,7 +113,7 @@ def heredoc_bodies(
                                    operator.delimiter.encode(),
                                    operator.allows_indent)
         if body_end is None:
-            continue
+            body_end = len(data)
         spans[position] = (body_start, body_end)
         bodies.append((body_start, body_end))
         cursor = next_line(data, body_end)

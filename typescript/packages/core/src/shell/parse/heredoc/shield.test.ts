@@ -163,9 +163,13 @@ describe('protectedSource', () => {
     expect(diff(cmd, out ?? '')).toEqual([[cmd.indexOf('\t\\first'), 'x']])
   })
 
-  it('leaves an unterminated heredoc alone', () => {
+  it('masks an unterminated body too', () => {
+    // Bash reads the body to the end of the input, so the shield does;
+    // the masked copy still lacks heredoc_end, and parseProtected keeps
+    // the plain tree for it.
     const cmd = 'cat <<EOF\n\\first\nsecond\n'
-    expect(protectedSource(cmd, root(cmd))).toBeNull()
+    const out = protectedSource(cmd, root(cmd))
+    expect(diff(cmd, out ?? '')).toEqual([[cmd.indexOf('\\first'), 'x']])
   })
 })
 

@@ -13,19 +13,32 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { TSNodeLike } from '../../types.ts'
+import { heredocBodies } from './body.ts'
 import { HEREDOC_BODY, HEREDOC_START, SKIPPED_BLANKS } from './constants.ts'
-import { operatorLineEnd } from './line.ts'
+import { heredocOperators } from './shield.ts'
+
+/** The root of the tree `node` belongs to. */
+export function treeRoot(node: TSNodeLike): TSNodeLike {
+  let root = node
+  while (root.parent !== null && root.parent !== undefined) root = root.parent
+  return root
+}
 
 /**
  * The opening characters of a body that tree-sitter left out of its node.
  *
  * The scanner starts heredoc_body at the first character it keeps,
  * dropping every empty line before it and, when the shield could not
- * run, the first kept line's indentation; bash keeps all of that. What
- * lies between the operator's logical line and the body node is exactly
- * that dropped run when it is blank, and is body text nowhere else, so a
- * gap holding anything but blanks and newlines yields nothing. Returns
- * the empty string when the node starts where bash starts the body.
+ * run, the first kept line's indentation; bash keeps all of that. Where
+ * bash starts the body is what heredocBodies says over the whole tree, so
+ * a later heredoc on the same operator line is measured from the line
+ * after the earlier body's terminator rather than from the newline the
+ * two operators share. What lies between that start and the body node is
+ * exactly the dropped run when it is blank, and is body text nowhere
+ * else, so a gap holding anything but blanks and newlines yields nothing.
+ * The tree's text begins at its root, which sits past any blanks before
+ * the first token, so offsets are taken from there. Returns the empty
+ * string when the node starts where bash starts the body.
  */
 export function bodyPrefix(redirectNode: TSNodeLike): string {
   let start: TSNodeLike | null = null
@@ -34,13 +47,22 @@ export function bodyPrefix(redirectNode: TSNodeLike): string {
     if (child.type === HEREDOC_START) start = child
     else if (child.type === HEREDOC_BODY) body = child
   }
-  const base = redirectNode.startIndex
-  if (start === null || body === null || base === undefined) return ''
-  if (start.endIndex === undefined || body.startIndex === undefined) return ''
-  const text = redirectNode.text
-  const lineEnd = operatorLineEnd(text, start.endIndex - base)
-  if (lineEnd === null) return ''
-  const gap = text.slice(lineEnd + 1, body.startIndex - base)
+  if (start === null || body === null) return ''
+  if (start.startIndex === undefined || body.startIndex === undefined) return ''
+  const root = treeRoot(redirectNode)
+  const origin = root.startIndex
+  if (origin === undefined) return ''
+  const text = root.text
+  const operators = heredocOperators(root).map((operator) => ({
+    ...operator,
+    wordStart: operator.wordStart - origin,
+    wordEnd: operator.wordEnd - origin,
+  }))
+  const wordStart = start.startIndex - origin
+  const index = operators.findIndex((operator) => operator.wordStart === wordStart)
+  const span = index < 0 ? null : heredocBodies(text, operators)[index]
+  if (span === null || span === undefined) return ''
+  const gap = text.slice(span[0], body.startIndex - origin)
   if (gap === '') return ''
   for (const char of gap) {
     if (!SKIPPED_BLANKS.has(char)) return ''

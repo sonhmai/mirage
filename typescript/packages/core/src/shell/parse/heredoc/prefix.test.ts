@@ -18,7 +18,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { Language, Parser } from 'web-tree-sitter'
 import type { TSNodeLike } from '../../types.ts'
 import { createShellParser, type ShellParser } from '../parse.ts'
-import { bodyPrefix } from './prefix.ts'
+import { bodyPrefix, treeRoot } from './prefix.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -37,18 +37,57 @@ beforeAll(async () => {
   plain.setLanguage(language)
 })
 
-function redirect(root: TSNodeLike): TSNodeLike {
+function redirects(root: TSNodeLike): TSNodeLike[] {
+  const found: TSNodeLike[] = []
   const stack: TSNodeLike[] = [root]
   for (;;) {
     const node = stack.pop()
-    if (node === undefined) throw new Error('no heredoc_redirect in the tree')
-    if (node.type === HEREDOC_REDIRECT) return node
+    if (node === undefined) break
+    if (node.type === HEREDOC_REDIRECT) found.push(node)
     stack.push(...node.children)
   }
+  if (found.length === 0) throw new Error('no heredoc_redirect in the tree')
+  return found.sort((a, b) => (a.startIndex ?? 0) - (b.startIndex ?? 0))
 }
 
 function prefix(command: string): string {
-  return bodyPrefix(redirect(shielding.parse(command) as TSNodeLike))
+  const [first] = redirects(shielding.parse(command) as TSNodeLike)
+  if (first === undefined) throw new Error('no heredoc_redirect in the tree')
+  return bodyPrefix(first)
+}
+
+const TWO_ON_A_LINE = 'cat <<A <<B\na\nA\n\nb\nB\n'
+
+// The slice of a web-tree-sitter Node that bodyPrefix reads, over
+// TWO_ON_A_LINE.
+function node(type: string, start: number, end: number, children: TSNodeLike[] = []): TSNodeLike {
+  const built: TSNodeLike = {
+    type,
+    text: TWO_ON_A_LINE.slice(start, end),
+    children,
+    namedChildren: children,
+    startIndex: start,
+    endIndex: end,
+    parent: null,
+  }
+  let previous: TSNodeLike | null = null
+  for (const child of children) {
+    child.parent = built
+    child.previousSibling = previous
+    previous = child
+  }
+  return built
+}
+
+// A redirect of TWO_ON_A_LINE: `<<` at `operator`, a one-letter delimiter,
+// and a one-letter body line at `body`.
+function heredoc(operator: number, body: number): TSNodeLike {
+  return node(HEREDOC_REDIRECT, operator, body + 3, [
+    node('<<', operator, operator + 2),
+    node('heredoc_start', operator + 2, operator + 3),
+    node('heredoc_body', body, body + 2),
+    node('heredoc_end', body + 2, body + 3),
+  ])
 }
 
 describe('bodyPrefix', () => {
@@ -96,6 +135,42 @@ describe('bodyPrefix', () => {
     const cmd = 'cat <<EOF\n  foo\nEOF\n'
     const tree = plain.parse(cmd)
     if (tree === null) throw new Error('parse returned null')
-    expect(bodyPrefix(redirect(tree.rootNode as TSNodeLike))).toBe('  ')
+    const [first] = redirects(tree.rootNode as TSNodeLike)
+    if (first === undefined) throw new Error('no heredoc_redirect in the tree')
+    expect(bodyPrefix(first)).toBe('  ')
+  })
+
+  it('reads the source from a root that sits past leading blanks', () => {
+    expect(prefix('  cat <<EOF\n\nfoo\nEOF\n')).toBe('\n')
+    expect(prefix('\n\ncat <<EOF\n\nfoo\nEOF\n')).toBe('\n')
+  })
+
+  it('keeps the blank line of an unterminated body', () => {
+    // Bash reads the body to the end of the input, blank lines included.
+    expect(prefix('cat <<EOF\n\nfoo\n')).toBe('\n')
+  })
+
+  it('reads a heredoc inside a command substitution on its own line', () => {
+    const [outer, inner] = redirects(
+      shielding.parse('cat <<A $(cat <<B\n\nb\nB\n)\na\nA\n') as TSNodeLike,
+    )
+    if (outer === undefined || inner === undefined) throw new Error('expected two redirects')
+    expect(bodyPrefix(outer)).toBe('')
+    expect(bodyPrefix(inner)).toBe('\n')
+  })
+
+  it('measures a later heredoc on the line from the line after the earlier body', () => {
+    // tree-sitter-bash has no tree for two heredocs on one line; were it
+    // to grow one, B's node would span A's body too, and B's blank line is
+    // measured from the line after A's terminator, not from the operator
+    // line's newline the two share.
+    const first = heredoc(4, 12)
+    const second = heredoc(8, 17)
+    const root = node('program', 0, TWO_ON_A_LINE.length, [
+      node('redirected_statement', 0, 20, [node('command', 0, 3), first, second]),
+    ])
+    expect(treeRoot(second)).toBe(root)
+    expect(bodyPrefix(first)).toBe('')
+    expect(bodyPrefix(second)).toBe('\n')
   })
 })

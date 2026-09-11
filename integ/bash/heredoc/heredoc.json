@@ -1574,6 +1574,68 @@
         "stdout": "\nfirst\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "heredoc_leading_empty_line_after_indented_command",
+      "seq": 501270,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "  cat <<'END'\n\nfirst\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "\nfirst\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_leading_empty_line_in_substitution",
+      "seq": 501271,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf '[%s]' \"$(cat <<'B'\n\nb\nB\n)\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\nb]",
+        "stderr": ""
+      }
     }
   ]
 }

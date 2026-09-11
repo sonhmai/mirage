@@ -939,6 +939,49 @@ class TagNotFoundError(GitError):
         super().__init__(f"tag '{name}' not found.")
 
 
+class ListModeOnlyError(GitError):
+    """``-n`` on a ``tag`` line that deletes rather than lists.
+
+    ``-n`` asks for message lines beside each name, which only a listing
+    prints, and git makes it *imply* a listing rather than refuse it:
+    ``git tag -n1 nosuch`` is a listing whose pattern matches nothing
+    and exits 0. The implication is what cannot happen once ``-d`` has
+    already said what mode the line is in, so git dies there instead,
+    with the tags untouched. Refusing it matters more here than the
+    wording does: read as a listing flag and dropped, the line went on
+    to delete the refs its operands named. Pinned against git 2.50.1.
+
+    Args:
+        None.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("the '-n' option is only allowed in list mode")
+
+
+class RefUpdateConflictError(GitError):
+    """``tag -d`` naming one tag twice.
+
+    git stages every deletion on the line as one ref transaction, and a
+    transaction holding two updates for the same ref is refused before
+    any of them applies, so the whole line is a no-op: the repeated tag
+    survives, and so does every other tag the line named. The ref it
+    blames is the first in ref order rather than the first typed, since
+    the transaction sorts before it looks for the repeat. Reported the
+    way git reports it, as an ``error`` exiting 1 rather than a fatal.
+
+    Args:
+        ref (str): the full ref name given twice (``refs/tags/v``).
+    """
+
+    prefix = "error"
+    code = 1
+
+    def __init__(self, ref: str) -> None:
+        super().__init__("could not delete references: multiple updates "
+                         f"for ref '{ref}' not allowed")
+
+
 class InvalidTagNameError(GitError):
     """A tag name git's ref rules refuse.
 

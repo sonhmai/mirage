@@ -461,6 +461,16 @@ class Dispatcher:
                 # rename has emptied. The destination's own subtree is
                 # replaced first, as rename(2) replaces what it lands on.
                 await self._namespace.purge_under(kwargs["dst"].virtual)
+                # The node at the source itself is not part of the
+                # subtree below it, so re-anchoring that subtree leaves
+                # it behind: the mode or ownership a chmod recorded
+                # stayed at the emptied name, never reached the
+                # landing, and was inherited by whatever was created at
+                # the old name next. Shell mv compensates for this in
+                # its own prepare step; a verb reaching the dispatcher
+                # directly, as git mv does, had nothing to.
+                await self._namespace.rename(path.virtual,
+                                             kwargs["dst"].virtual)
                 await self._namespace.rename_under(path.virtual,
                                                    kwargs["dst"].virtual)
         bound = await post_ops_gate(policies, op, path, write, mount.prefix,

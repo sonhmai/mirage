@@ -378,3 +378,27 @@ async def test_a_dashed_operand_is_still_a_switch_unescaped(git_rw):
     code, _out, err = await run(git_rw, "mv -draft kept.txt")
     assert code == 129
     assert err == b"error: unknown switch `draft'\n"
+
+
+@pytest.mark.asyncio
+async def test_the_overlay_travels_with_a_moved_file(git_rw):
+    # git mv renames through the dispatcher, which is where the node
+    # table's own bookkeeping lives. A mode the inode cannot hold is
+    # recorded in the namespace overlay, and leaving it at the emptied
+    # name both lost it at the landing and left it to be inherited by
+    # whatever was written at the old name next.
+    assert (await git_rw.execute("chmod 400 /repo/a.txt")).exit_code == 0
+    assert await run(git_rw, "mv a.txt c.txt") == (0, b"", b"")
+    listed = await git_rw.execute("ls -l /repo/c.txt")
+    assert (listed.stdout or b"").startswith(b"-r--------")
+    assert git_rw.namespace.meta_for("/repo/a.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_a_link_below_a_moved_directory_travels_too(git_rw):
+    await git_rw.execute("mkdir -p /repo/d && echo t > /repo/t.txt")
+    await git_rw.execute("ln -s /repo/t.txt /repo/d/link")
+    assert (await run(git_rw, "add d"))[0] == 0
+    assert await run(git_rw, "mv d notes") == (0, b"", b"")
+    read = await git_rw.execute("readlink /repo/notes/link")
+    assert (read.exit_code, read.stdout) == (0, b"/repo/t.txt\n")

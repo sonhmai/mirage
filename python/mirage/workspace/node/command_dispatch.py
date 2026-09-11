@@ -615,7 +615,7 @@ async def _route_argv(
                                                                 stderr=err)
             elif name == "mv":
                 operands, post_unlink, post_rename, early = await prepare_mv(
-                    namespace, dispatch, operands)
+                    namespace, dispatch, operands, argv.args, session.cwd)
                 if early is not None:
                     return early
         except CycleError as exc:
@@ -668,9 +668,15 @@ async def _route_argv(
                     await namespace.unlink(item.virtual)
                     await namespace.purge_under(item.virtual)
         if post_unlink is not None:
+            # The landing is replaced the way rename(2) replaces it,
+            # node and subtree alike, and then the source's own node and
+            # subtree land on it. The same four steps the dispatcher
+            # takes for a rename it forwards itself.
             await namespace.unlink(post_unlink)
+            await namespace.purge_under(post_unlink)
         if post_rename is not None:
             await namespace.rename(post_rename[0], post_rename[1])
+            await namespace.rename_under(post_rename[0], post_rename[1])
     if link_errors:
         # A refused link operand fails the line the way a refused
         # backend operand does: its lines lead (they were reported

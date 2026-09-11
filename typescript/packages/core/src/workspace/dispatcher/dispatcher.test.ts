@@ -420,3 +420,44 @@ describe('the turf mode gates the node table', () => {
     }
   })
 })
+
+describe('a rename moves what the node table holds', () => {
+  it('carries the node at the source itself', async () => {
+    // The subtree below the source was re-anchored and the source's own
+    // node was not, so an overlay recorded there stayed at the emptied
+    // name: it never reached the landing, and whatever was created at
+    // the old name next inherited it.
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/a': new RAMResource() },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.execute('printf one > /a/f.txt')
+      await ws.namespace.setAttrs('/a/f.txt', { mode: 0o400 })
+      await ws.dispatch('rename', '/a/f.txt', [PathSpec.fromStrPath('/a/g.txt')])
+      expect(ws.namespace.metaFor('/a/f.txt')).toBeNull()
+      expect(ws.namespace.metaFor('/a/g.txt')?.mode).toBe(0o400)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('replaces the node at the landing', async () => {
+    // rename(2) replaces the destination, so the overlay it carried
+    // goes with it rather than staying to shadow what just landed.
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/a': new RAMResource() },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.execute('printf one > /a/f.txt && printf two > /a/g.txt')
+      await ws.namespace.setAttrs('/a/g.txt', { mode: 0o400 })
+      await ws.dispatch('rename', '/a/f.txt', [PathSpec.fromStrPath('/a/g.txt')])
+      expect(ws.namespace.metaFor('/a/g.txt')).toBeNull()
+    } finally {
+      await ws.close()
+    }
+  })
+})

@@ -2337,6 +2337,62 @@
         "stdout": "notes\nold\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_mv_carries_the_mode_overlay",
+      "seq": 568326,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "echo m > /repo/mvmode.txt && git -C /repo add mvmode.txt && git -C /repo commit -m mvmode > /dev/null && chmod 400 /repo/mvmode.txt && git -C /repo mv mvmode.txt mvmoved.txt && stat -c '%A' /repo/mvmoved.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-r--------\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_mv_carries_a_link_below_a_directory",
+      "seq": 568327,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "mkdir /repo/notes && echo t > /repo/tgt.txt && ln -s /repo/tgt.txt /repo/notes/link && git -C /repo add notes && git -C /repo mv notes moved && readlink /repo/moved/link; readlink /repo/notes/link; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo/tgt.txt\nexit=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_refuses_n_when_deleting",
+      "seq": 568328,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag ndel && git -C /repo tag -d -n1 ndel; echo exit=$?; git -C /repo tag -l 'ndel'",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=128\nndel\n",
+        "stderr": "fatal: the '-n' option is only allowed in list mode\n"
+      }
+    },
+    {
+      "id": "git_tag_refuses_a_repeated_deletion",
+      "seq": 568329,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag dupa && git -C /repo tag dupb && git -C /repo tag -d dupa dupb dupa; echo exit=$?; git -C /repo tag -l 'dup*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\ndupa\ndupb\n",
+        "stderr": "error: could not delete references: multiple updates for ref 'refs/tags/dupa' not allowed\n"
+      }
     }
   ]
 }

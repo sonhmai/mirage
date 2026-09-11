@@ -2172,3 +2172,78 @@ describe('a lightweight tag as an annotated tag target', () => {
     expect(git(drained, ['cat-file', '-p', 'fromlight']).split('\n')[1]).toBe('type commit')
   })
 })
+
+describe('git tag -d given a display option', () => {
+  it('refuses -n and leaves the tag standing', async () => {
+    const h = await harness()
+    expect((await h.run('tag v'))[0]).toBe(0)
+    expect(await h.run('tag -d -n1 v')).toEqual([
+      128,
+      '',
+      "fatal: the '-n' option is only allowed in list mode\n",
+    ])
+    expect(await h.run('tag -l')).toEqual([0, 'v\n', ''])
+  })
+
+  it('still reads -n alone as a listing', async () => {
+    // The refusal above is about -d having already chosen the mode:
+    // with nothing else on the line -n makes it a listing, so an
+    // operand is a pattern and one that matches nothing exits 0.
+    const h = await harness()
+    expect((await h.run('tag v'))[0]).toBe(0)
+    expect(await h.run('tag -n1 nosuch')).toEqual([0, '', ''])
+    expect(await h.run('tag -l')).toEqual([0, 'v\n', ''])
+  })
+})
+
+describe('git tag -d naming one tag twice', () => {
+  it('deletes nothing at all', async () => {
+    const h = await harness()
+    expect((await h.run('tag v'))[0]).toBe(0)
+    expect((await h.run('tag w'))[0]).toBe(0)
+    // One ref transaction holds every deletion on the line, and two
+    // updates for one ref are refused before any of them applies.
+    expect(await h.run('tag -d v w v')).toEqual([
+      1,
+      '',
+      "error: could not delete references: multiple updates for ref 'refs/tags/v' not allowed\n",
+    ])
+    expect(await h.run('tag -l')).toEqual([0, 'v\nw\n', ''])
+  })
+
+  it('reports a name that is not there before the conflict', async () => {
+    const h = await harness()
+    expect((await h.run('tag v'))[0]).toBe(0)
+    expect(await h.run('tag -d v v nosuch')).toEqual([
+      1,
+      '',
+      "error: tag 'nosuch' not found.\n" +
+        "error: could not delete references: multiple updates for ref 'refs/tags/v' not allowed\n",
+    ])
+    expect(await h.run('tag -l')).toEqual([0, 'v\n', ''])
+  })
+
+  it('blames the first ref in ref order, not the first typed', async () => {
+    const h = await harness()
+    expect((await h.run('tag v'))[0]).toBe(0)
+    expect((await h.run('tag w'))[0]).toBe(0)
+    expect((await h.run('tag -d w w v v'))[2]).toBe(
+      "error: could not delete references: multiple updates for ref 'refs/tags/v' not allowed\n",
+    )
+  })
+})
+
+describe('a moved path that the node table knows about', () => {
+  it('carries a link below a moved directory', async () => {
+    const h = await harness()
+    await h.ws.execute('mkdir /repo/notes && echo t > /repo/t.txt')
+    await h.ws.execute('ln -s /repo/t.txt /repo/notes/link')
+    expect((await h.run('add notes'))[0]).toBe(0)
+    expect(await h.run('mv notes moved')).toEqual([0, '', ''])
+    // A link is namespace state, so the question goes to the namespace
+    // rather than to the drained copy, which never holds one.
+    const told = await h.ws.execute('readlink /repo/moved/link')
+    expect([told.exitCode, DEC.decode(told.stdout)]).toEqual([0, '/repo/t.txt\n'])
+    expect((await h.ws.execute('readlink /repo/notes/link')).exitCode).not.toBe(0)
+  })
+})

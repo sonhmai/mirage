@@ -670,3 +670,36 @@ async def test_a_directory_rename_drops_the_listing_cached_below_it(tmp_path):
         assert gone.stdout == b"gone\n"
         assert (await ws.execute("ls /disk/docs")).exit_code != 0
         assert (await ws.execute("ls /disk/moved")).stdout == b"readme.md\n"
+
+
+@pytest.mark.asyncio
+async def test_a_rename_carries_the_node_at_the_source(tmp_path):
+    # The subtree below the source was re-anchored and the source's own
+    # node was not, so the mode a chmod recorded stayed at the emptied
+    # name: the landing read as the unclamped file and whatever was
+    # created at the old name next inherited the overlay.
+    (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
+    with Workspace({"/disk/": DiskResource(root=str(tmp_path))},
+                   mode=MountMode.WRITE) as ws:
+        assert (await ws.execute("chmod 400 /disk/a.txt")).exit_code == 0
+        assert ws.namespace.meta_for("/disk/a.txt").mode == 0o400
+        await ws.dispatch("rename",
+                          PathSpec.from_str_path("/disk/a.txt"),
+                          dst=PathSpec.from_str_path("/disk/b.txt"))
+        assert ws.namespace.meta_for("/disk/a.txt") is None
+        assert ws.namespace.meta_for("/disk/b.txt").mode == 0o400
+
+
+@pytest.mark.asyncio
+async def test_a_rename_replaces_the_node_at_the_landing(tmp_path):
+    # rename(2) replaces the destination, so the overlay it carried goes
+    # with it rather than staying to shadow what just landed.
+    (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("two\n", encoding="utf-8")
+    with Workspace({"/disk/": DiskResource(root=str(tmp_path))},
+                   mode=MountMode.WRITE) as ws:
+        assert (await ws.execute("chmod 400 /disk/b.txt")).exit_code == 0
+        await ws.dispatch("rename",
+                          PathSpec.from_str_path("/disk/a.txt"),
+                          dst=PathSpec.from_str_path("/disk/b.txt"))
+        assert ws.namespace.meta_for("/disk/b.txt") is None

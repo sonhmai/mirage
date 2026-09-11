@@ -780,7 +780,7 @@ async function routeArgv(
           ]
         }
       } else if (name === 'mv') {
-        const prepared = await prepareMv(namespace, dispatch, operands)
+        const prepared = await prepareMv(namespace, dispatch, operands, argv.args, session.cwd)
         operands = prepared.items
         postUnlink = prepared.postUnlink
         postRename = prepared.postRename
@@ -845,8 +845,18 @@ async function routeArgv(
         }
       }
     }
-    if (postUnlink !== null) await namespace.unlink(postUnlink)
-    if (postRename !== null) await namespace.rename(postRename[0], postRename[1])
+    if (postUnlink !== null) {
+      // The landing is replaced the way rename(2) replaces it, node and
+      // subtree alike, and then the source's own node and subtree land on it.
+      // The same four steps the dispatcher takes for a rename it forwards
+      // itself.
+      await namespace.unlink(postUnlink)
+      await namespace.purgeUnder(postUnlink)
+    }
+    if (postRename !== null) {
+      await namespace.rename(postRename[0], postRename[1])
+      await namespace.renameUnder(postRename[0], postRename[1])
+    }
   }
   if (linkErrors.length > 0) {
     // A refused link operand fails the line the way a refused backend

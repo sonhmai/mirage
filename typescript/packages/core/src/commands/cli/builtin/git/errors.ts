@@ -780,6 +780,44 @@ export class TagNotFoundError extends GitError {
   }
 }
 
+/**
+ * `-n` on a `tag` line that deletes rather than lists.
+ *
+ * `-n` asks for message lines beside each name, which only a listing prints,
+ * and git makes it *imply* a listing rather than refuse it: `git tag -n1
+ * nosuch` is a listing whose pattern matches nothing and exits 0. The
+ * implication is what cannot happen once `-d` has already said what mode the
+ * line is in, so git dies there instead, with the tags untouched. Refusing it
+ * matters more here than the wording does: read as a listing flag and dropped,
+ * the line went on to delete the refs its operands named. Pinned against git
+ * 2.50.1.
+ */
+export class ListModeOnlyError extends GitError {
+  constructor() {
+    super("the '-n' option is only allowed in list mode")
+  }
+}
+
+/**
+ * `tag -d` naming one tag twice.
+ *
+ * git stages every deletion on the line as one ref transaction, and a
+ * transaction holding two updates for the same ref is refused before any of
+ * them applies, so the whole line is a no-op: the repeated tag survives, and so
+ * does every other tag the line named. The ref it blames is the first in ref
+ * order rather than the first typed, since the transaction sorts before it
+ * looks for the repeat. Reported the way git reports it, as an `error` exiting
+ * 1 rather than a fatal.
+ */
+export class RefUpdateConflictError extends GitError {
+  override readonly prefix = 'error'
+  override readonly code = 1
+
+  constructor(ref: string) {
+    super(`could not delete references: multiple updates for ref '${ref}' not allowed`)
+  }
+}
+
 /** A tag name git's ref rules refuse. */
 export class InvalidTagNameError extends GitError {
   constructor(name: string) {

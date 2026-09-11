@@ -24,8 +24,10 @@ import {
   GitError,
   IncompatibleOptionsError,
   InvalidTagNameError,
+  ListModeOnlyError,
   MissingTagMessageError,
   NoWorkspaceError,
+  RefUpdateConflictError,
   TagExistsError,
   TagNotFoundError,
   TagUsageError,
@@ -235,12 +237,17 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
     ) {
       throw new TagUsageError()
     }
+    // After the two usage refusals above, which git reaches first: `-l -d -n1`
+    // is the incompatible pair and `-d -f -n1` the usage, both exiting 129,
+    // where `-d -n1` alone dies here.
+    if (flags.remove && flags.lines !== undefined) throw new ListModeOnlyError()
     const repo = await opened(fl, doors)
     abbrev = repo.abbrev
     const known = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)
     if (flags.remove) {
       const out: string[] = []
       const err: string[] = []
+      const doomed: { name: string; ref: string; sha: string }[] = []
       for (const each of texts) {
         const ref = `${TAG_PREFIX}${each}`
         const sha = known.get(ref)
@@ -248,6 +255,25 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
           err.push(`error: ${new TagNotFoundError(each).message}\n`)
           continue
         }
+        doomed.push({ name: each, ref, sha })
+      }
+      // Every deletion on the line is one ref transaction, and a name given
+      // twice makes two updates for one ref, which the transaction refuses
+      // before applying any of them: the whole line deletes nothing. A name
+      // that is not there never reaches the transaction, so `-d nosuch nosuch`
+      // is two ordinary reports rather than this refusal.
+      const seen = new Map<string, number>()
+      for (const { ref } of doomed) seen.set(ref, (seen.get(ref) ?? 0) + 1)
+      const repeated = [...seen.entries()]
+        .filter(([, count]) => count > 1)
+        .map(([ref]) => ref)
+        .sort(compareCodePoints)
+      const blamed = repeated[0]
+      if (blamed !== undefined) {
+        err.push(`error: ${new RefUpdateConflictError(blamed).message}\n`)
+        return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(err.join('')) })]
+      }
+      for (const { name: each, ref, sha } of doomed) {
         await deleteRef(dispatch, repo.location.commondir, ref)
         out.push(`Deleted tag '${each}' (was ${short(sha, repo.abbrev)})\n`)
       }

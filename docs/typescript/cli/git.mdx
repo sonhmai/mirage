@@ -122,7 +122,7 @@ git -C /repo tag -d v1.0
 | `branch`   | `-d` deletes a merged branch, `-D` any branch                                                                                           |
 | `checkout` | refuses rather than overwrite work you have not committed, an untracked file the target needs the room for included and an index still holding conflict stages too |
 | `switch`   | the same move for a branch only; `-c` creates and checks the name against git's ref rules and works before the first commit, `--detach` is the only way onto a bare commit and takes HEAD when nothing is named; a staged addition, deletion or edit both branches agree about is carried across and reported with its status letter |
-| `tag`      | lists sorted, `-l <pattern>`, `-n[<num>]`; a name is a lightweight tag, `-a`/`-m` an annotated one; any object is a legal target, `HEAD^{tree}`, `HEAD:a.txt` and `v1^{tag}` included, and the type recorded is the one the target really is; `-d`, `-f`; a creation option needs a name |
+| `tag`      | lists sorted, `-l <pattern>`, `-n[<num>]`; a name is a lightweight tag, `-a`/`-m` an annotated one; any object is a legal target, `HEAD^{tree}`, `HEAD:a.txt` and `v1^{tag}` included, and the type recorded is the one the target really is; `-d` deletes atomically, `-f`; a creation option needs a name, and `-n` needs a listing |
 
 `commit` records `mirage <mirage@localhost>` unless `--author` says
 otherwise: git reads `user.name` from config files that a mount does not
@@ -172,6 +172,14 @@ serve, and inventing a name would put an unreviewed one into history.
   own: the file lands hidden behind that mount while the index names the
   new path. A source that is a mount root, or holds one, is refused for
   the same reason one level up.
+- **A rename moves what the node table holds at the path, not just below
+  it.** A symlink and an attr overlay live above every backend, addressed
+  by absolute path, so a move has to re-anchor the source's own entry and
+  its whole subtree or the link is destroyed and the mode is inherited by
+  whatever is written at the old name next. `git mv` renames through the
+  dispatcher, which does this for every caller that reaches it; a
+  single-mount shell `mv` renames through the backend op directly and so
+  repeats it, for a two-operand line only.
 - **A rename onto a directory the namespace has filled is `ENOTEMPTY`.**
   A symlink is namespace state no backend can see, so a destination the
   backend reads as empty can still hold one, and replacing it would
@@ -181,6 +189,18 @@ serve, and inventing a name would put an unreviewed one into history.
   editor to open. `mv` prints only its two usage lines for a missing
   operand, and `tag` prints only the synopsis lines for the options this
   build has, neither of them git's full option table.
+- **`tag -n` asks for a listing, so `-d` cannot also be on the line.**
+  With nothing else there `-n` *makes* the line a listing, which is why
+  `tag -n1 nosuch` is a pattern matching nothing at exit 0; once `-d`
+  has chosen the mode there is nothing left to imply, and the line dies
+  with every tag still standing.
+- **`tag -d` deletes every name or none of them.** One ref transaction
+  carries the whole line, and a name given twice is two updates for one
+  ref, which the transaction refuses before applying any of them. A name
+  no ref answers is reported and skipped instead, since it never reaches
+  the transaction at all. The one divergence is the wording of the
+  `-l`/`-d` refusal: git names the two options in the order they were
+  typed and in the spelling used, where this build has one fixed order.
 - **`reset` takes no revision.** Real git resets the index to any commit
   named as an operand; this build resets it from HEAD only and refuses a
   revision by name rather than doing nothing quietly.

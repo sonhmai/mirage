@@ -358,3 +358,77 @@ async def test_a_bare_tag_id_makes_a_nested_tag(git_rw, repo_path: Path):
     # the tag rather than at the commit behind it.
     assert written.object[0].type_name == b"tag"
     assert written.object[1].decode() == held
+
+
+@pytest.mark.asyncio
+async def test_n_is_refused_on_a_line_that_deletes(git_rw):
+    assert await run(git_rw, "tag v") == (0, b"", b"")
+    code, out, err = await run(git_rw, "tag -d -n1 v")
+    assert (code, out) == (128, b"")
+    assert err == b"fatal: the '-n' option is only allowed in list mode\n"
+    assert (await run(git_rw, "tag -l"))[1] == b"v\n"
+
+
+@pytest.mark.asyncio
+async def test_n_still_implies_a_listing_on_its_own(git_rw):
+    # The refusal above is about -d having already chosen the mode: with
+    # nothing else on the line -n makes it a listing, so an operand is a
+    # pattern and one that matches nothing prints nothing at exit 0.
+    assert await run(git_rw, "tag v") == (0, b"", b"")
+    assert await run(git_rw, "tag -n1 nosuch") == (0, b"", b"")
+    assert (await run(git_rw, "tag -l"))[1] == b"v\n"
+
+
+@pytest.mark.asyncio
+async def test_the_incompatible_pair_outranks_the_n_refusal(git_rw):
+    # Ranking, not wording: git reaches the -d/-l pair first and exits
+    # 129 there rather than dying on -n. (It names the two options in
+    # the order they were typed, where this build has one fixed order.)
+    code, _out, err = await run(git_rw, "tag -l -d -n1 v")
+    assert code == 129
+    assert err == (b"error: options '-l' and '-d' cannot be used "
+                   b"together\n")
+
+
+@pytest.mark.asyncio
+async def test_a_tag_named_twice_deletes_nothing(git_rw):
+    assert await run(git_rw, "tag v") == (0, b"", b"")
+    assert await run(git_rw, "tag w") == (0, b"", b"")
+    code, out, err = await run(git_rw, "tag -d v w v")
+    assert (code, out) == (1, b"")
+    assert err == (b"error: could not delete references: multiple updates "
+                   b"for ref 'refs/tags/v' not allowed\n")
+    assert (await run(git_rw, "tag -l"))[1] == b"v\nw\n"
+
+
+@pytest.mark.asyncio
+async def test_a_name_that_is_not_there_is_reported_before_the_conflict(
+        git_rw):
+    # A name no ref answers never reaches the transaction, so it is an
+    # ordinary report and the conflict is found among what is left.
+    assert await run(git_rw, "tag v") == (0, b"", b"")
+    code, out, err = await run(git_rw, "tag -d v v nosuch")
+    assert (code, out) == (1, b"")
+    assert err == (b"error: tag 'nosuch' not found.\n"
+                   b"error: could not delete references: multiple updates "
+                   b"for ref 'refs/tags/v' not allowed\n")
+    assert (await run(git_rw, "tag -l"))[1] == b"v\n"
+
+
+@pytest.mark.asyncio
+async def test_a_missing_name_twice_is_two_reports(git_rw):
+    code, out, err = await run(git_rw, "tag -d nosuch nosuch")
+    assert (code, out) == (1, b"")
+    assert err == (b"error: tag 'nosuch' not found.\n"
+                   b"error: tag 'nosuch' not found.\n")
+
+
+@pytest.mark.asyncio
+async def test_the_blamed_ref_is_the_first_in_ref_order(git_rw):
+    # The transaction sorts its updates before it looks for the repeat,
+    # so `-d w w v v` blames v although w was typed first.
+    for name in ("v", "w"):
+        assert await run(git_rw, f"tag {name}") == (0, b"", b"")
+    _code, _out, err = await run(git_rw, "tag -d w w v v")
+    assert err == (b"error: could not delete references: multiple updates "
+                   b"for ref 'refs/tags/v' not allowed\n")

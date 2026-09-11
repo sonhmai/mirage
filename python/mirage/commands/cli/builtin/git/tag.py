@@ -15,6 +15,7 @@
 import asyncio
 import fnmatch
 import time
+from collections import Counter
 from dataclasses import dataclass
 
 from dulwich.objects import Commit, ObjectID, ShaFile, Tag
@@ -25,9 +26,10 @@ from mirage.commands.cli.builtin.git.commit import identity
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import GitError  # yapf: disable
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
-    IncompatibleOptionsError, InvalidTagNameError, MissingTagMessageError,
-    NoWorkspaceError, TagExistsError, TagNotFoundError, TagUsageError,
-    TooManyArgumentsError, UnknownSwitchError, UnresolvedRefError)
+    IncompatibleOptionsError, InvalidTagNameError, ListModeOnlyError,
+    MissingTagMessageError, NoWorkspaceError, RefUpdateConflictError,
+    TagExistsError, TagNotFoundError, TagUsageError, TooManyArgumentsError,
+    UnknownSwitchError, UnresolvedRefError)
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.refs import (TAG_PREFIX, delete_ref,
@@ -244,16 +246,37 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                    or not texts)
         if creating and reading:
             raise TagUsageError()
+        # After the two usage refusals above, which git reaches first:
+        # ``-l -d -n1`` is the incompatible pair and ``-d -f -n1`` the
+        # usage, both exiting 129, where ``-d -n1`` alone dies here.
+        if flags.delete and flags.lines is not None:
+            raise ListModeOnlyError()
         repo, location = await opened(fl, doors)
         known = repo.refs.allkeys()
         if flags.delete:
             out: list[str] = []
             err: list[str] = []
+            doomed: list[tuple[str, Ref]] = []
             for name in texts:
                 ref = Ref(f"{TAG_PREFIX}{name}".encode())
                 if ref not in known:
                     err.append(f"error: {TagNotFoundError(name)}\n")
                     continue
+                doomed.append((name, ref))
+            # Every deletion on the line is one ref transaction, and a
+            # name given twice makes two updates for one ref, which the
+            # transaction refuses before applying any of them: the whole
+            # line deletes nothing. A name that is not there never
+            # reaches the transaction, so ``-d nosuch nosuch`` is two
+            # ordinary reports rather than this refusal.
+            seen = Counter(ref for _name, ref in doomed)
+            repeated = sorted(ref for ref, count in seen.items() if count > 1)
+            if repeated:
+                blamed = RefUpdateConflictError(repeated[0].decode())
+                err.append(f"error: {blamed}\n")
+                return None, IOResult(exit_code=1,
+                                      stderr="".join(err).encode())
+            for name, ref in doomed:
                 sha = repo.refs[ref]
                 await delete_ref(dispatch, location.commondir, ref.decode())
                 out.append(f"Deleted tag '{name}' "

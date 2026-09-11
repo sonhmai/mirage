@@ -18,7 +18,8 @@ from mirage.policy.match import head_visible, node_visible
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.routing.types import RouteDecision
-from mirage.workspace.lookup.constants import NAMESPACE_COMMANDS, SHELL_NAMES
+from mirage.workspace.lookup.constants import (INTERPRETER_NAMES,
+                                               NAMESPACE_COMMANDS, SHELL_NAMES)
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
@@ -127,7 +128,8 @@ def _layers(name: str,
     native = isinstance(bound, (LineExecutorMixin, ProcessExecutorMixin))
     if name in SHELL_NAMES and installed:
         found = True
-        yield Consumer.EXTERNAL if native else Consumer.SESSION
+        yield (Consumer.EXTERNAL
+               if native and name in INTERPRETER_NAMES else Consumer.SESSION)
     if installed and name in NAMESPACE_COMMANDS:
         found = True
         yield Consumer.NAMESPACE

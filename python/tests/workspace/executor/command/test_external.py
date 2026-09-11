@@ -31,6 +31,8 @@ from mirage.policy.rule import RulePolicy
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import ProcessExecution, RunResult
+from mirage.workspace.lookup import SHELL_NAMES, Consumer, lookup, lookup_all
+from mirage.workspace.session import Session
 
 
 class ProcessProbe(Runtime, ProcessExecutorMixin):
@@ -332,3 +334,36 @@ async def test_external_spec_preserves_text_words_and_shell_globs(kind):
             assert probe.requests[0].argv == tokens
         else:
             assert shlex.split(probe.lines[0]) == list(tokens)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [ProcessProbe, ShellProbe])
+@pytest.mark.parametrize("willing", [True, False])
+async def test_native_captures_preserve_shell_builtins(kind, willing):
+    probe = kind(captures=tuple(SHELL_NAMES), script=lambda ctx: willing)
+    async with workspace({"/work": RAMResource()},
+                         mode=MountMode.EXEC,
+                         runtimes=[probe]) as ws:
+        session = Session(session_id="lookup")
+        for name in SHELL_NAMES - {"python", "python3", "node", "js"}:
+            assert lookup(name, session,
+                          ws._registry) is Consumer.SESSION, name
+            layers = lookup_all(name, session, ws._registry)
+            assert layers[0] is Consumer.SESSION, name
+            assert Consumer.EXTERNAL not in layers, name
+        assert (await ws.execute("cd /work")).exit_code == 0
+        assert await (await ws.execute("pwd")).stdout_str() == "/work\n"
+        assert (await ws.execute("export NATIVE_TEST=kept")).exit_code == 0
+        assert await (await ws.execute('printf "%s\n" "$NATIVE_TEST"')
+                      ).stdout_str() == "kept\n"
+        assert await (await ws.execute("echo shell")).stdout_str() == "shell\n"
+        assert await (await ws.execute("type -a echo")
+                      ).stdout_str() == "echo is a shell builtin\n"
+        assert not (probe.requests
+                    if isinstance(probe, ProcessProbe) else probe.lines)
+        for name in ("python", "python3", "node", "js"):
+            result = await ws.execute(name + " --version")
+            assert result.exit_code == (0 if willing else 126)
+        delegated = probe.requests if isinstance(probe,
+                                                 ProcessProbe) else probe.lines
+        assert len(delegated) == (4 if willing else 0)

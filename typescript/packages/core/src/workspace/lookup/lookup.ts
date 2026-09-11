@@ -18,7 +18,7 @@ import type { RouteDecision } from '../../runtime/routing/types.ts'
 import { headVisible, nodeVisible } from '../../policy/match/allow.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
-import { NAMESPACE_COMMANDS, SHELL_NAMES } from './constants.ts'
+import { INTERPRETER_NAMES, NAMESPACE_COMMANDS, SHELL_NAMES } from './constants.ts'
 import { Consumer } from './types.ts'
 
 /**
@@ -99,7 +99,7 @@ function* layers(
   const native = bound != null && (isLineExecutor(bound) || isProcessExecutor(bound))
   if (SHELL_NAMES.has(name) && installed) {
     found = true
-    yield native ? Consumer.EXTERNAL : Consumer.SESSION
+    yield native && INTERPRETER_NAMES.has(name) ? Consumer.EXTERNAL : Consumer.SESSION
   }
   if (installed && NAMESPACE_COMMANDS.has(name)) {
     found = true

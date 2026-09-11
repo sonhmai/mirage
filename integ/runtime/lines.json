@@ -140,6 +140,52 @@
       ]
     },
     {
+      "id": "native_captures_preserve_shell_builtins",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "captures": [
+              "cd",
+              "export",
+              "echo",
+              "pwd",
+              "printf",
+              "type",
+              "python3",
+              "node"
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "cd /ram; export BUILTIN_VALUE=kept; printf \"%s\\n\" \"$BUILTIN_VALUE\"; echo shell; pwd; type -a echo",
+          "expect": {
+            "exit": 0,
+            "stdout": "kept\nshell\n/ram\necho is a shell builtin\n"
+          }
+        },
+        {
+          "command": "python3 --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"python3\",\"--version\"]\n"
+          }
+        },
+        {
+          "command": "node --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"node\",\"--version\"]\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "captured_program_pipeline",
       "world": {
         "runtimes": [

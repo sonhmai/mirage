@@ -31,6 +31,8 @@ import {
 import type { ProcessExecution, RunResult, RuntimeOptions } from '../../../runtime/types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import { Limit, MountMode } from '../../../types.ts'
+import { Consumer, SHELL_NAMES, lookup, lookupAll } from '../../lookup/index.ts'
+import { Session } from '../../session/session.ts'
 import { sleep } from '../../abort.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { getTestParser } from '../../fixtures/workspace_fixture.ts'
@@ -369,6 +371,42 @@ describe.each(['process', 'shell'] as const)('external %s path admission', (kind
       const tokens = ['grep', 'secret.txt', 'public.txt']
       if (probe instanceof ProcessProbe) expect(probe.requests[0]?.argv).toEqual(tokens)
       else expect(probe.lines[0]).toBe(shellJoin(tokens))
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe.each(['process', 'shell'] as const)('native %s builtin precedence', (kind) => {
+  it.each([true, false])('keeps builtins in Mirage when willingness is %s', async (willing) => {
+    const options = { captures: [...SHELL_NAMES], script: () => willing }
+    const probe = kind === 'process' ? new ProcessProbe(options) : new ShellProbe(options)
+    const ws = await workspace(probe)
+    try {
+      const session = new Session({ sessionId: 'lookup' })
+      for (const name of SHELL_NAMES) {
+        if (['python', 'python3', 'node', 'js'].includes(name)) continue
+        expect(lookup(name, session, ws.registry), name).toBe(Consumer.SESSION)
+        const layers = lookupAll(name, session, ws.registry)
+        expect(layers[0], name).toBe(Consumer.SESSION)
+        expect(layers, name).not.toContain(Consumer.EXTERNAL)
+      }
+      await ws.execute('mkdir /work')
+      expect((await ws.execute('cd /work')).exitCode).toBe(0)
+      expect(DEC.decode((await ws.execute('pwd')).stdout)).toBe('/work\n')
+      expect((await ws.execute('export NATIVE_TEST=kept')).exitCode).toBe(0)
+      expect(DEC.decode((await ws.execute('printf "%s\n" "$NATIVE_TEST"')).stdout)).toBe('kept\n')
+      expect(DEC.decode((await ws.execute('echo shell')).stdout)).toBe('shell\n')
+      expect(DEC.decode((await ws.execute('type -a echo')).stdout)).toBe(
+        'echo is a shell builtin\n',
+      )
+      expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(0)
+      for (const name of ['python', 'python3', 'node', 'js']) {
+        expect((await ws.execute(name + ' --version')).exitCode).toBe(willing ? 0 : 126)
+      }
+      expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(
+        willing ? 4 : 0,
+      )
     } finally {
       await ws.close()
     }

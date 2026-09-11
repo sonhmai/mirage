@@ -242,6 +242,26 @@ describe('external program timeout', () => {
       await ws.close()
     }
   })
+
+  it('includes stdin materialization in the timeout', async () => {
+    DEFAULT_COMMAND_LIMITS['native-tool'] = new Limit({ timeoutSeconds: 0.05 })
+    const probe = new ProcessProbe()
+    const ws = await workspace(probe)
+    async function* slowStdin(): AsyncGenerator<Uint8Array> {
+      await sleep(150)
+      yield ENC.encode('late\n')
+    }
+    try {
+      const result = await ws.execute('native-tool', { stdin: slowStdin() })
+      expect(result.exitCode).toBe(124)
+      expect(DEC.decode(result.stderr)).toContain('native-tool: timed out after 0.05s')
+      expect(probe.requests).toHaveLength(0)
+      await sleep(150)
+      expect(probe.requests).toHaveLength(0)
+    } finally {
+      await ws.close()
+    }
+  })
 })
 
 class ShellProbe extends Runtime implements LineExecutor {

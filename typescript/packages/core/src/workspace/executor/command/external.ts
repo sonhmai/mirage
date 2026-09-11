@@ -62,22 +62,23 @@ export async function runExternal(
   const timeout = guard?.timeoutSeconds ?? null
   const deadline = timeout !== null && timeout > 0 ? new AbortController() : null
   const runSignal = mergeSignals(signal, deadline?.signal)
-  const common = {
-    cwd: PathSpec.fromStrPath(session.cwd),
-    env: envSnapshot(session),
-    stdin: stdin === null ? null : await materialize(stdin),
-    ...(runSignal !== undefined ? { signal: runSignal } : {}),
+  const execute = async () => {
+    const input = stdin === null ? null : await materialize(stdin)
+    runSignal?.throwIfAborted()
+    const common = {
+      cwd: PathSpec.fromStrPath(session.cwd),
+      env: envSnapshot(session),
+      stdin: input,
+      ...(runSignal !== undefined ? { signal: runSignal } : {}),
+    }
+    return runtime.execute(
+      isProcessExecutor(runtime)
+        ? { kind: 'process', argv: argv.tokens, ...common }
+        : { kind: 'shell', line: command, ...common },
+    )
   }
   try {
-    const result = await runWithTimeout(
-      runtime.execute(
-        isProcessExecutor(runtime)
-          ? { kind: 'process', argv: argv.tokens, ...common }
-          : { kind: 'shell', line: command, ...common },
-      ),
-      timeout,
-      argv.name,
-    )
+    const result = await runWithTimeout(execute(), timeout, argv.name)
     return [
       result.stdout,
       new IOResult({

@@ -211,6 +211,30 @@ async def test_external_timeout_cancels_process(monkeypatch, source):
         assert probe.cancelled
 
 
+@pytest.mark.asyncio
+async def test_external_timeout_includes_stdin_materialization(monkeypatch):
+    monkeypatch.setitem(DEFAULT_COMMAND_LIMITS, "native-tool",
+                        Limit(timeout_seconds=0.05))
+    cancelled = False
+
+    async def slow_stdin():
+        nonlocal cancelled
+        try:
+            await asyncio.sleep(0.15)
+            yield b"late\n"
+        finally:
+            cancelled = True
+
+    probe = ProcessProbe()
+    async with workspace({"/": RAMResource()}, runtimes=[probe]) as ws:
+        result = await ws.execute("native-tool", stdin=slow_stdin())
+        assert result.exit_code == 124
+        assert "native-tool: timed out after 0.05s" in await result.stderr_str(
+        )
+        assert not probe.requests
+        assert cancelled
+
+
 class ShellProbe(Runtime, LineExecutorMixin):
     name = "shell-probe"
 

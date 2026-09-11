@@ -21,7 +21,7 @@ from mirage.policy import resolve_limit
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.routing.types import RouteDecision
-from mirage.runtime.types import ProcessExecution, ShellExecution
+from mirage.runtime.types import ProcessExecution, RunResult, ShellExecution
 from mirage.types import PathSpec, Producer
 from mirage.workspace.expand.argv import Argv
 from mirage.workspace.mount import MountRegistry
@@ -47,17 +47,25 @@ async def run_external(
                               stderr=err), ExecutionNode(command=command,
                                                          exit_code=126,
                                                          stderr=err)
-    data = await materialize(stdin) if stdin is not None else None
     cwd = PathSpec.from_str_path(session.cwd)
     env = env_snapshot(session)
-    request = (ProcessExecution(argv=argv.tokens, cwd=cwd, env=env, stdin=data)
-               if isinstance(runtime, ProcessExecutorMixin) else
-               ShellExecution(line=command, cwd=cwd, env=env, stdin=data))
+    guard = resolve_limit(argv.name, registry.mounts())
+
+    async def execute() -> RunResult:
+        data = await materialize(stdin) if stdin is not None else None
+        if isinstance(runtime, ProcessExecutorMixin):
+            return await runtime.execute(
+                ProcessExecution(argv=argv.tokens,
+                                 cwd=cwd,
+                                 env=env,
+                                 stdin=data))
+        return await runtime.execute(
+            ShellExecution(line=command, cwd=cwd, env=env, stdin=data))
+
     try:
-        guard = resolve_limit(argv.name, registry.mounts())
         result = await run_with_timeout(
-            runtime.execute(request),
-            guard.timeout_seconds if guard is not None else None, argv.name)
+            execute(), guard.timeout_seconds if guard is not None else None,
+            argv.name)
     finally:
         await registry.invalidate_after_external()
     io = IOResult(exit_code=result.exit_code,

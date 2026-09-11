@@ -17,7 +17,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../../../workspace.ts'
 import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
 import { Limit, MountMode } from '@struktoai/mirage-core/types'
-import { E2BRuntime, type E2bSdk } from './runtime.ts'
+import { E2BRuntime, type E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 
 const DEC = new TextDecoder()
 

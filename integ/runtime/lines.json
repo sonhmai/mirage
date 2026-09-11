@@ -64,6 +64,82 @@
       ]
     },
     {
+      "id": "external_capture_path_policy",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "captures": [
+              "cat",
+              "grep"
+            ]
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "secret.txt": "secret\n",
+              "public.txt": "public\n"
+            }
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "protected",
+                  "commands": {
+                    "cat": [
+                      "/ram/secret.txt"
+                    ],
+                    "grep": [
+                      "/ram/secret.txt"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /ram",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cat secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cat: secret.txt: protected\n"
+          }
+        },
+        {
+          "command": "cat s*.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cat: secret.txt: protected\n"
+          }
+        },
+        {
+          "command": "grep secret.txt public*.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"grep\",\"secret.txt\",\"public.txt\"]\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "captured_program_pipeline",
       "world": {
         "runtimes": [

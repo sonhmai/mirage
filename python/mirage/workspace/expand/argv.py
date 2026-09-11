@@ -149,7 +149,8 @@ async def expand_argv(
     policy = word_policy(consumer)
     word_kinds: list[ValueType | None] | None = None
     word_bases: list[str | None] | None = None
-    if policy is WordPolicy.MOUNT:
+    # Native captures still need the spec's path roles for admission.
+    if policy is WordPolicy.MOUNT or consumer is Consumer.EXTERNAL:
         spec = spec_for_command(name, registry, session.cwd)
         if spec:
             # Before anything reads the line: an option carrying a

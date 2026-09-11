@@ -25,7 +25,9 @@ from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
 from mirage.config import _build_runtime_entries
 from mirage.io import IOResult
+from mirage.policy import CommandRule
 from mirage.policy.builtin.output_cap import DEFAULT_COMMAND_LIMITS
+from mirage.policy.rule import RulePolicy
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import ProcessExecution, RunResult
@@ -273,3 +275,60 @@ async def test_external_script_sees_first_unresolved_stage(head):
         denied = await ws.execute(head + " | denied-tool")
         assert denied.exit_code == 126
         assert not probe.requests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [ProcessProbe, ShellProbe])
+@pytest.mark.parametrize("line", [
+    "cat secret.txt",
+    "cat ./secret.txt",
+    "cat /work/secret.txt",
+    "cat -- secret.txt",
+    "cat s*.txt",
+    "grep pattern secret.txt",
+    "tar -cf archive.tar -C /work secret.txt",
+])
+async def test_named_external_capture_cannot_bypass_path_policy(kind, line):
+    probe = kind(captures=("cat", "grep", "tar"))
+    policy = RulePolicy(
+        CommandRule(reason="protected",
+                    commands=("cat", "grep", "tar"),
+                    paths=("/work/secret.txt", )))
+    async with workspace({"/work": RAMResource()},
+                         runtimes=[probe],
+                         policies=[policy],
+                         mode=MountMode.EXEC) as ws:
+        assert (await
+                ws.execute("echo secret > /work/secret.txt")).exit_code == 0
+        await ws.execute("cd /work")
+        result = await ws.execute(line)
+        assert result.exit_code != 0
+        assert "protected" in await result.stderr_str()
+        assert not (probe.requests
+                    if isinstance(probe, ProcessProbe) else probe.lines)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [ProcessProbe, ShellProbe])
+async def test_external_spec_preserves_text_words_and_shell_globs(kind):
+    probe = kind(captures=("grep", ))
+    policy = RulePolicy(
+        CommandRule(reason="protected",
+                    commands=("grep", ),
+                    paths=("/work/secret.txt", )))
+    async with workspace({"/work": RAMResource()},
+                         runtimes=[probe],
+                         policies=[policy],
+                         mode=MountMode.EXEC) as ws:
+        assert (await
+                ws.execute("echo secret > /work/secret.txt")).exit_code == 0
+        assert (await
+                ws.execute("echo public > /work/public.txt")).exit_code == 0
+        await ws.execute("cd /work")
+        result = await ws.execute("grep secret.txt public*.txt")
+        assert result.exit_code == 0
+        tokens = ("grep", "secret.txt", "public.txt")
+        if isinstance(probe, ProcessProbe):
+            assert probe.requests[0].argv == tokens
+        else:
+            assert shlex.split(probe.lines[0]) == list(tokens)

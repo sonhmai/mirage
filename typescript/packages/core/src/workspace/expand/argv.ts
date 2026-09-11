@@ -134,7 +134,8 @@ export async function expandArgv(
   const policy = wordPolicy(consumer)
   let wordKinds: (ValueType | null)[] | null = null
   let wordBases: (string | null)[] | null = null
-  if (policy === WordPolicy.MOUNT) {
+  // Native captures still need the spec's path roles for admission.
+  if (policy === WordPolicy.MOUNT || consumer === Consumer.EXTERNAL) {
     const spec = specForCommand(name, registry, session.cwd)
     if (spec !== null) {
       const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')

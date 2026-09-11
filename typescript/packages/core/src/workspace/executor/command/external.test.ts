@@ -18,6 +18,7 @@ import { CommandSpec } from '../../../commands/spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { afterEach, describe, expect, it } from 'vitest'
+import { RulePolicy } from '../../../policy/rule.ts'
 import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { Runtime } from '../../../runtime/base.ts'
@@ -313,4 +314,63 @@ describe('external command routing regressions', () => {
       }
     },
   )
+})
+
+describe.each(['process', 'shell'] as const)('external %s path admission', (kind) => {
+  async function guardedWorkspace(): Promise<[Workspace, ProcessProbe | ShellProbe]> {
+    const options = { captures: ['cat', 'grep', 'tar'] }
+    const probe = kind === 'process' ? new ProcessProbe(options) : new ShellProbe(options)
+    const ws = new Workspace(
+      { '/work': new RAMResource() },
+      {
+        shellParser: await getTestParser(),
+        runtimes: [probe],
+        mode: MountMode.EXEC,
+        policies: [
+          new RulePolicy({
+            reason: 'protected',
+            commands: ['cat', 'grep', 'tar'],
+            paths: ['/work/secret.txt'],
+          }),
+        ],
+      },
+    )
+    expect((await ws.execute('echo secret > /work/secret.txt')).exitCode).toBe(0)
+    expect((await ws.execute('echo public > /work/public.txt')).exitCode).toBe(0)
+    await ws.execute('cd /work')
+    return [ws, probe]
+  }
+
+  it.each([
+    'cat secret.txt',
+    'cat ./secret.txt',
+    'cat /work/secret.txt',
+    'cat -- secret.txt',
+    'cat s*.txt',
+    'grep pattern secret.txt',
+    'tar -cf archive.tar -C /work secret.txt',
+  ])('refuses %s before delegating to a runtime', async (line) => {
+    const [ws, probe] = await guardedWorkspace()
+    try {
+      const result = await ws.execute(line)
+      expect(result.exitCode).not.toBe(0)
+      expect(DEC.decode(result.stderr)).toContain('protected')
+      expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('preserves text operands and shell glob expansion', async () => {
+    const [ws, probe] = await guardedWorkspace()
+    try {
+      const result = await ws.execute('grep secret.txt public*.txt')
+      expect(result.exitCode).toBe(0)
+      const tokens = ['grep', 'secret.txt', 'public.txt']
+      if (probe instanceof ProcessProbe) expect(probe.requests[0]?.argv).toEqual(tokens)
+      else expect(probe.lines[0]).toBe(shellJoin(tokens))
+    } finally {
+      await ws.close()
+    }
+  })
 })

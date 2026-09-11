@@ -26,7 +26,7 @@ from mirage.shell.helpers import (  # isort: skip
     get_if_branches, get_list_parts, get_negated_command, get_parts,
     get_pipeline_commands, get_process_sub_body, get_redirects,
     get_subshell_body, get_text, get_while_parts, is_backgrounded,
-    literal_word, split_env_prefix)
+    literal_word, normalize_heredoc_body, split_env_prefix)
 
 _LANG = tree_sitter.Language(tree_sitter_bash.language())
 _PARSER = tree_sitter.Parser(_LANG)
@@ -862,3 +862,24 @@ def test_byte_offset_counts_the_bytes_before_an_index():
     assert byte_offset("cat é x", 5) == 6
     assert byte_offset("cat é x", 7) == 8
     assert byte_offset("", 0) == 0
+
+
+def _heredoc_redirect(cmd: str):
+    return next(c for c in _first(cmd).named_children
+                if c.type == NT.HEREDOC_REDIRECT)
+
+
+def test_get_heredoc_parts_keeps_leading_empty_lines():
+    _, body = get_heredoc_parts(_heredoc_redirect("cat <<EOF\n\nfoo\nEOF"))
+    assert body == "\nfoo\n"
+
+
+def test_get_heredoc_meta_keeps_leading_empty_lines_under_dash():
+    body, dash, _ = get_heredoc_meta(
+        _heredoc_redirect("cat <<-EOF\n\n\tfoo\nEOF"))
+    assert dash is True
+    assert body == "\nfoo\n"
+
+
+def test_normalize_heredoc_body_strips_a_swallowed_escaped_delimiter_line():
+    assert normalize_heredoc_body("body\nEOF\n", "\\EOF") == "body\n"

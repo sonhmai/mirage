@@ -233,7 +233,7 @@ describe('stripLineContinuation', () => {
 // tree-sitter-bash lexes a heredoc body line that opens with a backslash
 // as more words of the operator line, and skips the first line's leading
 // whitespace. parse() shields such a body while the tree is built, so
-// the body node spans exactly what bash reads (see heredoc.ts).
+// the body node spans exactly what bash reads (see heredoc/shield.ts).
 describe('heredoc reparse: body lines the lexer would swallow', () => {
   function heredocRedirect(command: string): TSNodeLike {
     const statement = parser.parse(command).children[0] as TSNodeLike
@@ -291,6 +291,10 @@ describe('heredoc reparse: body lines the lexer would swallow', () => {
     const body = heredocBody('cat <<EOF\n\\$v\nsecond\nEOF')
     expect(body.namedChildren.map((c) => c.type)).not.toContain(NT.SIMPLE_EXPANSION)
     expect(getText(body)).toBe('\\$v\nsecond\n')
+  })
+
+  it('keeps a backslash line under an escaped quoted delimiter', () => {
+    expect(getText(heredocBody('cat <<"E\\$F"\n\\first\nE$F'))).toBe('\\first\n')
   })
 
   it('hands out the typed source as node text', () => {

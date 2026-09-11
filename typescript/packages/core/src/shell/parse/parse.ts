@@ -15,7 +15,7 @@
 import { Language, type Node, Parser } from 'web-tree-sitter'
 
 import { ARITH_OPEN_TOKEN, DIGIT, NAME_CONT, QUOTES } from './constants.ts'
-import { protectedSource, sameShape } from './heredoc.ts'
+import { protectedSource, sameShape } from './heredoc/index.ts'
 
 export interface ShellParserConfig {
   engineWasm: Uint8Array | ArrayBuffer

@@ -1326,6 +1326,254 @@
         "stdout": "\\first\nsecond\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "heredoc_leading_empty_line",
+      "seq": 501262,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<'END'\n\nfirst\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "\nfirst\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_only_empty_line",
+      "seq": 501263,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<'END'\n\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_empty_line_before_backslash",
+      "seq": 501264,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<'END'\n\n\\first\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n\\first\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_empty_lines_then_expansion",
+      "seq": 501265,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "hb=val; cat <<END\n\n\n$hb\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n\nval\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_dash_leading_empty_line",
+      "seq": 501266,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<-'END'\n\n\tfirst\n\tEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "\nfirst\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_escaped_dollar_in_quoted_delimiter",
+      "seq": 501267,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<\"E\\$F\"\n\\first\nE$F",
+      "expect": {
+        "exit": 0,
+        "stdout": "\\first\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_escaped_quote_in_quoted_delimiter",
+      "seq": 501268,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<\"E\\\"F\"\n\\first\nE\"F",
+      "expect": {
+        "exit": 0,
+        "stdout": "\\first\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_leading_empty_line_to_file",
+      "seq": 501269,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat > /data/HB7 <<'END'\n\nfirst\nEND\ncat /data/HB7\nrm /data/HB7",
+      "expect": {
+        "exit": 0,
+        "stdout": "\nfirst\n",
+        "stderr": ""
+      }
     }
   ]
 }

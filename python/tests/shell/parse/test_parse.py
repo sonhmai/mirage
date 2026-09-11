@@ -426,3 +426,8 @@ def test_heredoc_escaped_dollar_on_a_backslash_line_stays_literal():
 def test_heredoc_tree_text_is_the_typed_source():
     command = "cat <<'EOF'\n\\first\nEOF"
     assert get_text(parse(command)) == command
+
+
+def test_heredoc_body_keeps_a_backslash_line_under_an_escaped_delimiter():
+    body = _heredoc_body('cat <<"E\\$F"\n\\first\nE$F')
+    assert get_text(body) == "\\first\n"

@@ -355,3 +355,62 @@ async def test_heredoc_dash_keeps_a_tab_indented_backslash_line():
     ws = await _workspace_at("/data")
     out = await _stdout(ws, "cat <<-'END'\n\t\\first\n\tsecond\n\tEND")
     assert out == "\\first\nsecond\n"
+
+
+# bash keeps the empty lines a body opens with and reads a quoted
+# delimiter with the shell's own escape rules; both reach the workspace
+# through the heredoc package (issue #1050).
+
+
+@pytest.mark.asyncio
+async def test_heredoc_keeps_a_leading_empty_line():
+    ws = await _workspace_at("/data")
+    assert await _stdout(ws, "cat <<'END'\n\nfirst\nEND") == "\nfirst\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_keeps_a_body_that_is_one_empty_line():
+    ws = await _workspace_at("/data")
+    assert await _stdout(ws, "cat <<'END'\n\nEND") == "\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_keeps_an_empty_line_before_a_backslash_line():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "cat <<'END'\n\n\\first\nEND")
+    assert out == "\n\\first\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_expands_after_leading_empty_lines():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "hb=val; cat <<END\n\n\n$hb\nEND")
+    assert out == "\n\nval\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_dash_keeps_a_leading_empty_line():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "cat <<-'END'\n\n\tfirst\n\tEND")
+    assert out == "\nfirst\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_reads_an_escaped_dollar_in_a_quoted_delimiter():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, 'cat <<"E\\$F"\n\\first\nE$F')
+    assert out == "\\first\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_reads_an_escaped_quote_in_a_quoted_delimiter():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, 'cat <<"E\\"F"\n\\first\nE"F')
+    assert out == "\\first\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_leading_empty_line_round_trips_through_a_file():
+    ws = await _workspace_at("/data")
+    await ws.execute("cat > /data/HB7 <<'END'\n\nfirst\nEND")
+    assert await _stdout(ws, "cat /data/HB7") == "\nfirst\n"

@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { Language, type Node, Parser } from 'web-tree-sitter'
-import { cleanDelimiter, heredocBodyRange, protectedSource, sameShape } from './heredoc.ts'
+import { firstContentLine, heredocOperators, protectedSource, sameShape } from './shield.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -46,81 +46,37 @@ function diff(before: string, after: string): [number, string][] {
   return out
 }
 
-function range(command: string, delimiter = 'EOF', dash = false): [number, number] | null {
-  let start = command.indexOf('<<') + (dash ? 3 : 2)
-  const rest = command.slice(start)
-  start += (rest.split('\n', 1)[0] ?? '').split(' ', 1)[0]?.length ?? 0
-  return heredocBodyRange(command, start, delimiter, dash)
-}
+describe('heredocOperators', () => {
+  it('reads the delimiter as bash does', () => {
+    expect(heredocOperators(root("cat <<-'EOF'\n\tbody\n\tEOF\n"))).toEqual([
+      { wordStart: 7, wordEnd: 12, delimiter: 'EOF', allowsIndent: true },
+    ])
+  })
 
-describe('cleanDelimiter', () => {
-  it.each([
-    ['EOF', 'EOF'],
-    ["'EOF'", 'EOF'],
-    ['"EOF"', 'EOF'],
-    ["EN'D'", 'END'],
-    ['\\EOF', 'EOF'],
-    ['E\\OF', 'EOF'],
-    ["'EO F'", 'EO F'],
-  ])('reads %j as %j', (token, expected) => {
-    expect(cleanDelimiter(token)).toBe(expected)
+  it('lists operators in source order', () => {
+    const operators = heredocOperators(root('cat <<A\none\nA\ncat <<B\ntwo\nB\n'))
+    expect(operators.map((op) => op.delimiter)).toEqual(['A', 'B'])
+  })
+
+  it('finds a start token inside an error', () => {
+    // Two heredocs on one line are beyond the grammar, but both start
+    // tokens survive the error.
+    const operators = heredocOperators(root('cat <<A ; cat <<B\none\nA\ntwo\nB\n'))
+    expect(operators.map((op) => op.delimiter)).toEqual(['A', 'B'])
   })
 })
 
-describe('heredocBodyRange', () => {
-  it('spans the lines between the operator line and the terminator', () => {
-    expect(range('cat <<EOF\nbody\nEOF\n')).toEqual([10, 15])
+describe('firstContentLine', () => {
+  it('skips empty lines', () => {
+    expect(firstContentLine('\n\nfoo\n', 0, 6)).toBe(2)
   })
 
-  it('ends at a terminator without a trailing newline', () => {
-    expect(range('cat <<EOF\nbody\nEOF')).toEqual([10, 15])
+  it('counts a blank line as content', () => {
+    expect(firstContentLine('  \nfoo\n', 0, 7)).toBe(0)
   })
 
-  it('starts after a pipeline on the operator line', () => {
-    const cmd = 'cat <<EOF | tr a-z A-Z\nbody\nEOF\n'
-    expect(range(cmd)).toEqual([cmd.indexOf('body'), cmd.indexOf('EOF\n', 10)])
-  })
-
-  it('honors a line continuation', () => {
-    const cmd = 'cat <<EOF \\\n| tr a-z A-Z\nbody\nEOF\n'
-    expect(range(cmd)).toEqual([cmd.indexOf('body'), cmd.lastIndexOf('EOF')])
-  })
-
-  it('lets a comment hold a quote', () => {
-    const cmd = "cat <<EOF # don't\nbody\nEOF\n"
-    expect(range(cmd)).toEqual([cmd.indexOf('body'), cmd.lastIndexOf('EOF')])
-  })
-
-  it('does not end the line at a quoted newline', () => {
-    const cmd = "cat <<EOF | tr 'a\nb' x\nbody\nEOF\n"
-    expect(range(cmd)).toEqual([cmd.indexOf('body'), cmd.lastIndexOf('EOF')])
-  })
-
-  it('does not end the line inside a substitution', () => {
-    const cmd = 'cat <<EOF | $(echo\ncat)\nbody\nEOF\n'
-    expect(range(cmd)).toEqual([cmd.indexOf('body'), cmd.lastIndexOf('EOF')])
-  })
-
-  it('allows a tab-indented terminator under <<-', () => {
-    const cmd = 'cat <<-EOF\n\tbody\n\tEOF\n'
-    expect(range(cmd, 'EOF', true)).toEqual([cmd.indexOf('\tbody'), cmd.indexOf('\tEOF')])
-  })
-
-  it('ignores a space-indented terminator under <<-', () => {
-    expect(range('cat <<-EOF\n  body\n  EOF\n', 'EOF', true)).toBeNull()
-  })
-
-  it('is null for an unterminated body', () => {
-    expect(range('cat <<EOF\nbody\nmore\n')).toBeNull()
-  })
-
-  it('is null without a body line', () => {
-    expect(range('cat <<EOF')).toBeNull()
-  })
-
-  it('matches the unquoted delimiter', () => {
-    const cmd = "cat <<EN'D'\nbody\nEND\n"
-    expect(range(cmd, 'END')).toEqual([cmd.indexOf('body'), cmd.lastIndexOf('END')])
+  it('is null for empty lines only', () => {
+    expect(firstContentLine('\n\n', 0, 2)).toBeNull()
   })
 })
 
@@ -153,10 +109,15 @@ describe('protectedSource', () => {
     expect(diff(cmd, out ?? '')).toEqual([[cmd.indexOf('  first'), 'x']])
   })
 
-  it('skips blank lines before the first content line', () => {
+  it('skips empty lines before the first content line', () => {
     const cmd = "cat <<'EOF'\n\n\\first\nsecond\nEOF\n"
     const out = protectedSource(cmd, root(cmd))
     expect(diff(cmd, out ?? '')).toEqual([[cmd.indexOf('\\first'), 'x']])
+  })
+
+  it('leaves leading empty lines to bodyPrefix', () => {
+    const cmd = 'cat <<EOF\n\nfoo\nEOF\n'
+    expect(protectedSource(cmd, root(cmd))).toBeNull()
   })
 
   it("avoids the delimiter's first letter", () => {
@@ -172,6 +133,21 @@ describe('protectedSource', () => {
       [cmd.indexOf('\\one'), 'x'],
       [cmd.indexOf('\\two'), 'x'],
     ])
+  })
+
+  it('shields both bodies of one operator line', () => {
+    const cmd = 'cat <<A ; cat <<B\n\\one\nA\n\\two\nB\n'
+    const out = protectedSource(cmd, root(cmd))
+    expect(diff(cmd, out ?? '')).toEqual([
+      [cmd.indexOf('\\one'), 'x'],
+      [cmd.indexOf('\\two'), 'x'],
+    ])
+  })
+
+  it('shields an escaped double-quoted delimiter', () => {
+    const cmd = 'cat <<"E\\$F"\n\\first\nE$F\n'
+    const out = protectedSource(cmd, root(cmd))
+    expect(diff(cmd, out ?? '')).toEqual([[cmd.indexOf('\\first'), 'x']])
   })
 
   it('ignores an operator inside a body', () => {

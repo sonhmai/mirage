@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
 import tree_sitter
 
-from mirage.shell.parse.heredoc import (clean_delimiter, heredoc_body_range,
-                                        protected_source, same_shape)
+from mirage.shell.parse.heredoc import (HeredocOperator, first_content_line,
+                                        heredoc_operators, protected_source,
+                                        same_shape)
 from mirage.shell.parse.parse import TS_PARSER
 
 
@@ -30,80 +30,37 @@ def _diff(before: str, after: bytes) -> list[tuple[int, str]]:
             if a != b]
 
 
-@pytest.mark.parametrize("token, expected", [
-    ("EOF", "EOF"),
-    ("'EOF'", "EOF"),
-    ('"EOF"', "EOF"),
-    ("EN'D'", "END"),
-    ("\\EOF", "EOF"),
-    ("E\\OF", "EOF"),
-    ("'EO F'", "EO F"),
-])
-def test_clean_delimiter(token: str, expected: str):
-    assert clean_delimiter(token) == expected
+def test_heredoc_operators_reads_the_delimiter_as_bash_does():
+    assert heredoc_operators(_root("cat <<-'EOF'\n\tbody\n\tEOF\n")) == [
+        HeredocOperator(word_start=7,
+                        word_end=12,
+                        delimiter="EOF",
+                        allows_indent=True)
+    ]
 
 
-def _range(command: str, delimiter: str = "EOF", dash: bool = False):
-    data = command.encode()
-    start = data.index(b"<<") + (3 if dash else 2)
-    start += len(data[start:].split(b"\n", 1)[0].split(b" ", 1)[0])
-    return heredoc_body_range(data, start, delimiter, dash)
+def test_heredoc_operators_are_in_source_order():
+    operators = heredoc_operators(_root("cat <<A\none\nA\ncat <<B\ntwo\nB\n"))
+    assert [op.delimiter for op in operators] == ["A", "B"]
 
 
-def test_body_range_plain():
-    assert _range("cat <<EOF\nbody\nEOF\n") == (10, 15)
+def test_heredoc_operators_finds_a_start_inside_an_error():
+    # Two heredocs on one line are beyond the grammar, but both start
+    # tokens survive the error.
+    operators = heredoc_operators(_root("cat <<A ; cat <<B\none\nA\ntwo\nB\n"))
+    assert [op.delimiter for op in operators] == ["A", "B"]
 
 
-def test_body_range_ends_at_terminator_without_trailing_newline():
-    assert _range("cat <<EOF\nbody\nEOF") == (10, 15)
+def test_first_content_line_skips_empty_lines():
+    assert first_content_line(b"\n\nfoo\n", 0, 6) == 2
 
 
-def test_body_range_after_pipeline_on_operator_line():
-    cmd = "cat <<EOF | tr a-z A-Z\nbody\nEOF\n"
-    assert _range(cmd) == (cmd.index("body"), cmd.index("EOF\n", 10))
+def test_first_content_line_counts_a_blank_line_as_content():
+    assert first_content_line(b"  \nfoo\n", 0, 7) == 0
 
 
-def test_body_range_honors_line_continuation():
-    cmd = "cat <<EOF \\\n| tr a-z A-Z\nbody\nEOF\n"
-    assert _range(cmd) == (cmd.index("body"), cmd.rindex("EOF"))
-
-
-def test_body_range_comment_may_hold_a_quote():
-    cmd = "cat <<EOF # don't\nbody\nEOF\n"
-    assert _range(cmd) == (cmd.index("body"), cmd.rindex("EOF"))
-
-
-def test_body_range_quoted_newline_is_not_the_line_end():
-    cmd = "cat <<EOF | tr 'a\nb' x\nbody\nEOF\n"
-    assert _range(cmd) == (cmd.index("body"), cmd.rindex("EOF"))
-
-
-def test_body_range_substitution_newline_is_not_the_line_end():
-    cmd = "cat <<EOF | $(echo\ncat)\nbody\nEOF\n"
-    assert _range(cmd) == (cmd.index("body"), cmd.rindex("EOF"))
-
-
-def test_body_range_dash_allows_tab_indented_terminator():
-    cmd = "cat <<-EOF\n\tbody\n\tEOF\n"
-    assert _range(cmd, dash=True) == (cmd.index("\tbody"), cmd.index("\tEOF"))
-
-
-def test_body_range_dash_ignores_space_indented_terminator():
-    assert _range("cat <<-EOF\n  body\n  EOF\n", dash=True) is None
-
-
-def test_body_range_unterminated_is_none():
-    assert _range("cat <<EOF\nbody\nmore\n") is None
-
-
-def test_body_range_without_body_line_is_none():
-    assert _range("cat <<EOF") is None
-
-
-def test_body_range_matches_unquoted_delimiter():
-    cmd = "cat <<EN'D'\nbody\nEND\n"
-    assert _range(cmd,
-                  delimiter="END") == (cmd.index("body"), cmd.rindex("END"))
+def test_first_content_line_is_none_for_empty_lines_only():
+    assert first_content_line(b"\n\n", 0, 2) is None
 
 
 def test_protected_source_is_none_when_the_body_lexes_already():
@@ -133,11 +90,16 @@ def test_protected_source_masks_leading_indentation():
     assert _diff(cmd, out) == [(cmd.index("  first"), "x")]
 
 
-def test_protected_source_skips_blank_lines_before_the_first_content_line():
+def test_protected_source_skips_empty_lines_before_the_first_content_line():
     cmd = "cat <<'EOF'\n\n\\first\nsecond\nEOF\n"
     out = protected_source(cmd.encode(), _root(cmd))
     assert out is not None
     assert _diff(cmd, out) == [(cmd.index("\\first"), "x")]
+
+
+def test_protected_source_leaves_leading_empty_lines_to_body_prefix():
+    cmd = "cat <<EOF\n\nfoo\nEOF\n"
+    assert protected_source(cmd.encode(), _root(cmd)) is None
 
 
 def test_protected_source_avoids_the_delimiters_first_letter():
@@ -153,6 +115,21 @@ def test_protected_source_handles_every_heredoc_on_the_line_list():
     assert out is not None
     assert _diff(cmd, out) == [(cmd.index("\\one"), "x"),
                                (cmd.index("\\two"), "x")]
+
+
+def test_protected_source_shields_both_bodies_of_one_operator_line():
+    cmd = "cat <<A ; cat <<B\n\\one\nA\n\\two\nB\n"
+    out = protected_source(cmd.encode(), _root(cmd))
+    assert out is not None
+    assert _diff(cmd, out) == [(cmd.index("\\one"), "x"),
+                               (cmd.index("\\two"), "x")]
+
+
+def test_protected_source_shields_an_escaped_double_quoted_delimiter():
+    cmd = 'cat <<"E\\$F"\n\\first\nE$F\n'
+    out = protected_source(cmd.encode(), _root(cmd))
+    assert out is not None
+    assert _diff(cmd, out) == [(cmd.index("\\first"), "x")]
 
 
 def test_protected_source_ignores_an_operator_inside_a_body():

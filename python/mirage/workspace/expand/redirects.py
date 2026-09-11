@@ -23,6 +23,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import (get_process_sub_body,
                                   get_process_sub_direction, get_text)
+from mirage.shell.parse.heredoc import body_prefix
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ProcessSubDirection, Redirect, RedirectKind
 from mirage.workspace.expand.classify import classify_bare_path
@@ -79,7 +80,8 @@ async def expand_heredoc_body(
     the literal text between them (including the leading chunk, which is
     NOT a named child) is gap-filled from byte spans. Literal pieces get
     heredoc backslash escapes and `<<-` tab stripping; expansion nodes
-    route through expand_node.
+    route through expand_node. The empty lines tree-sitter dropped before
+    the body node (body_prefix) come first.
     """
     body_node = None
     dash = False
@@ -93,8 +95,12 @@ async def expand_heredoc_body(
     raw = body_node.text or b""
     base = body_node.start_byte
     parts: list[str] = []
-    pos = 0
     at_line_start = True
+    prefix = body_prefix(redirect_node)
+    if prefix:
+        parts.append(_strip_heredoc_tabs(prefix, True) if dash else prefix)
+        at_line_start = prefix.endswith("\n")
+    pos = 0
     for child in body_node.named_children:
         pieces = [(raw[pos:child.start_byte - base].decode(), True)]
         if child.type == NT.HEREDOC_CONTENT:

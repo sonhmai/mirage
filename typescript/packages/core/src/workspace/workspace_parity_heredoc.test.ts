@@ -331,3 +331,65 @@ describe('workspace: heredoc bodies the lexer would swallow', () => {
     await ws.close()
   })
 })
+
+// bash keeps the empty lines a body opens with and reads a quoted
+// delimiter with the shell's own escape rules; both reach the workspace
+// through the heredoc package (issue #1050).
+describe('workspace: heredoc leading empty lines and escaped delimiters', () => {
+  it('keeps a leading empty line', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("cat <<'END'\n\nfirst\nEND")
+    expect(stdoutStr(io)).toBe('\nfirst\n')
+    await ws.close()
+  })
+
+  it('keeps a body that is one empty line', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("cat <<'END'\n\nEND")
+    expect(stdoutStr(io)).toBe('\n')
+    await ws.close()
+  })
+
+  it('keeps an empty line before a backslash line', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("cat <<'END'\n\n\\first\nEND")
+    expect(stdoutStr(io)).toBe('\n\\first\n')
+    await ws.close()
+  })
+
+  it('expands after leading empty lines', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('hb=val; cat <<END\n\n\n$hb\nEND')
+    expect(stdoutStr(io)).toBe('\n\nval\n')
+    await ws.close()
+  })
+
+  it('keeps a leading empty line under <<-', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("cat <<-'END'\n\n\tfirst\n\tEND")
+    expect(stdoutStr(io)).toBe('\nfirst\n')
+    await ws.close()
+  })
+
+  it('reads an escaped dollar in a quoted delimiter', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('cat <<"E\\$F"\n\\first\nE$F')
+    expect(stdoutStr(io)).toBe('\\first\n')
+    await ws.close()
+  })
+
+  it('reads an escaped quote in a quoted delimiter', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('cat <<"E\\"F"\n\\first\nE"F')
+    expect(stdoutStr(io)).toBe('\\first\n')
+    await ws.close()
+  })
+
+  it('round-trips a leading empty line through a file', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute("cat > /disk/HB7 <<'END'\n\nfirst\nEND")
+    const io = await ws.execute('cat /disk/HB7')
+    expect(stdoutStr(io)).toBe('\nfirst\n')
+    await ws.close()
+  })
+})

@@ -12,9 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from datetime import datetime, timezone
+
 import pytest
 
+from mirage.cache.index import RAMIndexCacheStore
+from mirage.core.hf_buckets.du import size
 from mirage.core.hf_buckets.find import find
+from mirage.core.hf_buckets.stat import stat
 from mirage.types import PathSpec
 
 
@@ -86,3 +91,34 @@ async def test_find_empty_matches_zero_length_file(make_acc):
     acc = make_acc({"empty.txt": b"", "full.txt": b"x"})
     out = await find(acc, PathSpec.from_str_path("/"), empty=True)
     assert out == ["/empty.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("warmup", ["find", "du"])
+async def test_recursive_warmup_preserves_modification_times(make_acc, warmup):
+    acc = make_acc({"source.txt": b"old", "dest.txt": b"new"})
+    acc._fake.metas["source.txt"].last_modified = datetime(2025,
+                                                           1,
+                                                           1,
+                                                           tzinfo=timezone.utc)
+    acc._fake.metas["dest.txt"].last_modified = datetime(2026,
+                                                         1,
+                                                         1,
+                                                         tzinfo=timezone.utc)
+    cold = {
+        key: await stat(acc, PathSpec.from_str_path("/" + key))
+        for key in acc._fake.files
+    }
+    index = RAMIndexCacheStore()
+    root = PathSpec.from_str_path("/")
+    if warmup == "find":
+        await find(acc, root, index=index)
+    else:
+        await size(acc, root, index=index)
+    for key, expected in cold.items():
+        path = PathSpec.from_str_path("/" + key)
+        cached = await index.get(path.virtual)
+        assert cached.entry is not None
+        assert cached.entry.remote_time == expected.modified
+        assert (await stat(acc, path,
+                           index=index)).modified == expected.modified

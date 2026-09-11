@@ -22,8 +22,11 @@ from mirage.core.hierarchy.probe import ReaddirFn
 from mirage.core.hierarchy.readdir import (DirListing, Listed, Lister,
                                            make_readdir)
 from mirage.core.hierarchy.scope import ROOT, ScopeMatch
+from mirage.core.qdrant.naming import group_name, row_stem
+from mirage.core.qdrant.payload import field_value
 from mirage.core.qdrant.query import (distinct_values, list_tables,
-                                      rows_matching, table_exists)
+                                      resolve_group, rows_matching,
+                                      table_exists)
 from mirage.core.qdrant.render import blob_bytes, render_json, render_text
 from mirage.core.qdrant.scope import detect_for, filters_of, table_of
 from mirage.resource.qdrant.config import QdrantConfig
@@ -63,33 +66,37 @@ def _row_entries(rows: list[dict[str, Any]],
     entries: list[tuple[str, IndexEntry]] = []
     for row in rows:
         rid = str(row[config.id_field])
-        entries.append((f"{rid}.json",
+        stem = row_stem(row, config)
+        entries.append((f"{stem}.json",
                         IndexEntry(
                             id=rid,
-                            name=f"{rid}.json",
+                            name=f"{stem}.json",
                             resource_type="qdrant/row_json",
-                            vfs_name=f"{rid}.json",
+                            vfs_name=f"{stem}.json",
                             size=len(render_json(row, config)),
                         )))
-        if config.text_field and row.get(config.text_field) is not None:
-            entries.append((f"{rid}.txt",
+        if config.text_field and field_value(row,
+                                             config.text_field) is not None:
+            entries.append((f"{stem}.txt",
                             IndexEntry(
                                 id=rid,
-                                name=f"{rid}.txt",
+                                name=f"{stem}.txt",
                                 resource_type="qdrant/row_text",
-                                vfs_name=f"{rid}.txt",
+                                vfs_name=f"{stem}.txt",
                                 size=len(render_text(row, config)),
                             )))
-        if config.blob_field and row.get(config.blob_field) is not None:
-            blob_name = f"{rid}.{config.blob_ext}"
-            entries.append((blob_name,
-                            IndexEntry(
-                                id=rid,
-                                name=blob_name,
-                                resource_type="qdrant/row_blob",
-                                vfs_name=blob_name,
-                                size=_blob_size(row[config.blob_field]),
-                            )))
+        if config.blob_field and field_value(row,
+                                             config.blob_field) is not None:
+            blob_name = f"{stem}.{config.blob_ext}"
+            entries.append(
+                (blob_name,
+                 IndexEntry(
+                     id=rid,
+                     name=blob_name,
+                     resource_type="qdrant/row_blob",
+                     vfs_name=blob_name,
+                     size=_blob_size(field_value(row, config.blob_field)),
+                 )))
     return entries
 
 
@@ -111,21 +118,54 @@ def _row_prefix(pattern: str | None, config: QdrantConfig) -> str:
     return glob_stem_prefix(pattern, suffixes)
 
 
+async def _resolved_filters(accessor: QdrantAccessor, table: str,
+                            filters: dict[str, str]) -> dict[str, str] | None:
+    """Resolve basename-rendered group segments back to payload values."""
+    resolved: dict[str, str] = {}
+    for column, value in filters.items():
+        if column not in accessor.config.basename_fields:
+            resolved[column] = value
+            continue
+        sources = await resolve_group(accessor, table, column, resolved, value,
+                                      True)
+        if not sources:
+            return None
+        if len(sources) > 1:
+            raise ValueError(
+                f"qdrant: basename collision for {column!r}: {value!r}")
+        resolved[column] = sources[0]
+    return resolved
+
+
 async def _children(accessor: QdrantAccessor,
                     match: ScopeMatch) -> Listed | None:
     config = accessor.config
     table = table_of(config, match)
-    filters = filters_of(config, match)
     pattern = match.pattern
     if not await table_exists(accessor, table):
         return None
+    filters = await _resolved_filters(accessor, table,
+                                      filters_of(config, match))
+    if filters is None:
+        return None
     depth = len(filters)
     if depth < len(config.group_by):
-        prefix = glob_prefix(pattern)
+        display_prefix = glob_prefix(pattern)
+        basename = config.group_by[depth] in config.basename_fields
         names = await distinct_values(accessor, table, config.group_by[depth],
-                                      filters, config.max_rows, prefix)
-        return DirListing(entries=[(name, _dir_entry(name)) for name in names],
-                          partial=bool(prefix))
+                                      filters, config.max_rows, display_prefix,
+                                      basename)
+        rendered = [group_name(name, basename=basename) for name in names]
+        if display_prefix:
+            rendered = [
+                name for name in rendered if name.startswith(display_prefix)
+            ]
+        if len(rendered) != len(set(rendered)):
+            raise ValueError(
+                "qdrant: basename_fields produced a path collision")
+        return DirListing(entries=[(name, _dir_entry(name))
+                                   for name in rendered],
+                          partial=bool(display_prefix))
     prefix = _row_prefix(pattern, config)
     rows = await rows_matching(accessor, table, filters, config.max_rows,
                                prefix)

@@ -19,7 +19,8 @@ from mirage.accessor.slack import SlackAccessor
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_pattern import pattern_arg
-from mirage.commands.builtin.grep_pushdown import pushdown_operand
+from mirage.commands.builtin.grep_pushdown import (pushdown_operand,
+                                                   text_search_results)
 from mirage.commands.builtin.slack._provision import file_read_provision
 from mirage.commands.builtin.slack.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
@@ -112,10 +113,12 @@ async def grep(accessor: SlackAccessor, paths: list[PathSpec],
             if err is None:
                 if not native_lines:
                     return b"", IOResult(exit_code=1)
-                return format_records(native_lines), IOResult()
-            logger.warning(
-                "slack search push-down failed (%s); "
-                "falling back to per-file scan", err)
+                if text_search_results(native_lines):
+                    return format_records(native_lines), IOResult()
+            if err is not None:
+                logger.warning(
+                    "slack search push-down failed (%s); "
+                    "falling back to per-file scan", err)
 
     resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
     return await generic_grep(

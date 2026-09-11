@@ -98,9 +98,12 @@ def test_a_view_is_offered_whenever_the_workspace_holds_links():
     assert link_view(_FakeNamespace(), _dispatch) is not None
 
 
-def test_no_view_when_the_workspace_holds_no_links():
-    """The common case stays free: no links, nothing to offer."""
-    assert link_view(_FakeNamespace(has_links=False), _dispatch) is None
+def test_empty_namespace_still_offers_a_live_view():
+    """A captured view must remain usable when the first link appears."""
+    view = link_view(_FakeNamespace(has_links=False), _dispatch)
+    assert view is not None
+    assert view.children("/") == []
+    assert view.stat_at("/missing") is None
 
 
 def test_no_view_without_a_namespace():

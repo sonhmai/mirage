@@ -71,7 +71,7 @@ def _make_world() -> tuple[DiscordResource, Workspace]:
     resource = DiscordResource(config=config)
     ws = Workspace({f"{PREFIX}/": resource}, mode=MountMode.READ)
     index = resource.index
-    _run(index.put(f"{PREFIX}/{GUILD}", guild_entry(GUILD_PAYLOAD)))
+    _run(index.set_dir(PREFIX, [(GUILD, guild_entry(GUILD_PAYLOAD))]))
     _run(index.put(f"{PREFIX}/{CHANNEL_PATH}", channel_entry(CHANNEL_PAYLOAD)))
     _run(
         index.put(f"{PREFIX}/{DATE_DIR_PATH}",

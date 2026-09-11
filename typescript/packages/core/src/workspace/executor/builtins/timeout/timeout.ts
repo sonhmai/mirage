@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
-import { IOResult, materialize } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import type { Session } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -51,14 +51,40 @@ export function parseDuration(raw: string): number | null {
   return Number(match[1]) * (UNIT_SECONDS[match[2] ?? ''] ?? 1)
 }
 
+// Run the inner line and drain its stdout under the same deadline. A lazy
+// inner pipeline produces bytes only when consumed; draining inside the
+// deadline keeps the whole run under the limit, and draining chunk by
+// chunk into `drained` is what lets a run that overruns keep what it had
+// printed.
 async function executeDrained(
   executeFn: ExecuteStringFn,
   inner: string,
   sessionId: string,
+  drained: Uint8Array[],
+  held: IOResult[],
+  signal: AbortSignal,
 ): Promise<[Uint8Array, IOResult]> {
-  const io = await executeFn(inner, { sessionId })
-  const stdout = await materialize(io.stdout)
-  return [stdout, io]
+  const io = await executeFn(inner, { sessionId, signal })
+  held.push(io)
+  const source = io.stdout
+  if (source instanceof Uint8Array) {
+    drained.push(source)
+  } else if (source !== null) {
+    for await (const chunk of source) drained.push(chunk)
+  }
+  return [concatChunks(drained), io]
+}
+
+function concatChunks(chunks: readonly Uint8Array[]): Uint8Array {
+  let total = 0
+  for (const c of chunks) total += c.byteLength
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    out.set(c, offset)
+    offset += c.byteLength
+  }
+  return out
 }
 
 async function raceDeadline(
@@ -115,15 +141,31 @@ export async function handleTimeout(
   if (seconds === null) return usageError(`invalid time interval '${raw}'`)
 
   const inner = shellJoin(rest)
-  const run = executeDrained(executeFn, inner, session.sessionId)
+  const drained: Uint8Array[] = []
+  // The inner result lands here as soon as it exists, so its stderr
+  // survives the deadline the way the drained stdout does.
+  const held: IOResult[] = []
+  // The deadline aborts the inner run, not just the wait for it: a
+  // promise cannot be cancelled, so the signal is what stops a
+  // `tail -f` from polling on after 124 was already returned (python's
+  // wait_for cancels the drain the same way).
+  const abort = new AbortController()
+  const run = executeDrained(executeFn, inner, session.sessionId, drained, held, abort.signal)
   const result = seconds > 0 ? await raceDeadline(run, seconds) : await run
   if (result === TIMED_OUT) {
+    abort.abort()
     // The abandoned run may still reject later; without a handler that
     // becomes an unhandled rejection and can crash the process.
     run.catch(() => undefined)
+    // What the command printed before the deadline is its output, as GNU
+    // leaves it on the terminal; only the run past it is lost. That goes
+    // for stderr too: a `tail -F missing` has already said it cannot open
+    // the file by the time the deadline kills it.
+    const partial = concatChunks(drained)
+    const stderr = held[0]?.stderr
     return [
-      null,
-      new IOResult({ exitCode: 124 }),
+      partial.byteLength > 0 ? partial : null,
+      new IOResult({ exitCode: 124, stderr: stderr instanceof Uint8Array ? stderr : null }),
       new ExecutionNode({ command: 'timeout', exitCode: 124 }),
     ]
   }

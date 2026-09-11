@@ -31,7 +31,7 @@ describe('fetchEnv', () => {
   })
 
   it('refuses a ref: the process env has no sub-address', async () => {
-    await expect(fetchEnv(EnvConfig.parse({}), 'x')).rejects.toThrowError(SecretsError)
-    await expect(fetchEnv(EnvConfig.parse({}), 'x')).rejects.toThrowError(/takes no ref/)
+    await expect(fetchEnv(EnvConfig.parse({}), 'x')).rejects.toThrow(SecretsError)
+    await expect(fetchEnv(EnvConfig.parse({}), 'x')).rejects.toThrow(/takes no ref/)
   })
 })

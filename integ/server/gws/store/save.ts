@@ -16,6 +16,7 @@ import { clearTenants } from '../../kit/typescript/index.ts'
 import type { Dmmf } from '../../kit/typescript/index.ts'
 import type { C } from './client.ts'
 import type { GwsState } from './state.ts'
+import type { DocTab } from './types.ts'
 
 // The tenant's world, written back whole.
 //
@@ -52,6 +53,7 @@ export async function saveState(db: C, dmmf: Dmmf, tenant: string, st: GwsState)
     if (rows.revisions.length > 0) await tx.revision.createMany({ data: rows.revisions })
     if (rows.permissions.length > 0) await tx.permission.createMany({ data: rows.permissions })
     if (rows.docs.length > 0) await tx.doc.createMany({ data: rows.docs })
+    if (rows.docTabs.length > 0) await tx.docTab.createMany({ data: rows.docTabs })
     if (rows.spreadsheets.length > 0) await tx.spreadsheet.createMany({ data: rows.spreadsheets })
     if (rows.tabs.length > 0) await tx.sheetTab.createMany({ data: rows.tabs })
     if (rows.cells.length > 0) await tx.sheetCell.createMany({ data: rows.cells })
@@ -111,7 +113,16 @@ interface Rows {
     emailAddress: string | null
     seq: number
   }[]
-  docs: { tenant: string; id: string; title: string; text: string }[]
+  docs: { tenant: string; id: string; title: string }[]
+  docTabs: {
+    tenant: string
+    documentId: string
+    tabId: string
+    title: string
+    text: string
+    parentTabId: string | null
+    seq: number
+  }[]
   spreadsheets: { tenant: string; id: string; title: string; nextSheetId: number }[]
   tabs: {
     tenant: string
@@ -233,6 +244,7 @@ function buildRows(tenant: string, st: GwsState): Rows {
     revisions: [],
     permissions: [],
     docs: [],
+    docTabs: [],
     spreadsheets: [],
     tabs: [],
     cells: [],
@@ -301,8 +313,26 @@ function buildRows(tenant: string, st: GwsState): Rows {
     }
   }
 
+  // Pre-order, so `seq` puts a parent before its children and loadState
+  // can rebuild the tree in one pass.
   for (const [id, doc] of st.docs) {
-    rows.docs.push({ tenant, id, title: doc.title, text: doc.text })
+    rows.docs.push({ tenant, id, title: doc.title })
+    let docTabSeq = 0
+    const emit = (tabs: DocTab[], parentTabId: string | null): void => {
+      for (const tab of tabs) {
+        rows.docTabs.push({
+          tenant,
+          documentId: id,
+          tabId: tab.tabId,
+          title: tab.title,
+          text: tab.text,
+          parentTabId,
+          seq: docTabSeq++,
+        })
+        emit(tab.childTabs, tab.tabId)
+      }
+    }
+    emit(doc.tabs, null)
   }
 
   let tabSeq = 0

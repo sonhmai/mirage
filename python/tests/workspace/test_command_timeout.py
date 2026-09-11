@@ -165,8 +165,8 @@ async def test_foreground_timeout_leaves_a_background_job_alone(
     r = await ws.execute("{ sleep 0.2; sleep 0.2; echo bg-done; } & sleep 1",
                          cancel=asyncio.Event())
     assert r.exit_code == 124
-    await ws.job_table.wait(1)
-    job = ws.job_table.get(1)
+    await ws.job_table.wait(1, ws.default_session_id)
+    job = ws.job_table.get(1, ws.default_session_id)
     assert job.exit_code == 0
     assert (await job.console.snapshot(Channel.STDOUT)) == b"bg-done\n"
 
@@ -301,7 +301,7 @@ async def test_job_table_reports_completed_bg_without_wait(restore_defaults):
     ws = _ws()
     await ws.execute("sleep 5 &")
     await asyncio.sleep(0.2)
-    jobs = ws.job_table.list_jobs()
+    jobs = ws.job_table.list_jobs(ws.default_session_id)
     assert len(jobs) == 1
     assert jobs[0].status.value == "completed"
     assert jobs[0].exit_code == 124

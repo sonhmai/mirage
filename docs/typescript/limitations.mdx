@@ -138,13 +138,15 @@ Mounts that hit third-party APIs (S3, GitHub, Linear, etc.) make `fetch` calls f
 - **Pre-signed URLs.** For S3/R2/GCS, generate pre-signed URLs server-side and pass them in. The Mirage browser examples include a Vite dev-server `presigner` plugin as reference.
 - **Same-origin proxy.** Stand up a tiny proxy on your own domain that forwards to the upstream API with the right auth headers.
 
-### 4. Python sees the mount as of the start of the run
+### 4. Pyodide caches accessed files for each run
 
-`open()` against a mounted path is served by a filesystem Mirage registers inside the interpreter. Its callbacks are synchronous, so the tree is collected before the script starts and writes are replayed after it ends: an edit made to the resource from elsewhere mid-run is not visible until the next run.
+Pyodide's worker fetches workspace files on access and caches them for that
+execution. An external edit to a cached file is not visible until the next
+run. Without workers or `SharedArrayBuffer`, the fallback collects whole
+mounts before execution, which can be expensive for large resources.
 
-This needs no [JSPI](https://github.com/WebAssembly/js-promise-integration) and no V8 flag, so it works the same in Chrome, Firefox, Safari and Node.
-
-See [Python filesystem](/typescript/python-fs) for the details.
+See [Pyodide workspace file access](/typescript/runtime/python#workspace-file-access)
+for browser requirements and limitations.
 
 ### 5. Some resource drivers remain Node-only
 

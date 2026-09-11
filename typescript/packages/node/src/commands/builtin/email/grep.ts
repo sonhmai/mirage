@@ -17,7 +17,10 @@ import { prefixAggregate } from '@struktoai/mirage-core/commands/builtin/aggrega
 import { grepGeneric } from '@struktoai/mirage-core/commands/builtin/generic/grep'
 import { resolveGlobOf } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { compilePattern, patternArg } from '@struktoai/mirage-core/commands/builtin/grep_pattern'
-import { pushdownOperand } from '@struktoai/mirage-core/commands/builtin/grep_pushdown'
+import {
+  pushdownOperand,
+  textSearchResults,
+} from '@struktoai/mirage-core/commands/builtin/grep_pushdown'
 import { grepLines } from '@struktoai/mirage-core/commands/builtin/grep_scan'
 import type { GrepLinesOptions } from '@struktoai/mirage-core/commands/builtin/grep_scan'
 import { FlagView, specOf } from '@struktoai/mirage-core/commands/spec/index'
@@ -94,28 +97,30 @@ async function grepCommand(
         filePrefix,
         accessor.config.maxMessages,
       )
-      const pat = compilePattern(pattern, fl.asBool('i'), fl.asBool('F'), fl.asBool('w'))
-      const lineOpts: GrepLinesOptions = {
-        invert: false,
-        lineNumbers: fl.asBool('n'),
-        countOnly: false,
-        filesOnly: fl.asBool('args_l'),
-        onlyMatching: fl.asBool('o'),
-        maxCount: fl.asInt('m') ?? null,
-      }
-      const lines: string[] = []
-      for (const [vfsPath, msgText] of pairs) {
-        const matched = grepLines(vfsPath, messageLines(msgText), pat, lineOpts)
-        if (matched.length === 0) continue
-        if (lineOpts.filesOnly) {
-          lines.push(vfsPath)
-          continue
+      if (textSearchResults(pairs.map(([, text]) => text))) {
+        const pat = compilePattern(pattern, fl.asBool('i'), fl.asBool('F'), fl.asBool('w'))
+        const lineOpts: GrepLinesOptions = {
+          invert: false,
+          lineNumbers: fl.asBool('n'),
+          countOnly: false,
+          filesOnly: fl.asBool('args_l'),
+          onlyMatching: fl.asBool('o'),
+          maxCount: fl.asInt('m') ?? null,
         }
-        for (const line of matched) lines.push(`${vfsPath}:${line}`)
+        const lines: string[] = []
+        for (const [vfsPath, msgText] of pairs) {
+          const matched = grepLines(vfsPath, messageLines(msgText), pat, lineOpts)
+          if (matched.length === 0) continue
+          if (lineOpts.filesOnly) {
+            lines.push(vfsPath)
+            continue
+          }
+          for (const line of matched) lines.push(`${vfsPath}:${line}`)
+        }
+        if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+        const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
+        return [out, new IOResult()]
       }
-      if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
-      return [out, new IOResult()]
     }
   }
 

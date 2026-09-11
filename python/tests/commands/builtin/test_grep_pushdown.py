@@ -230,3 +230,15 @@ def test_lone_operand_is_the_operand_rule_on_its_own():
     assert grep_pushdown.lone_operand([TRACES, SESSIONS]) is None
     assert grep_pushdown.lone_operand([]) is None
     assert grep_pushdown.lone_operand([_operand("/traces/*", "*")]) is None
+
+
+@pytest.mark.parametrize("mode", ["binary", "text", "without-match", "bad"])
+def test_binary_mode_requires_scanning(mode):
+    assert grep_pushdown.has_search_shaping_flags({"binary_files": mode})
+
+
+@pytest.mark.parametrize("text,expected", [("hello 😀", True),
+                                           ("hello\0tail", False),
+                                           ("hello\udcff", False)])
+def test_search_result_binary_guard(text, expected):
+    assert grep_pushdown.text_search_results([text]) is expected

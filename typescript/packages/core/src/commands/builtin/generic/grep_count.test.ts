@@ -165,3 +165,37 @@ describe('grepGeneric quiet mode', () => {
     expect(io.exitCode).toBe(1)
   })
 })
+
+describe('grepGeneric context separators between files', () => {
+  it.each([
+    [{ B: '1' }, '/a.txt-hello\n/a.txt:world\n--\n/b.txt:world\n'],
+    [{ h: true, B: '1' }, 'hello\nworld\n--\nworld\n'],
+    [{ c: true, B: '1' }, '/a.txt:1\n/b.txt:1\n'],
+    [{}, '/a.txt:world\n/b.txt:world\n'],
+  ])('separates groups for %j', async (flags, expected) => {
+    const [out, io] = (await grepGeneric(
+      'grep',
+      [spec('/a.txt'), spec('/b.txt')],
+      ['world'],
+      opts(flags),
+      stat,
+      readdir,
+      fileStream,
+    )) as [GrepOut, IOResult]
+    expect(await decode(out)).toBe(expected)
+    expect(io.exitCode).toBe(0)
+  })
+
+  it('needs earlier output before it separates', async () => {
+    const [out] = (await grepGeneric(
+      'grep',
+      [spec('/d/a.txt'), spec('/b.txt')],
+      ['world'],
+      opts({ B: '1' }),
+      stat,
+      readdir,
+      fileStream,
+    )) as [GrepOut, IOResult]
+    expect(await decode(out)).toBe('/b.txt:world\n')
+  })
+})

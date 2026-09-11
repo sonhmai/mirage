@@ -17,6 +17,7 @@ import tree_sitter_bash
 
 from mirage.shell.parse.constants import (ARITH_OPEN_TOKEN, DIGITS, NAME_CONT,
                                           QUOTES)
+from mirage.shell.parse.heredoc import protected_source, same_shape
 
 BASH_LANGUAGE = tree_sitter.Language(tree_sitter_bash.language())
 TS_PARSER = tree_sitter.Parser(BASH_LANGUAGE)
@@ -85,6 +86,36 @@ def _is_arithmetic(data: bytes, start: int) -> bool:
         # the construct alone rather than risk rewriting it.
         return True
     return not TS_PARSER.parse(data[start:end]).root_node.has_error
+
+
+def _parse_bytes(data: bytes) -> tree_sitter.Node:
+    """Parse ``data`` with every heredoc body shielded from the lexer.
+
+    tree-sitter-bash mis-lexes a body whose first line opens with a
+    backslash or with whitespace (see protected_source). The shielded
+    copy has the same length, so its clean tree is handed back to
+    tree-sitter as the old tree for a reparse of the untouched bytes:
+    with no edit to apply, every node is reused as it stands, and the
+    result reads the typed bytes at the shielded structure. The reuse is
+    verified node by node; when anything differs, or the shielded copy
+    does not parse cleanly, the plain parse stands.
+
+    Args:
+        data (bytes): encoded shell source.
+    """
+    tree = TS_PARSER.parse(data)
+    if b"<<" not in data:
+        return tree.root_node
+    shielded_data = protected_source(data, tree.root_node)
+    if shielded_data is None:
+        return tree.root_node
+    shielded = TS_PARSER.parse(shielded_data)
+    if shielded.root_node.has_error:
+        return tree.root_node
+    reused = TS_PARSER.parse(data, old_tree=shielded)
+    if not same_shape(shielded.root_node, reused.root_node):
+        return tree.root_node
+    return reused.root_node
 
 
 def _failed_arith_openers(root: tree_sitter.Node) -> list[int]:
@@ -196,7 +227,7 @@ def _repair_orphaned_dollars(root: tree_sitter.Node,
             break
         for offset in sorted(offsets, reverse=True):
             data = _rebrace_dollar(data, offset)
-        retried = TS_PARSER.parse(data).root_node
+        retried = _parse_bytes(data)
         if retried.has_error:
             break
         root = retried
@@ -229,7 +260,7 @@ def parse(command: str) -> tree_sitter.Node:
         reparse helps.
     """
     data = strip_line_continuation(command).encode()
-    root = TS_PARSER.parse(data).root_node
+    root = _parse_bytes(data)
     if root.has_error:
         # Sitting inside an ERROR is not evidence that an opener is
         # broken: tree-sitter's error region swallows neighbouring
@@ -248,7 +279,7 @@ def parse(command: str) -> tree_sitter.Node:
             for offset in sorted(offsets, reverse=True):
                 retried_data = (retried_data[:offset + 1] + b" " +
                                 retried_data[offset + 1:])
-            retried = TS_PARSER.parse(retried_data).root_node
+            retried = _parse_bytes(retried_data)
             if not retried.has_error:
                 root = retried
                 data = retried_data

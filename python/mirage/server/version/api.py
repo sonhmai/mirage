@@ -101,8 +101,7 @@ async def checkout(
     version = await resolve_ref(store, ref)
     entries, meta = await read_version(store, version)
     state = to_state(entries, meta)
-    await ws._cache.clear()
-    await apply_state_dict(ws, state)
+    await apply_state_dict(ws, state, replace_cache=True)
     install_fingerprints(ws,
                          state.get(StateKey.FINGERPRINTS) or [], drift_policy)
 

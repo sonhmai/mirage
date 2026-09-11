@@ -7,6 +7,7 @@ from opendal.exceptions import NotFound
 from opendal.types import EntryMode
 
 from mirage.accessor.nextcloud import NextcloudAccessor
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                keep, start_basename,
                                                tree_has_empty)
@@ -328,6 +329,7 @@ async def find(
     mindepth: int | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     predicate = tree if tree is not None else build_tree(
         name=name,

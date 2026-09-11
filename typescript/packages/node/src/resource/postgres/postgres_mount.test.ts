@@ -13,17 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountMode } from '@struktoai/mirage-core/types'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { Workspace } from '../../workspace.ts'
 import { PostgresResource } from './postgres.ts'
 
+// vitest 4 types a bare `vi.fn()` as neither callable nor constructable.
+type AnyMock = Mock<(...args: never[]) => unknown>
+
 interface MockPool {
-  query: ReturnType<typeof vi.fn>
-  end: ReturnType<typeof vi.fn>
+  query: AnyMock
+  end: AnyMock
 }
 
 const pools: MockPool[] = []
-const PoolCtor = vi.fn(() => {
+const PoolCtor = vi.fn(function () {
   const pool: MockPool = {
     query: vi.fn((sql: string, params?: unknown[]) => Promise.resolve(handleQuery(sql, params))),
     end: vi.fn(() => Promise.resolve()),

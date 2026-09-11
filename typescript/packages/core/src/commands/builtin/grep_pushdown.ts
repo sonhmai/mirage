@@ -108,7 +108,14 @@ const PUSHDOWN_SHAPING_BOOL = [
   'text',
 ] as const
 const PUSHDOWN_SHAPING_INT = ['m', 'A', 'B', 'C'] as const
-const PUSHDOWN_FILTER = ['type', 'glob', 'include', 'exclude', 'exclude_dir'] as const
+const PUSHDOWN_FILTER = [
+  'type',
+  'glob',
+  'include',
+  'exclude',
+  'exclude_dir',
+  'binary_files',
+] as const
 
 // True when a flag alters the match set or output shape of grep/rg. A search
 // push-down prints each matching record as one whole line, so it cannot honor
@@ -188,4 +195,15 @@ export function literalPushdownOperand(
 ): PathSpec | null {
   if (pattern === null || !searchPushdownOk(flags, pattern)) return null
   return loneOperand(paths)
+}
+
+export function textSearchResults(lines: readonly string[]): boolean {
+  return lines.every(
+    (line) =>
+      !line.includes('\0') &&
+      !Array.from(line).some((char) => {
+        const cp = char.codePointAt(0) ?? 0
+        return cp >= 0xd800 && cp <= 0xdfff
+      }),
+  )
 }

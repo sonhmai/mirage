@@ -10,15 +10,16 @@ packages ship two:
 
 | Runtime | Engine | Filesystem | Default |
 | --- | --- | --- | --- |
-| `pyodide` | CPython compiled to WebAssembly ([Pyodide](https://pyodide.org)) | Workspace mounts, preloaded into the WASM filesystem and lazily backfilled | Yes |
+| `pyodide` | CPython compiled to WebAssembly ([Pyodide](https://pyodide.org)) | Workspace mounts, fetched on access in a worker | Yes |
 | `monty` | [Pydantic Monty](https://github.com/pydantic/monty), a sandboxed Python interpreter written in Rust | Workspace mounts only, bridged through Mirage | No |
 
 ## Pyodide (default)
 
 Pyodide is full CPython in WebAssembly: real stdlib, `sys.argv`, stdin,
-and auto-loaded scientific packages. Mirage mirrors the workspace mounts
-into Pyodide's in-memory filesystem, so `open()` and `os.listdir` work on
-mounted paths.
+and auto-loaded scientific packages. `open()` and `os.listdir` access the
+workspace's existing mounts through Pyodide's filesystem adapter.
+
+Installed Python script CLIs receive bare `argv` (including the installed name at index 0) and `stdin` (bytes, or `None` when absent), on both Monty and Pyodide. Pyodide also keeps `sys.argv` and `sys.stdin`. Ordinary `python3` commands retain their interpreter's existing globals.
 
 ```ts
 import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
@@ -27,6 +28,47 @@ const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.EXEC 
 await ws.execute('echo hello > /data/a.txt')
 const io = await ws.execute(`python3 -c "print(open('/data/a.txt').read().strip())"`)
 ```
+
+### Workspace file access
+
+Pyodide supports `open()`, `os.listdir`, `pathlib`, and native packages
+that use file operations, such as PIL and NumPy. These operations reach
+the same workspace mounts used by shell commands. Symlinks and metadata
+overlays come from the workspace namespace.
+
+With a worker, files are fetched on first access and cached for that run.
+The cache is discarded before the next execution; it does not track
+external edits to already fetched files during a run. Writes flush through
+workspace operations before later backend reads and when execution ends.
+A failed flush produces stderr and a nonzero exit, and stops later
+mutations. Concurrent writes have no conflict detection.
+
+Worker access requires `SharedArrayBuffer`. Node supports this without
+experimental flags. Browser pages must be cross-origin isolated, typically
+using `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`. Vite consumers must also
+select ES module output for workers:
+
+```ts
+export default defineConfig({
+  worker: { format: 'es' },
+})
+```
+
+When workers or shared memory are unavailable, or a worker cannot start,
+Pyodide falls back to collecting mounted files before execution and
+replaying writes afterward. That fallback reads whole mounts into memory;
+use narrow mount prefixes for large resources. Neither mode requires JSPI.
+
+Mount workspace files under a non-root prefix such as `/data`. A mount at
+`/` cannot replace Pyodide's own filesystem, which contains its standard
+library. For a non-root cwd inside that unsupported mount, Python keeps
+the interpreter's existing cwd. Supported child mounts retain their
+normal relative file access.
+
+See [Python command usage](/typescript/python#reading-and-writing-mirage-mounts-from-python)
+for examples, or run the
+[Pyodide VFS example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/pyodide/vfs.ts).
 
 ## Monty
 
@@ -117,7 +159,7 @@ way. There is no python3-specific limit surface.
 The deadline stops the interpreter, not just the answer. Monty's
 worker process is SIGKILLed when its run trips the deadline (or a
 background job is killed), so a runaway loop never keeps burning.
-Pyodide shares the event loop with the workspace, so the runtime arms
+Pyodide runs in a worker when available, and the runtime arms
 its interrupt buffer from a watchdog thread: the guest gets a
 `KeyboardInterrupt` at the deadline and the run answers 124 even for
 a busy `while True` loop. The watchdog needs `SharedArrayBuffer`

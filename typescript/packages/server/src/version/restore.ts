@@ -117,9 +117,7 @@ export async function restore(
     }
   }
 
-  const cache = ws.cache as { clear?: () => Promise<void> }
-  if (typeof cache.clear === 'function') await cache.clear()
-  await applyStateDict(ws, merged as unknown as WorkspaceStateDict)
+  await applyStateDict(ws, merged as unknown as WorkspaceStateDict, { replaceCache: true })
   return {
     version,
     categories: [...selected].sort(compareCodePoints),

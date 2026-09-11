@@ -123,7 +123,8 @@ async def test_for_iterates_values_binding_the_loop_variable():
                                     [node("body")], sess)
     assert seen == ["a", "b", "c"]
     assert await text_of(stdout) == "iter-a\niter-b\niter-c\n"
-    assert "X" not in sess.env
+    # bash leaves the loop variable holding its last value.
+    assert sess.env["X"] == "c"
 
 
 @pytest.mark.asyncio
@@ -154,15 +155,31 @@ async def test_for_skips_to_the_next_iteration_on_continue():
     assert seen == ["a", "b", "c"]
 
 
+# bash 5.2: `Z=before; for Z in a b; do :; done; echo $Z` prints b. The
+# loop variable is an ordinary variable and keeps its last value; the
+# shadowed value is not put back.
 @pytest.mark.asyncio
-async def test_for_restores_a_shadowed_loop_variable():
+async def test_for_keeps_the_loop_variables_last_value():
     sess = session(vars=vars_from_env({"X": "saved"}))
 
     async def execute(*_args):
         return result()
 
-    await handle_for(execute, "X", ["a"], [node("body")], sess)
-    assert sess.env["X"] == "saved"
+    await handle_for(execute, "X", ["a", "b"], [node("body")], sess)
+    assert sess.env["X"] == "b"
+
+
+# bash 5.2: `unset Y; for Y in ; do :; done` leaves Y unset, since no
+# iteration ever assigned it.
+@pytest.mark.asyncio
+async def test_for_over_no_words_leaves_the_variable_untouched():
+    sess = session()
+
+    async def execute(*_args):
+        return result()
+
+    await handle_for(execute, "Y", [], [node("body")], sess)
+    assert "Y" not in sess.env
 
 
 @pytest.mark.asyncio
@@ -383,12 +400,12 @@ async def test_if_body_ampersand_launches_a_job_and_answers_the_launch_status(
     assert ran == ["c"]
     assert io.exit_code == 0
     assert sess.last_exit_code == 0
-    job = table.get(1)
+    job = table.get(1, sess.session_id)
     assert job is not None
     assert job.command == "slow"
     assert job.status == JobStatus.RUNNING
     gate.set()
-    await table.wait(1)
+    await table.wait(1, sess.session_id)
     assert ran == ["c", "slow"]
     assert job.exit_code == 3
 
@@ -408,11 +425,11 @@ async def test_case_arm_ampersand_launches_a_job():
                                       timeout=2)
     assert ran == []
     assert io.exit_code == 0
-    job = table.get(1)
+    job = table.get(1, "test")
     assert job is not None
     assert job.command == "slow"
     gate.set()
-    await table.wait(1)
+    await table.wait(1, "test")
     assert job.exit_code == 3
 
 
@@ -429,9 +446,9 @@ async def test_for_body_ampersand_launches_one_job_per_iteration():
                                       timeout=2)
     assert ran == []
     assert io.exit_code == 0
-    assert [j.command for j in table.list_jobs()] == ["slow", "slow"]
+    assert [j.command for j in table.list_jobs("test")] == ["slow", "slow"]
     gate.set()
-    await table.wait_all()
+    await table.wait_all("test")
     assert ran == ["slow", "slow"]
 
 

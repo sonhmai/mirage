@@ -29,7 +29,7 @@ import { IOResult } from '../../../io/types.ts'
 import { type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { tailGeneric } from '../generic/tail.ts'
+import { followFlags, tailGeneric } from '../generic/tail.ts'
 import { parseN } from '../tail_counts.ts'
 import { FlagView } from '../../spec/types.ts'
 
@@ -79,8 +79,14 @@ async function tailCommand(
   const resolved =
     paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
   const first = resolved[0]
+  // One followed collection is a change stream (-F included, as the
+  // Python twin reads it); anything else a follow polls, and a
+  // pushed-down suffix moves with the collection, so it has no byte
+  // position to measure against: a follow reads the collection whole.
+  const following = followFlags(fl)
+  const follow = typeof following !== 'string' && following.follow
   if (
-    fl.asBool('follow') &&
+    follow &&
     resolved.length === 1 &&
     first !== undefined &&
     detectScope(first).kind === 'documents'
@@ -89,9 +95,13 @@ async function tailCommand(
   }
   const nRaw = fl.asStr('n') ?? null
   const [lines, plusMode] = parseN(nRaw)
-  const pushdown = fl.asStr('c') === undefined && !plusMode && lines > 0
-  return tailGeneric(resolved, texts, opts, (p) =>
-    tailSource(accessor, p, opts.index ?? undefined, lines, pushdown),
+  const pushdown = fl.asStr('c') === undefined && !plusMode && lines > 0 && !follow
+  return tailGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => tailSource(accessor, p, opts.index ?? undefined, lines, pushdown),
+    (p) => MONGODB_IO.stat(accessor, p, opts.index ?? undefined),
   )
 }
 

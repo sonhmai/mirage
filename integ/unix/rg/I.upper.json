@@ -32,6 +32,66 @@
       "flags": [
         "I"
       ]
+    },
+    {
+      "id": "rg_no_filename_keeps_nul_match_0",
+      "seq": 990120,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'needle\\000tail\\n' > /data/rg-binary.txt; rg -I needle /data/rg-binary.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "needle\u0000tail\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_no_filename_keeps_nul_match_1",
+      "seq": 990121,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'needle\\000tail\\n' > /data/rg-binary.txt; rg -HI needle /data/rg-binary.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "needle\u0000tail\n",
+        "stderr": ""
+      }
     }
   ]
 }

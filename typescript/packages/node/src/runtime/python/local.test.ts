@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
@@ -26,6 +26,51 @@ import { LocalRuntime } from './local.ts'
 const DEC = new TextDecoder()
 
 describe('LocalRuntime', () => {
+  it.each([
+    ['list', 'seed.txt\nsub\n'],
+    ['stat', 'file 5 32768\ndir 16384\nmissing\n'],
+    ['glob', 'seed.txt\nsub/inner.txt\n'],
+  ])('runs the shared %s filesystem fixture', async (operation, expected) => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-local-fs-'))
+    const rt = new LocalRuntime()
+    try {
+      await writeFile(join(dir, 'seed.txt'), 'seed\n')
+      await mkdir(join(dir, 'sub'))
+      await writeFile(join(dir, 'sub/inner.txt'), 'inner\n')
+      const code = await readFile(
+        new URL(`../../../../../../integ/fixtures/runtime/fs/py/${operation}.py`, import.meta.url),
+        'utf8',
+      )
+      const result = await rt.run({ code, args: [], env: { MIRAGE_TEST_ROOT: dir }, stdin: null })
+      expect(result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe(expected)
+      expect(result.stderr).toBeNull()
+    } finally {
+      await rt.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it.each([null, new Uint8Array(), new Uint8Array(300_000).fill(120)])(
+    'keeps script-CLI input off the process argv',
+    async (stdin) => {
+      const rt = new LocalRuntime()
+      const result = await rt.run({
+        code: "from __future__ import annotations\nimport sys\nprint(argv)\nprint(stdin is None, len(stdin or b''), sys.stdin.buffer.read() == (stdin or b''))",
+        prog: 'pager',
+        args: ['one'],
+        scriptCli: true,
+        env: {},
+        stdin,
+      })
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe(
+        `['pager', 'one']\n${stdin === null ? 'True' : 'False'} ${String(stdin?.length ?? 0)} True\n`,
+      )
+      await rt.close()
+    },
+  )
+
   it.each([MountMode.READ, MountMode.WRITE, MountMode.EXEC])(
     'uses only the host environment for the version process in %s mode',
     async (mode) => {

@@ -110,8 +110,7 @@ async def restore(
                 _merge_mount_files(mount, target_by_prefix[prefix], prefix,
                                    paths)
 
-    await ws._cache.clear()
-    await apply_state_dict(ws, merged)
+    await apply_state_dict(ws, merged, replace_cache=True)
     if "files" in selected and paths is None:
         install_fingerprints(ws,
                              target.get(StateKey.FINGERPRINTS) or [],

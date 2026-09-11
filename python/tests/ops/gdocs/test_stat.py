@@ -60,15 +60,15 @@ async def test_stat_root_is_directory(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_doc(accessor, index):
-    await index.put(
-        "/gdocs/owned/File__doc1.gdoc.json",
-        IndexEntry(
-            id="doc1",
-            name="Report",
-            resource_type="gdocs/doc",
-            remote_time="2026-04-01T00:00:00Z",
-            vfs_name="File__doc1.gdoc.json",
-        ))
+    await index.set_dir('/gdocs/owned',
+                        [('File__doc1.gdoc.json',
+                          IndexEntry(
+                              id="doc1",
+                              name="Report",
+                              resource_type="gdocs/doc",
+                              remote_time="2026-04-01T00:00:00Z",
+                              vfs_name="File__doc1.gdoc.json",
+                          ))])
     result = await stat(accessor,
                         _scope("/gdocs/owned/File__doc1.gdoc.json"),
                         index=index)

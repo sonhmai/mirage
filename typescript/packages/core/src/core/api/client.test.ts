@@ -72,7 +72,7 @@ describe('apiRequest', () => {
       Promise.resolve(jsonResponse({ message: 'nope' }, 404)),
     )
     const failure = apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch })
-    await expect(failure).rejects.toThrowError(Boom)
+    await expect(failure).rejects.toThrow(Boom)
     await expect(failure).rejects.toMatchObject({
       status: 404,
       body: JSON.stringify({ message: 'nope' }),
@@ -105,9 +105,9 @@ describe('apiRequest', () => {
     const fakeFetch = vi.fn<typeof fetch>(() =>
       Promise.resolve(jsonResponse({ retry_after: 0.001 }, 429)),
     )
-    await expect(
-      apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch, retry }),
-    ).rejects.toThrowError(Boom)
+    await expect(apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch, retry })).rejects.toThrow(
+      Boom,
+    )
     expect(fakeFetch).toHaveBeenCalledTimes(3)
   })
 
@@ -127,15 +127,13 @@ describe('apiRequest', () => {
     const fakeFetch = vi.fn<typeof fetch>(() =>
       Promise.resolve(jsonResponse({ retry_after: 30 }, 429)),
     )
-    await expect(apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch })).rejects.toThrowError(
-      Boom,
-    )
+    await expect(apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch })).rejects.toThrow(Boom)
     expect(fakeFetch).toHaveBeenCalledTimes(1)
   })
 
   it('propagates network errors without wrapping', async () => {
     const fakeFetch: typeof fetch = () => Promise.reject(new TypeError('network down'))
-    await expect(apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch })).rejects.toThrowError(
+    await expect(apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch })).rejects.toThrow(
       TypeError,
     )
   })
@@ -166,9 +164,9 @@ describe('apiRequest', () => {
       retryTransport: true,
     }
     const fakeFetch: typeof fetch = () => Promise.reject(new TypeError('network down'))
-    await expect(
-      apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch, retry }),
-    ).rejects.toThrowError(TypeError)
+    await expect(apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch, retry })).rejects.toThrow(
+      TypeError,
+    )
   })
 
   it('bytes mode sends the range and trims an ignored one', async () => {

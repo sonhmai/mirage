@@ -23,6 +23,12 @@ import { NOT_FOUND, idVerbOf, ok, unknownRoute } from '../wire/reply.ts'
 import { docsBatchUpdate } from './batch.ts'
 import { fmtDocument } from './body.ts'
 
+// Only the literal "true" turns it on, which is how a Discovery boolean
+// query parameter is spelled on the wire; anything else reads as unset.
+function wantsTabs(url: URL): boolean {
+  return url.searchParams.get('includeTabsContent') === 'true'
+}
+
 // The old fake spelled a document id `[^/:]+`.
 const ID: RouteOpts = { classes: { id: 'id' } }
 
@@ -41,7 +47,7 @@ export function docsRoutes(): KitRoute<C>[] {
           Buffer.alloc(0),
           ctx.db.nextId('doc'),
         )
-        return ok(fmtDocument(ctx.db, item.id))
+        return ok(fmtDocument(ctx.db, item.id, wantsTabs(ctx.url)))
       },
       { write: true },
     ),
@@ -51,7 +57,7 @@ export function docsRoutes(): KitRoute<C>[] {
       (ctx) => {
         const id = ctx.params.id ?? ''
         if (!ctx.db.docs.has(id)) return NOT_FOUND
-        return ok(fmtDocument(ctx.db, id))
+        return ok(fmtDocument(ctx.db, id, wantsTabs(ctx.url)))
       },
       ID,
     ),

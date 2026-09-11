@@ -37,6 +37,8 @@ import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/types'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
+import { applyStateDict, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
+import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
 
 interface ResourceConfig {
   resource: string
@@ -61,6 +63,7 @@ type Step = (
   | { op: 'exec'; command: string; session?: string }
   | { op: 'set_mode'; path: string; mode: MountMode }
   | { op: 'session'; id: string; profile?: Record<string, unknown> }
+  | { op: 'close_session'; id: string }
   | { op: 'set_profile'; session?: string; profile: Record<string, unknown> | string | null }
   | {
       op: 'register_cli'
@@ -70,9 +73,16 @@ type Step = (
       config?: Record<string, unknown>
     }
   | { op: 'unregister_cli' | 'add_runtime'; name: string }
-  | { op: 'register_policy'; id: string; commands?: string[]; paths?: string[]; reason: string }
+  | {
+      op: 'register_policy'
+      id: string
+      commands?: string[]
+      paths?: string[]
+      vars?: string[]
+      reason: string
+    }
   | { op: 'unregister_policy'; id: string }
-  | { op: 'mounts' | 'clis' | 'close' }
+  | { op: 'mounts' | 'clis' | 'close' | 'snapshot' | 'checkout' }
 ) & { expect?: Record<string, unknown>; session?: string }
 
 interface ScriptDocument {
@@ -124,15 +134,22 @@ for (const register of [registerNodeResource, registerBrowserResource]) {
   })
 }
 
+// What earlier steps put aside for later ones: `snapshot` stores the
+// state dict `checkout` applies.
+interface Held {
+  state?: WorkspaceStateDict
+}
+
 async function action(
   host: Host,
   ws: Workspace,
   step: Step,
   policies: Map<string, Policy>,
+  held: Held,
 ): Promise<unknown> {
   if (['read', 'write', 'readdir', 'stat'].includes(step.op) && step.session !== undefined) {
     const { session, ...unbound } = step
-    return runWithSession(ws.getSession(session), () => action(host, ws, unbound, policies))
+    return runWithSession(ws.getSession(session), () => action(host, ws, unbound, policies, held))
   }
   switch (step.op) {
     case 'cached': {
@@ -156,6 +173,9 @@ async function action(
       break
     case 'session':
       ws.createSession(step.id, { profile: profileDocument(step.profile ?? {}) })
+      break
+    case 'close_session':
+      await ws.closeSession(step.id)
       break
     case 'set_profile':
       await ws.setSessionProfile(
@@ -190,6 +210,8 @@ async function action(
           step.commands?.includes(ctx.command) ? { kind: 'deny', reason: step.reason } : null,
         preOps: (ctx) =>
           step.paths?.includes(ctx.path.virtual) ? { kind: 'deny', reason: step.reason } : null,
+        preSession: (ctx) =>
+          step.vars?.includes(ctx.key) ? { kind: 'deny', reason: step.reason } : null,
       }
       ws.policies.add(policy)
       policies.set(step.id, policy)
@@ -224,6 +246,16 @@ async function action(
         refusal: result.refusal?.reason ?? null,
       }
     }
+    case 'snapshot':
+      held.state = await toStateDict(ws)
+      break
+    case 'checkout': {
+      // A checkout onto the running workspace: the restored state wins,
+      // and every restored variable clears the session gate first.
+      if (held.state === undefined) throw new Error('checkout before snapshot')
+      await applyStateDict(ws, held.state)
+      break
+    }
     case 'mounts':
       return ws
         .mounts()
@@ -255,11 +287,12 @@ async function run(host: Host, testCase: Case): Promise<number> {
     ...(testCase.settings.runtimes !== undefined ? { runtimes: testCase.settings.runtimes } : {}),
   })
   const policies = new Map<string, Policy>()
+  const held: Held = {}
   try {
     for (const [index, step] of testCase.steps.entries()) {
       let actual: Record<string, unknown>
       try {
-        actual = { value: await action(host, ws, step, policies) }
+        actual = { value: await action(host, ws, step, policies, held) }
       } catch (err) {
         actual = { error: err instanceof Error ? err.message : String(err) }
         const condition = classify(err)

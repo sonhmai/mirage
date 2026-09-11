@@ -12,12 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+from uuid import uuid4
+
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.cache.index.config import RedisIndexConfig
 from mirage.resource.ram import RAMResource
-from mirage.types import ConsistencyPolicy
+from mirage.resource.s3 import S3Config, S3Resource
+from mirage.types import ConsistencyPolicy, FileStat, FileType
 from mirage.workspace.reconcile import Reconciler
+from tests.e2e.s3_mock import patch_s3_multi
 
 
 async def _ws_with_overlay():
@@ -117,3 +123,85 @@ async def test_reconcile_read_skips_under_lazy():
     rec = Reconciler(ws.cache, ws.namespace, ConsistencyPolicy.LAZY)
     await rec.reconcile_read(mount, "/data/gone.txt")
     assert ws.namespace.meta_for("/data/gone.txt") is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("index_type", ["ram", "redis"])
+@pytest.mark.parametrize("surface", ["shell", "fs"])
+@pytest.mark.parametrize("change", ["overwrite", "delete"])
+async def test_always_probes_live_s3_with_warm_index(index_type, surface,
+                                                     change):
+    index = None
+    if index_type == "redis":
+        url = os.environ.get("REDIS_URL")
+        if not url:
+            pytest.skip("REDIS_URL not set")
+        index = RedisIndexConfig(url=url, key_prefix=f"reconcile:{uuid4()}:")
+    objects = {"f.txt": b"v1"}
+    resource = S3Resource(
+        S3Config(bucket="test-bucket",
+                 region="us-east-1",
+                 aws_access_key_id="fake",
+                 aws_secret_access_key="fake"))
+    with patch_s3_multi({"test-bucket": objects}):
+        ws = Workspace({"/s3": resource},
+                       index=index,
+                       consistency=ConsistencyPolicy.ALWAYS)
+        try:
+            assert (await ws.execute("ls /s3/")).exit_code == 0
+            assert (await resource.index.get("/s3/f.txt")).entry is not None
+            assert (await ws.execute("cat /s3/f.txt")).stdout == b"v1"
+            assert await ws.cache.exists("/s3/f.txt")
+            if change == "overwrite":
+                objects["f.txt"] = b"v2"
+            else:
+                del objects["f.txt"]
+            if surface == "shell":
+                result = await ws.execute("cat /s3/f.txt")
+                assert result.stdout == (b"v2"
+                                         if change == "overwrite" else b"")
+                assert result.exit_code == (0 if change == "overwrite" else 1)
+            elif change == "overwrite":
+                assert await ws.fs.read("/s3/f.txt") == b"v2"
+            else:
+                with pytest.raises(FileNotFoundError):
+                    await ws.fs.read("/s3/f.txt")
+        finally:
+            await resource.index.clear()
+            await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("probe", ["unknown", "none", "failed", "fresh"])
+@pytest.mark.parametrize("surface", ["shell", "gate"])
+async def test_unverified_probe_cannot_serve_cached_bytes(
+        monkeypatch, probe, surface):
+    ws = Workspace({"/data": RAMResource()})
+    try:
+        mount = ws.namespace.mount_for("/data/f.txt")
+        monkeypatch.setattr(mount.resource, "SUPPORTS_SNAPSHOT", True)
+        await ws.cache.set("/data/f.txt", b"v1", fingerprint="fp1")
+
+        async def stat(*args, **kwargs):
+            if probe == "failed":
+                raise OSError("probe unavailable")
+            if probe == "none":
+                return None
+            return FileStat(name="f.txt",
+                            type=FileType.FILE,
+                            fingerprint="fp1" if probe == "fresh" else None)
+
+        monkeypatch.setattr(mount, "execute_op", stat)
+        rec = Reconciler(ws.cache, ws.namespace, ConsistencyPolicy.ALWAYS)
+        if surface == "shell":
+            await rec.reconcile_read(mount, "/data/f.txt")
+            assert await ws.cache.exists("/data/f.txt") == (probe == "fresh")
+        elif probe == "failed":
+            with pytest.raises(OSError, match="probe unavailable"):
+                await rec.may_serve_cached(mount, "/data/f.txt")
+        else:
+            assert await rec.may_serve_cached(
+                mount, "/data/f.txt") == (probe == "fresh")
+            assert await ws.cache.exists("/data/f.txt") == (probe == "fresh")
+    finally:
+        await ws.close()

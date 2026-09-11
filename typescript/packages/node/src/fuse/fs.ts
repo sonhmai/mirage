@@ -361,8 +361,8 @@ export class MirageFS {
     })
   }
 
-  private open(path: string, _flags: number, cb: Cb<number>): void {
-    void this.core.open(path).then(
+  private open(path: string, flags: number, cb: Cb<number>): void {
+    void this.core.open(path, flags).then(
       (fh) => {
         cb(0, fh)
       },

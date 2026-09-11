@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { IndexEntry } from '../cache/index/config.ts'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -149,7 +150,11 @@ const statOp: RegisteredOp = {
   resource: 'fake-remote',
   filetype: null,
   write: false,
-  fn: (accessor: Accessor, scope: PathSpec) => {
+  fn: async (accessor: Accessor, scope: PathSpec, _args, { index }) => {
+    const cached = await index?.get(scope.virtual)
+    if (cached?.entry !== undefined && cached.entry !== null) {
+      return new FileStat({ name: cached.entry.name, type: FileType.FILE })
+    }
     const acc = accessor as unknown as FakeRemoteAccessor
     const entry = acc.blobs.get(scope.virtual)
     if (entry === undefined) {
@@ -226,37 +231,50 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
     await loaded.close()
   })
 
-  it('STRICT load raises ContentDriftError when fingerprint drifts (no revision pin)', async () => {
-    const accessor = new FakeRemoteAccessor()
-    accessor.put('/remote/a.txt', new TextEncoder().encode('v1'))
-    const ws = build(accessor)
-    await recordedDispatch(ws, 'read', '/remote/a.txt')
-    const state = await toStateDict(ws)
-    // Strip revisions so the loader queues a drift check instead of pinning.
-    state.fingerprints = (state.fingerprints ?? []).map((e) => ({
-      path: e.path,
-      mount_prefix: e.mount_prefix,
-      fingerprint: e.fingerprint ?? null,
-    }))
-    const snap = join(tempDir, 'drift.tar')
-    const [manifest, blobs] = splitManifestAndBlobs(state as unknown as Record<string, unknown>)
-    const { writeFileSync } = await import('node:fs')
-    writeFileSync(snap, await writeSnapshotTar(manifest, blobs))
+  it.each(['shell', 'dispatch'])(
+    'STRICT load probes beyond warm metadata via %s',
+    async (surface) => {
+      const accessor = new FakeRemoteAccessor()
+      accessor.put('/remote/a.txt', new TextEncoder().encode('v1'))
+      const ws = build(accessor)
+      await recordedDispatch(ws, 'read', '/remote/a.txt')
+      const state = await toStateDict(ws)
+      // Strip revisions so the loader queues a drift check instead of pinning.
+      state.fingerprints = (state.fingerprints ?? []).map((e) => ({
+        path: e.path,
+        mount_prefix: e.mount_prefix,
+        fingerprint: e.fingerprint ?? null,
+      }))
+      const snap = join(tempDir, 'drift.tar')
+      const [manifest, blobs] = splitManifestAndBlobs(state as unknown as Record<string, unknown>)
+      const { writeFileSync } = await import('node:fs')
+      writeFileSync(snap, await writeSnapshotTar(manifest, blobs))
 
-    accessor.put('/remote/a.txt', new TextEncoder().encode('v2'))
+      accessor.put('/remote/a.txt', new TextEncoder().encode('v2'))
 
-    const ops = new OpsRegistry()
-    ops.register(readOp)
-    ops.register(statOp)
-    const loaded = await Workspace.load(
-      snap,
-      { mode: MountMode.WRITE, ops, shellParser: parser, driftPolicy: DriftPolicy.STRICT },
-      { '/remote/': new FakeRemoteResource(accessor) },
-    )
-    await expect(loaded.dispatch('read', '/remote/a.txt')).rejects.toBeInstanceOf(ContentDriftError)
-    await ws.close()
-    await loaded.close()
-  })
+      const ops = new OpsRegistry()
+      ops.register(readOp)
+      ops.register(statOp)
+      const loaded = await Workspace.load(
+        snap,
+        { mode: MountMode.WRITE, ops, shellParser: parser, driftPolicy: DriftPolicy.STRICT },
+        { '/remote/': new FakeRemoteResource(accessor) },
+      )
+      const index = loaded.namespace.mountFor('/remote/a.txt').index
+      if (index === undefined) throw new Error('missing index')
+      await index.put(
+        '/remote/a.txt',
+        new IndexEntry({ id: 'a', name: 'a.txt', resourceType: 'file', size: 2 }),
+      )
+      const read =
+        surface === 'shell'
+          ? loaded.execute('cat /remote/a.txt')
+          : loaded.dispatch('read', '/remote/a.txt')
+      await expect(read).rejects.toBeInstanceOf(ContentDriftError)
+      await ws.close()
+      await loaded.close()
+    },
+  )
 
   it('STRICT load checks drift on the fs facade too, not only Workspace.dispatch', async () => {
     // The fs facade (the FUSE path) reaches the dispatcher without

@@ -268,29 +268,10 @@ async def test_eval_cancellation_reclaims_the_worker():
         await task
     # The killed worker took the session's heap with it, so the id is
     # dropped and the next eval gets a fresh worker rather than a dead one.
-    assert "live" not in rt._eval_sessions
+    assert "live" not in rt._execution._eval_sessions
     again = await rt.eval("6 * 7", session="live")
     assert again.value == 42
     await rt.close()
-
-
-@pytest.mark.asyncio
-async def test_monty_concurrent_first_use_shares_one_pool():
-    """Two cold runs must not each build a pool.
-
-    The loser of the race would be unreachable from close(), leaking
-    its worker subprocesses.
-    """
-    runtime = MontyRuntime()
-    pools: list[object] = []
-
-    async def probe():
-        pool = await runtime._ensure_pool()
-        pools.append(pool)
-
-    await asyncio.gather(probe(), probe(), probe())
-    assert len({id(p) for p in pools}) == 1
-    await runtime.close()
 
 
 @pytest.mark.asyncio
@@ -302,7 +283,7 @@ async def test_monty_cancelled_eval_session_releases_its_checkout(monkeypatch):
     itself: one leaked lease would not exhaust a CPU-sized pool, so a
     later eval succeeding proves nothing.
     """
-    import mirage.runtime.python.monty.runtime as monty_mod
+    import mirage.runtime.python.monty.execution as monty_mod
     released: list[object] = []
     original = monty_mod._release
 
@@ -318,7 +299,7 @@ async def test_monty_cancelled_eval_session_releases_its_checkout(monkeypatch):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert "s1" not in runtime._eval_sessions
+    assert "s1" not in runtime._execution._eval_sessions
     assert len(released) == 1, "the cancelled checkout was never released"
     # And the runtime stays usable afterwards.
     result = await runtime.eval("1 + 1", session="s1")

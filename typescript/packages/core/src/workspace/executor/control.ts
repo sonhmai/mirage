@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { seedVar } from '../session/state.ts'
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { asyncChain } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -253,8 +252,6 @@ export async function handleFor(
     const err = new TextEncoder().encode(`bash: ${variable}: readonly variable\n`)
     return collectLoopResult([], new IOResult({ exitCode: 1, stderr: err }), 'for')
   }
-  const savedValue = session.env[variable]
-  const hadKey = variable in session.env
   const [prevBuffer, bodyStdin] = installStdinBuffer(session, stdin)
   stdin = bodyStdin
 
@@ -310,12 +307,9 @@ export async function handleFor(
       }
     }
   } finally {
-    if (hadKey && savedValue !== undefined) {
-      seedVar(session, variable, savedValue)
-    } else {
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete session.vars[variable]
-    }
+    // The loop variable is an ordinary variable in bash and keeps its
+    // last value after the loop (`for X in a b; do :; done; echo $X`
+    // prints b); nothing is put back.
     session.stdinBuffer = prevBuffer
   }
   return collectLoopResult(allStdout, mergedIo, 'for')
@@ -678,8 +672,6 @@ export async function handleSelect(
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
   const view = sessionView(session, policies)
-  const savedValue = session.env[variable]
-  const hadKey = variable in session.env
   const [prevBuffer, bodyStdin] = installStdinBuffer(session, stdin)
   stdin = bodyStdin
 
@@ -767,12 +759,9 @@ export async function handleSelect(
       }
     }
   } finally {
-    if (hadKey && savedValue !== undefined) {
-      seedVar(session, variable, savedValue)
-    } else {
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete session.vars[variable]
-    }
+    // The loop variable is an ordinary variable in bash and keeps its
+    // last value after the loop (`for X in a b; do :; done; echo $X`
+    // prints b); nothing is put back.
     session.stdinBuffer = prevBuffer
   }
   return collectLoopResult(allStdout, mergedIo, 'select')

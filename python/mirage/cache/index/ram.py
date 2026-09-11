@@ -68,7 +68,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         exp = self._expiry.get(resource_path)
         if exp is None:
             return ListResult(status=LookupStatus.NOT_FOUND)
-        if datetime.now(timezone.utc) > exp:
+        if datetime.now(timezone.utc) >= exp:
             return ListResult(status=LookupStatus.EXPIRED)
         children = self._children.get(resource_path)
         return ListResult(entries=children or [])

@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.provision import pure_provision
+from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -25,34 +26,6 @@ from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.dates import parse_date_expr
-
-
-def _expand_gnu_only(fmt: str, dt: datetime) -> str:
-    """Expand the directives GNU date implements itself, ahead of strftime.
-
-    ``%q`` (quarter) exists in no C library strftime, so passing it
-    through prints a mangled literal; GNU expands it before formatting
-    and so does this. ``%%`` pairs are stepped over, keeping ``%%q``
-    literal.
-
-    Args:
-        fmt (str): the + format as typed.
-        dt (datetime): the moment being rendered.
-    """
-    out: list[str] = []
-    i = 0
-    while i < len(fmt):
-        if fmt[i] == "%" and i + 1 < len(fmt):
-            nxt = fmt[i + 1]
-            if nxt == "q":
-                out.append(str((dt.month - 1) // 3 + 1))
-            else:
-                out.append(fmt[i:i + 2])
-            i += 2
-            continue
-        out.append(fmt[i])
-        i += 1
-    return "".join(out)
 
 
 @command("date", resource=None, spec=SPECS["date"], provision=pure_provision)
@@ -89,7 +62,7 @@ async def date(
     elif fl.as_bool("R"):
         result = email.utils.format_datetime(dt)
     elif fmt is not None:
-        result = dt.strftime(_expand_gnu_only(fmt, dt))
+        result = gnu_strftime(dt, fmt)
     else:
         result = dt.strftime("%a %b %d %H:%M:%S %Z %Y") if u else dt.strftime(
             "%a %b %d %H:%M:%S %Y")

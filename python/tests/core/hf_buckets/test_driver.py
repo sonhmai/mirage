@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from datetime import datetime, timezone
 from typing import cast
 
 import pytest
@@ -199,3 +200,19 @@ async def test_probe_prefix_sees_any_key_under_the_prefix():
 def test_is_not_found_matches_only_opendal_not_found():
     assert DRIVER.is_not_found(NotFound("path not found", "k")) is True
     assert DRIVER.is_not_found(KeyError("k")) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,path", [("list_tree", "data/"),
+                                         ("list_subtree", "data"),
+                                         ("list_subtree", "data/a.txt")])
+@pytest.mark.parametrize("modified",
+                         [datetime(2025, 1, 1, tzinfo=timezone.utc), None])
+async def test_recursive_rows_preserve_modification_time(
+        method, path, modified):
+    fake = FakeAsyncOperator(files={"data/a.txt": b"old"})
+    fake.metas["data/a.txt"].last_modified = modified
+    scan = DRIVER.list_tree if method == "list_tree" else DRIVER.list_subtree
+    rows = [row async for row in scan(_op(fake), path)]
+    assert len(rows) == 1
+    assert rows[0].modified == (modified.isoformat() if modified else "")

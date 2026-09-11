@@ -37,6 +37,7 @@ try {
     configFile: false,
     root,
     logLevel: 'warn',
+    worker: { format: 'es', rollupOptions: { external } },
     plugins: [
       {
         name: 'no-implicit-e2b',

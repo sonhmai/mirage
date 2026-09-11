@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Connection, Table } from '@lancedb/lancedb'
-import type { LanceDriver, LanceRow } from '@struktoai/mirage-core/core/lancedb/_driver'
+import type { Connection, Query, Table } from '@lancedb/lancedb'
+import type { LanceDriver, LanceRow, ValueTest } from '@struktoai/mirage-core/core/lancedb/_driver'
 import type { LanceDBConfigResolved } from '@struktoai/mirage-core/resource/lancedb/config'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
@@ -22,6 +22,42 @@ function toStr(value: unknown): string {
   if (value === null || value === undefined) return ''
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value as string | number | boolean | bigint)
+}
+
+function textsOf(rows: LanceRow[], column: string): string[] {
+  const texts: string[] = []
+  for (const row of rows) {
+    const value = row[column]
+    if (value !== null && value !== undefined) texts.push(toStr(value))
+  }
+  return texts
+}
+
+/**
+ * The first `limit` values of `column` that pass `keep`.
+ *
+ * Streams the unbounded query batch by batch and stops at the cap, so a scan
+ * past the head of the table costs one batch of memory.
+ */
+async function keptTexts(
+  query: Query,
+  column: string,
+  limit: number,
+  keep: ValueTest,
+): Promise<string[]> {
+  const texts: string[] = []
+  for await (const batch of query) {
+    for (const row of batch.toArray() as LanceRow[]) {
+      const value = row[column]
+      if (value === null || value === undefined) continue
+      const text = toStr(value)
+      if (keep(text)) {
+        texts.push(text)
+        if (texts.length >= limit) return texts
+      }
+    }
+  }
+  return texts
 }
 
 /**
@@ -118,18 +154,17 @@ export class LanceDBStore implements LanceDriver {
     filters: Record<string, string>,
     limit: number,
     prefix = '',
+    keep?: ValueTest,
   ): Promise<string[]> {
     const tbl = await this.table(table)
-    let query = tbl.query().select([column]).limit(limit)
+    let query = tbl.query().select([column])
     const clause = predicate(column, filters, prefix)
     if (clause !== '') query = query.where(clause)
-    const rows = (await query.toArray()) as LanceRow[]
-    const values = new Set<string>()
-    for (const row of rows) {
-      const v = row[column]
-      if (v !== null && v !== undefined) values.add(toStr(v))
-    }
-    return [...values].sort(compareCodePoints)
+    const texts =
+      keep === undefined
+        ? textsOf((await query.limit(limit).toArray()) as LanceRow[], column)
+        : await keptTexts(query, column, limit, keep)
+    return [...new Set(texts)].sort(compareCodePoints)
   }
 
   async tableColumns(table: string): Promise<string[]> {

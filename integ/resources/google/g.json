@@ -91,10 +91,10 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "cat /data/Plan.gdoc.json | jq -c '{documentId: (.documentId | length > 0), title, body: (.body.content | length)}'",
+      "command": "cat /data/Plan.gdoc.json | jq -c '{documentId: (.documentId | length > 0), title, tabs: (.tabs | length), blocks: (.tabs[0].documentTab.body.content | length)}'",
       "expect": {
         "exit": 0,
-        "stdout": "{\"documentId\":true,\"title\":\"Plan\",\"body\":2}\n",
+        "stdout": "{\"documentId\":true,\"title\":\"Plan\",\"tabs\":1,\"blocks\":2}\n",
         "stderr": ""
       }
     },
@@ -119,7 +119,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "cat /data/Plan.gdoc.json | jq -r '.body.content[1].paragraph.elements[0].textRun.content'",
+      "command": "cat /data/Plan.gdoc.json | jq -r '[.. | .textRun? // empty | .content] | add'",
       "expect": {
         "exit": 0,
         "stdout": "from drive\n\n",

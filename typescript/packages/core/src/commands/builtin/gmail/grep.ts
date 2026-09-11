@@ -28,7 +28,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { grepGeneric } from '../generic/grep.ts'
 import { patternArg } from '../grep_pattern.ts'
-import { pushdownOperand } from '../grep_pushdown.ts'
+import { pushdownOperand, textSearchResults } from '../grep_pushdown.ts'
 import { fileReadProvision } from './_provision.ts'
 import { FlagView } from '../../spec/types.ts'
 
@@ -77,8 +77,10 @@ async function grepCommand(
       )
       const lines = formatGrepResults(rows, labelName, filePrefix, pattern)
       if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
-      return [out, new IOResult()]
+      if (textSearchResults(lines)) {
+        const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
+        return [out, new IOResult()]
+      }
     }
   }
 

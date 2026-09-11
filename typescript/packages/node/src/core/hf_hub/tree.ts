@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { withIndexLock } from '@struktoai/mirage-core/cache/index/lock'
 import { IndexEntry } from '@struktoai/mirage-core/cache/index/config'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { LookupStatus } from '@struktoai/mirage-core/cache/index/config'
@@ -283,12 +284,14 @@ export async function refillIndex(
   accessor.tree = await fetchTree(accessor)
   accessor.treeLoaded = true
   accessor.rowsCache = null
+  // Refilling replaces the snapshot; merging would retain deleted paths.
+  await index.invalidatePrefix(prefix.replace(/\/+$/, '') || '/')
   await seedIndex(accessor, index, prefix)
   return true
 }
 
 /**
- * Refetch when the index holds no listing at all.
+ * Refetch when the root listing is missing or expired.
  *
  * Every reader treats a missing listing as a real absence, which is right
  * against a *live* index and wrong against one that was never filled or has
@@ -303,7 +306,8 @@ export async function ensureLiveIndex(
 ): Promise<boolean> {
   const root = prefix.replace(/\/+$/, '')
   const listing = await index.listDir(root === '' ? '/' : root)
-  if (listing.status !== LookupStatus.NOT_FOUND) return false
+  if (listing.status !== LookupStatus.NOT_FOUND && listing.status !== LookupStatus.EXPIRED)
+    return false
   return refillIndex(accessor, index, prefix)
 }
 
@@ -326,7 +330,9 @@ export async function ensureTree(
   }
   const run = (async () => {
     if (index !== undefined) {
-      await refillIndex(accessor, index, prefix)
+      await withIndexLock(index, prefix.replace(/\/+$/, '') || '/', async () => {
+        if (!accessor.treeLoaded) await refillIndex(accessor, index, prefix)
+      })
       return
     }
     accessor.tree = await fetchTree(accessor)

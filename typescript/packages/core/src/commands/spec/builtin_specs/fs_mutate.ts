@@ -93,12 +93,32 @@ export const SPECS: Record<string, CommandSpec> = {
     options: [new Option({ short: '-z', long: '--zero' })],
     rest: new Operand({ type: 'str' }),
   }),
+  // ln runs in the executor for both link kinds (a symlink is namespace
+  // state, a "hard link" is a byte copy through the op door), so this spec
+  // is its grammar authority and no builder binds it.
   ln: new CommandSpec({
     options: [
-      new Option({ short: '-s' }),
-      new Option({ short: '-f' }),
-      new Option({ short: '-n' }),
-      new Option({ short: '-v' }),
+      new Option({ short: '-s', long: '--symbolic' }),
+      new Option({ short: '-f', long: '--force' }),
+      new Option({ short: '-n', long: '--no-dereference' }),
+      new Option({ short: '-v', long: '--verbose' }),
+      new Option({ short: '-r', long: '--relative' }),
+      new Option({ short: '-L', long: '--logical' }),
+      new Option({ short: '-P', long: '--physical' }),
+      new Option({ short: '-d', long: '--directory' }),
+      new Option({ short: '-F' }),
+      // GNU: -b never takes an argument; only --backup= carries a value,
+      // so the short stays clusterable (-sbv).
+      new Option({
+        short: '-b',
+        long: '--backup',
+        type: 'str',
+        valueOptional: true,
+        shortValue: false,
+      }),
+      new Option({ short: '-S', long: '--suffix', type: 'str' }),
+      new Option({ short: '-t', long: '--target-directory', type: 'path' }),
+      new Option({ short: '-T', long: '--no-target-directory' }),
     ],
     rest: new Operand({ type: 'path' }),
   }),

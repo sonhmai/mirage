@@ -55,13 +55,20 @@ from mirage.resource.registry import (build_resource, known_resources,
                                       register_resource)
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.constants import EXTERNAL_COMMANDS
+from mirage.runtime.binding import WorkspaceBinding
+from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.mixin import EvaluatorMixin, LineExecutorMixin
+from mirage.runtime.mixin import (EvaluatorMixin, LineExecutorMixin,
+                                  ProcessExecutorMixin)
 from mirage.runtime.routing import DenyResult, RouteContext, RouteResult
 from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
 from mirage.runtime.table import (build_runtime, known_runtimes,
                                   register_runtime)
-from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.types import (RunArgs, RunResult, CodeExecution,
+                                  ShellExecution, ProcessExecution,
+                                  ExecutionRequest, RuntimeContext,
+                                  RuntimeCapabilities, FilesystemOperation)
 from mirage.secrets.registry import known_sources, register_secrets
 from mirage.types import (ContentType, DriftPolicy, FileType, Limit, PathSpec,
                           ResourceName)
@@ -118,6 +125,7 @@ __all__ = [
     "LanguageRuntime",
     "Limit",
     "LineExecutorMixin",
+    "ProcessExecutorMixin",
     "NULL_INDEX",
     "OpsContext",
     "OpsTable",
@@ -130,10 +138,20 @@ __all__ = [
     "ResourceName",
     "RouteContext",
     "RouteResult",
+    "CodeExecution",
+    "ShellExecution",
+    "ProcessExecution",
+    "ExecutionRequest",
+    "RuntimeContext",
+    "RuntimeCapabilities",
+    "FilesystemOperation",
+    "WorkspaceBinding",
+    "UnsupportedExecutionError",
     "RunArgs",
     "RunResult",
     "Runtime",
     "RuntimeConfig",
+    "EXTERNAL_COMMANDS",
     "SPECS",
     "SandboxConfig",
     "Scope",

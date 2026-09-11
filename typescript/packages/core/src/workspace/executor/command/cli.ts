@@ -25,7 +25,7 @@ import { renderHelp } from '../../../commands/spec/help.ts'
 import { Operand, type FlagValue } from '../../../commands/spec/types.ts'
 import { UsageError } from '../../../commands/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { wordText, type PathSpec } from '../../../types.ts'
+import { wordText, PathSpec } from '../../../types.ts'
 import { concatBytes } from '../../../core/jq/format.ts'
 import { maybeWithTimeout, runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import { CommandTimeoutError } from '../../../commands/errors.ts'
@@ -125,6 +125,9 @@ async function scriptOutput(
   script: ScriptSource,
   runtime: LanguageRuntime,
   prog: string,
+  cwd: PathSpec,
+  timeout: number | null,
+  signal: AbortSignal,
 ): Promise<[Uint8Array | null, IOResult]> {
   const env: Record<string, string> = { ...inv.env }
   if (inv.config !== null && inv.config !== undefined) {
@@ -133,12 +136,18 @@ async function scriptOutput(
   const stdin = inv.stdin !== null ? await materialize(inv.stdin) : null
   // A .mjs source needs the engine's module mode, the same bit the js
   // command derives from the operand's extension.
-  const result = await runtime.run({
+  const result = await runtime.execute({
+    kind: 'code',
+    language: runtime.language,
     code: script.source,
     args: [...inv.argv],
     prog,
+    scriptCli: true,
+    cwd,
     env,
     stdin,
+    signal,
+    ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
     ...(script.module ? { flags: { module: true } } : {}),
   })
   return runOutput(result)
@@ -286,6 +295,12 @@ export async function handleCli(
     ...(Object.keys(doors).length > 0 ? { doors } : {}),
   }
 
+  // The outer timer bounds the whole invocation; the runtime deadline
+  // also interrupts engines that block their event loop. Unlike Python's
+  // asyncio cancellation, racing a promise does not stop its work.
+  const limit = resolveLimit(prog, [], leaf.limit)
+  const timeout = limit?.timeoutSeconds ?? null
+  const abort = new AbortController()
   let body: Promise<[ByteSource | null, IOResult] | null>
   if (leaf.script !== null) {
     const [runtime, refused] = selectRuntime(prog, leaf, context.entries ?? [])
@@ -299,7 +314,15 @@ export async function handleCli(
         new ExecutionNode({ command: cmdStr, exitCode: 127, stderr }),
       ]
     }
-    body = scriptOutput(inv, leaf.script, runtime, prog)
+    body = scriptOutput(
+      inv,
+      leaf.script,
+      runtime,
+      prog,
+      PathSpec.fromStrPath(session.cwd),
+      timeout,
+      abort.signal,
+    )
   } else {
     const fn = leaf.fn
     if (fn === null) {
@@ -317,8 +340,6 @@ export async function handleCli(
   // streams, exactly like mount dispatch: without the wrap a blocking
   // leaf hangs forever and an unbounded-output leaf ignores its own
   // limits.
-  const limit = resolveLimit(prog, [], leaf.limit)
-  const timeout = limit?.timeoutSeconds ?? null
   let stdout: ByteSource | null = null
   let io = new IOResult()
   try {
@@ -339,7 +360,10 @@ export async function handleCli(
     }
     // A limit timeout is answered by the workspace-level handler
     // (exit 124), not here.
-    if (err instanceof CommandTimeoutError) throw err
+    if (err instanceof CommandTimeoutError) {
+      abort.abort()
+      throw err
+    }
     // Any other thrown leaf error (an API error, a TypeError) becomes
     // this command's IOResult, prefixed like GNU (prog: message), so
     // the rest of the line keeps running.

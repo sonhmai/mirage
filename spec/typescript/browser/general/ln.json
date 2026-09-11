@@ -1,99 +1,77 @@
 {
   "_meta": {
-    "by_resource": {
-      "box": {
-        "filetypes": [],
-        "has_aggregate": false,
-        "has_provision": true,
-        "has_write": true
-      },
-      "databricks_volume": {
-        "filetypes": [],
-        "has_aggregate": false,
-        "has_provision": true,
-        "has_write": true
-      },
-      "dropbox": {
-        "filetypes": [],
-        "has_aggregate": false,
-        "has_provision": true,
-        "has_write": true
-      },
-      "gdrive": {
-        "filetypes": [],
-        "has_aggregate": false,
-        "has_provision": true,
-        "has_write": true
-      },
-      "onedrive": {
-        "filetypes": [],
-        "has_aggregate": false,
-        "has_provision": true,
-        "has_write": true
-      },
-      "opfs": {
-        "filetypes": [],
-        "has_aggregate": false,
-        "has_provision": true,
-        "has_write": true
-      },
-      "ram": {
-        "filetypes": [],
-        "has_aggregate": false,
-        "has_provision": true,
-        "has_write": true
-      },
-      "redis": {
-        "filetypes": [],
-        "has_aggregate": false,
-        "has_provision": true,
-        "has_write": true
-      },
-      "s3": {
-        "filetypes": [],
-        "has_aggregate": false,
-        "has_provision": true,
-        "has_write": true
-      },
-      "sharepoint": {
-        "filetypes": [],
-        "has_aggregate": false,
-        "has_provision": true,
-        "has_write": true
-      }
-    },
+    "by_resource": {},
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": true,
-    "has_write": true,
-    "resources": [
-      "box",
-      "databricks_volume",
-      "dropbox",
-      "gdrive",
-      "onedrive",
-      "opfs",
-      "ram",
-      "redis",
-      "s3",
-      "sharepoint"
-    ]
+    "has_provision": false,
+    "has_write": false,
+    "resources": []
   },
   "options": [
     {
+      "long": "--symbolic",
       "short": "-s",
       "type": "bool"
     },
     {
+      "long": "--force",
       "short": "-f",
       "type": "bool"
     },
     {
+      "long": "--no-dereference",
       "short": "-n",
       "type": "bool"
     },
     {
+      "long": "--verbose",
       "short": "-v",
+      "type": "bool"
+    },
+    {
+      "long": "--relative",
+      "short": "-r",
+      "type": "bool"
+    },
+    {
+      "long": "--logical",
+      "short": "-L",
+      "type": "bool"
+    },
+    {
+      "long": "--physical",
+      "short": "-P",
+      "type": "bool"
+    },
+    {
+      "long": "--directory",
+      "short": "-d",
+      "type": "bool"
+    },
+    {
+      "short": "-F",
+      "type": "bool"
+    },
+    {
+      "long": "--backup",
+      "short": "-b",
+      "short_value": false,
+      "type": "str",
+      "value_optional": true
+    },
+    {
+      "long": "--suffix",
+      "short": "-S",
+      "type": "str"
+    },
+    {
+      "long": "--target-directory",
+      "short": "-t",
+      "type": "path"
+    },
+    {
+      "long": "--no-target-directory",
+      "short": "-T",
       "type": "bool"
     }
   ],

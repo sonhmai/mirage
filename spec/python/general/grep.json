@@ -386,6 +386,10 @@
       "type": "bool"
     },
     {
+      "long": "--binary-files",
+      "type": "str"
+    },
+    {
       "long": "--include",
       "multiple": true,
       "type": "str"

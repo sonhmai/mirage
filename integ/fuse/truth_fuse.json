@@ -2,6 +2,8 @@
   "data_cat_a": "alpha",
   "logs_cat_b": "beta",
   "logs_size_b": 5,
+  "overwrite_short_size": 3,
+  "overwrite_short_body": "BB",
   "data_pinned": true,
   "distinct_mounts": true,
   "data_mode_is_write": true,

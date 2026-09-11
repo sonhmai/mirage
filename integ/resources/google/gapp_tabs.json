@@ -1,0 +1,228 @@
+{
+  "cases": [
+    {
+      "id": "gapp_tabs_ls",
+      "seq": 521000,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "ls /docs/owned",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-01-01_Weekly_Log__doc0001.gdoc.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_no_flat_body",
+      "seq": 521001,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "cat /docs/owned/*.gdoc.json | jq -c '{body: .body, tabs: (.tabs | length)}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"body\":null,\"tabs\":2}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_names",
+      "seq": 521002,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "cat /docs/owned/*.gdoc.json | jq -c '[.. | .tabProperties? // empty | .title]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"Tab 1\",\"Notes\",\"Archive\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_all_text",
+      "seq": 521003,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "cat /docs/owned/*.gdoc.json | jq -r '[.. | .textRun? // empty | .content] | add'",
+      "expect": {
+        "exit": 0,
+        "stdout": "sep 6 entry\nloose notes\nolder material\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_child_is_nested",
+      "seq": 521004,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "cat /docs/owned/*.gdoc.json | jq -c '.tabs[1].childTabs[0].tabProperties | {tabId, title, index, parentTabId, nestingLevel}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"tabId\":\"t.2\",\"title\":\"Archive\",\"index\":0,\"parentTabId\":\"t.1\",\"nestingLevel\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_grep_finds_a_later_tab",
+      "seq": 521005,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "grep -c 'older material' /docs/owned/*.gdoc.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_write_targets_a_tab",
+      "seq": 521006,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "D=$(cat /docs/owned/*.gdoc.json | jq -r .documentId) && gws docs write --document $D --tab t.2 --text ' appended' > /dev/null && cat /docs/owned/*.gdoc.json | jq -r '[.. | .textRun? // empty | .content] | add'",
+      "expect": {
+        "exit": 0,
+        "stdout": "sep 6 entry\nloose notes\nolder material appended\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_write_without_a_tab_hits_the_first",
+      "seq": 521007,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "D=$(cat /docs/owned/*.gdoc.json | jq -r .documentId) && gws docs write --document $D --text ' plain' > /dev/null && cat /docs/owned/*.gdoc.json | jq -r '.tabs[0].documentTab.body.content[] | .paragraph?.elements[]?.textRun.content'",
+      "expect": {
+        "exit": 0,
+        "stdout": "sep 6 entry plain\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_unknown_tab_is_refused",
+      "seq": 521008,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "D=$(cat /docs/owned/*.gdoc.json | jq -r .documentId); gws docs write --document $D --tab t.99 --text 'x' 2>&1 >/dev/null | grep -o 'tabId not found in the document'",
+      "expect": {
+        "exit": 0,
+        "stdout": "tabId not found in the document\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_unknown_tab_exits_nonzero",
+      "seq": 521009,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "D=$(cat /docs/owned/*.gdoc.json | jq -r .documentId); gws docs write --document $D --tab t.99 --text 'x' 2>/dev/null; echo \"exit=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_refusal_left_the_document_alone",
+      "seq": 521010,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "cat /docs/owned/*.gdoc.json | jq -r '[.. | .textRun? // empty | .content] | add'",
+      "expect": {
+        "exit": 0,
+        "stdout": "sep 6 entry plain\nloose notes\nolder material appended\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_cli_without_the_flag_is_flat",
+      "seq": 521011,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "gws docs documents get --params '{\"documentId\": \"doc0001\"}' | jq -c '{body: (.body.content | length > 0), tabs: .tabs}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"body\":true,\"tabs\":null}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_cli_with_the_flag_is_tabbed",
+      "seq": 521012,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "gws docs documents get --params '{\"documentId\": \"doc0001\", \"includeTabsContent\": true}' | jq -c '{body: .body, tabs: (.tabs | length)}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"body\":null,\"tabs\":2}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_batch_is_all_or_nothing",
+      "seq": 521013,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "gws docs documents batchUpdate --params '{\"documentId\": \"doc0001\"}' --json '{\"requests\": [{\"insertText\": {\"text\": \" FIRSTREQ\", \"endOfSegmentLocation\": {\"segmentId\": \"\"}}}, {\"insertText\": {\"text\": \" SECONDREQ\", \"endOfSegmentLocation\": {\"tabId\": \"t.99\"}}}]}' 2>&1 >/dev/null | grep -o 'tabId not found in the document'",
+      "expect": {
+        "exit": 0,
+        "stdout": "tabId not found in the document\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_failed_batch_applied_nothing",
+      "seq": 521014,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "cat /docs/owned/*.gdoc.json | jq -r '[.. | .textRun? // empty | .content] | add | test(\"FIRSTREQ\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "false\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_tabs_index_counts_within_the_parent",
+      "seq": 521015,
+      "targets": [
+        "gapps-tabs"
+      ],
+      "clear_cache": true,
+      "command": "cat /docs/owned/*.gdoc.json | jq -c '[.tabs[0].tabProperties.index, .tabs[1].tabProperties.index, .tabs[1].childTabs[0].tabProperties.index]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[0,1,0]\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

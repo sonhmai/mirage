@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { PatternType } from './constants.ts'
 import {
+  textSearchResults,
   classifyPattern,
   extractRequiredLiteral,
   hasSearchShapingFlags,
@@ -229,4 +230,15 @@ describe('literalPushdownOperand', () => {
     expect(literalPushdownOperand([TRACES], {}, 'a.b')).toBe(null)
     expect(literalPushdownOperand([TRACES], { F: true }, 'a.b')).toBe(TRACES)
   })
+})
+
+it.each(['binary', 'text', 'without-match', 'bad'])('binary mode %s requires scanning', (mode) => {
+  expect(hasSearchShapingFlags({ binary_files: mode })).toBe(true)
+})
+it.each([
+  ['hello 😀', true],
+  ['hello\0tail', false],
+  ['hello\udcff', false],
+] as const)('checks provider snippets %j', (text, expected) => {
+  expect(textSearchResults([text])).toBe(expected)
 })

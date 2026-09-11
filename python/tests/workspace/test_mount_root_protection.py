@@ -244,7 +244,7 @@ def test_ln_refuses_mount_root_as_link_name():
     async def go():
         ws = _ws_two_mounts()
         await _exec(ws, "touch /ram/source")
-        r = await _exec(ws, "ln /ram/source /r2")
+        r = await _exec(ws, "ln -T /ram/source /r2")
         assert r.exit_code == 1
         assert b"File exists" in (r.stderr or b"")
 
@@ -255,7 +255,7 @@ def test_ln_s_refuses_mount_root_as_link_name():
 
     async def go():
         ws = _ws_two_mounts()
-        r = await _exec(ws, "ln -s /ram/source /r2")
+        r = await _exec(ws, "ln -sT /ram/source /r2")
         assert r.exit_code == 1
         assert b"File exists" in (r.stderr or b"")
 

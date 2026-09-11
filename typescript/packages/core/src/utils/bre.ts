@@ -19,7 +19,7 @@
 const BRE_LITERALS = '+?|(){}'
 const BACKREFERENCES = '123456789'
 // A bracket expression takes its own rules: every character inside is
-// ordinary, so the span is copied out untouched.
+// ordinary; a leading literal ] needs escaping for the RegExp engine.
 const CLASS_INTRODUCERS = ':.='
 
 // Index just past a bracket expression opening at `start`. POSIX puts a literal
@@ -73,8 +73,8 @@ function dollarAnchors(pattern: string, index: number): boolean {
  *   pattern, and after `^`, `\(` or `\|`. `^*abc` matches a literal asterisk.
  * - `^` anchors only at those same starting positions, and `$` only at the end
  *   or before `\)` / `\|`. `a^b` and `a$b` are three literal characters each.
- * - A bracket expression is copied out whole: everything inside it is already
- *   ordinary in both dialects.
+ * - A bracket expression keeps its ordinary characters, with a leading
+ *   literal `]` escaped for the RegExp engine.
  *
  * @param pattern the expression as the user typed it
  */
@@ -89,7 +89,13 @@ export function breToRegExp(pattern: string): string {
     const char = pattern.charAt(index)
     if (char === '[') {
       const end = bracketEnd(pattern, index)
-      out.push(pattern.slice(index, end))
+      const first = index + (pattern.charAt(index + 1) === '^' ? 2 : 1)
+      const literalClose = pattern.charAt(first) === ']'
+      out.push(
+        literalClose
+          ? pattern.slice(index, first) + '\\' + pattern.slice(first, end)
+          : pattern.slice(index, end),
+      )
       index = end
       fresh = false
       continue

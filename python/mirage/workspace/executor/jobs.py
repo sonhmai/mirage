@@ -256,7 +256,18 @@ def _job_result(
                                                      stderr=err)
 
 
-def _resolve_spec(job_table: JobTable, spec: str) -> tuple[Job | None, str]:
+def _session_of(session: Session | None) -> str:
+    """The job list a builtin reads: the calling session's, or the shared
+    empty id when it runs with no session (a bare table in a test).
+
+    Args:
+        session (Session | None): the shell session, if any.
+    """
+    return session.session_id if session is not None else ""
+
+
+def _resolve_spec(job_table: JobTable, spec: str,
+                  session_id: str) -> tuple[Job | None, str]:
     """The job a `wait`/`disown` operand names, or bash's refusal.
 
     A `%N` spec that names no job is `no such job`; a bare number is a
@@ -265,15 +276,16 @@ def _resolve_spec(job_table: JobTable, spec: str) -> tuple[Job | None, str]:
     Anything else is `not a pid or valid job spec`.
 
     Args:
-        job_table (JobTable): the session's jobs.
+        job_table (JobTable): the workspace's job table.
         spec (str): the operand as typed.
+        session_id (str): the session whose list the spec names into.
     """
     if spec.startswith("%"):
         raw = spec[1:]
-        job = job_table.get(int(raw)) if raw.isdigit() else None
+        job = job_table.get(int(raw), session_id) if raw.isdigit() else None
         return job, "" if job is not None else f"{spec}: no such job"
     if spec.isdigit():
-        job = job_table.get(int(spec))
+        job = job_table.get(int(spec), session_id)
         return job, "" if job is not None else (
             f"pid {spec} is not a child of this shell")
     return None, f"`{spec}': not a pid or valid job spec"
@@ -288,9 +300,9 @@ async def _wait_first(job_table: JobTable, jobs: list[Job]) -> Job:
     """
     for job in jobs:
         if job.status != JobStatus.RUNNING:
-            return await job_table.wait(job.id)
+            return await job_table.wait(job.id, job.session_id)
     tasks = {
-        asyncio.ensure_future(job_table.wait(job.id)): job
+        asyncio.ensure_future(job_table.wait(job.id, job.session_id)): job
         for job in jobs
     }
     done, pending = await asyncio.wait(tasks,
@@ -315,7 +327,7 @@ async def _adopt(
     stderr = await job.console.snapshot(Channel.STDERR)
     # Reaped like GNU bash reaps a job waited on by id, so a later bare
     # `wait` does not adopt this console a second time.
-    job_table.reap(job.id)
+    job_table.reap(job.id, job.session_id)
     return stdout, IOResult(
         exit_code=job.exit_code,
         stderr=stderr or None,
@@ -353,6 +365,7 @@ async def handle_wait(
         view (SessionView | None): the session plane's gated door.
     """
     cmd_str = " ".join(parts)
+    sid = _session_of(session)
     next_job = False
     var: str | None = None
     specs: list[str] = []
@@ -404,14 +417,14 @@ async def handle_wait(
     errors: list[str] = []
     picked: list[Job] = []
     for spec in specs:
-        job, refusal = _resolve_spec(job_table, spec)
+        job, refusal = _resolve_spec(job_table, spec, sid)
         if job is None:
             errors.append(f"bash: wait: {refusal}")
             continue
         picked.append(job)
     err_text = ("\n".join(errors) + "\n") if errors else ""
     if next_job:
-        candidates = picked if specs else job_table.list_jobs()
+        candidates = picked if specs else job_table.list_jobs(sid)
         if not candidates:
             # Nothing to wait for: the specs were all bad, or there are
             # no jobs. bash reports any bad spec and answers 127.
@@ -435,13 +448,13 @@ async def handle_wait(
         # accident. Ordered by job id, because jobs finish concurrently
         # and completion order is not reproducible. Reaped afterwards so
         # a second `wait` does not print the same output twice.
-        await job_table.wait_all()
+        await job_table.wait_all(sid)
         out = b""
         err = b""
-        for finished in sorted(job_table.list_jobs(), key=lambda j: j.id):
+        for finished in sorted(job_table.list_jobs(sid), key=lambda j: j.id):
             out += await finished.console.snapshot(Channel.STDOUT)
             err += await finished.console.snapshot(Channel.STDERR)
-        job_table.pop_completed()
+        job_table.pop_completed(sid)
         return out or None, IOResult(stderr=err or None), ExecutionNode(
             command=cmd_str, exit_code=0)
     if not picked:
@@ -456,7 +469,7 @@ async def handle_wait(
     last_code = 0
     last_job: Job | None = None
     for job in picked:
-        finished = await job_table.wait(job.id)
+        finished = await job_table.wait(job.id, sid)
         stdout, io, _ = await _adopt(job_table, finished, cmd_str)
         if stdout:
             outs.append(stdout if isinstance(stdout, bytes) else b"")
@@ -497,6 +510,7 @@ async def handle_disown(
         view (SessionView | None): unused; the job-builtin signature.
     """
     cmd_str = " ".join(parts)
+    sid = _session_of(session)
     scan = scan_options(parts[1:], "arh")
     if scan.bad is not None:
         return _job_result(
@@ -510,23 +524,23 @@ async def handle_disown(
     errors: list[str] = []
     if specs:
         for spec in specs:
-            job, _ = _resolve_spec(job_table, spec)
+            job, _ = _resolve_spec(job_table, spec, sid)
             if job is None:
                 errors.append(f"bash: disown: {spec}: no such job")
                 continue
             targets.append(job)
     elif all_jobs or running_only:
-        targets = (job_table.running_jobs()
-                   if running_only else job_table.list_jobs())
+        targets = (job_table.running_jobs(sid)
+                   if running_only else job_table.list_jobs(sid))
     else:
-        jobs = job_table.list_jobs()
+        jobs = job_table.list_jobs(sid)
         if not jobs:
             return _job_result(cmd_str, "bash: disown: current: no such job\n",
                                1)
         targets = [jobs[-1]]
     if not keep:
         for job in targets:
-            job_table.disown(job.id)
+            job_table.disown(job.id, sid)
     err = ("\n".join(errors) + "\n").encode() if errors else None
     code = 1 if errors else 0
     return None, IOResult(exit_code=code,
@@ -550,8 +564,9 @@ async def handle_fg(
             optional operand is a job id, with or without ``%``.
     """
     cmd_str = " ".join(parts)
+    sid = _session_of(session)
     if len(parts) <= 1:
-        running = job_table.running_jobs()
+        running = job_table.running_jobs(sid)
         if not running:
             err = b"fg: current: no such job\n"
             return None, IOResult(exit_code=1,
@@ -569,17 +584,17 @@ async def handle_fg(
                                   stderr=err), ExecutionNode(command=cmd_str,
                                                              exit_code=1,
                                                              stderr=err)
-        if job_table.get(job_id) is None:
+        if job_table.get(job_id, sid) is None:
             err = f"fg: {parts[1]}: no such job\n".encode()
             return None, IOResult(exit_code=1,
                                   stderr=err), ExecutionNode(command=cmd_str,
                                                              exit_code=1,
                                                              stderr=err)
-    job = await job_table.wait(job_id)
+    job = await job_table.wait(job_id, sid)
     header = (job.command + "\n").encode()
     stdout = header + await job.console.snapshot(Channel.STDOUT)
     stderr = await job.console.snapshot(Channel.STDERR)
-    job_table.reap(job_id)
+    job_table.reap(job_id, sid)
     return stdout, IOResult(
         exit_code=job.exit_code,
         stderr=stderr or None,
@@ -593,6 +608,7 @@ async def handle_kill(
     view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     cmd_str = " ".join(parts)
+    sid = _session_of(session)
     if len(parts) < 2:
         err = b"kill: usage: kill <job_id>\n"
         return None, IOResult(exit_code=1,
@@ -608,7 +624,7 @@ async def handle_kill(
                               stderr=err), ExecutionNode(command=cmd_str,
                                                          exit_code=1,
                                                          stderr=err)
-    killed = await job_table.kill(job_id)
+    killed = await job_table.kill(job_id, sid)
     if not killed:
         err = f"kill: no such job: {job_id}\n".encode()
         return None, IOResult(exit_code=1,
@@ -660,6 +676,7 @@ async def handle_jobs(
         parts (list[str]): the command words, `jobs` first.
     """
     cmd_str = " ".join(parts)
+    sid = _session_of(session)
     flags: set[str] = set()
     specs: list[str] = []
     for word in parts[1:]:
@@ -675,12 +692,12 @@ async def handle_jobs(
             flags.update(word[1:])
         else:
             specs.append(word)
-    jobs = job_table.list_jobs()
+    jobs = job_table.list_jobs(sid)
     if specs:
         picked: list[Job] = []
         for spec in specs:
             raw = spec.lstrip("%")
-            job = job_table.get(int(raw)) if raw.isdigit() else None
+            job = job_table.get(int(raw), sid) if raw.isdigit() else None
             if job is None:
                 err = f"bash: jobs: {spec}: no such job\n".encode()
                 return None, IOResult(exit_code=1, stderr=err), ExecutionNode(
@@ -697,7 +714,7 @@ async def handle_jobs(
         lines = [str(j.id) for j in jobs]
     else:
         lines = [_job_row(j, "l" in flags) for j in jobs]
-    job_table.pop_completed()
+    job_table.pop_completed(sid)
     out = ("\n".join(lines) + "\n").encode() if lines else b""
     return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
 
@@ -709,7 +726,8 @@ async def handle_ps(
     view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     cmd_str = " ".join(parts)
-    running = job_table.running_jobs()
+    sid = _session_of(session)
+    running = job_table.running_jobs(sid)
     lines = []
     for job in running:
         lines.append(f"{job.id}\t{job.command}")

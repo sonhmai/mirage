@@ -53,6 +53,22 @@ function buildWorkspace(): Workspace {
 const dec = (b: Uint8Array | null): string => (b === null ? '' : new TextDecoder().decode(b))
 
 describe('symlinks (namespace-backed)', () => {
+  it.each([
+    ['stat -c %F', '/data/virtual'],
+    ['stat -c %F', '/data/virtual/deep'],
+    ['stat -L -c %F', '/data/virtual'],
+    ['stat -L -c %F', '/data/virtual/deep'],
+    ['file -b', '/data/virtual'],
+    ['file -b', '/data/virtual/deep'],
+  ])('%s reports link-only namespace directory %s', async (command, path) => {
+    const ws = buildWorkspace()
+    await ws.namespace.symlink('/data/virtual/deep/link', '/data/target', 0)
+    const result = await ws.execute(`${command} ${path}`)
+    expect(result.exitCode).toBe(0)
+    expect(dec(result.stdout)).toBe('directory\n')
+    await ws.close()
+  })
+
   it('ln -s then readlink returns the target verbatim', async () => {
     const ws = buildWorkspace()
     await ws.execute('echo hi > /data/a.txt')
@@ -1062,6 +1078,229 @@ describe('trailing slash (POSIX pathname resolution)', () => {
       "mv: cannot move '/data/alias/dlink/' to '/data/out': Not a directory\n",
     )
     expect((await ws.execute('readlink /data/base/dlink')).exitCode).toBe(0)
+    await ws.close()
+  })
+})
+
+// ln: GNU operand grammar, backups, and the hard-link tier.
+async function seedLn(ws: Workspace): Promise<void> {
+  await ws.execute('mkdir -p /data/d /data/e')
+  await ws.execute('echo hi > /data/a.txt; echo yo > /data/b.txt')
+}
+
+describe('ln operand grammar and backups', () => {
+  it('links into a directory destination', async () => {
+    const ws = buildWorkspace()
+    await seedLn(ws)
+    const r = await ws.execute('ln -sv /data/a.txt /data/d')
+    expect(r.exitCode).toBe(0)
+    expect(dec(r.stdout)).toBe("'/data/d/a.txt' -> '/data/a.txt'\n")
+    expect(dec((await ws.execute('readlink /data/d/a.txt')).stdout)).toBe('/data/a.txt\n')
+    expect((await ws.execute('ln -sr /data/b.txt /data/d/')).exitCode).toBe(0)
+    expect(dec((await ws.execute('readlink /data/d/b.txt')).stdout)).toBe('../b.txt\n')
+    await ws.close()
+  })
+
+  it('-t and a trailing directory operand link every operand', async () => {
+    const ws = buildWorkspace()
+    await seedLn(ws)
+    expect((await ws.execute('ln -s -t /data/d /data/a.txt /data/b.txt')).exitCode).toBe(0)
+    expect(dec((await ws.execute('readlink /data/d/a.txt')).stdout)).toBe('/data/a.txt\n')
+    expect(dec((await ws.execute('readlink /data/d/b.txt')).stdout)).toBe('/data/b.txt\n')
+    expect((await ws.execute('ln -s /data/a.txt /data/b.txt /data/e')).exitCode).toBe(0)
+    expect(dec((await ws.execute('readlink /data/e/b.txt')).stdout)).toBe('/data/b.txt\n')
+    await ws.close()
+  })
+
+  it('a single operand links into the cwd', async () => {
+    const ws = buildWorkspace()
+    await seedLn(ws)
+    const r = await ws.execute('cd /data/d && ln -s ../a.txt && readlink a.txt')
+    expect(r.exitCode).toBe(0)
+    expect(dec(r.stdout)).toBe('../a.txt\n')
+    const again = await ws.execute('cd /data/d && ln -s ../a.txt')
+    expect(again.exitCode).toBe(1)
+    expect(dec(again.stderr)).toBe("ln: failed to create symbolic link './a.txt': File exists\n")
+    await ws.close()
+  })
+
+  it.each([
+    [
+      'ln -s -t /data/nodir /data/a.txt',
+      "ln: failed to access '/data/nodir': No such file or directory\n",
+    ],
+    ['ln -s -t /data/b.txt /data/a.txt', "ln: target '/data/b.txt' is not a directory\n"],
+    [
+      'ln -s -t /data/d -T /data/a.txt',
+      'ln: cannot combine --target-directory and --no-target-directory\n',
+    ],
+    [
+      'ln -s /data/a.txt /data/b.txt /data/nodir',
+      "ln: target '/data/nodir': No such file or directory\n",
+    ],
+    ['ln -s /data/a.txt /data/d/x /data/b.txt', "ln: target '/data/b.txt': Not a directory\n"],
+    ['ln -sT /data/a.txt /data/d', "ln: failed to create symbolic link '/data/d': File exists\n"],
+    [
+      'ln -sT /data/a.txt /data/b.txt /data/c',
+      "ln: extra operand '/data/c'\nTry 'ln --help' for more information.\n",
+    ],
+    [
+      'ln -sT /data/a.txt',
+      "ln: missing destination file operand after '/data/a.txt'\nTry 'ln --help' for more information.\n",
+    ],
+    ['ln', "ln: missing file operand\nTry 'ln --help' for more information.\n"],
+    [
+      'ln -x /data/a.txt /data/l',
+      "ln: invalid option -- 'x'\nTry 'ln --help' for more information.\n",
+    ],
+    [
+      'ln --bogus /data/a.txt /data/l',
+      "ln: unrecognized option '--bogus'\nTry 'ln --help' for more information.\n",
+    ],
+    [
+      'ln -s --backup=bogus /data/a.txt /data/l',
+      "ln: invalid argument 'bogus' for 'backup type'\nValid arguments are:\n  - 'none', 'off'\n  - 'simple', 'never'\n  - 'existing', 'nil'\n  - 'numbered', 't'\nTry 'ln --help' for more information.\n",
+    ],
+    [
+      'ln /data/missing /data/h',
+      "ln: failed to access '/data/missing': No such file or directory\n",
+    ],
+    ['ln /data/d /data/hd', 'ln: /data/d: hard link not allowed for directory\n'],
+    [
+      'ln -d /data/d /data/hd',
+      "ln: failed to create hard link '/data/hd' => '/data/d': Operation not permitted\n",
+    ],
+    [
+      'ln -F /data/d /data/hd',
+      "ln: failed to create hard link '/data/hd' => '/data/d': Operation not permitted\n",
+    ],
+  ])('refuses in GNU words: %s', async (line, stderr) => {
+    const ws = buildWorkspace()
+    await seedLn(ws)
+    const r = await ws.execute(line)
+    expect(r.exitCode).toBe(1)
+    expect(dec(r.stderr)).toBe(stderr)
+    await ws.close()
+  })
+
+  it('-b moves the occupant aside, -S names the suffix', async () => {
+    const ws = buildWorkspace()
+    await seedLn(ws)
+    await ws.execute('ln -s /data/a.txt /data/l')
+    const r = await ws.execute('ln -sbv /data/b.txt /data/l')
+    expect(r.exitCode).toBe(0)
+    expect(dec(r.stdout)).toBe("'/data/l~' ~ '/data/l' -> '/data/b.txt'\n")
+    expect(dec((await ws.execute('readlink /data/l')).stdout)).toBe('/data/b.txt\n')
+    expect(dec((await ws.execute('readlink /data/l~')).stdout)).toBe('/data/a.txt\n')
+    expect((await ws.execute('ln -s -S .bak /data/a.txt /data/b.txt')).exitCode).toBe(0)
+    expect(dec((await ws.execute('cat /data/b.txt.bak')).stdout)).toBe('yo\n')
+    expect(dec((await ws.execute('readlink /data/b.txt')).stdout)).toBe('/data/a.txt\n')
+    await ws.close()
+  })
+
+  it('numbered backups and --backup=none', async () => {
+    const ws = buildWorkspace()
+    await seedLn(ws)
+    await ws.execute('echo n > /data/l')
+    expect((await ws.execute('ln -s --backup=numbered /data/a.txt /data/l')).exitCode).toBe(0)
+    expect(dec((await ws.execute("cat '/data/l.~1~'")).stdout)).toBe('n\n')
+    const r = await ws.execute('ln -s --backup=none /data/b.txt /data/l')
+    expect(r.exitCode).toBe(1)
+    expect(dec(r.stderr)).toBe("ln: failed to create symbolic link '/data/l': File exists\n")
+    await ws.close()
+  })
+
+  it('dereferences a link to a directory unless -n', async () => {
+    const ws = buildWorkspace()
+    await seedLn(ws)
+    await ws.execute('ln -s /data/d /data/dl')
+    expect((await ws.execute('ln -s /data/a.txt /data/dl')).exitCode).toBe(0)
+    expect(dec((await ws.execute('readlink /data/d/a.txt')).stdout)).toBe('/data/a.txt\n')
+    const r = await ws.execute('ln -sn /data/b.txt /data/dl')
+    expect(r.exitCode).toBe(1)
+    expect(dec(r.stderr)).toBe("ln: failed to create symbolic link '/data/dl': File exists\n")
+    expect((await ws.execute('ln -sfn /data/b.txt /data/dl')).exitCode).toBe(0)
+    expect(dec((await ws.execute('readlink /data/dl')).stdout)).toBe('/data/b.txt\n')
+    for (const line of [
+      'ln -sL /data/a.txt /data/l1',
+      'ln -sP /data/a.txt /data/l2',
+      'ln -sd /data/a.txt /data/l3',
+    ]) {
+      expect((await ws.execute(line)).exitCode).toBe(0)
+    }
+    await ws.close()
+  })
+
+  it('a hard link copies bytes and refuses an occupied name', async () => {
+    const ws = buildWorkspace()
+    await seedLn(ws)
+    const r = await ws.execute('ln -v /data/a.txt /data/h')
+    expect(r.exitCode).toBe(0)
+    expect(dec(r.stdout)).toBe("'/data/h' => '/data/a.txt'\n")
+    expect(dec((await ws.execute('cat /data/h')).stdout)).toBe('hi\n')
+    const dup = await ws.execute('ln /data/b.txt /data/h')
+    expect(dup.exitCode).toBe(1)
+    expect(dec(dup.stderr)).toBe("ln: failed to create hard link '/data/h': File exists\n")
+    expect((await ws.execute('ln -f /data/b.txt /data/h')).exitCode).toBe(0)
+    expect(dec((await ws.execute('cat /data/h')).stdout)).toBe('yo\n')
+    const backed = await ws.execute('ln -bv /data/a.txt /data/h')
+    expect(dec(backed.stdout)).toBe("'/data/h~' ~ '/data/h' => '/data/a.txt'\n")
+    expect(dec((await ws.execute('cat /data/h~')).stdout)).toBe('yo\n')
+    expect((await ws.execute('ln -t /data/e /data/a.txt /data/b.txt')).exitCode).toBe(0)
+    expect(dec((await ws.execute('cat /data/e/b.txt')).stdout)).toBe('yo\n')
+    const partial = await ws.execute('ln /data/missing /data/a.txt /data/d')
+    expect(partial.exitCode).toBe(1)
+    expect(dec((await ws.execute('cat /data/d/a.txt')).stdout)).toBe('hi\n')
+    await ws.close()
+  })
+
+  it('a hard link of a link keeps the link unless -L', async () => {
+    const ws = buildWorkspace()
+    await seedLn(ws)
+    await ws.execute('ln -s /data/a.txt /data/lnk')
+    expect((await ws.execute('ln /data/lnk /data/h1')).exitCode).toBe(0)
+    expect(dec((await ws.execute('readlink /data/h1')).stdout)).toBe('/data/a.txt\n')
+    expect((await ws.execute('ln -L /data/lnk /data/h2')).exitCode).toBe(0)
+    expect((await ws.execute('readlink /data/h2')).exitCode).toBe(1)
+    expect(dec((await ws.execute('cat /data/h2')).stdout)).toBe('hi\n')
+    await ws.execute('ln -s /data/nope /data/dang')
+    const r = await ws.execute('ln -L /data/dang /data/h3')
+    expect(r.exitCode).toBe(1)
+    expect(dec(r.stderr)).toBe("ln: failed to access '/data/dang': No such file or directory\n")
+    expect((await ws.execute('ln /data/dang /data/h4')).exitCode).toBe(0)
+    expect(dec((await ws.execute('readlink /data/h4')).stdout)).toBe('/data/nope\n')
+    await ws.close()
+  })
+
+  it('the last of -L and -P wins', async () => {
+    const ws = buildWorkspace()
+    await seedLn(ws)
+    await ws.execute('ln -s /data/a.txt /data/lnk')
+    expect((await ws.execute('ln -LP /data/lnk /data/hp')).exitCode).toBe(0)
+    expect(dec((await ws.execute('readlink /data/hp')).stdout)).toBe('/data/a.txt\n')
+    expect((await ws.execute('ln -PL /data/lnk /data/hl')).exitCode).toBe(0)
+    expect((await ws.execute('readlink /data/hl')).exitCode).toBe(1)
+    expect(dec((await ws.execute('cat /data/hl')).stdout)).toBe('hi\n')
+    expect((await ws.execute('ln --logical --physical /data/lnk /data/hp2')).exitCode).toBe(0)
+    expect(dec((await ws.execute('readlink /data/hp2')).stdout)).toBe('/data/a.txt\n')
+    await ws.close()
+  })
+
+  it('-r needs -s, checked after the operand count', async () => {
+    const ws = buildWorkspace()
+    await seedLn(ws)
+    const r = await ws.execute('ln -r /data/a.txt /data/rel')
+    expect(r.exitCode).toBe(1)
+    expect(dec(r.stderr)).toBe('ln: cannot do --relative without --symbolic\n')
+    expect((await ws.execute('test -e /data/rel')).exitCode).toBe(1)
+    const missing = "ln: missing file operand\nTry 'ln --help' for more information.\n"
+    expect(dec((await ws.execute('ln -r')).stderr)).toBe(missing)
+    expect(dec((await ws.execute('ln -r -T -t /data/d /data/a.txt /data/x')).stderr)).toBe(
+      'ln: cannot do --relative without --symbolic\n',
+    )
+    expect(dec((await ws.execute('ln -T -t /data/d')).stderr)).toBe(missing)
+    expect((await ws.execute('ln -rs /data/a.txt /data/d/rel')).exitCode).toBe(0)
+    expect(dec((await ws.execute('readlink /data/d/rel')).stdout)).toBe('../a.txt\n')
     await ws.close()
   })
 })

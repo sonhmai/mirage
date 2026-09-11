@@ -33,6 +33,33 @@ export function compactJsonBytes(value: unknown): Uint8Array {
   return ENC.encode(compactJsonText(value))
 }
 
+/**
+ * Spell a number the way ECMAScript's `Number::toString` does, which is what
+ * `JSON.stringify` writes for a finite one. `String()` is the spec here; the
+ * python twin reproduces its layout from `repr`, whose digits agree and whose
+ * exponent thresholds and padding do not. A non-finite value has no JSON
+ * spelling and renders `null`, as `JSON.stringify` does.
+ */
+export function numberText(value: number): string {
+  return Number.isFinite(value) ? String(value) : 'null'
+}
+
+/**
+ * Spell a payload value as text, as compact JSON in both languages.
+ *
+ * A string is itself; anything else renders as compact JSON, so a boolean
+ * spells `true` rather than Python's `True`, a number lays out as
+ * `numberText` says, and an object or array spells as one JSON literal rather
+ * than `[object Object]`, its numbers included. Path labels and group values
+ * are built from this, so one collection grows one tree.
+ */
+export function valueText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'bigint') return value.toString()
+  if (typeof value === 'number') return numberText(value)
+  return compactJsonText(value)
+}
+
 // An empty row list renders as empty bytes rather than a lone newline, so an
 // empty .jsonl leaf sizes and reads as a zero-byte file.
 export function jsonlBytes(rows: readonly unknown[]): Uint8Array {

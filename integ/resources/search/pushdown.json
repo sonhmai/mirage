@@ -55,6 +55,34 @@
         "stdout": "/search/alpha.txt\n/search/beta.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "search_word_keeps_labels",
+      "seq": 540005,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "grep -rw wombat /search",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/alpha.txt:wombat runs fast\n/search/beta.txt:the wombat sleeps\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "search_word_keeps_explicit_h",
+      "seq": 540006,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "grep -rhw wombat /search",
+      "expect": {
+        "exit": 0,
+        "stdout": "wombat runs fast\nthe wombat sleeps\n",
+        "stderr": ""
+      }
     }
   ]
 }

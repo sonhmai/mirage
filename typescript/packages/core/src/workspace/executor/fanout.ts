@@ -133,7 +133,7 @@ export function shouldFanOut(
   // ripgrep recurses directories by default; no flag to check.
   if (cmdName === 'rg') return true
   if (cmdName === 'ls') {
-    return flagKwargs.R === true
+    return flagKwargs.recursive === true
   }
   return false
 }

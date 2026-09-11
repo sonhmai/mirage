@@ -94,12 +94,12 @@ def test_ls_1(env):
     assert "\n" in result
 
 
-def test_ls_1_overrides_l(env):
+def test_ls_1_keeps_l(env):
     env.create_file("a.txt", b"hello")
     env.create_file("b.txt", b"world")
-    short = env.mirage("ls -1 /data").strip()
-    one_overrides_long = env.mirage("ls -l -1 /data").strip()
-    assert one_overrides_long == short
+    long = env.mirage("ls -l /data").strip()
+    assert env.mirage("ls -l -1 /data").strip() == long
+    assert env.mirage("ls -1 -l /data").strip() == long
 
 
 def test_ls_R(env):

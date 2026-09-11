@@ -310,7 +310,22 @@
     {
       "long": "--follow",
       "short": "-f",
+      "short_value": false,
+      "type": "str",
+      "value_optional": true
+    },
+    {
+      "short": "-F",
       "type": "bool"
+    },
+    {
+      "long": "--retry",
+      "type": "bool"
+    },
+    {
+      "long": "--sleep-interval",
+      "short": "-s",
+      "type": "str"
     }
   ],
   "rest": {

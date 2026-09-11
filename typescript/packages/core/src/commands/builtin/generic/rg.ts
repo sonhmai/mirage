@@ -24,10 +24,9 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/types.ts'
 import { compilePattern, resolvePattern } from '../grep_pattern.ts'
-import { grepStream, nonzeroCountStream } from '../grep_scan.ts'
+import { grepStream, nonzeroCountStream, prefixLines } from '../grep_scan.ts'
 import { rgFolderFiletype, rgFull } from '../rg_scan.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { grepGeneric } from './grep.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -309,8 +308,43 @@ export async function rgGeneric(
     return [exitOnEmpty(counted, io), io]
   }
 
-  // grepGeneric reads grep's -H/-h names; translate rg's -I to grep's -h so
-  // suppression carries through the shared body.
-  const fwd = flags.noFilename ? { ...opts, flags: { ...opts.flags, h: true } } : opts
-  return grepGeneric('rg', paths, texts, fwd, stat, readdir, stream)
+  const pat = compilePattern(exprText, flags.ignoreCase, flags.fixedString, flags.wholeWord)
+  if (paths.length > 1 || flags.withFilename) {
+    const results: string[] = []
+    const warnings: string[] = []
+    for (const p of paths) {
+      let data: Uint8Array
+      try {
+        const matched = grepStream(stream(p), pat, flags)
+        data = await materialize(label ? prefixLines(matched, p.rawPath + ':') : matched)
+      } catch (error) {
+        if (!isFsError(error)) throw error
+        warnings.push(`rg: ${p.rawPath}: ${String(fsStrerror(error))}`)
+        continue
+      }
+      if (data.length) results.push(DEC.decode(data))
+    }
+    return [
+      ENC.encode(results.join('')),
+      new IOResult({
+        exitCode: warnings.length ? 2 : results.length ? 0 : 1,
+        ...(warnings.length ? { stderr: ENC.encode(warnings.join('\n') + '\n') } : {}),
+      }),
+    ]
+  }
+
+  try {
+    await statFn(first.virtual)
+  } catch (error) {
+    if (!isFsError(error)) throw error
+    return [
+      new Uint8Array(),
+      new IOResult({
+        exitCode: 2,
+        stderr: ENC.encode(`rg: ${first.rawPath}: ${String(fsStrerror(error))}\n`),
+      }),
+    ]
+  }
+  const io = new IOResult()
+  return [exitOnEmpty(grepStream(stream(first), pat, flags), io), io]
 }

@@ -16,9 +16,8 @@ from dataclasses import dataclass
 
 from mirage.observe.store import ObserverStore
 from mirage.runtime.base import Runtime
-from mirage.runtime.resolver import MountResolver
+from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.table import VFSRuntime, bind_commands
-from mirage.runtime.types import DispatchFn
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.session import SessionStore
@@ -77,7 +76,7 @@ def resolve_control_stores(
 
 
 def wire_runtime_world(
-        registry: MountRegistry, dispatch: DispatchFn, resolver: MountResolver,
+        registry: MountRegistry, binding: WorkspaceBinding,
         entries: list[Runtime | str] | None) -> tuple[Runtimes, Router]:
     """Build the ordered runtime world and its route-policy router.
 
@@ -89,14 +88,13 @@ def wire_runtime_world(
 
     Args:
         registry (MountRegistry): mount table the bindings install on.
-        dispatch (DispatchFn): the workspace's op dispatch.
-        resolver (MountResolver): the live mount routing table.
+        binding (WorkspaceBinding): workspace services for runtime adapters.
         entries (list[Runtime | str] | None): explicit runtime world;
             None builds the default.
     """
-    runtimes = Runtimes(registry, dispatch, resolver)
+    runtimes = Runtimes(registry, binding)
     runtimes.resolve(entries)
-    router = Router(registry, runtimes, resolver)
+    router = Router(registry, runtimes, binding.resolver)
     registry.runtime_bindings = bind_commands(runtimes.entries)
     registry.runtime_entries = runtimes.entries
     registry.vfs_runtime = next(

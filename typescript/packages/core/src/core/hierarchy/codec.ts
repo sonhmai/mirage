@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ESCAPE_LEAD, SAFE_SLASH, isBlank, pathSafeName } from '../../utils/sanitize.ts'
+
 const ASCII_DIGITS = /^[0-9]+$/
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -40,19 +42,76 @@ export function isoDateShaped(text: string): boolean {
 }
 
 /**
+ * Render a free-form value as one segment `pathSafeDecode` inverts.
+ *
+ * `/` renders as `∕` the way `pathSafeName` renders it, and a value already
+ * holding `∕` or `⁄` has that character prefixed with `⁄`. A blank value
+ * (`isBlank`, the one definition of white space both runtimes read) takes
+ * the lead too, so it renders as the lead plus its own characters (the empty
+ * value is the lone lead) rather than as `pathSafeName`'s `unknown`;
+ * `pathSafeName` itself leads a dot-led name, which the decode's escape rule
+ * already inverts. The decode reads the segment back one token at a time, so
+ * no two values render as one segment. Without the escape `a/b` and `a∕b`
+ * would list as the same directory, and descending into it would filter for
+ * only one.
+ */
+function pathSafeEncode(value: string): string {
+  const escaped = value
+    .replaceAll(ESCAPE_LEAD, ESCAPE_LEAD + ESCAPE_LEAD)
+    .replaceAll(SAFE_SLASH, ESCAPE_LEAD + SAFE_SLASH)
+  return pathSafeName(isBlank(escaped) ? ESCAPE_LEAD + escaped : escaped)
+}
+
+/**
+ * Undo `pathSafeEncode`: `∕` reads as `/` and `⁄` as an escape for the
+ * character after it; a lead with nothing after it escapes nothing, which is
+ * how the empty value's lone lead reads back as empty and how a glob head cut
+ * inside an escape pair loses only the dangling lead.
+ */
+function pathSafeDecode(name: string): string {
+  let value = ''
+  let escaped = false
+  for (const char of name) {
+    if (escaped) {
+      value += char
+      escaped = false
+    } else if (char === ESCAPE_LEAD) {
+      escaped = true
+    } else if (char === SAFE_SLASH) {
+      value += '/'
+    } else {
+      value += char
+    }
+  }
+  return value
+}
+
+/**
  * How one dynamic path segment encodes its value.
  *
  * `suffix` is the extension the segment carries ('.json'); empty for bare
  * names. `validate` is an extra shape check on the decoded payload; a
  * failing payload means the segment does not match the scope at all.
+ * `pathSafe` marks a free-form value rendered path-safe and reversibly:
+ * `/` becomes `∕` (U+2215), a value already holding `∕` or `⁄` (U+2044) has
+ * that character prefixed with `⁄`, and a blank or dot-led value is prefixed
+ * with `⁄` as well, so every value has a segment that lists, opens and
+ * `decode`s back to exactly what `encode` rendered. The group
+ * levels of the table-shaped backends (qdrant, lancedb) are this shape: a
+ * segment there becomes an equality filter, so it has to name exactly one
+ * value.
  */
 export class Codec {
   readonly suffix: string
   readonly validate: ((text: string) => boolean) | null
+  readonly pathSafe: boolean
 
-  constructor(init: { suffix?: string; validate?: (text: string) => boolean } = {}) {
+  constructor(
+    init: { suffix?: string; validate?: (text: string) => boolean; pathSafe?: boolean } = {},
+  ) {
     this.suffix = init.suffix ?? ''
     this.validate = init.validate ?? null
+    this.pathSafe = init.pathSafe ?? false
   }
 
   /** Decode a path segment, null when it does not fit. */
@@ -63,13 +122,30 @@ export class Codec {
       value = value.slice(0, -this.suffix.length)
     }
     if (value === '') return null
+    if (this.pathSafe) value = pathSafeDecode(value)
     if (this.validate !== null && !this.validate(value)) return null
     return value
   }
 
   /** Render a value back into a path segment. */
   encode(value: string): string {
-    return `${value}${this.suffix}`
+    const rendered = this.pathSafe ? pathSafeEncode(value) : value
+    return `${rendered}${this.suffix}`
+  }
+
+  /**
+   * The value prefix a rendered-name prefix stands for.
+   *
+   * What a backend pushes into its query when a glob's literal head narrows
+   * a listing: every value whose rendering starts with `prefix` starts with
+   * this, so the pushdown loses nothing, and the caller keeps only the
+   * rendered names that really start with `prefix`. A head cut inside an
+   * escape pair ends on a lead that could open either escaped character; the
+   * decode drops it.
+   */
+  prefixValue(prefix: string): string {
+    if (!this.pathSafe) return prefix
+    return pathSafeDecode(prefix)
   }
 }
 
@@ -78,3 +154,4 @@ export const JSON_NAME = new Codec({ suffix: '.json' })
 export const JSONL_NAME = new Codec({ suffix: '.jsonl' })
 export const INT_JSON = new Codec({ suffix: '.json', validate: asciiDigits })
 export const DATE = new Codec({ validate: isoDateShaped })
+export const PATH_SAFE = new Codec({ pathSafe: true })

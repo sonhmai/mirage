@@ -165,3 +165,51 @@ describe('the isolation probe', () => {
     expect(fresh.createAsyncContext()).toBeInstanceOf(fresh.FallbackStorage)
   })
 })
+
+describe.each([
+  ['isolated', createAsyncContext<string>],
+  ['fallback', () => new FallbackStorage<string>()],
+] as const)('captured %s callbacks', (_name, makeStorage) => {
+  it('re-enters the captured binding and clears a captured empty context', async () => {
+    const storage = makeStorage()
+    const empty = storage.capture()
+    const captured = await storage.run('original', () => storage.capture())
+    await storage.run('other', async () => {
+      expect(
+        await captured(async () => {
+          await Promise.resolve()
+          return storage.getStore()
+        }),
+      ).toBe('original')
+      expect(empty(() => storage.getStore())).toBeUndefined()
+      expect(storage.getStore()).toBe('other')
+      await expect(captured(() => Promise.reject(new Error('fail')))).rejects.toThrow('fail')
+      expect(storage.getStore()).toBe('other')
+    })
+    expect(storage.liveStores()).toEqual([])
+  })
+})
+
+it('fallback captures retain all conservative gates, including duplicate bindings', async () => {
+  const storage = new FallbackStorage<string>()
+  const capture = await storage.run('outer', () => storage.run('inner', () => storage.capture()))
+  expect(capture(() => storage.liveStores())).toEqual(['outer', 'inner'])
+  let release!: () => void
+  const pending = storage.run(
+    'same',
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve
+      }),
+  )
+  const captured = storage.capture()
+  await storage.run('middle', async () => {
+    await captured(async () => {
+      release()
+      await pending
+      expect(storage.getStore()).toBe('same')
+    })
+    expect(storage.getStore()).toBe('middle')
+  })
+  expect(storage.liveStores()).toEqual([])
+})

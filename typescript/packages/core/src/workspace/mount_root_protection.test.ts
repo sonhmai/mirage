@@ -176,7 +176,7 @@ describe('mount-root protection — ln', () => {
   it('ln refuses a mount root as link name', async () => {
     const ws = await twoMountWs()
     await ws.execute('touch /ram/source')
-    const r = await ws.execute('ln /ram/source /r2')
+    const r = await ws.execute('ln -T /ram/source /r2')
     expect(r.exitCode).toBe(1)
     expect(r.stderrText).toMatch(/File exists/)
     await ws.close()
@@ -184,7 +184,7 @@ describe('mount-root protection — ln', () => {
 
   it('ln -s refuses a mount root as link name', async () => {
     const ws = await twoMountWs()
-    const r = await ws.execute('ln -s /ram/source /r2')
+    const r = await ws.execute('ln -sT /ram/source /r2')
     expect(r.exitCode).toBe(1)
     expect(r.stderrText).toMatch(/File exists/)
     await ws.close()

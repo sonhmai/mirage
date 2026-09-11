@@ -58,17 +58,21 @@ function makeOpts(partial: Partial<CommandOpts>): CommandOpts {
 }
 
 async function putFile(index: RAMIndexCacheStore, key: string, name: string): Promise<void> {
-  await index.put(
-    key,
-    new IndexEntry({
-      id: 'file123',
+  const slash = key.lastIndexOf('/')
+  const parent = slash > 0 ? key.slice(0, slash) : '/'
+  await index.setDir(parent, [
+    [
       name,
-      resourceType: 'gdrive/file',
-      remoteTime: '2026-01-01T00:00:00Z',
-      vfsName: name,
-      size: 100,
-    }),
-  )
+      new IndexEntry({
+        id: 'file123',
+        name,
+        resourceType: 'gdrive/file',
+        remoteTime: '2026-01-01T00:00:00Z',
+        vfsName: name,
+        size: 100,
+      }),
+    ],
+  ])
 }
 
 async function outText(result: CommandFnResult): Promise<string> {

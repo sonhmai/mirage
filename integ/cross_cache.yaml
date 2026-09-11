@@ -1,0 +1,26 @@
+mode: WRITE
+consistency: LAZY
+
+# The file cache on Redis rather than RAM: `workspace snapshot` has to
+# serialize a workspace whose cache holds no snapshot entries (it used to
+# raise on the store type), and the load must serve the bytes through the
+# backend, since a Redis cache is never restored from a snapshot.
+cache:
+  type: redis
+  url: ${REDIS_URL}
+  key_prefix: ${CROSS_REDIS_PREFIX}cache/
+index:
+  type: ram
+  ttl: 600
+
+mounts:
+  /ram:
+    resource: ram
+
+  /minio:
+    resource: minio
+    config:
+      bucket: ${S3_BUCKET}
+      endpoint_url: ${S3_ENDPOINT}
+      access_key_id: ${AWS_ACCESS_KEY_ID}
+      secret_access_key: ${AWS_SECRET_ACCESS_KEY}

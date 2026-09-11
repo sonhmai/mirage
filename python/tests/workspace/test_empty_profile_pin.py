@@ -75,11 +75,16 @@ def test_an_empty_profile_changes_nothing():
     # profile {} compiles to all-None narrowing, so every gate must
     # stay inert: the battery is byte-identical to a session with no
     # profile at all.
-    bare_ws = _seeded()
-    bare_ws.create_session("probe")
-    profiled_ws = _seeded()
-    profiled_ws.create_session("probe", profile={})
-    assert _outputs(bare_ws, "probe") == _outputs(profiled_ws, "probe")
+    #
+    # Both sessions read ONE workspace, because the claim is about the
+    # profile and nothing else. Two separately seeded worlds differ in a
+    # way the profile has no part in: `ls -la` renders mtime to the
+    # minute, so seeding them either side of a minute boundary made this
+    # go red on a slow runner.
+    ws = _seeded()
+    ws.create_session("bare")
+    ws.create_session("profiled", profile={})
+    assert _outputs(ws, "bare") == _outputs(ws, "profiled")
 
 
 def test_a_hide_on_one_mount_leaves_the_other_byte_identical():
@@ -87,11 +92,10 @@ def test_a_hide_on_one_mount_leaves_the_other_byte_identical():
     # off their fast paths, and /b must not notice, whichever path its
     # commands take. Byte-identical output is the whole claim, so a
     # native-op/walk divergence on /b surfaces here.
-    bare_ws = _seeded()
-    bare_ws.create_session("probe")
-    hidden_ws = _seeded()
-    hidden_ws.create_session("probe", profile={"paths": {"hide": ["/a/sub"]}})
+    ws = _seeded()
+    ws.create_session("bare")
+    ws.create_session("hidden", profile={"paths": {"hide": ["/a/sub"]}})
     b_lines = [entry for entry in BATTERY if "/a" not in entry]
-    bare = [r for r in _outputs(bare_ws, "probe") if r[0] in b_lines]
-    hidden = [r for r in _outputs(hidden_ws, "probe") if r[0] in b_lines]
+    bare = [r for r in _outputs(ws, "bare") if r[0] in b_lines]
+    hidden = [r for r in _outputs(ws, "hidden") if r[0] in b_lines]
     assert bare == hidden

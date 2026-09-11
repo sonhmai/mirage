@@ -71,14 +71,14 @@ describe('grep', () => {
     expect(exitCode).toBe(1)
   })
 
-  it('-r on a single file prefixes the filename', async () => {
+  it('-r on a single file retains single-file output', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/log.txt', ENC.encode('one\nerror here\ntwo\nerror again\n'))
     const { text } = await runGrep(resource, 'error', [PathSpec.fromStrPath('/log.txt')], {
       r: true,
       n: true,
     })
-    expect(text).toBe('/log.txt:2:error here\n/log.txt:4:error again\n')
+    expect(text).toBe('2:error here\n4:error again\n')
   })
 
   it('-i ignore case matches', async () => {

@@ -2493,11 +2493,12 @@ def test_glob_function_args_resolve():
 
 
 def test_ln_multi_source_is_error():
-    """GNU ln: multiple sources need a directory target."""
+    """GNU ln: multiple sources need a directory target (9.7 names the
+    missing one as absent)."""
     ws = _ws()
     io = _exec(ws, "ln -s /ram/*.txt /ram/lnk")
     assert io.exit_code == 1
-    assert b": Not a directory" in io.stderr
+    assert b": No such file or directory" in io.stderr
 
 
 def test_ln_single_match_resolves():

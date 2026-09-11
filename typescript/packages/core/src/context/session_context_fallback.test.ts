@@ -131,7 +131,7 @@ describe('the mount gate on the fallback storage', () => {
           // trello's own gate even with s3's writable one beside it.
           expect(() => {
             requireMountWritable('/trello')
-          }).toThrowError(/read-only/)
+          }).toThrow(/read-only/)
           requireMountWritable('/s3')
           return Promise.resolve()
         }),

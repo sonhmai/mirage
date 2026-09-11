@@ -3,7 +3,9 @@ from difflib import SequenceMatcher
 from types import SimpleNamespace
 
 import pytest
+from qdrant_client import models
 
+from mirage.core.qdrant.payload import field_value
 from mirage.resource.qdrant.config import QdrantConfig
 
 COLLECTION = "animals"
@@ -50,14 +52,29 @@ def _points() -> list[SimpleNamespace]:
     return points
 
 
-def _match(point: SimpleNamespace, scroll_filter) -> bool:
-    if scroll_filter is None:
+def filter_holds(point: SimpleNamespace, condition) -> bool:
+    """Whether a point satisfies a Qdrant filter the way the server would.
+
+    Typed: a ``match`` compares value and type, so the string ``"1"``
+    does not satisfy an integer match, and a ``range`` reads numbers only.
+    """
+    if condition is None:
         return True
-    for condition in scroll_filter.must:
-        value = (point.payload or {}).get(condition.key)
-        if str(value) != str(condition.match.value):
+    if isinstance(condition, models.Filter):
+        if condition.must and not all(
+                filter_holds(point, c) for c in condition.must):
             return False
-    return True
+        if condition.should and not any(
+                filter_holds(point, c) for c in condition.should):
+            return False
+        return True
+    value = field_value(point.payload or {}, condition.key)
+    if condition.range is not None:
+        return (isinstance(value,
+                           (int, float)) and not isinstance(value, bool)
+                and condition.range.gte <= value <= condition.range.lte)
+    want = condition.match.value
+    return type(value) is type(want) and value == want
 
 
 class FakeQdrantClient:
@@ -78,7 +95,7 @@ class FakeQdrantClient:
                      offset=None,
                      with_payload=True,
                      with_vectors=False):
-        matched = [p for p in self.points if _match(p, scroll_filter)]
+        matched = [p for p in self.points if filter_holds(p, scroll_filter)]
         start = offset or 0
         window = matched[start:start + limit]
         nxt = start + limit if start + limit < len(matched) else None
@@ -156,6 +173,67 @@ def accessor(qdrant_config) -> FakeAccessor:
     return FakeAccessor(qdrant_config, FakeQdrantClient())
 
 
+@pytest.fixture
+def lineage() -> FakeAccessor:
+    client = FakeQdrantClient()
+    client.points[0].payload = {
+        "page_content": "Refunds are processed within 14 days",
+        "metadata": {
+            "source": "s3://docs/policies/refund-2026.pdf",
+            "page": "004",
+        },
+    }
+    client.points = client.points[:1]
+    config = QdrantConfig(
+        collection=COLLECTION,
+        group_by=["metadata.source"],
+        basename_fields=["metadata.source"],
+        name_field="metadata.page",
+        text_field="page_content",
+    )
+    return FakeAccessor(config, client)
+
+
+@pytest.fixture
+def slashed() -> FakeAccessor:
+    """Two labels a lossy ``∕`` decode would merge into one directory."""
+    client = FakeQdrantClient()
+    client.points[0].payload["label"] = "a/b"
+    client.points[1].payload["label"] = "a∕b"
+    client.points = client.points[:2]
+    return FakeAccessor(
+        QdrantConfig(collection=COLLECTION,
+                     group_by=["label"],
+                     text_field="name"), client)
+
+
+@pytest.fixture
+def edged() -> FakeAccessor:
+    """A blank label and a dot-led one, the two a raw rendering loses."""
+    client = FakeQdrantClient()
+    client.points[0].payload["label"] = ""
+    client.points[1].payload["label"] = ".env"
+    client.points = client.points[:2]
+    return FakeAccessor(
+        QdrantConfig(collection=COLLECTION,
+                     group_by=["label"],
+                     text_field="name"), client)
+
+
+@pytest.fixture
+def long_basename() -> FakeAccessor:
+    """Two sources whose leaves agree past NAME_MAX and differ at the end."""
+    client = FakeQdrantClient()
+    client.points[0].payload["source"] = f"s3://docs/{'r' * 300}a.pdf"
+    client.points[1].payload["source"] = f"s3://docs/{'r' * 300}b.pdf"
+    client.points = client.points[:2]
+    return FakeAccessor(
+        QdrantConfig(collection=COLLECTION,
+                     group_by=["source"],
+                     basename_fields=["source"],
+                     text_field="name"), client)
+
+
 WIDE_CAP = 5
 WIDE_POINTS = 600
 
@@ -186,3 +264,35 @@ def capped() -> FakeAccessor:
                      id_field="id",
                      text_field="name",
                      max_rows=WIDE_CAP), WideQdrantClient())
+
+
+@pytest.fixture
+def basename_capped() -> FakeAccessor:
+    client = WideQdrantClient()
+    for point in client.points:
+        point.payload["source"] = f"s3://docs/other-{point.id}.pdf"
+    client.points[-1].payload["source"] = "s3://archive/target-late.pdf"
+    return FakeAccessor(
+        QdrantConfig(collection=COLLECTION,
+                     group_by=["source"],
+                     basename_fields=["source"],
+                     max_rows=WIDE_CAP), client)
+
+
+@pytest.fixture
+def basename_collision_capped() -> FakeAccessor:
+    """One basename shared by two sources, the second past the row cap."""
+    client = WideQdrantClient()
+    for point in client.points:
+        point.payload["source"] = "s3://one/report.pdf"
+    client.points[-1].payload["source"] = "s3://two/report.pdf"
+    return FakeAccessor(
+        QdrantConfig(collection=COLLECTION,
+                     group_by=["source"],
+                     basename_fields=["source"],
+                     max_rows=WIDE_CAP), client)
+
+
+@pytest.fixture
+def holds():
+    return filter_holds

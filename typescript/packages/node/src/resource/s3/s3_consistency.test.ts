@@ -12,6 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import {
+  IndexType,
+  type IndexConfig,
+  type RedisIndexConfig,
+} from '@struktoai/mirage-core/cache/index/config'
 import { ConsistencyPolicy, MountMode } from '@struktoai/mirage-core/types'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { Workspace } from '../../workspace.ts'
@@ -52,19 +57,52 @@ describe('S3 cache consistency (mocked)', () => {
     mock.restore()
   })
 
-  it('ALWAYS refetches after the remote object changes out-of-band', async () => {
-    const ws = new Workspace(
-      { '/s3/': new S3Resource(makeConfig()) },
-      { mode: MountMode.WRITE, consistency: ConsistencyPolicy.ALWAYS },
-    )
-    const first = await ws.execute('cat /s3/c.txt')
-    expect(DEC.decode(first.stdout)).toBe('v1')
-    // Mutate the object behind the cache's back (different content => new ETag).
-    mock.store.set(BUCKET, 'c.txt', ENC.encode('v2'))
-    const second = await ws.execute('cat /s3/c.txt')
-    expect(DEC.decode(second.stdout)).toBe('v2')
-    await ws.close()
-  })
+  for (const type of [IndexType.RAM, IndexType.REDIS]) {
+    it
+      .skipIf(type === IndexType.REDIS && process.env.REDIS_URL === undefined)
+      .each(['shell', 'fs'])(`ALWAYS checks a warm ${type} index via %s`, async (surface) => {
+      const index: IndexConfig | RedisIndexConfig =
+        type === IndexType.REDIS
+          ? {
+              type,
+              ...(process.env.REDIS_URL === undefined ? {} : { url: process.env.REDIS_URL }),
+              keyPrefix: `consistency:${crypto.randomUUID()}:`,
+            }
+          : { type }
+      const resource = new S3Resource(makeConfig())
+      const ws = new Workspace(
+        { '/s3/': resource },
+        {
+          mode: MountMode.WRITE,
+          consistency: ConsistencyPolicy.ALWAYS,
+          index,
+        },
+      )
+      try {
+        expect((await ws.execute('ls /s3/')).exitCode).toBe(0)
+        expect((await resource.index.get('/s3/c.txt')).entry).toBeDefined()
+        expect(DEC.decode((await ws.execute('cat /s3/c.txt')).stdout)).toBe('v1')
+        expect(await ws.cache.exists('/s3/c.txt')).toBe(true)
+        mock.store.set(BUCKET, 'c.txt', ENC.encode('v2'))
+        if (surface === 'shell') {
+          expect(DEC.decode((await ws.execute('cat /s3/c.txt')).stdout)).toBe('v2')
+        } else {
+          expect(DEC.decode(await ws.fs.readFile('/s3/c.txt'))).toBe('v2')
+        }
+        mock.store.objects(BUCKET).delete('c.txt')
+        if (surface === 'shell') {
+          const result = await ws.execute('cat /s3/c.txt')
+          expect(result.exitCode).toBe(1)
+          expect(result.stdout.byteLength).toBe(0)
+        } else {
+          await expect(ws.fs.readFile('/s3/c.txt')).rejects.toMatchObject({ code: 'ENOENT' })
+        }
+      } finally {
+        await resource.index.clear()
+        await ws.close()
+      }
+    })
+  }
 
   it('LAZY keeps serving the cached bytes after an out-of-band change', async () => {
     const ws = new Workspace(
@@ -77,5 +115,16 @@ describe('S3 cache consistency (mocked)', () => {
     const second = await ws.execute('cat /s3/c.txt')
     expect(DEC.decode(second.stdout)).toBe('v1')
     await ws.close()
+  })
+  it('keeps stat type=text after tee and touch', async () => {
+    const ws = new Workspace({ '/s3': new S3Resource(makeConfig()) }, { mode: MountMode.WRITE })
+    try {
+      const result = await ws.execute('tee /s3/c.txt <<< x; touch /s3/c.txt; stat /s3/c.txt')
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(result.stdout)).toContain('name=c.txt size=2')
+      expect(DEC.decode(result.stdout)).toContain('type=text')
+    } finally {
+      await ws.close()
+    }
   })
 })

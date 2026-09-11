@@ -79,7 +79,10 @@ class LocalRuntime(PythonRuntime):
         # right (sys.flags included) where an in-process engine cannot.
         return await self._run([
             *init_argv(args.flags), "-c",
-            bootstrap(args.code, args.prog), *args.args
+            bootstrap(args.code,
+                      args.prog,
+                      script_cli=args.script_cli,
+                      stdin=args.stdin), *args.args
         ], args.env, args.stdin)
 
     async def _run(self,

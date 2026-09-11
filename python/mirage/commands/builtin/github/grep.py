@@ -15,6 +15,7 @@
 from mirage.accessor.github import GitHubAccessor
 from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.generic.grep import labelled
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.github.pushdown import narrow_scope
 from mirage.commands.builtin.grep_pattern import pattern_arg
@@ -97,6 +98,7 @@ async def grep(accessor: GitHubAccessor, paths: list[PathSpec],
     recursive = fl.as_bool("r") or fl.as_bool("R")
 
     resolved: list[PathSpec] = []
+    used_search = False
     if paths:
         resolved, file_count, used_search = await narrow_scope(
             accessor,
@@ -106,6 +108,8 @@ async def grep(accessor: GitHubAccessor, paths: list[PathSpec],
             fixed_string=fl.as_bool("F"),
             recursive=recursive,
             whole_word=fl.as_bool("w"),
+            exact_file_set=fl.as_bool("v") or fl.as_bool("c")
+            or fl.as_bool("text") or fl.as_str("binary_files") == "text",
         )
         if file_count > SCOPE_ERROR:
             # Push-down needs -w (see narrow_scope); without it a scope
@@ -114,6 +118,9 @@ async def grep(accessor: GitHubAccessor, paths: list[PathSpec],
             msg = (f"grep: {file_count} files in scope, "
                    "narrow the path, or use -w to enable code search\n")
             return b"", IOResult(exit_code=1, stderr=msg.encode())
+
+    if used_search:
+        opts = labelled(opts)
 
     return await generic_grep(
         resolved,

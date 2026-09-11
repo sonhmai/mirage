@@ -1,0 +1,81 @@
+{
+  "products": [
+    {
+      "gender": "Men",
+      "articleType": "Tshirts",
+      "baseColour": "Blue",
+      "name": "Roadster Men Blue Casual Tshirt"
+    },
+    {
+      "gender": "Men",
+      "articleType": "Tshirts",
+      "baseColour": "Black",
+      "name": "HRX Men Black Sports Tshirt"
+    },
+    {
+      "gender": "Men",
+      "articleType": "Shoes",
+      "baseColour": "White",
+      "name": "Nike Men White Running Sneakers"
+    },
+    {
+      "gender": "Men",
+      "articleType": "Shoes",
+      "baseColour": "Black",
+      "name": "Puma Men Black Formal Shoes"
+    },
+    {
+      "gender": "Men",
+      "articleType": "Jeans",
+      "baseColour": "Blue",
+      "name": "Levis Men Blue Casual Jeans"
+    },
+    {
+      "gender": "Women",
+      "articleType": "Tshirts",
+      "baseColour": "Red",
+      "name": "Roadster Women Red Casual Tshirt"
+    },
+    {
+      "gender": "Women",
+      "articleType": "Shoes",
+      "baseColour": "Red",
+      "name": "Steve Madden Women Red Heels"
+    },
+    {
+      "gender": "Women",
+      "articleType": "Shoes",
+      "baseColour": "White",
+      "name": "Adidas Women White Running Sneakers"
+    },
+    {
+      "gender": "Women",
+      "articleType": "Dress",
+      "baseColour": "Black",
+      "name": "Zara Women Black Formal Dress"
+    },
+    {
+      "gender": "Women",
+      "articleType": "Jeans",
+      "baseColour": "Blue",
+      "name": "H&M Women Blue Summer Jeans"
+    }
+  ],
+  "chunks": [
+    {
+      "source": "s3://docs/policies/refund-2026.pdf",
+      "page": "001",
+      "text": "Refund policy. An order may be returned within 30 days of delivery."
+    },
+    {
+      "source": "s3://docs/policies/refund-2026.pdf",
+      "page": "004",
+      "text": "Refunds are processed within 14 days of the return reaching the warehouse."
+    },
+    {
+      "source": "s3://docs/hr/leave-policy.pdf",
+      "page": "002",
+      "text": "Employees accrue 1.5 days of paid leave per month of service."
+    }
+  ]
+}

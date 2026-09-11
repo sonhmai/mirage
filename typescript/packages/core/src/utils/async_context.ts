@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+export type ContextCall = <R>(fn: () => R | Promise<R>) => R | Promise<R>
+
 export interface AsyncStorage<T> {
   run<R>(store: T, fn: () => R | Promise<R>): R | Promise<R>
   getStore(): T | undefined
@@ -27,6 +29,7 @@ export interface AsyncStorage<T> {
    * is a snapshot; it does not track later binds or settles.
    */
   liveStores(): readonly T[]
+  capture(): ContextCall
 }
 
 interface TaskStorage<T> {
@@ -51,12 +54,17 @@ type ALSCtor = new <T>() => TaskStorage<T>
  * with this class so the browser branch runs under node's test runner.
  */
 export class FallbackStorage<T> implements AsyncStorage<T> {
-  private frames: T[] = []
+  private frames: { store: T | undefined }[] = []
 
   run<R>(s: T, fn: () => R | Promise<R>): R | Promise<R> {
-    this.frames.push(s)
+    return this.withFrame(s, fn)
+  }
+
+  private withFrame<R>(s: T | undefined, fn: () => R | Promise<R>): R | Promise<R> {
+    const frame = { store: s }
+    this.frames.push(frame)
     const drop = (): void => {
-      const at = this.frames.lastIndexOf(s)
+      const at = this.frames.indexOf(frame)
       if (at >= 0) this.frames.splice(at, 1)
     }
     try {
@@ -73,19 +81,30 @@ export class FallbackStorage<T> implements AsyncStorage<T> {
   }
 
   getStore(): T | undefined {
-    return this.frames.length === 0 ? undefined : this.frames[this.frames.length - 1]
+    return this.frames.length === 0 ? undefined : this.frames[this.frames.length - 1]?.store
   }
 
   liveStores(): readonly T[] {
-    return this.frames.slice()
+    return this.frames
+      .map((frame) => frame.store)
+      .filter((store): store is T => store !== undefined)
+  }
+
+  capture(): ContextCall {
+    const frames = this.frames.length === 0 ? [undefined] : this.frames.map((frame) => frame.store)
+    return <R>(fn: () => R | Promise<R>): R | Promise<R> => {
+      const enter = (at: number): R | Promise<R> =>
+        at === frames.length ? fn() : this.withFrame(frames[at], () => enter(at + 1))
+      return enter(0)
+    }
   }
 }
 
 class IsolatedStorage<T> implements AsyncStorage<T> {
-  private readonly tasks: TaskStorage<T>
+  private readonly tasks: TaskStorage<T | undefined>
 
   constructor(ctor: ALSCtor) {
-    this.tasks = new ctor<T>()
+    this.tasks = new ctor<T | undefined>()
   }
 
   run<R>(store: T, fn: () => R | Promise<R>): R | Promise<R> {
@@ -99,6 +118,11 @@ class IsolatedStorage<T> implements AsyncStorage<T> {
   liveStores(): readonly T[] {
     const store = this.tasks.getStore()
     return store === undefined ? [] : [store]
+  }
+
+  capture(): ContextCall {
+    const store = this.tasks.getStore()
+    return (fn) => this.tasks.run(store, fn)
   }
 }
 

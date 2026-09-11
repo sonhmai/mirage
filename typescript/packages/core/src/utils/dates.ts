@@ -17,8 +17,14 @@ export function utcDateFolder(ts?: number): string {
   return d.toISOString().slice(0, 10)
 }
 
-// Truncated to whole seconds so this matches the Python epoch_to_iso byte
-// for byte (second precision).
+/** UTC ISO text: whole seconds, or six fraction digits, matching Python to_iso_z. */
+export function toIsoZ(date: Date): string {
+  return date
+    .toISOString()
+    .replace(/\.(\d{3})Z$/, (_, ms: string) => (ms === '000' ? 'Z' : `.${ms}000Z`))
+}
+
+// Truncated to whole seconds, matching Python epoch_to_iso.
 export function epochToIso(seconds: number): string {
   return new Date(Math.floor(seconds) * 1000).toISOString().replace('.000Z', 'Z')
 }

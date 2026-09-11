@@ -100,6 +100,11 @@ GWS = CLISpec(
                 options=(
                     Option(long="--document", type="str", required=True),
                     Option(long="--text", type="str", required=True),
+                    Option(long="--tab",
+                           type="str",
+                           description=("Tab to append to, from "
+                                        "tabs[].tabProperties.tabId; "
+                                        "the first tab when omitted")),
                 ),
             ), ),
         ),

@@ -17,7 +17,7 @@ import type { LanceDBConfigResolved } from '../../resource/lancedb/config.ts'
 import { ContentType } from '../../types.ts'
 import { contentTypeForExtension } from '../../utils/filetype.ts'
 import { perAccessor } from '../hierarchy/bind.ts'
-import { Codec } from '../hierarchy/codec.ts'
+import { Codec, PATH_SAFE } from '../hierarchy/codec.ts'
 import { Scope, Slot, makeDetectScope, type DetectFn, type ScopeMatch } from '../hierarchy/scope.ts'
 
 const CARD = new Codec({ suffix: '.md' })
@@ -30,13 +30,15 @@ const CARD = new Codec({ suffix: '.md' })
  * directory level, and `blobColumn` adds a second leaf suffix beside the
  * `.md` card. Group slots are named positionally (`g0`, `g1`, ...) so a
  * column named `table` cannot collide with the table slot; `filtersOf` maps
- * them back to column names. Every partial depth shares the one `group`
+ * them back to column names. A group slot decodes through `PATH_SAFE`, so a
+ * value holding `/` keeps its own directory and the WHERE clause holds the
+ * exact value. Every partial depth shares the one `group`
  * kind, and its lister derives the depth from the slots, so the lister table
  * stays static while the scope table varies per mount.
  */
 export function scopesFor(config: LanceDBConfigResolved): Scope[] {
   const prefix: Slot[] = config.table !== null ? [] : [new Slot('table')]
-  const groups = config.groupBy.map((_, i) => new Slot(`g${String(i)}`))
+  const groups = config.groupBy.map((_, i) => new Slot(`g${String(i)}`, PATH_SAFE))
   const scopes: Scope[] = []
   for (let depth = 0; depth <= groups.length; depth++) {
     if (depth === 0 && prefix.length === 0) continue

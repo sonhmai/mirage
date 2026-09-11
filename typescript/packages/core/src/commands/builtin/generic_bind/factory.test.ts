@@ -16,6 +16,10 @@ import { describe, expect, it } from 'vitest'
 import { ContentType, FileStat, FileType } from '../../../types.ts'
 import type { CommandIO } from './adapter.ts'
 import { makeGenericCommands } from './factory.ts'
+import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
+import { makeFind } from '../../../core/object_store/find.ts'
+import { makeStat } from '../../../core/object_store/stat.ts'
+import { FakeAccessor, FakeStore, makeDriver, spec } from '../../../core/object_store/fakes.ts'
 
 function makeOps(overrides: Partial<CommandIO> = {}): CommandIO {
   return {
@@ -32,6 +36,50 @@ function makeOps(overrides: Partial<CommandIO> = {}): CommandIO {
 }
 
 describe('makeGenericCommands', () => {
+  it.each(['find', 'cp'])(
+    '%s passes the invocation index through the guarded native find',
+    async (name) => {
+      const accessor = new FakeAccessor()
+      const store = new FakeStore({ 'data/a.txt': 'abc' })
+      const driver = makeDriver(store)
+      const find = makeFind(driver)
+      const stat = makeStat(driver)
+      const copied: string[] = []
+      const index = new RAMIndexCacheStore()
+      const commands = makeGenericCommands(
+        's3',
+        makeOps({
+          local: false,
+          find: (_accessor, path, options, idx) => find(accessor, path, options, idx),
+          stat: (_accessor, path, idx) => stat(accessor, path, idx),
+          mkdir: () => Promise.resolve(),
+          copy: (_accessor, _src, dst) => {
+            copied.push(dst.virtual)
+            return Promise.resolve()
+          },
+        }),
+      )
+      const command = commands.find((c) => c.name === name)
+      if (command === undefined) throw new Error('command missing')
+      const opts = {
+        stdin: null,
+        flags: { r: name === 'cp' },
+        filetypeFns: null,
+        cwd: '/mnt',
+        index,
+      }
+      const paths = name === 'cp' ? [spec('/data'), spec('/copy')] : [spec('/data')]
+      const cold = await command.fn(accessor, paths, [], opts)
+      expect((await index.get('/mnt/data/a.txt')).entry?.size).toBe(3)
+      if (name === 'cp') expect(copied).toEqual(['/mnt/copy/a.txt'])
+      else {
+        store.connects = 0
+        expect(await command.fn(accessor, paths, [], opts)).toEqual(cold)
+        expect(store.connects).toBe(0)
+      }
+    },
+  )
+
   it('emits read/metadata commands from the catalog', () => {
     const names = new Set(makeGenericCommands('ram', makeOps()).map((c) => c.name))
     expect(names.has('cat')).toBe(true)

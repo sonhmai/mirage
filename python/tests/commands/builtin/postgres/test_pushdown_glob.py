@@ -300,6 +300,37 @@ async def test_rg_glob_skips_pushdown_and_expands(accessor):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("flags", [{"follow": True}, {"F": True}])
+async def test_tail_follow_reads_the_relation_whole(accessor, flags):
+    # A follow polls the file as it grows; the pushed-down suffix moves
+    # with the table and has no byte position to measure against, so a
+    # follow goes through tail_generic on the full stream.
+    reached: list[list[PathSpec]] = []
+
+    async def fake_generic(paths, _texts, _opts, _stat, _stream):
+        reached.append(paths)
+        return b"", IOResult()
+
+    concrete = PathSpec(virtual=CONCRETE,
+                        directory="/public/tables/books",
+                        resource_path=CONCRETE.strip("/"))
+    with patch(
+            "mirage.commands.builtin.postgres.tail.client.count_rows",
+            new=AsyncMock(side_effect=AssertionError("pushdown ran under -f")),
+    ), patch(
+            "mirage.commands.builtin.postgres.tail.resolve_or_empty",
+            new=AsyncMock(return_value=[concrete]),
+    ), patch(
+            "mirage.commands.builtin.postgres.tail.tail_generic",
+            new=fake_generic,
+    ):
+        _, io = await tail(accessor, [concrete], [],
+                           CommandOpts(index=NULL_INDEX, flags=flags))
+    assert io.exit_code == 0
+    assert reached == [[concrete]]
+
+
+@pytest.mark.asyncio
 async def test_tail_glob_does_not_query_a_relation_named_star(accessor):
     # Before the fix this reached count_rows with entity="*" and surfaced
     # 'relation "public.*" does not exist' to the user.

@@ -18,6 +18,7 @@ import type { C } from './client.ts'
 import { DEFAULT_CALENDAR_TZ, GwsState } from './state.ts'
 import type {
   CalendarEvent,
+  DocTab,
   DriveItem,
   EventTime,
   FormItem,
@@ -92,6 +93,7 @@ export async function loadState(db: C, tenant: string, epochMs?: number): Promis
     revisions,
     permissions,
     docs,
+    docTabs,
     spreadsheets,
     tabs,
     cells,
@@ -117,6 +119,7 @@ export async function loadState(db: C, tenant: string, epochMs?: number): Promis
     db.revision.findMany({ where, orderBy: seq }),
     db.permission.findMany({ where, orderBy: seq }),
     db.doc.findMany({ where }),
+    db.docTab.findMany({ where, orderBy: seq }),
     db.spreadsheet.findMany({ where }),
     db.sheetTab.findMany({ where, orderBy: seq }),
     db.sheetCell.findMany({ where }),
@@ -180,7 +183,31 @@ export async function loadState(db: C, tenant: string, epochMs?: number): Promis
     st.files.set(item.id, item)
   }
 
-  for (const row of docs) st.docs.set(row.id, { title: row.title, text: row.text })
+  // Flat rows back into the childTabs tree. Rows arrive in `seq` order, so
+  // a parent is always seen before its children within one document and a
+  // single pass suffices; a child whose parent is missing is dropped
+  // rather than silently promoted to the root, which would turn a broken
+  // fixture into a plausible-looking document.
+  const docTabsOf = groupBy(docTabs, (r) => r.documentId)
+  for (const row of docs) {
+    const built = new Map<string, DocTab>()
+    const roots: DocTab[] = []
+    for (const tabRow of docTabsOf.get(row.id) ?? []) {
+      const tab: DocTab = {
+        tabId: tabRow.tabId,
+        title: tabRow.title,
+        text: tabRow.text,
+        childTabs: [],
+      }
+      built.set(tab.tabId, tab)
+      if (tabRow.parentTabId === null) {
+        roots.push(tab)
+        continue
+      }
+      built.get(tabRow.parentTabId)?.childTabs.push(tab)
+    }
+    st.docs.set(row.id, { title: row.title, tabs: roots })
+  }
 
   const cellsOf = groupBy(cells, (r) => `${r.spreadsheetId} ${String(r.sheetId)}`)
   const tabsOf = groupBy(tabs, (r) => r.spreadsheetId)

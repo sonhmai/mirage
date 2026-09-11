@@ -116,8 +116,8 @@ describe('HttpDiscordTransport', () => {
       { Authorization: 'Bot x' },
       fakeFetch,
     )
-    await expect(t.call('GET', '/users/@me/guilds')).rejects.toThrowError(TypeError)
-    await expect(t.call('GET', '/users/@me/guilds')).rejects.not.toThrowError(DiscordApiError)
+    await expect(t.call('GET', '/users/@me/guilds')).rejects.toThrow(TypeError)
+    await expect(t.call('GET', '/users/@me/guilds')).rejects.not.toThrow(DiscordApiError)
   })
 
   it('429 with retry_after retries and succeeds', async () => {
@@ -144,7 +144,7 @@ describe('HttpDiscordTransport', () => {
       { Authorization: 'Bot x' },
       fakeFetch,
     )
-    await expect(t.call('GET', '/users/@me/guilds')).rejects.toThrowError(DiscordApiError)
+    await expect(t.call('GET', '/users/@me/guilds')).rejects.toThrow(DiscordApiError)
   })
 
   it('non-2xx throws DiscordApiError with status', async () => {

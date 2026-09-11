@@ -21,10 +21,11 @@ from typing import Any
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import parse_mode
 from mirage.runtime.python.monty.binding import (MemoryFile, MontyFileHandle,
-                                                 OSAccess, StatResult,
-                                                 path_from_arg)
+                                                 OSAccess, path_from_arg)
 from mirage.runtime.python.monty.constants import (EXDEV_MESSAGE,
                                                    FILE_EXISTS_MESSAGE)
+from mirage.runtime.python.monty.list import merge_entries
+from mirage.runtime.python.monty.stat import stat_result
 from mirage.runtime.python.monty.vfs import MontyVFS
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn
@@ -197,24 +198,14 @@ class MirageOSAccess(OSAccess):
             self._ensure_file(path)
             self._ensure_dir(path)
             return super().path_stat(path)
-        # 0 is the door's spelling of "no stamp", and monty reads a 0.0
-        # as epoch zero rather than substituting the host clock, so an
-        # unknown mtime stays unknown instead of becoming now.
-        mtime = st.mtime_ns / 1_000_000_000
-        if st.is_dir:
-            return StatResult.dir_stat(mode=st.mode, mtime=mtime)
-        return StatResult.file_stat(size=st.size, mode=st.mode, mtime=mtime)
+        return stat_result(st)
 
     def path_iterdir(self, path: PurePosixPath) -> list[PurePosixPath]:
         remote = self._list_remote(str(path))
         if remote is None:
             return super().path_iterdir(path)
         self._insert_tree_dir(path)
-        merged = {str(p): p for p in super().path_iterdir(path)}
-        for name in remote:
-            child = path / name.rstrip("/")
-            merged.setdefault(str(child), child)
-        return sorted(merged.values())
+        return merge_entries(path, super().path_iterdir(path), remote)
 
     def path_open(self, path: PurePosixPath, mode: str) -> MontyFileHandle:
         self._ensure_file(path)

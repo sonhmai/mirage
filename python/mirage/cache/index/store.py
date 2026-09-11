@@ -33,7 +33,10 @@ class IndexCacheStore:
 
     def seed(self, entries: dict[str, IndexEntry],
              children: dict[str, list[str]], expires_at: datetime) -> None:
-        """Queue a synchronous metadata snapshot for the next lookup."""
+        """Merge a snapshot; flush deferred writes before operations or close.
+
+        Repeated seeds merge by path. Clear discards queued snapshots.
+        """
         raise NotImplementedError
 
     async def put(self, resource_path: str, entry: IndexEntry) -> None:

@@ -1,0 +1,1422 @@
+{
+  "cases": [
+    {
+      "id": "ls_flags_seed",
+      "seq": 960108,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/lsf/dir1 /data/lsf/dir2 && printf d > /data/lsf/dir1/k && printf d > /data/lsf/dir2/k && printf hello > /data/lsf/a.txt && printf x > /data/lsf/b.md && printf '' > /data/lsf/c && printf 1234567890 > /data/lsf/file10.txt && printf zz > /data/lsf/file2.txt && printf q > /data/lsf/Z.txt && touch -t 202501151030 /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "ls_v_version_order",
+      "seq": 960109,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -v /data/lsf",
+      "expect": {
+        "exit": 0,
+        "stdout": "Z.txt\na.txt\nb.md\nc\ndir1\ndir2\nfile2.txt\nfile10.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v"
+      ]
+    },
+    {
+      "id": "ls_X_extension_order",
+      "seq": 960110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -X /data/lsf",
+      "expect": {
+        "exit": 0,
+        "stdout": "c\ndir1\ndir2\nb.md\nZ.txt\na.txt\nfile10.txt\nfile2.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "X"
+      ]
+    },
+    {
+      "id": "ls_sort_word_version",
+      "seq": 960111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls --sort=version /data/lsf",
+      "expect": {
+        "exit": 0,
+        "stdout": "Z.txt\na.txt\nb.md\nc\ndir1\ndir2\nfile2.txt\nfile10.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "sort"
+      ]
+    },
+    {
+      "id": "ls_group_directories_first",
+      "seq": 960112,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls --group-directories-first /data/lsf",
+      "expect": {
+        "exit": 0,
+        "stdout": "dir1\ndir2\nZ.txt\na.txt\nb.md\nc\nfile10.txt\nfile2.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "group-directories-first"
+      ]
+    },
+    {
+      "id": "ls_group_directories_first_reversed",
+      "seq": 960113,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -r --group-directories-first /data/lsf",
+      "expect": {
+        "exit": 0,
+        "stdout": "dir2\ndir1\nfile2.txt\nfile10.txt\nc\nb.md\na.txt\nZ.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "group-directories-first",
+        "r"
+      ]
+    },
+    {
+      "id": "ls_sort_size_operands",
+      "seq": 960114,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls --sort=size /data/lsf/Z.txt /data/lsf/file10.txt /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/lsf/file10.txt\n/data/lsf/a.txt\n/data/lsf/Z.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "sort"
+      ]
+    },
+    {
+      "id": "ls_i_Z_lead_with_question_marks",
+      "seq": 960115,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -iZ /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "? ? /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i",
+        "Z"
+      ]
+    },
+    {
+      "id": "ls_go_long_iso",
+      "seq": 960116,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go --time-style=long-iso /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5 2025-01-15 10:30 /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_full_iso",
+      "seq": 960117,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go --time-style=full-iso /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5 2025-01-15 10:30:00.000000000 +0000 /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_iso_pads_the_year_form",
+      "seq": 960118,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go --time-style=iso /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5 2025-01-15  /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_time_style_format",
+      "seq": 960119,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go --time-style=+%Y/%m/%d /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5 2025/01/15 /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_block_size_K_rounds_up",
+      "seq": 960120,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go --block-size=K --time-style=+x /data/lsf/file10.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 1K x /data/lsf/file10.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "block-size",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_block_size_number",
+      "seq": 960121,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go --block-size=4 --time-style=+x /data/lsf/file10.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 3 x /data/lsf/file10.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "block-size",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_block_size_KB_is_decimal",
+      "seq": 960122,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go --block-size=KB --time-style=+x /data/lsf/file10.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 1kB x /data/lsf/file10.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "block-size",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_u_and_c_are_accepted",
+      "seq": 960123,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -gou --time-style=+x /data/lsf/a.txt && ls -goc --time-style=+x /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5 x /data/lsf/a.txt\n-rw-r--r-- 1 5 x /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "u",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_n_prints_the_ids_as_they_are",
+      "seq": 960124,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -ngo --time-style=+x /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5 x /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "g",
+        "o",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_sort_bogus",
+      "seq": 960125,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls --sort=bogus /data/lsf",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ls: invalid argument 'bogus' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'size'\n  - 'time'\n  - 'version'\n  - 'extension'\n  - 'name'\n  - 'width'\nTry 'ls --help' for more information.\n"
+      },
+      "flags": [
+        "sort"
+      ]
+    },
+    {
+      "id": "ls_time_bogus",
+      "seq": 960126,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls --time=bogus /data/lsf",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ls: invalid argument 'bogus' for '--time'\nValid arguments are:\n  - 'atime', 'access', 'use'\n  - 'ctime', 'status'\n  - 'mtime', 'modification'\n  - 'birth', 'creation'\nTry 'ls --help' for more information.\n"
+      },
+      "flags": [
+        "time"
+      ]
+    },
+    {
+      "id": "ls_time_style_bogus",
+      "seq": 960127,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -l --time-style=bogus /data/lsf",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: invalid argument 'bogus' for 'time style'\nValid arguments are:\n  - [posix-]full-iso\n  - [posix-]long-iso\n  - [posix-]iso\n  - [posix-]locale\n  - +FORMAT (e.g., +%H:%M) for a 'date'-style format\nTry 'ls --help' for more information.\n"
+      },
+      "flags": [
+        "l",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_block_size_bogus",
+      "seq": 960128,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -l --block-size=bogus /data/lsf",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: invalid --block-size argument 'bogus'\n"
+      },
+      "flags": [
+        "l",
+        "block-size"
+      ]
+    },
+    {
+      "id": "ls_hyperlink_bogus",
+      "seq": 960129,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls --hyperlink=bogus /data/lsf",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ls: invalid argument 'bogus' for '--hyperlink'\nValid arguments are:\n  - 'always', 'yes', 'force'\n  - 'never', 'no', 'none'\n  - 'auto', 'tty', 'if-tty'\nTry 'ls --help' for more information.\n"
+      },
+      "flags": [
+        "hyperlink"
+      ]
+    },
+    {
+      "id": "ls_posix_time_style_is_the_locale_style",
+      "seq": 960130,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go --time-style=posix-long-iso /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5 Jan 15  2025 /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "hyperlink"
+      ]
+    },
+    {
+      "id": "ls_time_style_format_width_on_nanoseconds",
+      "seq": 960131,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go --time-style=+%3N.%q /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5 000.1 /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "hyperlink"
+      ]
+    },
+    {
+      "id": "ls_hyperlink_escapes_the_href",
+      "seq": 960132,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf x > '/data/lsf/s p.txt' && ls --hyperlink=always '/data/lsf/s p.txt'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\u001b]8;;file:///data/lsf/s%20p.txt\u0007/data/lsf/s p.txt\u001b]8;;\u0007\n",
+        "stderr": ""
+      },
+      "flags": [
+        "hyperlink"
+      ]
+    },
+    {
+      "id": "ls_block_size_zero_count",
+      "seq": 960133,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -l --block-size=0K /data/lsf",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: invalid --block-size argument '0K'\n"
+      },
+      "flags": [
+        "l",
+        "block-size"
+      ]
+    },
+    {
+      "id": "ls_one_per_line_keeps_the_long_format",
+      "seq": 960134,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go1 --time-style=+x /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5 x /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "1",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_v_orders_bytes_past_the_letters",
+      "seq": 960135,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/lsv && printf x > /data/lsv/Z && printf x > /data/lsv/_ && printf x > '/data/lsv/{' && printf x > /data/lsv/é && ls -v /data/lsv",
+      "expect": {
+        "exit": 0,
+        "stdout": "Z\n_\n{\né\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v"
+      ]
+    },
+    {
+      "id": "ls_time_style_quarter_padding",
+      "seq": 960136,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go --time-style=+%_2q/%-2q/%02q /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5  1/1/01 /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_U_r_keeps_the_listing_order",
+      "seq": 960137,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "[ \"$(ls -U /data/lsf)\" = \"$(ls -Ur /data/lsf)\" ] && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
+        "stderr": ""
+      },
+      "flags": [
+        "U",
+        "r"
+      ]
+    },
+    {
+      "id": "ls_sort_width_counts_columns",
+      "seq": 960138,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/lsw && printf x > /data/lsw/a && printf x > /data/lsw/aa && printf x > /data/lsw/é && printf x > /data/lsw/界 && ls --sort=width /data/lsw",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\né\naa\n界\n",
+        "stderr": ""
+      },
+      "flags": [
+        "sort"
+      ]
+    },
+    {
+      "id": "ls_time_style_plus_flag",
+      "seq": 960139,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -go --time-style=+%+5Y/%+4Y/%+3C /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5 +2025/2025/+20 /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_time_style_plus_width_reaches_the_year",
+      "command": "ls -go --time-style=+%+12F /data/lsf/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 5 +02025-01-15 /data/lsf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "time-style"
+      ],
+      "seq": 960140,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "ls_later_of_h_and_block_size_wins_h",
+      "command": "ls -go --block-size=K -h --time-style=+x /data/lsf/file10.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 10 x /data/lsf/file10.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "block-size",
+        "h",
+        "time-style"
+      ],
+      "seq": 960141,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "ls_later_of_h_and_block_size_wins_block",
+      "command": "ls -goh --block-size=K --time-style=+x /data/lsf/file10.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 1 1K x /data/lsf/file10.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "h",
+        "block-size",
+        "time-style"
+      ],
+      "seq": 960142,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "ls_time_style_colon_zone",
+      "seq": 960143,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/lsz && printf x > /data/lsz/a.txt && ls -go --time-style='+%:z|%::z|%:::z|%8:z|%-:z|%:q' /data/lsz/a.txt | awk '{print $4}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "+00:00|+00:00:00|+00|+0000:00|+0:00|%:q\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_time_style_pads_a_negative_epoch_after_the_sign",
+      "seq": 960144,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "mkdir -p /data/lsn && printf x > /data/lsn/a.txt && touch -d '1969-01-01T00:00:00' /data/lsn/a.txt && ls -go --time-style=+%12s /data/lsn/a.txt | awk '{print $4}' | cut -c1-4",
+      "expect": {
+        "exit": 0,
+        "stdout": "-000\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_time_style_width_replaces_the_default_digits",
+      "seq": 960145,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "mkdir -p /data/lsw && printf x > /data/lsw/a.txt && touch -d '2001-02-03T12:00:00' /data/lsw/a.txt && ls -go --time-style='+%1d,%-m,%1j,%03e,%1Y,%1y,%3u,%+1d' /data/lsw/a.txt | awk '{print $4}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "3,2,34,003,2001,1,006,3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "o",
+        "time-style"
+      ]
+    }
+  ]
+}

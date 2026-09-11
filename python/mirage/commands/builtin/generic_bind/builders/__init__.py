@@ -39,7 +39,6 @@ from mirage.commands.builtin.generic_bind.builders import head
 from mirage.commands.builtin.generic_bind.builders import iconv
 from mirage.commands.builtin.generic_bind.builders import join
 from mirage.commands.builtin.generic_bind.builders import jq
-from mirage.commands.builtin.generic_bind.builders import ln
 from mirage.commands.builtin.generic_bind.builders import look
 from mirage.commands.builtin.generic_bind.builders import ls
 from mirage.commands.builtin.generic_bind.builders import md5
@@ -114,7 +113,6 @@ BUILDERS = (
     iconv.BUILDER,
     join.BUILDER,
     jq.BUILDER,
-    ln.BUILDER,
     look.BUILDER,
     ls.BUILDER,
     md5.BUILDER,

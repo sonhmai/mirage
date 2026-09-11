@@ -134,6 +134,26 @@ describe('rgGeneric columnar skip', () => {
 })
 
 describe('rgGeneric -H/-I filename labels', () => {
+  it('-H -m1 stops reading a remote file after the requested match', async () => {
+    const firstChunk = ENC.encode('hello one\n')
+    async function* limitedStream(_path: PathSpec): AsyncIterable<Uint8Array> {
+      yield await Promise.resolve(firstChunk)
+      throw new Error('read past the requested match')
+    }
+    const result = await rgGeneric(
+      [spec('/top1.txt')],
+      ['hello'],
+      opts({ H: true, m: 1 }),
+      stat,
+      readdir,
+      limitedStream,
+    )
+    if (result === null) throw new Error('rg returned no result')
+    const [out, io] = result
+    expect(DEC.decode(await materialize(out))).toBe('/top1.txt:hello one\n')
+    expect(io.exitCode).toBe(0)
+  })
+
   it('-H labels a single file like ripgrep --with-filename', async () => {
     expect(await run(['/top1.txt'], { H: true })).toBe('/top1.txt:hello one\n')
   })

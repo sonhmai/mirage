@@ -114,8 +114,8 @@ describe('parseOpRef', () => {
     ['op://mirage/', /a vault and an item/],
     ['op:///tok', /a vault and an item/],
   ])('refuses %s', (ref, message) => {
-    expect(() => parseOpRef(ref)).toThrowError(SecretsError)
-    expect(() => parseOpRef(ref)).toThrowError(message)
+    expect(() => parseOpRef(ref)).toThrow(SecretsError)
+    expect(() => parseOpRef(ref)).toThrow(message)
   })
 })
 
@@ -214,14 +214,14 @@ describe('fetchOnePassword', () => {
 
   it('refuses an unknown vault', async () => {
     state.vaults = [{ id: 'v1', title: 'other' }]
-    await expect(fetchOnePassword(config, 'op://mirage/aws')).rejects.toThrowError(
+    await expect(fetchOnePassword(config, 'op://mirage/aws')).rejects.toThrow(
       /vault 'mirage' not found/,
     )
   })
 
   it('refuses an unknown item', async () => {
     state.overviews = { v1: [{ id: 'i1', title: 'other' }] }
-    await expect(fetchOnePassword(config, 'op://mirage/aws')).rejects.toThrowError(
+    await expect(fetchOnePassword(config, 'op://mirage/aws')).rejects.toThrow(
       /item 'aws' not found/,
     )
   })
@@ -244,8 +244,8 @@ describe('fetchOnePassword', () => {
 
   it('refuses a missing token before loading the SDK', async () => {
     Reflect.deleteProperty(process.env, TOKEN_VAR)
-    await expect(onePasswordClient(OnePasswordConfig.parse({}))).rejects.toThrowError(SecretsError)
-    await expect(onePasswordClient(OnePasswordConfig.parse({}))).rejects.toThrowError(TOKEN_VAR)
+    await expect(onePasswordClient(OnePasswordConfig.parse({}))).rejects.toThrow(SecretsError)
+    await expect(onePasswordClient(OnePasswordConfig.parse({}))).rejects.toThrow(TOKEN_VAR)
     expect(state.auths).toEqual([])
   })
 })
@@ -255,10 +255,10 @@ describe('findVaultId and findItemId', () => {
     const client = { vaults: { list: () => Promise.resolve([]) } }
     await expect(
       findVaultId(client as unknown as Parameters<typeof findVaultId>[0], 'gone'),
-    ).rejects.toThrowError(/vault 'gone' not found/)
+    ).rejects.toThrow(/vault 'gone' not found/)
     const empty = { items: { list: () => Promise.resolve([]) } }
     await expect(
       findItemId(empty as unknown as Parameters<typeof findItemId>[0], 'v1', 'gone'),
-    ).rejects.toThrowError(/item 'gone' not found/)
+    ).rejects.toThrow(/item 'gone' not found/)
   })
 })

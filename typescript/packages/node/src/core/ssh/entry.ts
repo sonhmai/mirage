@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FileStat, FileType } from '@struktoai/mirage-core/types'
+import { epochToIso } from '@struktoai/mirage-core/utils/dates'
 import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import { isDirectoryAttrs } from './utils.ts'
 
@@ -26,7 +27,7 @@ export interface SshAttrs {
 }
 
 export function attrsToFileStat(name: string, attrs: SshAttrs): FileStat {
-  const modified = attrs.mtime !== undefined ? new Date(attrs.mtime * 1000).toISOString() : null
+  const modified = attrs.mtime !== undefined ? epochToIso(attrs.mtime) : null
   const extra: Record<string, unknown> = {}
   if (attrs.mode !== undefined) extra.mode = attrs.mode
   if (attrs.uid !== undefined) extra.uid = attrs.uid
@@ -37,7 +38,7 @@ export function attrsToFileStat(name: string, attrs: SshAttrs): FileStat {
   // needs privileges), so it lives wholly in the namespace overlay;
   // server-side uid/gid stay in extra only.
   const mode = attrs.mode !== undefined ? attrs.mode & 0o7777 : null
-  const atime = attrs.atime !== undefined ? new Date(attrs.atime * 1000).toISOString() : null
+  const atime = attrs.atime !== undefined ? epochToIso(attrs.atime) : null
   // The remote mtime is the only cheap change token SFTP offers, so it is
   // also the fingerprint: without one, the ALWAYS consistency policy has
   // nothing to compare and keeps serving a cached copy that the server has

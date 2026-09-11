@@ -15,6 +15,7 @@
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep,
                                                start_basename)
@@ -41,6 +42,7 @@ async def find(
     path_pattern: str | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     start_name = start_basename(path_spec)
     path = path_spec.mount_path

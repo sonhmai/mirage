@@ -141,7 +141,13 @@ export async function catGeneric(
   if (display.numberNonblank) display.numberLines = false
   const wantsDisplay = Object.values(display).some(Boolean)
   if (paths.length > 0) {
-    const [readable, err] = await splitReadable(paths, stat, 'cat')
+    const stats = new Map<string, FileStat>()
+    const rememberStat = async (p: PathSpec): Promise<FileStat> => {
+      const row = await stat(p)
+      stats.set(p.virtual, row)
+      return row
+    }
+    const [readable, err] = await splitReadable(paths, rememberStat, 'cat')
     const errBytes = err === '' ? null : ENC.encode(err)
     if (readable.length === 0) {
       return [null, new IOResult({ exitCode: err === '' ? 0 : 1, stderr: errBytes })]
@@ -157,7 +163,7 @@ export async function catGeneric(
     })
     for (const p of readable) {
       let source: ByteSource = stream(p)
-      if ((await stat(p)).type === FileType.CHAR_DEVICE) {
+      if (stats.get(p.virtual)?.type === FileType.CHAR_DEVICE) {
         source = truncateStream(source, io, new Limit({ maxBytes: CHAR_DEVICE_MAX_BYTES }))
       }
       const cachable = new CachableAsyncIterator(source)

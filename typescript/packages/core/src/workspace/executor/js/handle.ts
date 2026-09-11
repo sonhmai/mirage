@@ -14,7 +14,7 @@
 
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import type { LanguageRuntime } from '../../../runtime/language.ts'
-import { QuickJsUnavailableError } from '../../../runtime/js/types.ts'
+import { QuickJsUnavailableError } from '../../../runtime/js/quickjs/errors.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { ExecutionNode } from '../../types.ts'
@@ -40,6 +40,7 @@ export async function handleJs(
     command?: string
     stdin: ByteSource | null
     env: Record<string, string>
+    cwd?: PathSpec
     code: string | null
     module: boolean
     signal?: AbortSignal
@@ -57,6 +58,7 @@ export async function handleJs(
       command: opts.command ?? 'js',
       stdin: opts.stdin,
       env: opts.env,
+      ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
       code: opts.code,
       flags: { module },
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),

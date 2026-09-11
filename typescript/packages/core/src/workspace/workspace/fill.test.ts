@@ -339,7 +339,7 @@ describe('fillEnv through execute', () => {
   })
 
   it('an unknown source fails at construction', async () => {
-    await expect(makeWs({ T: { from: 'nope-never', ref: 'r' } })).rejects.toThrowError(
+    await expect(makeWs({ T: { from: 'nope-never', ref: 'r' } })).rejects.toThrow(
       /unknown secrets source/,
     )
   })
@@ -1639,15 +1639,13 @@ describe('declared source instances', () => {
     // Object.entries on one yields nothing -- the declarations would
     // vanish silently and every restored pointer would read as an
     // unknown source.
-    await expect(makeWs({}, undefined, undefined, [] as never)).rejects.toThrowError(
-      /must be a mapping/,
-    )
+    await expect(makeWs({}, undefined, undefined, [] as never)).rejects.toThrow(/must be a mapping/)
   })
 
   it('fails at construction for an instance naming an unknown source', async () => {
-    await expect(
-      makeWs({}, undefined, undefined, { prod: { source: 'nope' } }),
-    ).rejects.toThrowError(/unknown secrets source/)
+    await expect(makeWs({}, undefined, undefined, { prod: { source: 'nope' } })).rejects.toThrow(
+      /unknown secrets source/,
+    )
   })
 
   it('never resolves the block for a denied line', async () => {
@@ -1759,7 +1757,7 @@ describe('declared source instances', () => {
   it('validates a pointer named after a prototype member', async () => {
     await expect(
       makeWs({ TOKEN: { from: 'constructor', ref: '', key: 'credential' } }),
-    ).rejects.toThrowError(/unknown secrets source/)
+    ).rejects.toThrow(/unknown secrets source/)
   })
 
   it('needs no source of the instance name', async () => {

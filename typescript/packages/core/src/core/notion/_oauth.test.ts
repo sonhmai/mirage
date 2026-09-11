@@ -89,7 +89,7 @@ describe('MemoryOAuthClientProvider', () => {
 
   it('codeVerifier() throws an error containing "no code verifier" before any save', () => {
     const { provider } = makeProvider()
-    expect(() => provider.codeVerifier()).toThrowError(/no code verifier/)
+    expect(() => provider.codeVerifier()).toThrow(/no code verifier/)
   })
 
   it('clientMetadata getter returns the metadata passed in the constructor', () => {

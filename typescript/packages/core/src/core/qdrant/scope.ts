@@ -17,7 +17,7 @@ import type { QdrantConfigResolved } from '../../resource/qdrant/config.ts'
 import { ContentType } from '../../types.ts'
 import { contentTypeForExtension } from '../../utils/filetype.ts'
 import { perAccessor } from '../hierarchy/bind.ts'
-import { Codec, JSON_NAME } from '../hierarchy/codec.ts'
+import { Codec, JSON_NAME, PATH_SAFE, RAW } from '../hierarchy/codec.ts'
 import { Scope, Slot, makeDetectScope, type DetectFn, type ScopeMatch } from '../hierarchy/scope.ts'
 
 const TXT = new Codec({ suffix: '.txt' })
@@ -30,14 +30,20 @@ const TXT = new Codec({ suffix: '.txt' })
  * adds one directory level, and `textField` / `blobField` each add a leaf
  * suffix beside the `.json` row. Group slots are named positionally (`g0`,
  * `g1`, ...) so a column named `table` cannot collide with the collection
- * slot; `filtersOf` maps them back to column names. Every partial depth
- * shares the one `group` kind, and its lister derives the depth from the
- * slots, so the lister table stays static while the scope table varies per
- * mount.
+ * slot; `filtersOf` maps them back to column names. A group slot decodes
+ * through `PATH_SAFE`, so its filter holds the exact value the directory was
+ * rendered from; a `basenameFields` slot stays `RAW` because its rendering
+ * drops the value's parents and the lister resolves it against the payload
+ * instead. Every partial depth shares the one `group` kind, and its lister
+ * derives the depth from the slots, so the lister table stays static while
+ * the scope table varies per mount.
  */
 export function scopesFor(config: QdrantConfigResolved): Scope[] {
   const prefix: Slot[] = config.collection !== null ? [] : [new Slot('table')]
-  const groups = config.groupBy.map((_, i) => new Slot(`g${String(i)}`))
+  const groups = config.groupBy.map(
+    (column, i) =>
+      new Slot(`g${String(i)}`, config.basenameFields.includes(column) ? RAW : PATH_SAFE),
+  )
   const scopes: Scope[] = []
   for (let depth = 0; depth <= groups.length; depth++) {
     if (depth === 0 && prefix.length === 0) continue

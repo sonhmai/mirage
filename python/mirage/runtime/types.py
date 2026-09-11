@@ -12,12 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
 
 from mirage.io import IOResult, OpReport
 from mirage.types import PathSpec
+
+if TYPE_CHECKING:
+    from mirage.ops.types import NamespaceView, SessionView
+    from mirage.runtime.binding import WorkspaceBinding
+    from mirage.runtime.resolver import MountResolver
+    from mirage.utils.context_scope import ContextScope
 
 # The value contract of eval: never richer than JSON plus bytes, so any
 # evaluator (in-process or remote over a serialized transport) can carry
@@ -58,7 +64,7 @@ class DispatchFn(Protocol):
     ``path`` and return its result with the accounting IOResult.
 
     The contract a sandboxed runtime's file I/O rides: defined here,
-    on the consumer side, because runtimes receive it (attach) while
+    on the consumer side, because runtimes receive it through a binding while
     the workspace provides it, and the runtime package imports no
     workspace module. ``report``, when a caller passes one, is stamped
     by the door the moment the op completes, so an observer reads what
@@ -214,6 +220,10 @@ class RunArgs:
             defines that slot (CPython under ``-c``) it cannot apply.
         env (dict[str, str]): extra environment merged over the
             runtime's own.
+        script_cli (bool): installed script CLI; bind bare argv and stdin
+            in the program globals as well as the interpreter's own streams.
+        cwd (PathSpec | None): virtual working directory for
+            filesystem-aware guest runtimes.
         stdin (bytes | None): bytes fed to the interpreter's stdin.
         flags (dict[str, Any]): interpreter-level switches parsed by
             the command's spec (e.g. js module mode). Each runtime
@@ -226,6 +236,8 @@ class RunArgs:
     env: dict[str, str] = field(default_factory=dict)
     stdin: bytes | None = None
     flags: dict[str, Any] = field(default_factory=dict)
+    cwd: PathSpec | None = None
+    script_cli: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +254,74 @@ class RunResult:
     stdout: bytes
     stderr: bytes | None
     exit_code: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CodeExecution(RunArgs):
+    """Source in an explicit language, with interpreter execution arguments."""
+
+    language: Language
+    kind: Literal["code"] = field(default="code", init=False)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ShellExecution:
+    """A whole shell line, interpreted entirely by the selected runtime."""
+
+    line: str
+    cwd: PathSpec
+    env: dict[str, str] = field(default_factory=dict)
+    stdin: bytes | None = None
+    kind: Literal["shell"] = field(default="shell", init=False)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ProcessExecution:
+    """An argv request executed without shell interpretation."""
+
+    argv: tuple[str, ...]
+    cwd: PathSpec
+    env: dict[str, str] = field(default_factory=dict)
+    stdin: bytes | None = None
+    kind: Literal["process"] = field(default="process", init=False)
+
+
+ExecutionRequest: TypeAlias = CodeExecution | ShellExecution | ProcessExecution
+
+# Guest APIs that can operate on workspace files. Policy and backend support
+# still decide whether an individual operation is allowed.
+FilesystemOperation: TypeAlias = Literal["read", "write", "list", "stat",
+                                         "glob"]
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeCapabilities:
+    """Execution support by runtime type, plus the separate reach guarantee."""
+
+    languages: tuple[Language, ...] = ()
+    shell: bool = False
+    process: bool = False
+    evaluate: bool = False
+    reach: RuntimeReach = "process"
+    filesystem: tuple[FilesystemOperation, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeContext:
+    """Local workspace binding captured for one execution, never guest globals.
+
+    The scoped doors retain session, policy, and observation context even
+    when called later from a worker callback. No workspace stores are exposed.
+    """
+
+    binding: "WorkspaceBinding"
+    dispatch: DispatchFn
+    resolver: "MountResolver"
+    ns: "NamespaceView"
+    session_view: "SessionView | None"
+    cwd: PathSpec
+    env: Mapping[str, str]
+    scope: "ContextScope"
 
 
 @dataclass(frozen=True, slots=True)

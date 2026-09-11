@@ -346,7 +346,7 @@ export async function statGeneric(
     }
     let s: FileStat
     try {
-      s = await operandStat(p, stat, opts.statPath, opts.ns?.mounts)
+      s = await operandStat(p, stat, opts.statPath, opts.ns?.mounts, opts.ns?.links)
     } catch (e) {
       // GNU stat keeps reporting the remaining operands, exit 1.
       if (!isFsError(e)) throw e

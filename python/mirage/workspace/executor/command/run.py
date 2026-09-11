@@ -160,7 +160,7 @@ def registry_child_mounts(registry: MountRegistry,
 
 def link_view(namespace: Namespace | None,
               dispatch: DispatchFn | None) -> LinkView | None:
-    """The symlink facts on offer, or None when there are no links.
+    """Live symlink facts, or None without a namespace and dispatcher.
 
     Offered to every command as ``opts.ns.links``, whether or not it
     looks: a command opts in by reading the field, so there is no list
@@ -172,7 +172,7 @@ def link_view(namespace: Namespace | None,
         dispatch (DispatchFn | None): op dispatcher, which answers
             existence across mounts rather than within one backend.
     """
-    if namespace is None or dispatch is None or not namespace.has_links():
+    if namespace is None or dispatch is None:
         return None
     return LinkView(stat_at=namespace.link_stat_at,
                     children=namespace.link_stats_under,

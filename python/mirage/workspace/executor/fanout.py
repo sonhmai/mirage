@@ -176,7 +176,7 @@ def _should_fan_out(
         # ripgrep recurses directories by default; no flag to check.
         return True
     if cmd_name == "ls":
-        return flag_kwargs.get("R") is True
+        return flag_kwargs.get("recursive") is True
     return False
 
 

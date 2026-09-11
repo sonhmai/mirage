@@ -12,6 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+/** The selected runtime cannot interpret this execution request. */
+export class UnsupportedExecutionError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'UnsupportedExecutionError'
+  }
+}
+
 /**
  * An evaluation that could not produce a value. The message carries
  * the evaluator's own diagnostics (a traceback, a transport failure,

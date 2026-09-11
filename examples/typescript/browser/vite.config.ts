@@ -23,6 +23,7 @@ const here = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(here, '../../../.env.development') })
 
 export default defineConfig({
+  worker: { format: 'es' },
   optimizeDeps: {
     // The dev server's pre-bundler follows core's dynamic import of the
     // optional monty runtime and fails on the undeclared

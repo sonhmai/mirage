@@ -22,6 +22,7 @@ import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { gnuBasename } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import type { ObjectStoreDriver, StatFn } from './driver.ts'
+import { cachedEntry } from './readdir.ts'
 
 /** Build the index-first stat ladder over one driver. */
 export function makeStat<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): StatFn<A> {
@@ -48,9 +49,8 @@ export function makeStat<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>)
     // sizes, so stat can return instantly for known paths.
     if (index !== undefined) {
       const virtualKey = prefix !== '' ? `${prefix}/${stripped}` : '/' + stripped
-      const lookup = await index.get(virtualKey)
-      if (lookup.entry !== undefined && lookup.entry !== null) {
-        const entry = lookup.entry
+      const entry = await cachedEntry(index, virtualKey)
+      if (entry !== null) {
         // Store "folders" are synthetic prefixes with no object, so
         // readdir() records no time or size for them.
         if (entry.resourceType === ResourceType.FOLDER) {
@@ -70,13 +70,17 @@ export function makeStat<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>)
       // (e.g. .git, HEAD, .hg during cd).
       const parent = virtualKey.replace(/\/[^/]*$/, '') || '/'
       const parentListing = await index.listDir(parent)
-      if (parentListing.entries !== undefined && parentListing.entries !== null) {
+      if (
+        parentListing.entries !== undefined &&
+        parentListing.entries !== null &&
+        !parentListing.entries.includes(virtualKey)
+      ) {
         throw enoent(path)
       }
     }
 
-    // Slow path: no index cache available, or parent directory not yet
-    // listed. Hit the store.
+    // A listed child can lose its metadata to independent eviction.
+    // Missing cache information must fall back to the store.
     const kpfx = driver.keyPrefixOf(accessor)
     const key = kp.apply(kpfx, rawPath)
     const { conn, close } = await driver.connect(accessor)

@@ -119,17 +119,17 @@ describe('resolveSources', () => {
     delete process.env.SOURCES_ABSENT
     await expect(
       resolveSources({ prod: block({ token: { from: 'env', key: 'SOURCES_ABSENT' } }) }),
-    ).rejects.toThrowError(/secrets\.prod\.config\.token.*SOURCES_ABSENT/s)
+    ).rejects.toThrow(/secrets\.prod\.config\.token.*SOURCES_ABSENT/s)
   })
 
   it('names the known sources for an unknown one', async () => {
     await expect(
       resolveSources({ prod: SecretSourceSchema.parse({ source: 'nope' }) }),
-    ).rejects.toThrowError(SecretsError)
+    ).rejects.toThrow(SecretsError)
   })
 
   it('reports field and reason for config the source refuses', async () => {
-    await expect(resolveSources({ prod: block({ nonesuch: 'x' }) })).rejects.toThrowError(
+    await expect(resolveSources({ prod: block({ nonesuch: 'x' }) })).rejects.toThrow(
       /secrets\.prod:.*nonesuch/s,
     )
   })

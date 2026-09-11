@@ -31,12 +31,11 @@ def _spec(virtual: str) -> PathSpec:
 
 @pytest.mark.asyncio
 async def test_read_plain_file_downloads_by_id(accessor, index):
-    await index.put(
-        "/a.txt",
-        IndexEntry(id="200",
-                   name="a.txt",
-                   resource_type="box/file",
-                   vfs_name="a.txt"))
+    await index.set_dir('/', [('a.txt',
+                               IndexEntry(id="200",
+                                          name="a.txt",
+                                          resource_type="box/file",
+                                          vfs_name="a.txt"))])
     with patch(
             "mirage.core.box.read.download_file",
             new_callable=AsyncMock,
@@ -48,12 +47,11 @@ async def test_read_plain_file_downloads_by_id(accessor, index):
 
 @pytest.mark.asyncio
 async def test_a_ranged_read_asks_box_for_the_range(accessor, index):
-    await index.put(
-        "/a.txt",
-        IndexEntry(id="200",
-                   name="a.txt",
-                   resource_type="box/file",
-                   vfs_name="a.txt"))
+    await index.set_dir('/', [('a.txt',
+                               IndexEntry(id="200",
+                                          name="a.txt",
+                                          resource_type="box/file",
+                                          vfs_name="a.txt"))])
     with patch(
             "mirage.core.box.read.download_file",
             new_callable=AsyncMock,
@@ -67,12 +65,11 @@ async def test_a_ranged_read_asks_box_for_the_range(accessor, index):
 
 @pytest.mark.asyncio
 async def test_a_read_to_the_end_leaves_the_range_open(accessor, index):
-    await index.put(
-        "/a.txt",
-        IndexEntry(id="200",
-                   name="a.txt",
-                   resource_type="box/file",
-                   vfs_name="a.txt"))
+    await index.set_dir('/', [('a.txt',
+                               IndexEntry(id="200",
+                                          name="a.txt",
+                                          resource_type="box/file",
+                                          vfs_name="a.txt"))])
     with patch(
             "mirage.core.box.read.download_file",
             new_callable=AsyncMock,
@@ -85,12 +82,11 @@ async def test_a_read_to_the_end_leaves_the_range_open(accessor, index):
 
 @pytest.mark.asyncio
 async def test_read_box_native_file_returns_raw_bytes(accessor, index):
-    await index.put(
-        "/n.boxnote",
-        IndexEntry(id="300",
-                   name="n.boxnote",
-                   resource_type="box/file",
-                   vfs_name="n.boxnote"))
+    await index.set_dir('/', [('n.boxnote',
+                               IndexEntry(id="300",
+                                          name="n.boxnote",
+                                          resource_type="box/file",
+                                          vfs_name="n.boxnote"))])
     raw = json.dumps({"doc": {"content": []}}).encode()
     with patch(
             "mirage.core.box.read.download_file",
@@ -103,12 +99,11 @@ async def test_read_box_native_file_returns_raw_bytes(accessor, index):
 
 @pytest.mark.asyncio
 async def test_read_folder_raises_eisdir(accessor, index):
-    await index.put(
-        "/docs",
-        IndexEntry(id="100",
-                   name="docs",
-                   resource_type="box/folder",
-                   vfs_name="docs"))
+    await index.set_dir('/', [('docs',
+                               IndexEntry(id="100",
+                                          name="docs",
+                                          resource_type="box/folder",
+                                          vfs_name="docs"))])
     with pytest.raises(IsADirectoryError):
         await read(accessor, _spec("/docs"), index)
 
@@ -126,12 +121,11 @@ async def test_read_missing_populates_parent_then_raises(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stream_plain_file_chunks(accessor, index):
-    await index.put(
-        "/a.txt",
-        IndexEntry(id="200",
-                   name="a.txt",
-                   resource_type="box/file",
-                   vfs_name="a.txt"))
+    await index.set_dir('/', [('a.txt',
+                               IndexEntry(id="200",
+                                          name="a.txt",
+                                          resource_type="box/file",
+                                          vfs_name="a.txt"))])
 
     async def fake_stream(_tm, _fid):
         yield b"he"

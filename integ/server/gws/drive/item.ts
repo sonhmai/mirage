@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createHash } from 'node:crypto'
+import { initialDocTab } from '../docs/body.ts'
 import { newSlide } from '../slides/page.ts'
 import { newTab } from '../sheets/grid.ts'
 import type { GwsState } from '../store/state.ts'
@@ -62,7 +63,7 @@ export function pushRevision(item: DriveItem): void {
 // coupling between Drive and the editors.
 export function autoLink(st: GwsState, item: DriveItem): void {
   if (item.mimeType === DOC_MIME && !st.docs.has(item.id)) {
-    st.docs.set(item.id, { title: item.name, text: '' })
+    st.docs.set(item.id, { title: item.name, tabs: [initialDocTab()] })
   } else if (item.mimeType === SHEET_MIME && !st.sheets.has(item.id)) {
     st.sheets.set(item.id, { title: item.name, tabs: [newTab(0, 'Sheet1')], nextSheetId: 1 })
   } else if (item.mimeType === SLIDE_MIME && !st.presentations.has(item.id)) {

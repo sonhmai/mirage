@@ -282,7 +282,7 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
     seed(ram)
     const res = await ws.execute('ln -s /ram/*.txt /ram/lnk')
     expect(res.exitCode).toBe(1)
-    expect(new TextDecoder().decode(res.stderr)).toContain(': Not a directory')
+    expect(new TextDecoder().decode(res.stderr)).toContain(': No such file or directory')
     await ws.close()
   })
 

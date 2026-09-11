@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep,
                                                start_basename)
@@ -168,6 +169,7 @@ async def find(
     mindepth: int | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     start_name = start_basename(path_spec)
     path = path_spec.mount_path

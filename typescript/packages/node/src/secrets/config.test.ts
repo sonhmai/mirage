@@ -25,10 +25,10 @@ describe('source configs', () => {
   })
 
   it('each refuses an unknown key', () => {
-    expect(() => EnvConfig.parse({ bogus: 1 })).toThrowError()
-    expect(() => DotenvConfig.parse({ bogus: 1 })).toThrowError()
-    expect(() => AWSSMConfig.parse({ bogus: 1 })).toThrowError()
-    expect(() => OnePasswordConfig.parse({ bogus: 1 })).toThrowError()
+    expect(() => EnvConfig.parse({ bogus: 1 })).toThrow()
+    expect(() => DotenvConfig.parse({ bogus: 1 })).toThrow()
+    expect(() => AWSSMConfig.parse({ bogus: 1 })).toThrow()
+    expect(() => OnePasswordConfig.parse({ bogus: 1 })).toThrow()
   })
 
   it('1password takes a service account token', () => {
@@ -51,9 +51,9 @@ describe('source configs', () => {
     // Insertion order would otherwise decide which credential wins,
     // and the two hosts would disagree; python refuses the same config
     // from the other side, its camel key being the extra one there.
-    expect(() =>
-      AWSSMConfig.parse({ aws_profile: 'from-yaml', awsProfile: 'from-code' }),
-    ).toThrowError(/aws_profile/)
+    expect(() => AWSSMConfig.parse({ aws_profile: 'from-yaml', awsProfile: 'from-code' })).toThrow(
+      /aws_profile/,
+    )
   })
 
   // A `secrets:` block spells a source's config python's way, so this

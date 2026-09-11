@@ -14,6 +14,8 @@
 
 import asyncio
 
+import pytest
+
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
@@ -75,3 +77,27 @@ def test_grep_r_root_with_or_does_not_run_right_arm():
     _, out = asyncio.run(
         _run('grep -rEn "legacyFetch" / || echo SHOULD_NOT_PRINT'))
     assert "SHOULD_NOT_PRINT" not in out
+
+
+@pytest.mark.asyncio
+async def test_binary_only_match_survives_nested_mount_fanout():
+    outer = RAMResource()
+    inner = RAMResource()
+    outer._store.dirs.add("/")
+    outer._store.dirs.add("/work")
+    inner._store.files["/paper.pdf"] = b"needle\0tail\n"
+    ws = Workspace({
+        "/": (outer, MountMode.WRITE),
+        "/work/remote": (inner, MountMode.WRITE)
+    })
+    try:
+        io = await ws.execute("grep -r needle /work")
+        assert await io.materialize_stdout() == b""
+        assert io.exit_code == 0
+        stderr = await io.materialize_stderr()
+        assert b"/work/remote/paper.pdf: binary file matches" in stderr
+        io = await ws.execute("grep -Ir needle /work")
+        assert await io.materialize_stdout() == b""
+        assert io.exit_code == 1
+    finally:
+        await ws.close()

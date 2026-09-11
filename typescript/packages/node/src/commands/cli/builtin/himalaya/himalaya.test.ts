@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
 import type { CLIDoors } from '@struktoai/mirage-core/commands/cli/types'
 import { materialize } from '@struktoai/mirage-core/io/types'
@@ -109,6 +109,14 @@ beforeEach(() => {
     append: appendMock,
   } as unknown as Awaited<ReturnType<EmailAccessor['getImap']>>)
   vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
+})
+
+// vitest 4 hands a second spyOn on an already-spied method the same spy
+// with its call history intact, so a per-test count would otherwise see
+// every earlier test's close() calls. Restoring after each test gives
+// the next beforeEach a fresh spy.
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 function leaf(...path: string[]) {

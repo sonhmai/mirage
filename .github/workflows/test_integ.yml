@@ -1316,6 +1316,13 @@ jobs:
             sleep 1
           done
 
+      - name: Pull the sandbox image
+        run: |
+          for i in $(seq 1 5); do
+            docker pull debian:trixie-slim && break
+            echo "docker pull failed (attempt $i), retrying"; sleep 10
+          done
+
       - name: Start the docker sandbox container (user-provisioned)
         run: docker run -d --name "$MIRAGE_INTEG_DOCKER_CONTAINER" debian:trixie-slim sleep infinity
 

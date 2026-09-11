@@ -33,9 +33,7 @@
         "stdout": "24\n",
         "stderr": ""
       },
-      "flags": [
-        "c"
-      ]
+      "flags": ["c"]
     },
     {
       "id": "stat_name",
@@ -70,9 +68,7 @@
         "stdout": "/data/a.txt\n",
         "stderr": ""
       },
-      "flags": [
-        "c"
-      ]
+      "flags": ["c"]
     },
     {
       "id": "stat_root_dir",
@@ -107,9 +103,7 @@
         "stdout": "directory /data\n",
         "stderr": ""
       },
-      "flags": [
-        "c"
-      ]
+      "flags": ["c"]
     },
     {
       "id": "stat_mount_root_names_the_operand",
@@ -143,6 +137,25 @@
       "expect": {
         "exit": 0,
         "stdout": "name=data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stat_y_never_prints_zero_millis",
+      "seq": 96,
+      "targets": [
+        "s3",
+        "s3-prefix",
+        "gridfs",
+        "gridfs-prefix",
+        "ssh",
+        "databricks",
+        "databricks-prefix"
+      ],
+      "command": "stat -c '%y' /data/a.txt | grep -vc '\\.000Z'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
         "stderr": ""
       }
     }

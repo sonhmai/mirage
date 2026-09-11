@@ -15,6 +15,9 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
+import type { Policy } from '@struktoai/mirage-core/policy/index'
+import type { Action, SessionContext } from '@struktoai/mirage-core/policy/types'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { seedVar } from '@struktoai/mirage-core/workspace/session/state'
 import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
@@ -36,6 +39,16 @@ import { VersionStore } from './store.ts'
 
 function newWs(): Workspace {
   return new Workspace({ '/m': new RAMResource() }, { mode: MountMode.WRITE })
+}
+
+/** Refuse env writes to GATE_* names, the deployment's rule. */
+class DenyGate implements Policy {
+  preSession(ctx: SessionContext): Action | null {
+    if (ctx.plane === 'env' && ctx.key.startsWith('GATE_')) {
+      return { kind: 'deny', reason: 'GATE_* refused by policy' }
+    }
+    return null
+  }
 }
 
 describe('version api', () => {
@@ -158,5 +171,20 @@ describe('version api', () => {
     const historyText = new TextDecoder().decode(history.stdout)
     expect(historyText).toContain('echo original > /m/a.txt')
     expect(historyText).not.toContain('echo mutated > /m/a.txt')
+  })
+
+  // The live cache was cleared ahead of the restore's gate, so a refused
+  // checkout still sent every cached read back to its origin while the
+  // rest of the workspace stayed as it was; the clear now sits behind it.
+  it('a refused checkout leaves the live cache alone', async () => {
+    const ws = newWs()
+    const store = await openStore()
+    seedVar(ws.createSession('s2'), 'GATE_X', '1')
+    await commitState(store, await toStateDict(ws), 'main', 'v1')
+    await ws.cache.set('k', new TextEncoder().encode('cached'))
+    ws.policies.add(new DenyGate())
+    await expect(checkout(store, ws, 'main')).rejects.toBeInstanceOf(PolicyDenied)
+    expect(await ws.cache.get('k')).toEqual(new TextEncoder().encode('cached'))
+    await ws.close()
   })
 })

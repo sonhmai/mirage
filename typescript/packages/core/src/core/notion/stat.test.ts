@@ -85,16 +85,18 @@ describe('notion stat', () => {
     const transport = new FakeTransport()
     const idx = new RAMIndexCacheStore()
     const segment = `Tasks__${DB_ID}`
-    await idx.put(
-      `/databases/${segment}`,
-      new IndexEntry({
-        id: DB_ID,
-        name: segment,
-        resourceType: 'notion/database',
-        remoteTime: '2024-02-03T00:00:00Z',
-        vfsName: segment,
-      }),
-    )
+    await idx.setDir('/databases', [
+      [
+        segment,
+        new IndexEntry({
+          id: DB_ID,
+          name: segment,
+          resourceType: 'notion/database',
+          remoteTime: '2024-02-03T00:00:00Z',
+          vfsName: segment,
+        }),
+      ],
+    ])
     const result = await stat(makeAccessor(transport), spec(`/databases/${segment}/`), idx)
     expect(result.name).toBe(segment)
     expect(result.type).toBe(FileType.DIRECTORY)
@@ -148,16 +150,18 @@ describe('notion stat', () => {
     const transport = new FakeTransport()
     const idx = new RAMIndexCacheStore()
     const segment = `Tasks__${DB_ID}`
-    await idx.put(
-      `/databases/${segment}/database.json`,
-      new IndexEntry({
-        id: `${DB_ID}:database`,
-        name: 'database.json',
-        resourceType: 'file',
-        vfsName: 'database.json',
-        size: 42,
-      }),
-    )
+    await idx.setDir(`/databases/${segment}`, [
+      [
+        'database.json',
+        new IndexEntry({
+          id: `${DB_ID}:database`,
+          name: 'database.json',
+          resourceType: 'file',
+          vfsName: 'database.json',
+          size: 42,
+        }),
+      ],
+    ])
     const result = await stat(
       makeAccessor(transport),
       spec(`/databases/${segment}/database.json`),
@@ -193,16 +197,18 @@ describe('notion stat', () => {
     const transport = new FakeTransport()
     const idx = new RAMIndexCacheStore()
     const segment = `Page__${PAGE_ID}`
-    await idx.put(
-      `/pages/${segment}`,
-      new IndexEntry({
-        id: PAGE_ID,
-        name: segment,
-        resourceType: 'notion/page',
-        remoteTime: '2024-01-02T00:00:00Z',
-        vfsName: segment,
-      }),
-    )
+    await idx.setDir('/pages', [
+      [
+        segment,
+        new IndexEntry({
+          id: PAGE_ID,
+          name: segment,
+          resourceType: 'notion/page',
+          remoteTime: '2024-01-02T00:00:00Z',
+          vfsName: segment,
+        }),
+      ],
+    ])
     const result = await stat(makeAccessor(transport), spec(`/pages/${segment}/`), idx)
     expect(result.name).toBe(segment)
     expect(result.type).toBe(FileType.DIRECTORY)
@@ -215,15 +221,17 @@ describe('notion stat', () => {
     const transport = new FakeTransport()
     const idx = new RAMIndexCacheStore()
     const segment = `Page__${PAGE_ID}`
-    await idx.put(
-      `/pages/${segment}/page.json`,
-      new IndexEntry({
-        id: `${PAGE_ID}:page`,
-        name: 'page.json',
-        resourceType: 'file',
-        vfsName: 'page.json',
-      }),
-    )
+    await idx.setDir(`/pages/${segment}`, [
+      [
+        'page.json',
+        new IndexEntry({
+          id: `${PAGE_ID}:page`,
+          name: 'page.json',
+          resourceType: 'file',
+          vfsName: 'page.json',
+        }),
+      ],
+    ])
     const result = await stat(makeAccessor(transport), spec(`/pages/${segment}/page.json`), idx)
     expect(result.name).toBe('page.json')
     expect(result.content).toBe(ContentType.JSON)
@@ -262,16 +270,18 @@ describe('notion stat', () => {
     const transport = new FakeTransport()
     const idx = new RAMIndexCacheStore()
     const segment = `Page__${PAGE_ID}`
-    await idx.put(
-      `/notion/pages/${segment}`,
-      new IndexEntry({
-        id: PAGE_ID,
-        name: segment,
-        resourceType: 'notion/page',
-        remoteTime: '',
-        vfsName: segment,
-      }),
-    )
+    await idx.setDir('/notion/pages', [
+      [
+        segment,
+        new IndexEntry({
+          id: PAGE_ID,
+          name: segment,
+          resourceType: 'notion/page',
+          remoteTime: '',
+          vfsName: segment,
+        }),
+      ],
+    ])
     const virtual = `/notion/pages/${segment}/`
     const result = await stat(
       makeAccessor(transport),

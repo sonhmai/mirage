@@ -54,15 +54,17 @@ def index():
 
 @pytest.mark.asyncio
 async def test_read_gdoc(accessor, index):
-    await index.put(
-        "/My Doc.gdoc.json",
-        IndexEntry(
-            id="doc1",
-            name="My Doc",
-            resource_type="gdrive/gdoc",
-            remote_time="2026-04-01T00:00:00.000Z",
-            vfs_name="My Doc.gdoc.json",
-        ))
+    await index.set_dir(
+        "/",
+        [("My Doc.gdoc.json",
+          IndexEntry(
+              id="doc1",
+              name="My Doc",
+              resource_type="gdrive/gdoc",
+              remote_time="2026-04-01T00:00:00.000Z",
+              vfs_name="My Doc.gdoc.json",
+          ))],
+    )
     with patch(
             "mirage.core.gdocs.read.google_get",
             new_callable=AsyncMock,
@@ -78,15 +80,17 @@ async def test_read_gdoc(accessor, index):
 
 @pytest.mark.asyncio
 async def test_read_gsheet(accessor, index):
-    await index.put(
-        "/My Sheet.gsheet.json",
-        IndexEntry(
-            id="sheet1",
-            name="My Sheet",
-            resource_type="gdrive/gsheet",
-            remote_time="2026-04-01T00:00:00.000Z",
-            vfs_name="My Sheet.gsheet.json",
-        ))
+    await index.set_dir(
+        "/",
+        [("My Sheet.gsheet.json",
+          IndexEntry(
+              id="sheet1",
+              name="My Sheet",
+              resource_type="gdrive/gsheet",
+              remote_time="2026-04-01T00:00:00.000Z",
+              vfs_name="My Sheet.gsheet.json",
+          ))],
+    )
     with patch(
             "mirage.core.gsheets.read.google_get",
             new_callable=AsyncMock,
@@ -102,15 +106,17 @@ async def test_read_gsheet(accessor, index):
 
 @pytest.mark.asyncio
 async def test_read_gslide(accessor, index):
-    await index.put(
-        "/My Slides.gslide.json",
-        IndexEntry(
-            id="slide1",
-            name="My Slides",
-            resource_type="gdrive/gslide",
-            remote_time="2026-04-01T00:00:00.000Z",
-            vfs_name="My Slides.gslide.json",
-        ))
+    await index.set_dir(
+        "/",
+        [("My Slides.gslide.json",
+          IndexEntry(
+              id="slide1",
+              name="My Slides",
+              resource_type="gdrive/gslide",
+              remote_time="2026-04-01T00:00:00.000Z",
+              vfs_name="My Slides.gslide.json",
+          ))],
+    )
     with patch(
             "mirage.core.gslides.read.google_get",
             new_callable=AsyncMock,
@@ -126,15 +132,17 @@ async def test_read_gslide(accessor, index):
 
 @pytest.mark.asyncio
 async def test_read_regular(accessor, index):
-    await index.put(
-        "/photo.png",
-        IndexEntry(
-            id="img1",
-            name="photo",
-            resource_type="gdrive/file",
-            remote_time="2026-04-01T00:00:00.000Z",
-            vfs_name="photo.png",
-        ))
+    await index.set_dir(
+        "/",
+        [("photo.png",
+          IndexEntry(
+              id="img1",
+              name="photo",
+              resource_type="gdrive/file",
+              remote_time="2026-04-01T00:00:00.000Z",
+              vfs_name="photo.png",
+          ))],
+    )
     img_bytes = b"\x89PNG\r\n"
     with patch(
             "mirage.core.gdrive.read.download_file",

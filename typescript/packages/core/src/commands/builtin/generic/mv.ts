@@ -371,7 +371,10 @@ export async function mvGeneric(
       )
       continue
     }
-    const { exists: targetExists, isDir: targetIsDir } = await entryKind(stat, target)
+    const { exists: targetExists, isDir: targetIsDir } =
+      !flags.noTargetDir && target.virtual === dst.virtual
+        ? { exists: dstExists, isDir: dstIsDir }
+        : await entryKind(stat, target)
     const mismatch = overwriteTypeError('mv', src, srcIsDir, target, targetExists, targetIsDir)
     if (mismatch !== null) {
       errors.push(mismatch)

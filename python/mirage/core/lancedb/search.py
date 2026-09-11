@@ -15,6 +15,7 @@
 from typing import Any
 
 from mirage.accessor.lancedb import LanceDBAccessor
+from mirage.core.hierarchy.codec import PATH_SAFE
 from mirage.core.lancedb.query import search_rows
 from mirage.core.lancedb.render import render_card
 from mirage.resource.lancedb.config import LanceDBConfig
@@ -39,7 +40,7 @@ def _canonical_path(row: dict[str, Any], config: LanceDBConfig, table: str,
         segs.append(str(table))
     for column in config.group_by:
         if column in row and row[column] is not None:
-            segs.append(str(row[column]))
+            segs.append(PATH_SAFE.encode(str(row[column])))
     segs.append(f"{row[config.id_column]}.md")
     prefix = mount_prefix.rstrip("/")
     return prefix + "/" + "/".join(segs)

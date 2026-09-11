@@ -380,6 +380,289 @@
           }
         }
       ]
+    },
+    {
+      "id": "on_demand_mount_access",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "one.txt": "one",
+              "unused.txt": "unused"
+            }
+          },
+          "/data/nested": {
+            "resource": "ram",
+            "files": {
+              "inside.txt": "nested"
+            }
+          },
+          "/large": {
+            "resource": "ram",
+            "generated_files": 47000
+          }
+        },
+        "policies": [
+          {
+            "name": "seal_reads",
+            "suffix": "/large"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "is_file",
+            "path": "/large/file-46999.txt"
+          },
+          "expect": {
+            "value": true
+          }
+        },
+        {
+          "command": "js -e 'print(42)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n",
+            "stderr": "",
+            "ops_absent": [
+              "read"
+            ]
+          }
+        },
+        {
+          "command": "js -e 'const f = std.open('\"'\"'/data/one.txt'\"'\"', '\"'\"'r'\"'\"'); print(f.readAsString()); f.close()'",
+          "expect": {
+            "exit": 0,
+            "stdout": "one\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "append",
+            "path": "/data/one.txt",
+            "data": "-fresh"
+          },
+          "expect": {
+            "ops_contain": [
+              "append /data/one.txt"
+            ]
+          }
+        },
+        {
+          "command": "js -e 'const f = std.open('\"'\"'/data/one.txt'\"'\"', '\"'\"'r'\"'\"'); print(f.readAsString()); f.close()'",
+          "expect": {
+            "exit": 0,
+            "stdout": "one-fresh\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "command": "js -e 'const f = std.open('\"'\"'/data/nested/inside.txt'\"'\"', '\"'\"'r'\"'\"'); print(f.readAsString()); f.close()'",
+          "expect": {
+            "exit": 0,
+            "stdout": "nested\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/nested/inside.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "command": "js -e 'const f = std.open('\"'\"'/data/one.txt'\"'\"', '\"'\"'a'\"'\"'); f.puts('\"'\"'!'\"'\"'); f.close()'",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": "",
+            "ops_contain": [
+              "append /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "command": "js -e 'const f = std.open('\"'\"'/data/one.txt'\"'\"', '\"'\"'r'\"'\"'); print(f.readAsString()); f.close()'",
+          "expect": {
+            "exit": 0,
+            "stdout": "one-fresh!\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "list_files",
+            "path": "/large"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fs_list",
+      "filesystem": {
+        "quickjs": {
+          "list": true
+        }
+      },
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "inner\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "js -e",
+          "script": "fs/js/list.js",
+          "expect": {
+            "exit": 0,
+            "stdout": "seed.txt\nsub\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fs_stat",
+      "filesystem": {
+        "quickjs": {
+          "stat": true
+        }
+      },
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "inner\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "js -e",
+          "script": "fs/js/stat.js",
+          "expect": {
+            "exit": 0,
+            "stdout": "file 5 32768\ndir 16384\nmissing\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fs_glob",
+      "filesystem": {
+        "quickjs": {
+          "glob": false
+        }
+      },
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "inner\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "js -e",
+          "script": "fs/js/glob.js",
+          "expect": {
+            "exit": 0,
+            "stdout": "unsupported\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "output_survives_failure_and_reuse",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "js -e \"console.log('before failure'); throw new Error('original failure')\"",
+          "expect": {
+            "exit": 1,
+            "stdout": "before failure\n",
+            "stderr_contains": "original failure"
+          }
+        },
+        {
+          "command": "js -e \"console.log('next')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "next\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

@@ -104,6 +104,43 @@ Three things worth knowing:
   than read as absent.
 - **Reads are not scoped.** `gws drive files list` still sees the whole
   account. The scope is about where new files go, not a fence.
+- **Helpers are spelled bare, not `+`-prefixed.** Upstream marks its
+  hand-written commands with a `+` (`gws docs +write`); mirage's tree does
+  not need the marker, because a helper and a Discovery method cannot
+  collide inside a typed spec. So an upstream line carrying `+` has to
+  drop it here. The flag *names* are upstream's own and match it
+  (`--document --text`, `gmail send`'s `--to --subject --body`, `sheets
+  read`'s `--spreadsheet --range`); `--tab` is the single addition,
+  because upstream's `+write` takes no tab argument and upstream has no
+  tab support at all.
+
+### Document tabs
+
+A Google Doc holds one or more tabs, and the Docs API reports them only
+when asked. `documents.get` fills the legacy top-level `body` from the
+**first tab** and leaves `tabs` empty unless `includeTabsContent` is set;
+with it, the content moves under `tabs[].documentTab` and `body` is left
+empty. The two shapes are exclusive, so it is a shape switch rather than a
+verbosity knob, and tabs nest through `childTabs`.
+
+A `.gdoc.json` on a mount is always the tab-aware shape, because that is
+the only one that can represent a document with more than one tab. Through
+the passthrough you choose:
+
+```bash
+# every tab, the shape a mount serves
+gws docs documents get --params '{"documentId": "DOC_ID", "includeTabsContent": true}'
+
+# the legacy flat body, which is the FIRST tab only
+gws docs documents get --params '{"documentId": "DOC_ID"}'
+```
+
+Writes pick a tab the same way. `gws docs write` without `--tab` appends to
+the first tab, which is the API's own default for a request that names no
+tab; read the ids out of a mounted file with
+`jq '[.. | .tabProperties? // empty | .tabId]'`. Note that
+`replaceAllText` is one of three requests that instead default to **every**
+tab, so a bare `batchUpdate` replacement is document-wide.
 
 ### Helpers
 
@@ -118,7 +155,7 @@ Three things worth knowing:
 | `gws sheets read`         | Read a cell range (`--spreadsheet --range`)    |
 | `gws sheets write`        | Overwrite a range (`--values` / `--json-values`) |
 | `gws sheets append`       | Append rows after a range                      |
-| `gws docs write`          | Append text to a document (`--document --text`) |
+| `gws docs write`          | Append text to a doc or tab (`--document --text [--tab]`) |
 
 ```bash
 gws gmail send --to "user@example.com" --subject "Hello" --body "Hi there"
@@ -126,4 +163,5 @@ gws gmail triage --query "is:unread" --max 10
 gws sheets read --spreadsheet SHEET_ID --range "Sheet1!A1:C10"
 gws sheets append --spreadsheet SHEET_ID --values "alice,42"
 gws docs write --document DOC_ID --text "New paragraph"
+gws docs write --document DOC_ID --tab TAB_ID --text "Into that tab"
 ```

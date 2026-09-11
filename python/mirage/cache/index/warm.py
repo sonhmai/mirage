@@ -16,7 +16,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mirage.cache.index.config import IndexEntry
+from mirage.cache.index.config import IndexEntry, LookupStatus
+from mirage.cache.index.lock import index_lock
 from mirage.cache.index.store import IndexCacheStore
 
 logger = logging.getLogger(__name__)
@@ -27,18 +28,23 @@ async def entry_or_warm(
     virtual_key: str,
     warm: Callable[[], Awaitable[Any]] | None,
 ) -> IndexEntry | None:
-    """Resolve an index entry, listing the parent directory when cold.
+    """Resolve an entry when its parent listing is absent or expired.
 
     Id-addressed backends (Drive, Box, Dropbox, Gmail) can only turn a path
     into an id through the index, so a cold lookup has to warm it from the
     parent's listing and retry. Every such backend had grown its own copy of
     that block; this is the one place that decides what a failed listing means.
 
+    A missing parent listing does not prove a retained entry is current: a
+    partial warm may have stored the child without publishing the listing.
+    Such a child is dropped before the refresh. A newly warmed child is usable
+    for this lookup; without a complete parent, each lookup refreshes again.
     A parent that is simply absent is not an error here -- the caller reports
-    ENOENT against the operand, which is the path GNU names (``rm nodir/f``
-    says "cannot remove 'nodir/f'", not "nodir"). Every other failure
-    propagates: an expired token or a dropped connection reported as "no such
-    file" both misdiagnoses the fault and hides that it is worth retrying.
+    ENOENT against the operand,
+    which is the path GNU names (``rm nodir/f`` says "cannot remove 'nodir/f'",
+    not "nodir"). Every other failure propagates: an expired token or a
+    dropped connection reported as "no such file" both misdiagnoses the fault
+    and hides that it is worth retrying.
 
     Args:
         index (IndexCacheStore): the index to read, and to warm through
@@ -47,14 +53,31 @@ async def entry_or_warm(
         warm (Callable | None): lists the parent directory, populating the
             index; ``None`` when the key has no distinct parent to list.
     """
-    hit = await index.get(virtual_key)
-    if hit.entry is not None:
-        return hit.entry
-    if warm is None:
-        return None
-    try:
-        await warm()
-    except FileNotFoundError as exc:
-        logger.debug("index warm failed for %s: %s", virtual_key, exc)
-    warmed = await index.get(virtual_key)
-    return warmed.entry
+    parent = virtual_key.rstrip("/").rsplit("/", 1)[0] or "/"
+    async with index_lock(index, parent):
+        listing = await index.list_dir(parent)
+        if listing.entries is not None and virtual_key not in listing.entries:
+            return None
+        hit = await index.get(virtual_key)
+        if hit.entry is not None and listing.entries is not None:
+            return hit.entry
+        if warm is None:
+            return None
+        if listing.status == LookupStatus.EXPIRED:
+            # Retained metadata is not proof of existence. Drop old children
+            # before warming, even when a partial listing only puts rows.
+            await index.invalidate_dir(parent)
+        if hit.entry is not None:
+            # Partial listings can leave untracked rows that invalidate_dir
+            # cannot remove. A refresh that omits this path must not reuse one.
+            await index.invalidate_prefix(virtual_key)
+        try:
+            await warm()
+        except FileNotFoundError as exc:
+            logger.debug("index warm failed for %s: %s", virtual_key, exc)
+            return None
+        listing = await index.list_dir(parent)
+        if listing.entries is not None and virtual_key not in listing.entries:
+            return None
+        warmed = await index.get(virtual_key)
+        return warmed.entry

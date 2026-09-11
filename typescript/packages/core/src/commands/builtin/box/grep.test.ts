@@ -17,7 +17,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./pushdown.ts', () => ({ narrowScope: vi.fn() }))
-vi.mock('../generic/grep.ts', () => ({ grepGeneric: vi.fn() }))
+vi.mock('../generic/grep.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof grepModule>()),
+  grepGeneric: vi.fn(),
+}))
 
 import { BoxAccessor } from '../../../accessor/box.ts'
 import type { BoxTokenManager } from '../../../core/box/client.ts'
@@ -25,6 +28,7 @@ import { IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { grepGeneric } from '../generic/grep.ts'
+import type * as grepModule from '../generic/grep.ts'
 import { BOX_GREP } from './grep.ts'
 import { narrowScope } from './pushdown.ts'
 
@@ -92,6 +96,21 @@ describe('box grep push-down', () => {
     narrow.mockResolvedValue({ resolved: hits, usedSearch: true })
     await runGrep({ r: true })
     expect(generic.mock.calls[0]?.[1]).toEqual(hits)
+    expect(generic.mock.calls[0]?.[3].flags.H).toBe(true)
+  })
+
+  it('keeps an explicit -h through narrowing', async () => {
+    const hits = [
+      new PathSpec({
+        virtual: '/data/a.txt',
+        directory: '',
+        resourcePath: 'a.txt',
+        resolved: true,
+      }),
+    ]
+    narrow.mockResolvedValue({ resolved: hits, usedSearch: true })
+    await runGrep({ r: true, h: true })
+    expect(generic.mock.calls[0]?.[3].flags).not.toHaveProperty('H')
   })
 
   it('exits 1 without reading when the narrowed set is empty', async () => {
@@ -103,4 +122,9 @@ describe('box grep push-down', () => {
     expect(io.exitCode).toBe(1)
     expect(generic).not.toHaveBeenCalled()
   })
+})
+
+it.each([{ text: true }, { binary_files: 'text' }])('scans raw files for %j', async (flags) => {
+  await runGrep({ r: true, ...flags })
+  expect(narrow.mock.calls[0]?.[3]?.exactFileSet).toBe(true)
 })

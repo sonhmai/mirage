@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { toIsoZ } from '../../utils/dates.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
@@ -112,7 +113,7 @@ export async function readdir(
     names.push(fullPath)
     const name = rstripSlash(fullPath).split('/').pop() ?? fullPath
     const remoteTime =
-      typeof entry.last_modified === 'number' ? new Date(entry.last_modified).toISOString() : ''
+      typeof entry.last_modified === 'number' ? toIsoZ(new Date(entry.last_modified)) : ''
     let size = !isDir && typeof entry.file_size === 'number' ? entry.file_size : null
     if (!isDir && size === null) {
       // DirectoryEntry normally carries file_size; when the lister omits

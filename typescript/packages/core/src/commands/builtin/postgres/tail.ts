@@ -22,7 +22,7 @@ import { detectScope } from '../../../core/postgres/scope.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { tailGeneric } from '../generic/tail.ts'
+import { followFlags, tailGeneric } from '../generic/tail.ts'
 import { parseN } from '../tail_counts.ts'
 import { FlagView } from '../../spec/types.ts'
 
@@ -60,9 +60,18 @@ async function tailCommand(
   const fl = new FlagView(opts.flags, specOf('tail'))
   const nRaw = fl.asStr('n') ?? null
   const [lines, plusMode] = parseN(nRaw)
-  const pushdown = fl.asStr('c') === undefined && !plusMode && lines > 0
-  return tailGeneric(resolved, texts, opts, (p) =>
-    tailSource(accessor, p, opts.index ?? undefined, lines, pushdown),
+  // A follow polls the file as it grows, and a pushed-down suffix moves
+  // with the table, so it has no byte position to measure against: a
+  // follow reads the relation whole.
+  const following = followFlags(fl)
+  const follow = typeof following !== 'string' && following.follow
+  const pushdown = fl.asStr('c') === undefined && !plusMode && lines > 0 && !follow
+  return tailGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => tailSource(accessor, p, opts.index ?? undefined, lines, pushdown),
+    (p) => POSTGRES_IO.stat(accessor, p, opts.index ?? undefined),
   )
 }
 

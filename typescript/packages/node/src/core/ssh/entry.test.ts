@@ -42,7 +42,7 @@ describe('attrsToFileStat', () => {
 
   it('formats modified as ISO 8601 when mtime is given', () => {
     const stat = attrsToFileStat('foo.txt', { mode: 0o100644, mtime: 0 })
-    expect(stat.modified).toBe('1970-01-01T00:00:00.000Z')
+    expect(stat.modified).toBe('1970-01-01T00:00:00Z')
   })
 
   it('returns null modified when mtime is omitted', () => {

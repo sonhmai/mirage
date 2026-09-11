@@ -143,7 +143,7 @@ def search_query(pattern: str, fixed_string: bool) -> str | None:
 _PUSHDOWN_SHAPING_BOOL = ("v", "n", "c", "args_l", "w", "o", "q", "H", "h",
                           "args_I", "text")
 _PUSHDOWN_SHAPING_INT = ("m", "A", "B", "C")
-_PUSHDOWN_FILTER_STR = ("type", "glob")
+_PUSHDOWN_FILTER_STR = ("type", "glob", "binary_files")
 _PUSHDOWN_FILTER_LIST = ("include", "exclude", "exclude_dir")
 
 
@@ -290,3 +290,13 @@ def literal_pushdown_operand(
     if pattern is None or not search_pushdown_ok(flags, pattern):
         return None
     return lone_operand(paths)
+
+
+def text_search_results(lines: Sequence[str]) -> bool:
+    """Whether service snippets can be emitted without binary-file handling.
+
+    Args:
+        lines (Sequence[str]): Rendered provider search results.
+    """
+    return all("\0" not in line and not any(0xd800 <= ord(c) <= 0xdfff
+                                            for c in line) for line in lines)

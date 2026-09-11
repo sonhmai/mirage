@@ -202,3 +202,48 @@ async def test_rg_quiet_flag_defers_to_generic():
                         }))
     spy.assert_not_awaited()
     generic.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flags", [{
+    "args_I": True
+}, {
+    "text": True
+}, {
+    "binary_files": "without-match"
+}, {
+    "binary_files": "binary"
+}])
+async def test_binary_options_use_rendered_file_scan(flags):
+    with (
+            patch("mirage.commands.builtin.gmail.grep.search_messages",
+                  new=AsyncMock(return_value=ROWS)) as search,
+            patch("mirage.commands.builtin.gmail.grep.resolve_glob",
+                  new=AsyncMock(return_value=[_label_scope()])),
+            patch("mirage.commands.builtin.gmail.grep.generic_grep",
+                  new=AsyncMock(return_value=(b"", IOResult()))) as generic,
+    ):
+        await grep(
+            AsyncMock(), [_label_scope()], ["hello"],
+            CommandOpts(index=RAMIndexCacheStore(), flags={
+                "w": True,
+                **flags
+            }))
+    search.assert_not_awaited()
+    generic.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_binary_search_snippet_uses_rendered_file_scan():
+    rows = [{**ROWS[0], "snippet": "hello\0tail", "subject": ""}]
+    with (
+            patch("mirage.commands.builtin.gmail.grep.search_messages",
+                  new=AsyncMock(return_value=rows)),
+            patch("mirage.commands.builtin.gmail.grep.resolve_glob",
+                  new=AsyncMock(return_value=[_label_scope()])),
+            patch("mirage.commands.builtin.gmail.grep.generic_grep",
+                  new=AsyncMock(return_value=(b"", IOResult()))) as generic,
+    ):
+        await grep(AsyncMock(), [_label_scope()], ["hello"],
+                   CommandOpts(index=RAMIndexCacheStore(), flags={"w": True}))
+    generic.assert_awaited_once()

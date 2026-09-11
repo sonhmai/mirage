@@ -19,18 +19,18 @@ import pytest
 from mirage.ops.types import SessionView
 from mirage.policy import Action, Deny, Policies, Policy, PolicyDenied
 from mirage.policy.types import SessionContext
+from mirage.shell.array import make_array
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import HiddenVars
 from mirage.workspace.session import Session
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.session import vars_from_env
-from mirage.workspace.session.state import (element_index, env_snapshot,
-                                            next_random, seed_var,
-                                            session_elements, session_view,
-                                            set_attr, set_var,
-                                            strip_key_quotes, subscript_index,
-                                            visible_env)
+
+from mirage.workspace.session.state import (  # isort: skip
+    element_index, env_snapshot, gate_rendering, gate_restored_vars,
+    next_random, seed_var, session_elements, session_view, set_attr, set_var,
+    strip_key_quotes, subscript_index, visible_env)
 
 
 class DenySecrets(Policy):
@@ -457,3 +457,43 @@ def test_a_failing_coercion_lands_what_it_assigned():
         assert next_random(session, session.vars["RANDOM"].value) == 17772
 
     asyncio.run(run())
+
+
+# A snapshot is the one env input the deployment did not author, so the
+# restore fires the same gate a typed `export` does, name by name, and a
+# refusal aborts the whole restore rather than dropping one variable.
+@pytest.mark.asyncio
+async def test_gate_restored_vars_refuses_a_denied_name():
+    table = vars_from_env({"SECRET_A": "1", "PUBLIC": "2"})
+    with pytest.raises(PolicyDenied):
+        await gate_restored_vars(Policies([DenySecrets()]), "s", table)
+    await gate_restored_vars(Policies([DenySecrets()]), "s",
+                             vars_from_env({"PUBLIC": "2"}))
+    await gate_restored_vars(None, "s", table)
+
+
+# The names the shell keeps current itself (`cd` writes PWD/OLDPWD through
+# `seed_var`, ungated) stay the shell's on a restore too.
+@pytest.mark.asyncio
+async def test_gate_restored_vars_leaves_the_shell_bookkeeping_alone():
+
+    class DenyAll(Policy):
+
+        async def pre_session(self, ctx: SessionContext) -> Action | None:
+            return Deny("nothing may be set\n")
+
+    await gate_restored_vars(Policies([DenyAll()]), "s",
+                             vars_from_env({
+                                 "PWD": "/",
+                                 "OLDPWD": "/"
+                             }))
+    with pytest.raises(PolicyDenied):
+        await gate_restored_vars(Policies([DenyAll()]), "s",
+                                 vars_from_env({"X": "1"}))
+
+
+def test_gate_rendering_is_what_set_var_shows_a_hook():
+    assert gate_rendering("x") == "x"
+    assert gate_rendering({"b": "2", "a": "1"}) == "1 2"
+    assert gate_rendering(make_array(["p", "q"])) == "p q"
+    assert gate_rendering(None) is None

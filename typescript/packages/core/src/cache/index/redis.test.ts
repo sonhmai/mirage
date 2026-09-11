@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IndexEntry, LookupStatus } from './config.ts'
-import { RedisIndexCacheStore } from './redis.ts'
+import { RedisIndexCacheStore, type RedisClientLike } from './redis.ts'
 
 describe('RedisIndexCacheStore default keyPrefix', () => {
   it('namespaces keys under mirage:index: by default', () => {
@@ -49,9 +49,335 @@ describe.skipIf(skip)('RedisIndexCacheStore', () => {
     await store.close()
   })
 
+  async function redis(): Promise<RedisClientLike> {
+    return (store as unknown as { client: () => Promise<RedisClientLike> }).client()
+  }
+
+  it('batches cold snapshot directory tokens in a bounded number of requests', async () => {
+    const client = await redis()
+    const paths = Array.from({ length: 100 }, (_, i) => `/dir-${String(i)}`)
+    const get = vi.spyOn(client, 'get')
+    const set = vi.spyOn(client, 'set')
+    const mGet = vi.spyOn(client, 'mGet')
+    const multi = client.multi.bind(client)
+    const commands: number[] = []
+    let executions = 0
+    const transactions = vi.spyOn(client, 'multi').mockImplementation(() => {
+      const pipeline = multi()
+      const index = commands.length
+      commands.push(0)
+      const write = pipeline.set.bind(pipeline)
+      pipeline.set = (key, value, options) => {
+        commands[index] = (commands[index] ?? 0) + 1
+        return write(key, value, options)
+      }
+      const exec = pipeline.exec.bind(pipeline)
+      pipeline.exec = async () => {
+        executions += 1
+        return exec()
+      }
+      return pipeline
+    })
+    try {
+      const deadline = new Date(Date.now() + 365 * 24 * 3600000)
+      store.seed(new Map(), new Map(paths.map((path) => [path, []])), deadline)
+      store.seed(new Map(), new Map([['/dir-0', []]]), deadline)
+      await store.entries()
+      expect(get).toHaveBeenCalledTimes(1)
+      expect(set).toHaveBeenCalledTimes(1)
+      expect(mGet).toHaveBeenCalledTimes(1)
+      expect(mGet.mock.calls.map(([keys]) => keys.length)).toEqual([100])
+      expect(transactions).toHaveBeenCalledTimes(2)
+      expect(executions).toBe(2)
+      expect(commands).toEqual([100, 101])
+    } finally {
+      get.mockRestore()
+      set.mockRestore()
+      mGet.mockRestore()
+      transactions.mockRestore()
+    }
+    expect((await store.listDir('/dir-0')).entries).toEqual([])
+    expect((await store.listDir('/dir-99')).entries).toEqual([])
+  })
+
+  it('keeps parallel directory refills fresh on a cold store', async () => {
+    const paths = Array.from({ length: 50 }, (_, i) => `/dir-${String(i)}`)
+    await Promise.all(paths.map((path) => store.setDir(path, [['a', entry('a', 'a')]])))
+    for (const path of paths) {
+      expect((await store.listDir(path)).entries).toEqual([`${path}/a`])
+    }
+    await store.invalidate()
+    await Promise.all(paths.map((path) => store.setDir(path, [])))
+    for (const path of paths) expect((await store.listDir(path)).entries).toEqual([])
+  })
+
+  it('preserves an observed directory token while missing seed tokens initialize', async () => {
+    const client = await redis()
+    await store.setDir('/existing', [])
+    const key = `${prefix}mirage:idx:generation:/existing`
+    const multi = client.multi.bind(client)
+    const spy = vi.spyOn(client, 'multi').mockImplementationOnce(() => {
+      const pipeline = multi()
+      const exec = pipeline.exec.bind(pipeline)
+      pipeline.exec = async () => {
+        await client.del(key)
+        await client.set(key, 'concurrent-replacement')
+        return exec()
+      }
+      return pipeline
+    })
+    try {
+      store.seed(
+        new Map(),
+        new Map([
+          ['/existing', []],
+          ['/missing', []],
+        ]),
+        new Date(Date.now() + 3600000),
+      )
+      expect((await store.listDir('/existing')).status).toBe(LookupStatus.EXPIRED)
+      expect((await store.listDir('/missing')).entries).toEqual([])
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it.each(['replaced after initialization', 'lost NX'] as const)(
+    'keeps pending seed rows expired when their token was %s',
+    async (race) => {
+      const client = await redis()
+      const peer = new RedisIndexCacheStore({ client, keyPrefix: prefix })
+      await store.setDir('/other', [])
+      const multi = client.multi.bind(client)
+      const spy = vi.spyOn(client, 'multi').mockImplementationOnce(() => {
+        const pipeline = multi()
+        const exec = pipeline.exec.bind(pipeline)
+        pipeline.exec = async () => {
+          if (race === 'lost NX') {
+            await peer.setDir('/snapshot', [['new', entry('new', 'new')]])
+          }
+          const result = await exec()
+          if (race === 'replaced after initialization') {
+            await peer.invalidateDir('/snapshot')
+            await peer.setDir('/snapshot', [['new', entry('new', 'new')]])
+          }
+          return result
+        }
+        return pipeline
+      })
+      try {
+        store.seed(
+          new Map([['/snapshot/old', entry('old', 'old')]]),
+          new Map([['/snapshot', ['/snapshot/old']]]),
+          new Date(Date.now() + 3600000),
+        )
+        expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+        expect((await store.listDir('/other')).entries).toEqual([])
+      } finally {
+        spy.mockRestore()
+        await peer.close()
+      }
+    },
+  )
+
+  for (const token of ['global', 'directory'] as const) {
+    it.each(['replaced after initialization', 'lost NX'] as const)(
+      `keeps a scalar refill expired when its ${token} token was %s`,
+      async (race) => {
+        const client = await redis()
+        if (token === 'directory') await store.setDir('/other', [])
+        const key = `${prefix}mirage:idx:generation${token === 'directory' ? ':/snapshot' : ''}`
+        const set = client.set.bind(client)
+        let intercepted = false
+        const spy = vi.spyOn(client, 'set').mockImplementation(async (path, value, options) => {
+          if (path !== key || intercepted || options?.NX !== true) return set(path, value, options)
+          intercepted = true
+          if (race === 'lost NX') await set(path, 'concurrent-winner')
+          const result = await set(path, value, options)
+          if (race === 'replaced after initialization') {
+            await client.del(path)
+            await set(path, 'concurrent-replacement')
+          }
+          return result
+        })
+        try {
+          await store.setDir('/snapshot', [['old', entry('old', 'old')]])
+          expect(intercepted).toBe(true)
+          expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+        } finally {
+          spy.mockRestore()
+        }
+      },
+    )
+  }
+
+  it('expires year-long listings when another worker globally invalidates', async () => {
+    const deadline = new Date(Date.now() + 365 * 24 * 3600000)
+    await store.setDir('/snapshot', [['a', entry('a', 'a')]], deadline)
+    await store.setDir('/empty', [], deadline)
+    expect((await store.listDir('/snapshot')).entries).toEqual(['/snapshot/a'])
+    expect((await store.listDir('/empty')).entries).toEqual([])
+
+    await new RedisIndexCacheStore({ client: await redis(), keyPrefix: prefix }).invalidate()
+    expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+    expect((await store.listDir('/empty')).status).toBe(LookupStatus.EXPIRED)
+    expect((await store.listDir('/absent')).status).toBe(LookupStatus.NOT_FOUND)
+
+    await store.setDir('/other', [], deadline)
+    expect((await store.listDir('/other')).entries).toEqual([])
+    expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+    expect((await store.listDir('/empty')).status).toBe(LookupStatus.EXPIRED)
+    await store.setDir('/snapshot', [['b', entry('b', 'b')]], deadline)
+    expect((await store.listDir('/snapshot')).entries).toEqual(['/snapshot/b'])
+  })
+
+  it('does not revive a refill committed after another worker invalidates its generation', async () => {
+    await store.setDir('/snapshot', [])
+    const client = await redis()
+    const multi = client.multi.bind(client)
+    const spy = vi.spyOn(client, 'multi').mockImplementationOnce(() => {
+      const pipeline = multi()
+      const exec = pipeline.exec.bind(pipeline)
+      pipeline.exec = async () => {
+        await new RedisIndexCacheStore({ client: await redis(), keyPrefix: prefix }).invalidate()
+        return exec()
+      }
+      return pipeline
+    })
+    try {
+      await store.setDir('/snapshot', [['old', entry('old', 'old')]])
+      expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+      await store.setDir('/other', [])
+      expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('keeps a listing expired when its directory token is removed and recreated', async () => {
+    const client = await redis()
+    const directoryKey = `${prefix}mirage:idx:generation:/snapshot`
+    await store.setDir('/snapshot', [])
+    const original = await client.get(directoryKey)
+    await client.del(directoryKey)
+    expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+    await store.setDir('/other', [])
+    expect((await store.listDir('/other')).entries).toEqual([])
+    expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+    await client.set(directoryKey, 'replacement-token')
+    expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+    await client.del(directoryKey)
+    await store.setDir('/snapshot', [])
+    expect(await client.get(directoryKey)).not.toBe(original)
+    expect((await store.listDir('/snapshot')).entries).toEqual([])
+  })
+
+  it('keeps a late refill expired after its directory token is deleted', async () => {
+    const client = await redis()
+    const directoryKey = `${prefix}mirage:idx:generation:/snapshot`
+    await store.setDir('/snapshot', [])
+    const multi = client.multi.bind(client)
+    const spy = vi.spyOn(client, 'multi').mockImplementationOnce(() => {
+      const pipeline = multi()
+      const exec = pipeline.exec.bind(pipeline)
+      pipeline.exec = async () => {
+        await client.del(directoryKey)
+        return exec()
+      }
+      return pipeline
+    })
+    try {
+      await store.setDir('/snapshot', [['old', entry('old', 'old')]])
+      expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+      await store.setDir('/other', [])
+      expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('globally invalidates listings while retaining current metadata', async () => {
+    await store.setDir('/snapshot', [['a', entry('new', 'a')]])
+    await store.setDir('/empty', [])
+    await store.invalidate()
+
+    expect((await store.get('/snapshot/a')).entry?.id).toBe('new')
+    expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+    expect((await store.listDir('/empty')).status).toBe(LookupStatus.EXPIRED)
+    await store.setDir('/snapshot', [])
+    expect((await store.listDir('/snapshot')).entries).toEqual([])
+    expect((await store.listDir('/empty')).status).toBe(LookupStatus.EXPIRED)
+  })
+
+  it.each(['invalidateDir', 'invalidatePrefix', 'clear'] as const)(
+    '%s respects literal custom namespaces and paths',
+    async (method) => {
+      const client = await redis()
+      const stores = ['custom:[1]:', 'custom:1:'].map(
+        (suffix) => new RedisIndexCacheStore({ client, keyPrefix: prefix + suffix }),
+      )
+      const [isolated, neighbor] = stores as [RedisIndexCacheStore, RedisIndexCacheStore]
+      try {
+        for (const target of stores) {
+          for (const directory of ['/repo[1]', '/repo1']) {
+            await target.setDir(directory, [['a', entry('a', 'a')]])
+          }
+        }
+        if (method === 'clear') await isolated.clear()
+        else await isolated[method]('/repo[1]')
+        expect((await isolated.get('/repo[1]/a')).status).toBe(LookupStatus.NOT_FOUND)
+        expect((await isolated.listDir('/repo[1]')).status).toBe(LookupStatus.NOT_FOUND)
+        expect((await neighbor.listDir('/repo[1]')).entries).toEqual(['/repo[1]/a'])
+        expect((await neighbor.listDir('/repo1')).entries).toEqual(['/repo1/a'])
+        if (method !== 'clear') {
+          expect((await isolated.listDir('/repo1')).entries).toEqual(['/repo1/a'])
+        }
+      } finally {
+        for (const target of stores) {
+          await target.clear()
+          await target.close()
+        }
+      }
+    },
+  )
+
   it('get returns NOT_FOUND when missing', async () => {
     const r = await store.get('/nope')
     expect(r.status).toBe(LookupStatus.NOT_FOUND)
+  })
+
+  // The one wire format: what pydantic writes for the Python IndexEntry,
+  // snake_case and every field. `test_redis.py` pins the same literal, so an
+  // entry either language writes is one the other reads (#1020).
+  it('writes the entry JSON Python writes', async () => {
+    await store.put(
+      '/a.txt',
+      new IndexEntry({
+        id: '/a.txt',
+        name: 'a.txt',
+        resourceType: 'file',
+        remoteTime: '2026-01-01T00:00:00Z',
+        indexTime: '2026-01-01T00:00:00Z',
+        size: 6,
+      }),
+    )
+    const c = await redis()
+    expect(await c.get(`${prefix}mirage:idx:entry:/a.txt`)).toBe(
+      '{"id":"/a.txt","name":"a.txt","resource_type":"file","remote_time":"2026-01-01T00:00:00Z","index_time":"2026-01-01T00:00:00Z","vfs_name":"","size":6,"extra":{}}',
+    )
+  })
+
+  it('reads the entry JSON Python writes', async () => {
+    const c = await redis()
+    await c.set(
+      `${prefix}mirage:idx:entry:/b.txt`,
+      '{"id":"/b.txt","name":"b.txt","resource_type":"file","remote_time":"","index_time":"2026-01-01T00:00:00Z","vfs_name":"","size":null,"extra":{"size_bytes":9}}',
+    )
+    const r = await store.get('/b.txt')
+    expect(r.entry?.resourceType).toBe('file')
+    expect(r.entry?.indexTime).toBe('2026-01-01T00:00:00Z')
+    expect(r.entry?.size).toBeNull()
+    expect(r.entry?.extra).toEqual({ size_bytes: 9 })
   })
 
   it('put + get round-trips entry metadata', async () => {
@@ -110,7 +436,7 @@ describe.skipIf(skip)('RedisIndexCacheStore', () => {
       expect((await s.listDir('/tmp')).entries).toEqual(['/tmp/x'])
       await new Promise((r) => setTimeout(r, 1100))
       const r = await s.listDir('/tmp')
-      expect(r.status === LookupStatus.NOT_FOUND || r.status === LookupStatus.EXPIRED).toBe(true)
+      expect(r.status).toBe(LookupStatus.EXPIRED)
     } finally {
       await s.clear()
       await s.close()
@@ -148,5 +474,115 @@ describe.skipIf(skip)('RedisIndexCacheStore', () => {
     await store.clear()
     expect((await store.get('/a')).status).toBe(LookupStatus.NOT_FOUND)
     expect((await store.listDir('/')).status).toBe(LookupStatus.NOT_FOUND)
+  })
+})
+
+describe('deferred Redis seeds', () => {
+  function client() {
+    const pipeline: ReturnType<RedisClientLike['multi']> = {
+      set: vi.fn(),
+      del: vi.fn(),
+      exec: vi.fn().mockResolvedValue([]),
+    }
+    const value: RedisClientLike = {
+      get: vi.fn().mockResolvedValue(null),
+      mGet: vi.fn().mockResolvedValue([null, null, null]),
+      set: vi.fn().mockResolvedValue('OK'),
+      del: vi.fn().mockResolvedValue(0),
+      multi: () => pipeline,
+      scanIterator: () => {
+        throw new Error('unexpected scan')
+      },
+      connect: vi.fn().mockResolvedValue(undefined),
+      quit: vi.fn().mockResolvedValue(undefined),
+      isOpen: true,
+    }
+    return { value, pipeline }
+  }
+
+  it('retains failed seeds for a close retry', async () => {
+    const { value, pipeline } = client()
+    vi.mocked(pipeline.exec).mockRejectedValueOnce(new Error('retry'))
+    vi.mocked(value.get).mockResolvedValue('g')
+    vi.mocked(value.mGet).mockResolvedValue(['d'])
+    const store = new RedisIndexCacheStore({ client: value })
+    store.seed(
+      new Map([['/a', entry('a', 'a')]]),
+      new Map([['/', ['/a']]]),
+      new Date(Date.now() + 3600000),
+    )
+    await expect(store.close()).rejects.toThrow('retry')
+    await store.close()
+    await store.close()
+    expect(pipeline.exec).toHaveBeenCalledTimes(2)
+    const writes = vi.mocked(pipeline.set).mock.calls
+    expect(writes.slice(0, 2)).toEqual(writes.slice(2))
+    expect(value.quit).not.toHaveBeenCalled()
+  })
+
+  it('flushes a seed once across concurrent readers', async () => {
+    const { value, pipeline } = client()
+    vi.mocked(value.mGet).mockResolvedValue(['d'])
+    const store = new RedisIndexCacheStore({ client: value })
+    store.seed(
+      new Map([['/a', entry('a', 'a')]]),
+      new Map([['/', ['/a']]]),
+      new Date(Date.now() + 3600000),
+    )
+    await Promise.all([store.get('/a'), store.get('/a')])
+    expect(pipeline.exec).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries a failed initializer shared by parallel directory refills', async () => {
+    const { value } = client()
+    let rejectRead: (error: Error) => void = () => undefined
+    const read = new Promise<string | null>((_resolve, reject) => {
+      rejectRead = reject
+    })
+    vi.mocked(value.get).mockReturnValueOnce(read)
+    const store = new RedisIndexCacheStore({ client: value })
+    const pending = Promise.allSettled([store.setDir('/one', []), store.setDir('/two', [])])
+    await vi.waitFor(() => {
+      expect(value.get).toHaveBeenCalledTimes(1)
+    })
+    rejectRead(new Error('retry'))
+    const results = await pending
+    expect(results.map((result) => result.status)).toEqual(['rejected', 'rejected'])
+    expect(value.get).toHaveBeenCalledTimes(1)
+    await expect(store.setDir('/one', [])).resolves.toBeUndefined()
+    expect(value.get).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps listings stale when their generation key is evicted', async () => {
+    const { value, pipeline } = client()
+    const raw = JSON.stringify({ entries: [], expires_at: 4102444800, generation: 'old:dir' })
+    vi.mocked(value.mGet).mockResolvedValue([raw, null, 'dir'])
+    const store = new RedisIndexCacheStore({ client: value })
+    expect((await store.listDir('/old')).status).toBe(LookupStatus.EXPIRED)
+    await store.setDir('/new', [])
+    const generation = vi.mocked(value.set).mock.calls[0]?.[1]
+    expect(generation).toBeDefined()
+    expect(generation).not.toBe('old')
+    expect(pipeline.set).toHaveBeenCalled()
+    vi.mocked(value.mGet).mockResolvedValue([raw, generation ?? null, 'dir'])
+    expect((await store.listDir('/old')).status).toBe(LookupStatus.EXPIRED)
+  })
+
+  it('reads a listing and its invalidation generation in one request', async () => {
+    const { value } = client()
+    vi.mocked(value.mGet).mockResolvedValue([
+      JSON.stringify({ entries: [], expires_at: 4102444800, generation: 'g:d' }),
+      'g',
+      'd',
+    ])
+    const store = new RedisIndexCacheStore({ client: value })
+    expect((await store.listDir('/')).entries).toEqual([])
+    expect(value.mGet).toHaveBeenCalledTimes(1)
+    expect(value.mGet).toHaveBeenCalledWith([
+      'mirage:index:mirage:idx:directory:/',
+      'mirage:index:mirage:idx:generation',
+      'mirage:index:mirage:idx:generation:/',
+    ])
+    expect(value.get).not.toHaveBeenCalled()
   })
 })

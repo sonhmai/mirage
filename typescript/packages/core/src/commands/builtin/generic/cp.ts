@@ -783,7 +783,10 @@ export async function cpGeneric(
       errors.push(`cp: -r not specified; omitting directory '${src.virtual}'`)
       continue
     }
-    const { exists: targetExists, isDir: targetIsDir } = await entryKind(stat, target)
+    const { exists: targetExists, isDir: targetIsDir } =
+      !flags.noTargetDir && target.virtual === dst.virtual
+        ? { exists: dstExists, isDir: dstIsDir }
+        : await entryKind(stat, target)
     if (!targetExists) {
       const parentErr = await destParentError('cp', stat, target, srcIsDir)
       if (parentErr !== null) {

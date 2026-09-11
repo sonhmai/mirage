@@ -1588,6 +1588,11 @@ async function openGws(target: Target): Promise<Open> {
   if (target.epoch !== undefined) reset.epoch = target.epoch
   if (calendar?.calendars !== undefined) extras.calendars = calendar.calendars
   if (forms !== undefined) extras.forms = forms
+  // A multi-tab document is the third such state: the Docs API has no
+  // request that creates a tab, so one cannot be seeded through the editor
+  // APIs the way the single-tab `apps` docs are.
+  const docTabDocs = gwsManifest<unknown[]>(target.docs)
+  if (docTabDocs !== undefined) extras.docs = docTabDocs
   if (Object.keys(extras).length > 0) reset.extras = extras
   await gwsJson(`${base}/reset`, {
     method: 'POST',

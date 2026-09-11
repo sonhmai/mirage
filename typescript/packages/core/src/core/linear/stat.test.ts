@@ -37,16 +37,18 @@ function spec(virtual: string, prefix = ''): PathSpec {
 describe('linear stat modified', () => {
   it('returns modified from the cached team entry', async () => {
     const idx = new RAMIndexCacheStore()
-    await idx.put(
-      '/teams/ENG__Engineering__TEAM1',
-      new IndexEntry({
-        id: 'TEAM1',
-        name: 'Engineering',
-        resourceType: 'linear/team',
-        remoteTime: '2026-04-05T00:00:00Z',
-        vfsName: 'ENG__Engineering__TEAM1',
-      }),
-    )
+    await idx.setDir('/teams', [
+      [
+        'ENG__Engineering__TEAM1',
+        new IndexEntry({
+          id: 'TEAM1',
+          name: 'Engineering',
+          resourceType: 'linear/team',
+          remoteTime: '2026-04-05T00:00:00Z',
+          vfsName: 'ENG__Engineering__TEAM1',
+        }),
+      ],
+    ])
     const s = await stat(
       new LinearAccessor(new NoopTransport()),
       spec('/teams/ENG__Engineering__TEAM1'),
@@ -59,17 +61,19 @@ describe('linear stat modified', () => {
 
   it('reports the pushed-down size for a cached issue.json entry', async () => {
     const idx = new RAMIndexCacheStore()
-    await idx.put(
-      '/teams/ENG__Engineering__TEAM1/issues/ENG-1__ISSUE1/issue.json',
-      new IndexEntry({
-        id: 'ISSUE1',
-        name: 'issue.json',
-        resourceType: 'linear/issue_json',
-        remoteTime: '2026-04-05T00:00:00Z',
-        vfsName: 'issue.json',
-        size: 321,
-      }),
-    )
+    await idx.setDir('/teams/ENG__Engineering__TEAM1/issues/ENG-1__ISSUE1', [
+      [
+        'issue.json',
+        new IndexEntry({
+          id: 'ISSUE1',
+          name: 'issue.json',
+          resourceType: 'linear/issue_json',
+          remoteTime: '2026-04-05T00:00:00Z',
+          vfsName: 'issue.json',
+          size: 321,
+        }),
+      ],
+    ])
     const s = await stat(
       new LinearAccessor(new NoopTransport()),
       spec('/teams/ENG__Engineering__TEAM1/issues/ENG-1__ISSUE1/issue.json'),

@@ -14,6 +14,8 @@
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from mirage.core.timeutil import epoch_to_iso, iso_to_epoch, now_iso, to_iso_z
 
 
@@ -61,3 +63,14 @@ def test_epoch_floors_negative_fractional_like_typescript():
     # not 0 as int() truncation would give.
     assert iso_to_epoch("1969-12-31T23:59:59.500Z") == -1
     assert epoch_to_iso(-0.5) == "1969-12-31T23:59:59Z"
+
+
+@pytest.mark.parametrize("input,expected", [
+    ("2026-09-05T10:55:39.000Z", "2026-09-05T10:55:39Z"),
+    ("2026-09-05T10:55:39.001Z", "2026-09-05T10:55:39.001000Z"),
+    ("2026-09-05T10:55:39.120Z", "2026-09-05T10:55:39.120000Z"),
+    ("2026-09-05T12:55:39.123+02:00", "2026-09-05T10:55:39.123000Z"),
+    ("1969-12-31T23:59:59.500Z", "1969-12-31T23:59:59.500000Z"),
+])
+def test_to_iso_z_fraction_policy(input, expected):
+    assert to_iso_z(datetime.fromisoformat(input)) == expected

@@ -128,12 +128,12 @@ describe('runLs — cross-mount ls', () => {
   })
 
   it('interleaves each operand subtree under -R', async () => {
-    const { out } = await run(['/a', '/b'], { R: true })
+    const { out } = await run(['/a', '/b'], { recursive: true })
     expect(out).toBe('/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n/b:\ntwo\n\n/b/two:\ny.txt\n')
   })
 
   it('prints bare rows with no headers under -d', async () => {
-    const { out } = await run(['/a', '/b'], { d: true })
+    const { out } = await run(['/a', '/b'], { directory: true })
     expect(out).toBe('/a\n/b\n')
   })
 
@@ -153,7 +153,7 @@ describe('runLs — cross-mount ls', () => {
     const plain = await run(['/a', '/b'])
     const crossing = await run(['/a', '/b'], {}, undefined, nested)
     expect(crossing.out).toBe(plain.out)
-    const rec = await run(['/a', '/b'], { R: true }, undefined, nested)
+    const rec = await run(['/a', '/b'], { recursive: true }, undefined, nested)
     expect(rec.out).toBe('/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n/b:\ntwo\n\n/b/two:\ny.txt\n')
   })
 
@@ -174,7 +174,7 @@ describe('runLs — cross-mount ls', () => {
       },
       childMounts: (parent) => (parent === '/a' ? ['one'] : []),
     }
-    const { out, io } = await run(['/a', '/b'], { R: true }, ns, nested)
+    const { out, io } = await run(['/a', '/b'], { recursive: true }, ns, nested)
     expect(io.exitCode).toBe(0)
     expect(out).toBe('/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n/b:\ntwo\n\n/b/two:\ny.txt\n')
   })

@@ -777,6 +777,63 @@ def ensure_var_visible(session: Session, name: str) -> None:
         raise PolicyDenied(errno.EACCES, f"{name}: permission denied", name)
 
 
+# The names the shell maintains itself (`seed_var`'s second caller): a
+# `cd` writes the first two and `[[ =~ ]]` the third, ungated, because
+# they are the shell's to keep current rather than the session's to admit.
+SHELL_BOOKKEEPING = frozenset({"PWD", "OLDPWD", "BASH_REMATCH"})
+
+
+def gate_rendering(value: ShellValue | None) -> str | None:
+    """The value a ``pre_session`` hook is shown for one variable.
+
+    A scalar as itself, an indexed array as its present elements joined
+    by spaces, an associative one in sorted-key order, and None for a
+    variable that is declared but unset. One rendering, so a rule reads
+    the same text whether the write came from a typed line or a restore.
+
+    Args:
+        value (ShellValue | None): the variable's value.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return " ".join(value[k] for k in sorted(value))
+    return " ".join(array_values(value))
+
+
+async def gate_restored_vars(policies: Policies | None, session_id: str,
+                             table: Mapping[str, ShellVar]) -> None:
+    """Vet a variable table a snapshot restores through the session gate.
+
+    A snapshot is the one env input the deployment did not author, so
+    the ``pre_session`` rule that refuses a name on a typed line has to
+    see the restore too. Every restored variable fires the gate as a
+    ``set`` of its rendered value before any of them lands, and a
+    refusal aborts the load with the ``PolicyDenied`` a live ``export``
+    of that name reports, rather than dropping the one variable: a
+    partial restore is a workspace whose state matches no snapshot. The
+    shell's own bookkeeping (``SHELL_BOOKKEEPING``) is exempt here as it
+    is live. None policies gate nothing.
+
+    Args:
+        policies (Policies | None): the target workspace's policies.
+        session_id (str): the session the table is restored into.
+        table (Mapping[str, ShellVar]): the restored variables.
+    """
+    for name, var in table.items():
+        if name in SHELL_BOOKKEEPING:
+            continue
+        await pre_session_gate(
+            policies,
+            SessionContext(plane="env",
+                           verb="set",
+                           key=name,
+                           value=gate_rendering(var.value),
+                           session_id=session_id))
+
+
 async def set_var(session: Session,
                   policies: Policies | None,
                   name: str,
@@ -845,18 +902,12 @@ async def set_var(session: Session,
             # refusal reports.
             await _land_coercion(session, policies, coercion)
             raise
-    if isinstance(value, str):
-        rendered = value
-    elif isinstance(value, dict):
-        rendered = " ".join(value[k] for k in sorted(value))
-    else:
-        rendered = " ".join(array_values(value))
     await pre_session_gate(
         policies,
         SessionContext(plane="env",
                        verb="set",
                        key=name,
-                       value=rendered,
+                       value=gate_rendering(value),
                        session_id=session.session_id))
     if name == RANDOM and session._random_seed != RANDOM_UNSET and isinstance(
             value, str):
@@ -986,10 +1037,11 @@ def seed_var(session: Session, name: str, value: ShellValue) -> None:
     state. `visible_arrays` already names this case ("the embedder can
     seed session.arrays before narrowing"). The other is the shell
     writing its own bookkeeping -- ``$PWD``/``$OLDPWD`` after a ``cd``,
-    ``BASH_REMATCH`` after a ``[[ =~ ]]``, the loop variable a ``for``
-    puts back when it ends -- which are the shell's to maintain, not
-    the session's to admit, and which a ``pre_session`` rule refusing
-    them could only break.
+    ``BASH_REMATCH`` after a ``[[ =~ ]]`` -- which are the shell's to
+    maintain, not the session's to admit, and which a ``pre_session``
+    rule refusing them could only break. (A ``for`` loop's variable is
+    not one of these: bash leaves it holding its last value, so the
+    loop never writes it back.)
 
     A variable the *line* named goes through `SessionView.set` instead,
     which is the whole point of the store being read-only from outside.

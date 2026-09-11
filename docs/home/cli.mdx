@@ -100,8 +100,8 @@ mirage execute --workspace_id demo --command "head -n 1 /s3/data/example.jsonl"
 
 ### 4. Pipe stdin
 
-When stdout isn't a TTY, the CLI forwards stdin to the command
-automatically.
+For foreground commands, piped stdin is uploaded as a binary multipart file.
+Empty input and arbitrary bytes are preserved; input is buffered before execution.
 
 ```bash
 echo -e "a\nb\nc" | mirage execute --workspace_id demo --command "wc -l"
@@ -306,7 +306,7 @@ mirage workspace clone demo --at <version> --id demo_at_v1
 | `mirage session create WS [--id NAME] [--profile NAME] [-m /prefix[:mode]]...` | Add a named session (own cwd + env), optionally under a [permission profile](/home/permissions) or restricted to mounts with a mode ceiling (`read`/`write`/`exec` or `r`/`rw`/`rwx`). |
 | `mirage session list WS` | List sessions for a workspace. |
 | `mirage session delete WS SESSION` | Close a session. |
-| `mirage execute --workspace_id WS [--session_id S] [--background] --command "..."` | Run a command. Pipes stdin automatically when stdout is not a TTY. |
+| `mirage execute --workspace_id WS [--session_id S] [--background] --command "..."` | Run a command. Uploads piped stdin for foreground execution. |
 | `mirage provision --workspace_id WS [--session_id S] --command "..."` | Dry-run / cost estimate -- returns a `ProvisionResult` shape (network bytes, cache hits, estimated cost) without running the command. |
 | `mirage job list [--workspace_id WS]` | List jobs the daemon has run, plus their status. |
 | `mirage job get JOB` | Detail for one job. |

@@ -64,16 +64,16 @@ def index():
 
 @pytest.mark.asyncio
 async def test_read_file(accessor, index):
-    await index.put(
-        "/Team Drive/report.pdf",
-        IndexEntry(
-            id="file123",
-            name="report",
-            resource_type="gdrive/file",
-            remote_time="2026-04-01T00:00:00.000Z",
-            vfs_name="report.pdf",
-            extra={"drive_id": "drive1"},
-        ))
+    await index.set_dir('/Team Drive',
+                        [('report.pdf',
+                          IndexEntry(
+                              id="file123",
+                              name="report",
+                              resource_type="gdrive/file",
+                              remote_time="2026-04-01T00:00:00.000Z",
+                              vfs_name="report.pdf",
+                              extra={"drive_id": "drive1"},
+                          ))])
     content = b"pdf content here"
     with patch(
             "mirage.core.gdrive.read.download_file",
@@ -91,12 +91,11 @@ async def test_read_file(accessor, index):
 @pytest.mark.asyncio
 async def test_a_ranged_read_of_a_binary_file_asks_drive_for_the_range(
         accessor, index):
-    await index.put(
-        "/report.pdf",
-        IndexEntry(id="file123",
-                   name="report",
-                   resource_type="gdrive/file",
-                   vfs_name="report.pdf"))
+    await index.set_dir('/', [('report.pdf',
+                               IndexEntry(id="file123",
+                                          name="report",
+                                          resource_type="gdrive/file",
+                                          vfs_name="report.pdf"))])
     with patch(
             "mirage.core.gdrive.read.download_file",
             new_callable=AsyncMock,
@@ -119,12 +118,11 @@ async def test_a_ranged_read_of_a_rendered_file_slices_what_we_rendered(
         accessor, index):
     # A google-apps file has no bytes on Drive to range over: the JSON
     # exists only once we build it, so the window comes off the result.
-    await index.put(
-        "/notes.gdoc",
-        IndexEntry(id="doc1",
-                   name="notes",
-                   resource_type="gdrive/gdoc",
-                   vfs_name="notes.gdoc"))
+    await index.set_dir('/', [('notes.gdoc',
+                               IndexEntry(id="doc1",
+                                          name="notes",
+                                          resource_type="gdrive/gdoc",
+                                          vfs_name="notes.gdoc"))])
     with patch(
             "mirage.core.gdrive.read.read_doc",
             new_callable=AsyncMock,
@@ -143,15 +141,14 @@ async def test_a_ranged_read_of_a_rendered_file_slices_what_we_rendered(
 
 @pytest.mark.asyncio
 async def test_read_shared_drive_raises_is_a_directory(accessor, index):
-    await index.put(
-        "/Team Drive",
-        IndexEntry(
-            id="drive1",
-            name="Team Drive",
-            resource_type="gdrive/shared_drive",
-            vfs_name="Team Drive",
-            extra={"drive_id": "drive1"},
-        ))
+    await index.set_dir('/', [('Team Drive',
+                               IndexEntry(
+                                   id="drive1",
+                                   name="Team Drive",
+                                   resource_type="gdrive/shared_drive",
+                                   vfs_name="Team Drive",
+                                   extra={"drive_id": "drive1"},
+                               ))])
     with patch(
             "mirage.core.gdrive.read.download_file",
             new_callable=AsyncMock,

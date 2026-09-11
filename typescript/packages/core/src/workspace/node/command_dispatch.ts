@@ -44,6 +44,7 @@ import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
+import { runExternal } from '../executor/command/external.ts'
 import { handleCommand } from '../executor/command.ts'
 import type { ExecuteNodeOpts } from '../executor/jobs.ts'
 import { type AliasMark, aliasCommandText } from '../executor/builtins/alias/index.ts'
@@ -63,7 +64,6 @@ import {
   handleLn,
   handleReadlink,
   handleTouch,
-  linkFlags,
   prepareMv,
   stripLinkOperands,
 } from '../executor/builtins/index.ts'
@@ -72,7 +72,14 @@ import { globPattern } from '../../utils/glob_walk.ts'
 import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS, followsLastComponent } from '../lookup/index.ts'
+import {
+  Consumer,
+  lookup,
+  runtimeRefused,
+  SLASH_KEEPS_LAST,
+  UNSUPPORTED_BUILTINS,
+  followsLastComponent,
+} from '../lookup/index.ts'
 import { Admitted, admit } from './admission.ts'
 import type { Session } from '../session/session.ts'
 import { ensureVarVisible, sessionView } from '../session/state.ts'
@@ -396,11 +403,16 @@ async function runCommandBody(
     registry,
     namespace,
     sessionView(session, registry.policies),
+    routingDecision,
   )
 
   // Limits resolve against the expanded name, so `$CMD`-style
   // invocations get their real command's policy.
-  const resolved = argv.name !== '' ? resolveLimit(argv.name) : null
+  // External execution owns its mount-resolved deadline and cancellation.
+  const external =
+    !argv.name.includes('/') &&
+    lookup(argv.name, session, registry, routingDecision) === Consumer.EXTERNAL
+  const resolved = argv.name !== '' && !external ? resolveLimit(argv.name) : null
   const timeout = resolved !== null ? resolved.timeoutSeconds : null
   // Capture xtrace before the body runs so `set -x` itself is not
   // traced (bash enables tracing only for the following commands).
@@ -504,7 +516,10 @@ async function runArgv(
   // MountRootPolicy cannot recognize a mount root inside one, so
   // `tar -cf out.tar /base/*` would archive a whole backend the same
   // operand typed by hand is refused for.
-  const boundary = await expandBoundaryGlobs(argv.operands, registry, namespace)
+  const refusedExternal = runtimeRefused(name, session, registry, routingDecision)
+  const boundary = refusedExternal
+    ? [...argv.operands]
+    : await expandBoundaryGlobs(argv.operands, registry, namespace)
   const expandedWords = boundary.map(wordText)
   // Compared as words, not as a count: a glob that matches exactly one
   // name (`du /base/i*` where only the mount root matches) is still an
@@ -515,7 +530,7 @@ async function runArgv(
     expandedWords.length !== typedWords.length ||
     expandedWords.some((w, i) => w !== typedWords[i])
   ) {
-    argv = new Argv(argv.name, expandedWords, boundary)
+    argv = new Argv(argv.name, expandedWords, boundary, argv.prefix)
   }
 
   // Visibility and admission. The one chokepoint every command class
@@ -665,6 +680,11 @@ async function routeArgv(
     ]
   }
 
+  const consumer = lookup(name, session, registry, routingDecision)
+  if (consumer === Consumer.EXTERNAL) {
+    return runExternal(argv, stdin, session, registry, routingDecision, signal)
+  }
+
   // Shell builtins. One lookup: every executor-run builtin word maps to
   // a handler that takes the whole invocation, so the arms live beside
   // their workers (builtins/<word>/) rather than here. Job builtins and
@@ -719,7 +739,7 @@ async function routeArgv(
   // Symlinks are namespace-backed: not bash builtins, not mount commands.
   // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
   // which falls through to the mount command.
-  if (name === 'ln' && linkFlags(operands, 'sfnvrT').has('s')) {
+  if (name === 'ln') {
     return await handleLn(namespace, dispatch, session, operands)
   }
   if (name === 'readlink') {
@@ -787,7 +807,7 @@ async function routeArgv(
           ]
         }
       } else if (name === 'mv') {
-        const prepared = await prepareMv(namespace, dispatch, operands)
+        const prepared = await prepareMv(namespace, dispatch, operands, argv.args, session.cwd)
         operands = prepared.items
         postUnlink = prepared.postUnlink
         postRename = prepared.postRename
@@ -853,8 +873,18 @@ async function routeArgv(
         }
       }
     }
-    if (postUnlink !== null) await namespace.unlink(postUnlink)
-    if (postRename !== null) await namespace.rename(postRename[0], postRename[1])
+    if (postUnlink !== null) {
+      // The landing is replaced the way rename(2) replaces it, node and
+      // subtree alike, and then the source's own node and subtree land on it.
+      // The same four steps the dispatcher takes for a rename it forwards
+      // itself.
+      await namespace.unlink(postUnlink)
+      await namespace.purgeUnder(postUnlink)
+    }
+    if (postRename !== null) {
+      await namespace.rename(postRename[0], postRename[1])
+      await namespace.renameUnder(postRename[0], postRename[1])
+    }
   }
   if (linkErrors.length > 0) {
     // A refused link operand fails the line the way a refused backend

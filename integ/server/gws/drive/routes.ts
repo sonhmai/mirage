@@ -17,6 +17,7 @@ import { route } from '../wire/route.ts'
 import type { RouteOpts } from '../wire/route.ts'
 import { parseMultipartRelated } from '../gmail/mime.ts'
 import type { C } from '../store/client.ts'
+import { copyDocTabs } from '../docs/body.ts'
 import type { GwsState } from '../store/state.ts'
 import type { DriveItem, Permission, Revision } from '../store/types.ts'
 import { asObj, asStr, asStrArr, asBool } from '../wire/json.ts'
@@ -186,7 +187,9 @@ function copyFile(ctx: GwsCtx): Reply {
     Buffer.from(src.content),
   )
   const srcDoc = ctx.db.docs.get(src.id)
-  if (srcDoc !== undefined) ctx.db.docs.set(copy.id, { title: copy.name, text: srcDoc.text })
+  if (srcDoc !== undefined) {
+    ctx.db.docs.set(copy.id, { title: copy.name, tabs: copyDocTabs(srcDoc.tabs) })
+  }
   const srcSheet = ctx.db.sheets.get(src.id)
   if (srcSheet !== undefined) {
     ctx.db.sheets.set(copy.id, {

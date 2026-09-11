@@ -266,3 +266,203 @@ describe('workspace: job table cleanup', () => {
     await ws.close()
   })
 })
+
+// tree-sitter-bash used to lex a heredoc body line opening with a backslash
+// as more words of the operator line, and to skip the first line's leading
+// whitespace; parse() shields such bodies so the workspace reads them as
+// bash does (issue #1050).
+describe('workspace: heredoc bodies the lexer would swallow', () => {
+  it('keeps a leading backslash line', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("cat <<'END'\n\\first\nsecond\nEND")
+    expect(stdoutStr(io)).toBe('\\first\nsecond\n')
+    await ws.close()
+  })
+
+  it('round-trips a leading backslash line through a file', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute("cat > /disk/HB <<'END'\n\\first\nsecond\nEND")
+    const io = await ws.execute('cat /disk/HB')
+    expect(stdoutStr(io)).toBe('\\first\nsecond\n')
+    await ws.close()
+  })
+
+  it('keeps indentation after a backslash line', async () => {
+    const { ws } = await makeWorkspace()
+    const body = '\\begin{table}[!ht]\n  \\begin{center}\n  \\end{center}\n\\end{table}\n'
+    const io = await ws.execute(`cat <<'END'\n${body}END`)
+    expect(stdoutStr(io)).toBe(body)
+    await ws.close()
+  })
+
+  it('keeps leading indentation', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("cat <<'END'\n  first\nsecond\nEND")
+    expect(stdoutStr(io)).toBe('  first\nsecond\n')
+    await ws.close()
+  })
+
+  it('expands and escapes on an unquoted backslash line', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('hb=val; cat <<END\n\\a $hb\n\\$hb\nsecond\nEND')
+    expect(stdoutStr(io)).toBe('\\a val\n$hb\nsecond\n')
+    await ws.close()
+  })
+
+  it('does not let a backslash line reach the pipeline', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("cat <<'END' | tr a-z A-Z\n\\first\nsecond\nEND")
+    expect(stdoutStr(io)).toBe('\\FIRST\nSECOND\n')
+    await ws.close()
+  })
+
+  it('reads an apostrophe on a backslash line as body text', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("cat <<'END'\n\\item Don't stop; echo not-a-command\nsecond\nEND")
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe("\\item Don't stop; echo not-a-command\nsecond\n")
+    await ws.close()
+  })
+
+  it('keeps a tab-indented backslash line under <<-', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("cat <<-'END'\n\t\\first\n\tsecond\n\tEND")
+    expect(stdoutStr(io)).toBe('\\first\nsecond\n')
+    await ws.close()
+  })
+})
+
+// bash keeps the empty lines a body opens with and reads a quoted
+// delimiter with the shell's own escape rules; both reach the workspace
+// through the heredoc package (issue #1050).
+describe('workspace: heredoc leading empty lines and escaped delimiters', () => {
+  it('keeps a leading empty line', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("cat <<'END'\n\nfirst\nEND")
+    expect(stdoutStr(io)).toBe('\nfirst\n')
+    await ws.close()
+  })
+
+  it('keeps a body that is one empty line', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("cat <<'END'\n\nEND")
+    expect(stdoutStr(io)).toBe('\n')
+    await ws.close()
+  })
+
+  it('keeps an empty line before a backslash line', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("cat <<'END'\n\n\\first\nEND")
+    expect(stdoutStr(io)).toBe('\n\\first\n')
+    await ws.close()
+  })
+
+  it('expands after leading empty lines', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('hb=val; cat <<END\n\n\n$hb\nEND')
+    expect(stdoutStr(io)).toBe('\n\nval\n')
+    await ws.close()
+  })
+
+  it('keeps a leading empty line under <<-', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("cat <<-'END'\n\n\tfirst\n\tEND")
+    expect(stdoutStr(io)).toBe('\nfirst\n')
+    await ws.close()
+  })
+
+  it('reads an escaped dollar in a quoted delimiter', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('cat <<"E\\$F"\n\\first\nE$F')
+    expect(stdoutStr(io)).toBe('\\first\n')
+    await ws.close()
+  })
+
+  it('reads an escaped quote in a quoted delimiter', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('cat <<"E\\"F"\n\\first\nE"F')
+    expect(stdoutStr(io)).toBe('\\first\n')
+    await ws.close()
+  })
+
+  it('round-trips a leading empty line through a file', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute("cat > /disk/HB7 <<'END'\n\nfirst\nEND")
+    const io = await ws.execute('cat /disk/HB7')
+    expect(stdoutStr(io)).toBe('\nfirst\n')
+    await ws.close()
+  })
+})
+
+// A backslash before a newline in the delimiter is the reader's line
+// continuation rather than quoting, so the body it opens expands, and the
+// terminator line tree-sitter leaves in that body is not body text
+// (issue #1050).
+describe('workspace: heredoc continued delimiters', () => {
+  it('expands the body of a continued delimiter', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('hb=val; cat <<EO\\\nF\n$hb\nEOF\n')
+    expect(stdoutStr(io)).toBe('val\n')
+    await ws.close()
+  })
+
+  it('drops the terminator line of a continued delimiter', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('cat <<EO\\\nF\nbody\nEOF\n')
+    expect(stdoutStr(io)).toBe('body\n')
+    await ws.close()
+  })
+
+  it('reads a continued delimiter carrying an escape as quoted', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('hb=val; cat <<EO\\\nF\\G\n$hb\nEOFG\n')
+    expect(stdoutStr(io)).toBe('$hb\n')
+    await ws.close()
+  })
+
+  it('keeps a body that expands to the delimiter', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('hb=END; cat <<END\n$hb\nEND')
+    expect(stdoutStr(io)).toBe('END\n')
+    await ws.close()
+  })
+})
+
+// The operator line runs past a `)` that closes a case pattern and past
+// the quotes a substitution inside double quotes holds, so the body it
+// opens is the one bash reads (issue #1050).
+describe('workspace: heredoc operator lines that hold a case or a nested quote', () => {
+  it('keeps a backslash line after a case pattern paren', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute(
+      'cat <<EOF $(case x in\nx)\n  :\n  ;;\nesac\n)\n\\first\nsecond\nEOF\n',
+    )
+    expect(stdoutStr(io)).toBe('\\first\nsecond\n')
+    await ws.close()
+  })
+
+  it('keeps indentation after a case pattern paren', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute(
+      'cat <<EOF $(case x in\nx)\n  :\n  ;;\nesac\n)\n  spaced\nsecond\nEOF\n',
+    )
+    expect(stdoutStr(io)).toBe('  spaced\nsecond\n')
+    await ws.close()
+  })
+
+  it('keeps a backslash line after a quote inside a substitution', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute('cat <<EOF >"$( : "a\n  b"; echo /disk/HB8)"\n\\first\nsecond\nEOF\n')
+    const io = await ws.execute('cat /disk/HB8')
+    expect(stdoutStr(io)).toBe('\\first\nsecond\n')
+    await ws.close()
+  })
+
+  it('keeps a backslash line after a quote inside a backtick', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute('cat <<EOF >"`  : "a\n  b"; echo /disk/HB9 `"\n\\first\nsecond\nEOF\n')
+    const io = await ws.execute('cat /disk/HB9')
+    expect(stdoutStr(io)).toBe('\\first\nsecond\n')
+    await ws.close()
+  })
+})

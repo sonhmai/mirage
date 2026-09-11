@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mergeEntries } from './list.ts'
 import { parseMode } from '../../handles/mode.ts'
 import type { MontyBindingBits } from './binding.ts'
 import { guestError } from './errors.ts'
@@ -103,31 +104,6 @@ function dateMarker(): Record<string, unknown> {
     month: now.getMonth() + 1,
     day: now.getDate(),
   }
-}
-
-/** A full entry path under `dir`, whatever shape the listing spelled. */
-function joinEntry(dir: string, name: string): string {
-  const clean = name.endsWith('/') ? name.slice(0, -1) : name
-  if (clean.startsWith('/')) return clean
-  return dir === '/' ? '/' + clean : dir + '/' + clean
-}
-
-/** Sort paths the way python sorts PurePosixPath: by parts, not raw bytes. */
-function sortPaths(paths: string[]): string[] {
-  return paths
-    .map((p): [string[], string] => [p.split('/'), p])
-    .sort((a, b) => {
-      const [pa] = a
-      const [pb] = b
-      const n = Math.min(pa.length, pb.length)
-      for (let i = 0; i < n; i++) {
-        const x = pa[i] ?? ''
-        const y = pb[i] ?? ''
-        if (x !== y) return x < y ? -1 : 1
-      }
-      return pa.length - pb.length
-    })
-    .map(([, p]) => p)
 }
 
 /**
@@ -395,9 +371,11 @@ export class MirageOSAccess {
     if (vfs === null) return this.tree.iterdir(path)
     return vfs.readdir(path).then(
       (entries) => {
-        const merged = new Set<string>(this.tree.isDir(path) ? this.tree.iterdir(path) : [])
-        for (const entry of entries) merged.add(joinEntry(path, entry.path))
-        return sortPaths([...merged])
+        return mergeEntries(
+          path,
+          this.tree.isDir(path) ? this.tree.iterdir(path) : [],
+          entries.map((entry) => entry.path),
+        )
       },
       () => this.tree.iterdir(path),
     )

@@ -73,6 +73,645 @@
       "flags": [
         "T"
       ]
+    },
+    {
+      "id": "ln_directory_destination",
+      "seq": 611030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/lnf/d /data/lnf/e && printf k > /data/lnf/d/k.txt && printf k > /data/lnf/e/k.txt && printf hi > /data/lnf/a.txt && printf yo > /data/lnf/b.txt && ln -sv /data/lnf/a.txt /data/lnf/d && readlink /data/lnf/d/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/lnf/d/a.txt' -> '/data/lnf/a.txt'\n/data/lnf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s",
+        "v"
+      ]
+    },
+    {
+      "id": "ln_target_directory",
+      "seq": 611031,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s -t /data/lnf/e /data/lnf/a.txt /data/lnf/b.txt && readlink /data/lnf/e/a.txt && readlink /data/lnf/e/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/lnf/a.txt\n/data/lnf/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s",
+        "t"
+      ]
+    },
+    {
+      "id": "ln_target_directory_missing",
+      "seq": 611032,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s -t /data/lnf/nodir /data/lnf/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ln: failed to access '/data/lnf/nodir': No such file or directory\n"
+      },
+      "flags": [
+        "s",
+        "t"
+      ]
+    },
+    {
+      "id": "ln_target_directory_conflicts_with_T",
+      "seq": 611033,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s -t /data/lnf/e -T /data/lnf/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ln: cannot combine --target-directory and --no-target-directory\n"
+      },
+      "flags": [
+        "s",
+        "t",
+        "T"
+      ]
+    },
+    {
+      "id": "ln_T_keeps_a_directory_as_the_name",
+      "seq": 611034,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -sT /data/lnf/a.txt /data/lnf/d",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ln: failed to create symbolic link '/data/lnf/d': File exists\n"
+      },
+      "flags": [
+        "s",
+        "T"
+      ]
+    },
+    {
+      "id": "ln_backup_moves_a_link_aside",
+      "seq": 611035,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -sbv /data/lnf/b.txt /data/lnf/d/a.txt && readlink /data/lnf/d/a.txt~",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/lnf/d/a.txt~' ~ '/data/lnf/d/a.txt' -> '/data/lnf/b.txt'\n/data/lnf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s",
+        "b",
+        "v"
+      ]
+    },
+    {
+      "id": "ln_backup_suffix_moves_a_file_aside",
+      "seq": 611036,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s -S .bak /data/lnf/a.txt /data/lnf/b.txt && cat /data/lnf/b.txt.bak && readlink /data/lnf/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "yo/data/lnf/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s",
+        "S"
+      ]
+    },
+    {
+      "id": "ln_backup_none_refuses",
+      "seq": 611037,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s --backup=none /data/lnf/a.txt /data/lnf/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ln: failed to create symbolic link '/data/lnf/b.txt': File exists\n"
+      },
+      "flags": [
+        "s",
+        "backup"
+      ]
+    },
+    {
+      "id": "ln_hard_link_copies_bytes",
+      "seq": 611038,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -v /data/lnf/a.txt /data/lnf/h && cat /data/lnf/h",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/lnf/h' => '/data/lnf/a.txt'\nhi",
+        "stderr": ""
+      },
+      "flags": [
+        "v"
+      ]
+    },
+    {
+      "id": "ln_hard_link_of_a_directory",
+      "seq": 611039,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln /data/lnf/d /data/lnf/hd",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ln: /data/lnf/d: hard link not allowed for directory\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "ln_hard_link_of_a_directory_with_d",
+      "seq": 611040,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -d /data/lnf/d /data/lnf/hd",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ln: failed to create hard link '/data/lnf/hd' => '/data/lnf/d': Operation not permitted\n"
+      },
+      "flags": [
+        "d"
+      ]
+    },
+    {
+      "id": "ln_hard_link_of_a_link",
+      "seq": 611041,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s /data/lnf/a.txt /data/lnf/lk && ln /data/lnf/lk /data/lnf/h1 && readlink /data/lnf/h1 && ln -L /data/lnf/lk /data/lnf/h2 && cat /data/lnf/h2",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/lnf/a.txt\nhi",
+        "stderr": ""
+      },
+      "flags": [
+        "L"
+      ]
+    },
+    {
+      "id": "ln_missing_operand",
+      "seq": 611042,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ln: missing file operand\nTry 'ln --help' for more information.\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "ln_last_of_logical_and_physical_wins",
+      "seq": 611043,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -s /data/lnf/a.txt /data/lnf/lk2 && ln -LP /data/lnf/lk2 /data/lnf/hp && readlink /data/lnf/hp && ln -PL /data/lnf/lk2 /data/lnf/hl && cat /data/lnf/hl && readlink /data/lnf/hl; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/lnf/a.txt\nhicode=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L",
+        "P"
+      ]
+    },
+    {
+      "id": "ln_relative_needs_symbolic",
+      "seq": 611044,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ln -r /data/lnf/a.txt /data/lnf/rel; echo code=$?; test -e /data/lnf/rel; echo exists=$?; ln -r -T -t /data/lnf/d /data/lnf/a.txt /data/lnf/x",
+      "expect": {
+        "exit": 1,
+        "stdout": "code=1\nexists=1\n",
+        "stderr": "ln: cannot do --relative without --symbolic\nln: cannot do --relative without --symbolic\n"
+      },
+      "flags": [
+        "r",
+        "T",
+        "t"
+      ]
+    },
+    {
+      "id": "ln_f_refuses_the_same_file",
+      "command": "printf same > /data/lnf/same.txt && ln -sf /data/lnf/same.txt /data/lnf/same.txt; echo code=$?; ln -f /data/lnf/same.txt /data/lnf/same.txt; echo code=$?; cat /data/lnf/same.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\ncode=1\nsame",
+        "stderr": "ln: '/data/lnf/same.txt' and '/data/lnf/same.txt' are the same file\nln: '/data/lnf/same.txt' and '/data/lnf/same.txt' are the same file\n"
+      },
+      "flags": [
+        "s",
+        "f"
+      ],
+      "seq": 611045,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "ln_backup_refuses_a_directory_destination",
+      "seq": 611046,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/lnbd/d && printf y > /data/lnbd/d/k && printf x > /data/lnbd/a.txt && ln -sbT /data/lnbd/a.txt /data/lnbd/d; echo code=$?; ls /data/lnbd",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\na.txt\nd\n",
+        "stderr": "ln: /data/lnbd/d: cannot overwrite directory\n"
+      },
+      "flags": [
+        "s",
+        "b",
+        "T"
+      ]
     }
   ]
 }

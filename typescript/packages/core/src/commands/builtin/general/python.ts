@@ -14,7 +14,7 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import { handlePython } from '../../../workspace/executor/python/handle.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
@@ -179,6 +179,7 @@ async function pythonCommand(
       command: label,
       stdin: stdinForRuntime,
       env: opts.env ?? {},
+      cwd: PathSpec.fromStrPath(opts.cwd),
       code: resolvedCode,
       prog: argv0,
       mode,

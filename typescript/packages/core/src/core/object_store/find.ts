@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { readTree } from './readdir.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import { buildTree, emitStartPath, keep, startBasename } from '../../commands/builtin/find_eval.ts'
 import type { FindOptions } from '../../resource/base.ts'
@@ -19,27 +21,18 @@ import type { PathSpec } from '../../types.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import type { FindHints, ObjectStoreDriver, TreeEntry } from './driver.ts'
+import type { FindHints, ObjectStoreDriver } from './driver.ts'
 
 export type FindFn<A extends Accessor> = (
   accessor: A,
   path: PathSpec,
   options?: FindOptions,
+  index?: IndexCacheStore,
 ) => Promise<string[]>
-
-function treeIter<A extends Accessor, C>(
-  driver: ObjectStoreDriver<A, C>,
-  conn: C,
-  pfx: string,
-  hints: FindHints,
-): [AsyncIterable<TreeEntry>, boolean] {
-  if (driver.findTree === undefined) return [driver.listTree(conn, pfx), false]
-  return driver.findTree(conn, pfx, hints)
-}
 
 /** Build the recursive predicate walk over one driver. */
 export function makeFind<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): FindFn<A> {
-  return async function find(accessor, path, options = {}) {
+  return async function find(accessor, path, options = {}, index) {
     const startName = startBasename(path.virtual)
     const kpfx = driver.keyPrefixOf(accessor)
     const pfx = kp.applyDir(kpfx, path.mountPath)
@@ -79,66 +72,57 @@ export function makeFind<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>)
       maxSize: options.maxSize ?? null,
       pushdown,
     }
-    const { conn, close } = await driver.connect(accessor)
-    try {
-      const [iterator, narrowed] = treeIter(driver, conn, pfx, hints)
-      for await (const treeEntry of iterator) {
-        const key = treeEntry.key
-        if (key === pfx) {
-          seen.marker = true
+    const [rows, exists] = await readTree(driver, accessor, path, index, hints)
+    seen.descendant = exists
+    for (const treeEntry of rows) {
+      const key = treeEntry.key
+      if (key === pfx) {
+        seen.marker = true
+        continue
+      }
+      seen.descendant = true
+      const isDir = key.endsWith('/')
+      const normKey = isDir ? key.slice(0, -1) : key
+      const fullPath = '/' + kp.strip(kpfx, normKey)
+      const size = treeEntry.size ?? 0
+      if (isDir) {
+        if (seenDirs.has(fullPath)) continue
+        seenDirs.add(fullPath)
+      }
+      const entries: [string, 'f' | 'd'][] = [[fullPath, isDir ? 'd' : 'f']]
+      // Implicit directories exist only as key prefixes; synthesize the
+      // parent chain so find agrees with readdir on externally-populated
+      // buckets.
+      let parent = fullPath.slice(0, fullPath.lastIndexOf('/')) || '/'
+      while (parent !== rootKey && parent !== '/') {
+        if (!seenDirs.has(parent)) {
+          seenDirs.add(parent)
+          entries.push([parent, 'd'])
+        }
+        parent = parent.slice(0, parent.lastIndexOf('/')) || '/'
+      }
+      for (const [ep, kind] of entries) {
+        const entryName = ep.split('/').pop() ?? ''
+        const depth = (ep.match(/\//g) ?? []).length - baseDepth
+        if (
+          options.maxDepth !== null &&
+          options.maxDepth !== undefined &&
+          depth > options.maxDepth
+        ) {
           continue
         }
-        seen.descendant = true
-        const isDir = key.endsWith('/')
-        const normKey = isDir ? key.slice(0, -1) : key
-        const fullPath = '/' + kp.strip(kpfx, normKey)
-        const size = treeEntry.size ?? 0
-        if (isDir) {
-          if (seenDirs.has(fullPath)) continue
-          seenDirs.add(fullPath)
+        const isEmpty = !empty ? null : kind === 'd' ? false : size === 0
+        if (!keep({ key: ep, name: entryName, kind, depth, isEmpty }, tree, options.minDepth)) {
+          continue
         }
-        const entries: [string, 'f' | 'd'][] = [[fullPath, isDir ? 'd' : 'f']]
-        // Implicit directories exist only as key prefixes; synthesize the
-        // parent chain so find agrees with readdir on externally-populated
-        // buckets.
-        let parent = fullPath.slice(0, fullPath.lastIndexOf('/')) || '/'
-        while (parent !== rootKey && parent !== '/') {
-          if (!seenDirs.has(parent)) {
-            seenDirs.add(parent)
-            entries.push([parent, 'd'])
-          }
-          parent = parent.slice(0, parent.lastIndexOf('/')) || '/'
+        if (options.minSize != null || options.maxSize != null) {
+          // Directories count as size 0 for -size (deliberate GNU divergence).
+          const effective = kind === 'd' ? 0 : size
+          if (options.minSize != null && effective < options.minSize) continue
+          if (options.maxSize != null && effective > options.maxSize) continue
         }
-        for (const [ep, kind] of entries) {
-          const entryName = ep.split('/').pop() ?? ''
-          const depth = (ep.match(/\//g) ?? []).length - baseDepth
-          if (
-            options.maxDepth !== null &&
-            options.maxDepth !== undefined &&
-            depth > options.maxDepth
-          ) {
-            continue
-          }
-          const isEmpty = !empty ? null : kind === 'd' ? false : size === 0
-          if (!keep({ key: ep, name: entryName, kind, depth, isEmpty }, tree, options.minDepth)) {
-            continue
-          }
-          if (options.minSize != null || options.maxSize != null) {
-            // Directories count as size 0 for -size (deliberate GNU divergence).
-            const effective = kind === 'd' ? 0 : size
-            if (options.minSize != null && effective < options.minSize) continue
-            if (options.maxSize != null && effective > options.maxSize) continue
-          }
-          results.push(ep)
-        }
+        results.push(ep)
       }
-      if (narrowed && !seen.descendant && !seen.marker) {
-        // The narrowed query may have excluded every key under a prefix
-        // that does exist; probe so the start path still emits.
-        seen.descendant = await driver.probePrefix(conn, pfx)
-      }
-    } finally {
-      await close()
     }
     if (seen.descendant || seen.marker) {
       emitStartPath(results, rootKey, startName, {

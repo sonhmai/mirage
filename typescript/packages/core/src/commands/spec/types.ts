@@ -546,11 +546,11 @@ export class FlagView {
   }
 
   /**
-   * The given flag names, ordered as the line first typed them.
+   * The given flag names, ordered by their recorded occurrences.
    *
    * The parser fills the bag in scan order and every hop between
    * (object spreads, copies) preserves string-key insertion order, so
-   * a key's position is its first occurrence on the line; a flag
+   * a key's position is its last occurrence for scalars, first for accumulating options; a flag
    * supplied by a default or the environment lands after every typed
    * one. Names the line never carried are dropped. This is what an
    * order-sensitive option family (grep's --include/--exclude, where

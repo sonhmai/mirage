@@ -348,7 +348,7 @@ async def test_read_stat_readdir_range_stream_and_exists():
             mount_key("/volume/reports/latest.md", "/volume")))
     assert file_stat.name == "latest.md"
     assert file_stat.size == 6
-    assert file_stat.modified == "2023-11-14T22:13:20+00:00"
+    assert file_stat.modified == "2023-11-14T22:13:20Z"
     assert await resource.exists(
         PathSpec.from_str_path(
             "/volume/reports/latest.md",

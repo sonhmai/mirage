@@ -20,6 +20,8 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
+import { Channel } from '../shell/console/index.ts'
+import { JobStatus } from '../shell/job_table/index.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
 import { applyStateDict, toStateDict } from './snapshot/state.ts'
@@ -96,6 +98,25 @@ describe('history view + builtin', () => {
     const tail = await ws.execute('tail -n 2 /.bash_history')
     expect(tail.exitCode).toBe(0)
     expect(out(tail)).toContain('pwd')
+    await ws.close()
+  })
+
+  it('a followed history streams each new command to its job console', async () => {
+    // The history registration hands tailGeneric a stat, so -f polls the
+    // view; without one the follow branch is skipped and the command
+    // prints one snapshot and exits.
+    const ws = makeWs()
+    await ws.execute('pwd')
+    await ws.execute('tail -f -s 0.05 /.bash_history &')
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    await ws.execute('echo marker')
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
+    expect(job?.status).toBe(JobStatus.RUNNING)
+    const shown = new TextDecoder().decode(await job?.console.snapshot(Channel.STDOUT))
+    expect(shown).toContain('pwd')
+    expect(shown).toContain('echo marker')
+    expect((await ws.execute('kill %1')).exitCode).toBe(0)
     await ws.close()
   })
 
@@ -343,6 +364,25 @@ describe('history recording boundaries (GNU line-reader semantics)', () => {
       "echo 'cat /data/f.txt' > /data/s.sh",
       'source /data/s.sh',
     ])
+    await ws.close()
+  })
+
+  // bash 5.2 adds a line to history only when it is non-empty
+  // (`shell_input_line[0]`): a blank line is never recorded, while a
+  // whitespace-only or comment-only line is. Pinned in debian:stable-slim
+  // with `printf 'echo one\n\n   \n# comment\n' | bash -i; history -w`.
+  it('a blank line is not recorded but whitespace and comments are', async () => {
+    const ws = makeWs()
+    await ws.execute('echo one')
+    await ws.execute('')
+    await ws.execute('\n')
+    await ws.execute('   ')
+    await ws.execute('# comment')
+    expect(await commands(ws)).toEqual(['echo one', '   ', '# comment'])
+    const file = out(await ws.execute('cat /.bash_history'))
+    expect(file).not.toContain('\n\n')
+    expect(file).toContain('\n   \n')
+    expect(file).toContain('\n# comment\n')
     await ws.close()
   })
 

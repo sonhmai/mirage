@@ -13,17 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping
-from typing import Any
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.mixin import LineExecutorMixin
-from mirage.runtime.resolver import MountResolver
-from mirage.runtime.routing import RouteDecision, parsed_commands
+from mirage.runtime.routing import RouteDecision
 from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VFSRuntime,
                                   bind_commands, build_runtime,
                                   whole_line_runtime)
-from mirage.runtime.types import DispatchFn
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.workspace.guard import reject_config_script
 
@@ -39,17 +36,14 @@ class Runtimes:
     Args:
         registry (MountRegistry): carries the resolved bindings and the
             unavailable-runtime hints the dispatcher reports.
-        dispatch (DispatchFn): the workspace op dispatch each language
-            entry is attached to.
-        resolver (MountResolver): pull-model mount routing table read
-            per run, so mounts added after construction are picked up.
+        binding (WorkspaceBinding): the live workspace connection shared
+            by every runtime entry.
     """
 
-    def __init__(self, registry: MountRegistry, dispatch: DispatchFn,
-                 resolver: MountResolver) -> None:
+    def __init__(self, registry: MountRegistry,
+                 binding: WorkspaceBinding) -> None:
         self._registry = registry
-        self._dispatch = dispatch
-        self._resolver = resolver
+        self._binding = binding
         self._entries: list[Runtime] = []
 
     @property
@@ -95,8 +89,7 @@ class Runtimes:
         for entry in entries:
             reject_config_script(f"runtime {entry.name!r} script",
                                  entry.script)
-            if isinstance(entry, LanguageRuntime):
-                entry.attach(self._dispatch, self._resolver)
+            entry.bind(self._binding)
         self._entries = entries
         return entries
 
@@ -120,24 +113,22 @@ class Runtimes:
         reject_config_script(f"runtime {entry.name!r} script", entry.script)
         candidate = [*self._entries, entry]
         bindings = bind_commands(candidate)
-        if isinstance(entry, LanguageRuntime):
-            entry.attach(self._dispatch, self._resolver)
+        entry.bind(self._binding)
         self._entries = candidate
         self._registry.runtime_bindings = bindings
         self._registry.runtime_entries = candidate
         return entry
 
-    def whole_line(self, ast: Any,
+    def whole_line(self,
                    decision: RouteDecision | None) -> LineExecutorMixin | None:
         """The entry taking this whole line, None for the executor.
 
         An entry inheriting LineExecutorMixin takes the raw line when
-        the line's resolved bindings place one of its commands (or
-        "*") on it; everything else walks the executor's tree. The
+        the line's resolved bindings explicitly place "*" on it; everything
+        else walks the executor's tree. The
         common set has no such entry, so this is a cheap scan.
 
         Args:
-            ast: the parsed tree-sitter root node.
             decision (RouteDecision | None): the line's decision,
                 None when only static bindings apply.
         """
@@ -148,5 +139,4 @@ class Runtimes:
         bindings: Mapping[str, Runtime
                           | None] = (decision.bindings if decision is not None
                                      else self._registry.runtime_bindings)
-        commands = parsed_commands(ast, self._registry.clis.names())
-        return whole_line_runtime(bindings, [c.command for c in commands])
+        return whole_line_runtime(bindings)

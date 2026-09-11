@@ -1,21 +1,17 @@
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import replace
 from functools import partial
 
 from mirage.cache.read_through import (cache_aware_bound_bytes,
                                        cache_aware_bound_stream)
+from mirage.commands.builtin.constants import BINARY_EXTENSIONS
+from mirage.commands.builtin.grep_binary import GrepFlags, grep_input
 from mirage.commands.builtin.grep_pattern import (compile_pattern,
                                                   resolve_pattern)
-from mirage.commands.builtin.grep_scan import (count_exit_stream,
-                                               count_records_have_matches,
-                                               exit_code_for, grep_files_only,
-                                               grep_lines, grep_recursive,
-                                               grep_stream, prefix_lines)
-from mirage.commands.builtin.grep_select import (WalkFilters, file_admitted,
+from mirage.commands.builtin.grep_scan import exit_code_for
+from mirage.commands.builtin.grep_select import (WalkFilters, dir_admitted,
+                                                 file_admitted,
                                                  parse_file_globs)
-from mirage.commands.builtin.utils.lines import split_lines
-from mirage.commands.builtin.utils.output import (format_optional_records,
-                                                  format_records)
 from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 call_stat,
@@ -23,35 +19,77 @@ from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 mount_parent_stat)
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
+from mirage.commands.resolve import get_extension
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
-from mirage.io.stream import exit_on_empty, quiet_match
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
-from mirage.utils.path import respell_raw
+from mirage.utils.errors import WALK_ERRORS, fs_strerror
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.utils.path import respell_one
 
 
-@dataclass(frozen=True, slots=True)
-class GrepFlags:
-    """Parsed grep flags (TS FlagSet parity); the complete set grep honors."""
-    ignore_case: bool
-    invert: bool
-    line_numbers: bool
-    count_only: bool
-    files_only: bool
-    whole_word: bool
-    fixed_string: bool
-    basic_regexp: bool
-    only_matching: bool
-    quiet: bool
-    recursive: bool
-    with_filename: bool
-    no_filename: bool
-    max_count: int | None
-    after_context: int
-    before_context: int
-    filters: WalkFilters
+def binary_mode(fl: FlagView) -> str:
+    mode = "binary"
+    for name in fl.typed_order("text", "args_I", "binary_files"):
+        if name == "text" and fl.as_bool("text"):
+            mode = "text"
+        elif name == "args_I" and fl.as_bool("args_I"):
+            mode = "without-match"
+        elif name == "binary_files":
+            value = fl.as_str("binary_files")
+            mode = value if value is not None else "binary"
+            if mode not in ("binary", "text", "without-match"):
+                raise UsageError("grep: unknown binary-files type")
+    return mode
+
+
+def context_length(fl: FlagView, name: str) -> int | None:
+    """One -A/-B/-C value, refused the way GNU refuses it.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        name (str): the context option to read.
+    """
+    raw = fl.as_str(name)
+    try:
+        value = fl.as_int(name)
+    except ValueError as exc:
+        raise UsageError(
+            f"grep: {raw}: invalid context length argument") from exc
+    if value is not None and value < 0:
+        shown = raw if raw is not None else str(value)
+        raise UsageError(f"grep: {shown}: invalid context length argument")
+    return value
+
+
+def filename_mode(fl: FlagView) -> bool | None:
+    """The winning filename flag: True for -H, False for -h, None for neither.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+    """
+    mode: bool | None = None
+    for name in fl.typed_order("H", "h"):
+        if fl.as_bool(name):
+            mode = name == "H"
+    return mode
+
+
+def labelled(opts: CommandOpts) -> CommandOpts:
+    """Ask for the filename a walk would have printed on its own.
+
+    A content search hands the generic explicit files where the user
+    named a directory, so the label is requested here; an explicit -h
+    still wins, and an explicit -H is already on the line.
+
+    Args:
+        opts (CommandOpts): the narrowing wrapper's options.
+    """
+    flags = opts.flags or {}
+    if filename_mode(FlagView(flags, spec=SPECS["grep"])) is not None:
+        return opts
+    return replace(opts, flags={**flags, "H": True})
 
 
 def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
@@ -62,9 +100,17 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         never_match (bool): zero-pattern sentinel from resolve_pattern; it is
             a regex, so it suppresses -F.
     """
-    a_ctx = fl.as_int("A")
-    b_ctx = fl.as_int("B")
-    c_ctx = fl.as_int("C")
+    mode = binary_mode(fl)
+    filename = filename_mode(fl)
+    # GNU checks each context option as it is read, so the first bad one
+    # on the line is the one named.
+    contexts = {
+        name: context_length(fl, name)
+        for name in fl.typed_order("A", "B", "C")
+    }
+    a_ctx = contexts.get("A")
+    b_ctx = contexts.get("B")
+    c_ctx = contexts.get("C")
     return GrepFlags(
         ignore_case=fl.as_bool("i"),
         invert=fl.as_bool("v"),
@@ -79,14 +125,15 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         only_matching=fl.as_bool("o"),
         quiet=fl.as_bool("q"),
         recursive=fl.as_bool("r") or fl.as_bool("R"),
-        with_filename=fl.as_bool("H"),
-        no_filename=fl.as_bool("h"),
+        with_filename=filename is True,
+        no_filename=filename is False,
         max_count=fl.as_int("m"),
         after_context=a_ctx if a_ctx is not None else (c_ctx or 0),
         before_context=b_ctx if b_ctx is not None else (c_ctx or 0),
+        binary_mode=mode,
         filters=WalkFilters(file_globs=parse_file_globs(fl),
                             exclude_dir=tuple(fl.as_list("exclude_dir")),
-                            text=fl.as_bool("text")),
+                            text=mode == "text"),
     )
 
 
@@ -101,33 +148,6 @@ async def grep(
     read_stream: Callable[..., AsyncIterator[bytes]] | None,
     stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    """Run grep-style fallback search over backend paths or stdin.
-
-    Interprets the flags itself (TS grepGeneric parity), so backend
-    wrappers only wire paths, texts, the bag, and backend I/O.
-
-    Args:
-        paths (list[PathSpec]): Backend paths to search. Empty paths consume
-            stdin.
-        texts (Sequence[str]): positional TEXT operands (the pattern unless
-            -e/-f supplied it).
-        opts (CommandOpts): the invocation bag, read for the raw flag
-            kwargs and for the mount boundaries. The whole bag rather
-            than the two facts, so a wrapper cannot pass one and
-            forget the other: sixteen of this generic's nineteen call
-            sites omitted the boundaries when they were a keyword of
-            their own, which turned the mount-parent wrappers off on
-            every bespoke backend. Mirrors TS, whose generic has
-            always taken ``opts`` and read the boundaries off it.
-        readdir (Callable[..., Awaitable[list[str]]]): Directory reader.
-        stat (Callable[[PathSpec], Awaitable[FileStat]]): Backend stat reader.
-        read_bytes (Callable[..., Awaitable[bytes]]): Whole-file reader.
-        read_stream (Callable[..., AsyncIterator[bytes]] | None): Optional
-            stream reader.
-
-    Returns:
-        tuple[ByteSource | None, IOResult]: Output stream and exit metadata.
-    """
     read_bytes = cache_aware_bound_bytes(read_bytes)
     if read_stream is not None:
         read_stream = cache_aware_bound_stream(read_stream)
@@ -135,228 +155,111 @@ async def grep(
     pattern, never_match = await resolve_pattern(
         texts, fl, read_bytes, "grep: usage: grep [flags] pattern [path]")
     f = parse_flags(fl, never_match)
-
-    if paths:
-        mounts = opts.ns.mounts if opts.ns is not None else None
-        mount_prefix = mount_prefix_of(paths[0].virtual,
-                                       paths[0].resource_path)
-        rd = mount_parent_readdir(
-            partial(call_readdir, readdir, prefix=mount_prefix), mounts)
-        st = mount_parent_stat(partial(call_stat, stat, prefix=mount_prefix),
-                               mounts)
-        rb = partial(call_read_bytes, read_bytes, prefix=mount_prefix)
-
-        if f.files_only:
-            warnings: list[str] = []
-            results: list[str] = []
-            for p in paths:
-                hits = await grep_files_only(
-                    rd,
-                    st,
-                    rb,
-                    p.virtual,
-                    pattern,
-                    recursive=f.recursive,
-                    ignore_case=f.ignore_case,
-                    invert=f.invert,
-                    line_numbers=f.line_numbers,
-                    count_only=f.count_only,
-                    fixed_string=f.fixed_string,
-                    only_matching=f.only_matching,
-                    max_count=f.max_count,
-                    whole_word=f.whole_word,
-                    basic=f.basic_regexp,
-                    warnings=warnings,
-                    read_stream_fn=None,
-                    filters=f.filters,
-                )
-                results.extend(respell_raw(hits, p.virtual, p.raw_path))
-            stderr = format_optional_records(warnings)
-            # Under -c a result is a count, and a zero count is not a match,
-            # so emptiness alone cannot decide the exit status.
-            matched = bool(results) and (not f.count_only or
-                                         count_records_have_matches(results))
-            code = exit_code_for(matched, bool(warnings), f.quiet)
-            if f.quiet or not results:
-                return b"", IOResult(exit_code=code, stderr=stderr)
-            return format_records(results), IOResult(exit_code=code,
-                                                     stderr=stderr)
-
-        if f.recursive:
-            pat = compile_pattern(pattern, f.ignore_case, f.fixed_string,
-                                  f.whole_word, f.basic_regexp)
-            # OPTIMIZATION (see #207): this buffers every match into
-            # all_results and returns it materialized, so
-            # `grep -r PATTERN dir | head -n 3`
-            # still scans the whole tree before head sees a line. For plain
-            # line output (not -c/-l, which must aggregate) this could instead
-            # yield prefixed matches lazily per file as an async generator
-            # wrapped in exit_on_empty, letting an early-exiting consumer
-            # (head, grep -m, grep -q) abort the walk after enough matches.
-            all_results: list[str] = []
-            warnings = []
-            for p in paths:
-                try:
-                    s = await st(p.virtual)
-                except FileNotFoundError:
-                    warnings.append(
-                        f"grep: {p.raw_path}: No such file or directory")
-                    continue
-                if s.type == FileType.DIRECTORY:
-                    res = await grep_recursive(
-                        rd,
-                        st,
-                        rb,
-                        p.virtual,
-                        pat,
-                        invert=f.invert,
-                        line_numbers=f.line_numbers,
-                        count_only=f.count_only,
-                        files_only=False,
-                        only_matching=f.only_matching,
-                        max_count=f.max_count,
-                        warnings=warnings,
-                        read_stream_fn=None,
-                        filters=f.filters,
-                    )
-                    all_results.extend(respell_raw(res, p.virtual, p.raw_path))
-                elif not file_admitted(p.virtual, f.filters):
-                    continue
-                else:
-                    data = split_lines(
-                        (await rb(p.virtual)).decode(errors="replace"))
-                    hits = grep_lines(p.raw_path, data, pat, f.invert,
-                                      f.line_numbers, f.count_only,
-                                      f.files_only, f.only_matching,
-                                      f.max_count)
-                    label = "" if f.no_filename else f"{p.raw_path}:"
-                    if f.count_only and hits:
-                        all_results.append(f"{label}{hits[0]}")
-                    else:
-                        all_results.extend(f"{label}{rl}" for rl in hits)
-            stderr = format_optional_records(warnings)
-            matched = bool(all_results) and (
-                not f.count_only or count_records_have_matches(all_results))
-            code = exit_code_for(matched, bool(warnings), f.quiet)
-            if f.quiet or not all_results:
-                return b"", IOResult(exit_code=code, stderr=stderr)
-            return format_records(all_results), IOResult(exit_code=code,
-                                                         stderr=stderr)
-
-        pat = compile_pattern(pattern, f.ignore_case, f.fixed_string,
-                              f.whole_word, f.basic_regexp)
-
-        if len(paths) > 1:
-            all_results = []
-            multi_warnings: list[str] = []
-            for p in paths:
-                try:
-                    s = await st(p.virtual)
-                except FileNotFoundError:
-                    multi_warnings.append(
-                        f"grep: {p.raw_path}: No such file or directory")
-                    continue
-                if s.type == FileType.DIRECTORY:
-                    multi_warnings.append(
-                        f"grep: {p.raw_path}: Is a directory")
-                    continue
-                if not file_admitted(p.virtual, f.filters):
-                    continue
-                data = split_lines((await
-                                    rb(p.virtual)).decode(errors="replace"))
-                # -l returned at the top of this function, so every path
-                # from here down has files_only false.
-                hits = grep_lines(p.raw_path, data, pat, f.invert,
-                                  f.line_numbers, f.count_only, False,
-                                  f.only_matching, f.max_count)
-                label = "" if f.no_filename else f"{p.raw_path}:"
-                if f.count_only:
-                    if hits:
-                        all_results.append(f"{label}{hits[0]}")
-                else:
-                    all_results.extend(f"{label}{r}" for r in hits)
-            stderr = format_optional_records(multi_warnings)
-            matched = bool(all_results) and (
-                not f.count_only or count_records_have_matches(all_results))
-            code = exit_code_for(matched, bool(multi_warnings), f.quiet)
-            if f.quiet or not all_results:
-                return b"", IOResult(exit_code=code, stderr=stderr)
-            return format_records(all_results), IOResult(exit_code=code,
-                                                         stderr=stderr)
-
-        # An unreadable operand is grep's own error to report, not the
-        # dispatcher's: the shared handler flattens every OSError to exit 1,
-        # which is right for cat and wrong for grep.
-        try:
-            first_stat = await st(paths[0].virtual)
-        except FileNotFoundError:
-            stderr = (f"grep: {paths[0].raw_path}: "
-                      "No such file or directory\n").encode()
-            return b"", IOResult(exit_code=2, stderr=stderr)
-        if first_stat.type == FileType.DIRECTORY:
-            stderr = f"grep: {paths[0].raw_path}: Is a directory\n".encode()
-            return b"", IOResult(exit_code=2, stderr=stderr)
-
-        if not file_admitted(paths[0].virtual, f.filters):
-            # GNU passes over a command-line file --include leaves out
-            # in silence: no output, no diagnostic, exit "no match".
-            return b"", IOResult(exit_code=1)
-
-        if read_stream is not None:
-            source: AsyncIterator[bytes] = read_stream(paths[0])
-        else:
-            raw_bytes = await rb(paths[0].virtual)
-            source = _wrap_bytes(raw_bytes)
-        stream = grep_stream(
-            source,
-            pat,
-            invert=f.invert,
-            line_numbers=f.line_numbers,
-            only_matching=f.only_matching,
-            max_count=f.max_count,
-            count_only=f.count_only,
-            after_context=f.after_context,
-            before_context=f.before_context,
-        )
-        if f.quiet:
-            io = IOResult(exit_code=1)
-            return quiet_match(stream, io), io
-        io = IOResult()
-        out = (count_exit_stream(stream, io)
-               if f.count_only else exit_on_empty(stream, io))
-        if f.with_filename and not (f.after_context or f.before_context):
-            # GNU labels context lines with `-` instead of `:`, which the
-            # uniform prefix cannot reproduce, so -H skips context output.
-            out = prefix_lines(out, f"{paths[0].raw_path}:")
-        return out, io
-
-    source = resolve_source(stdin,
-                            "grep: usage: grep [flags] pattern [path]",
-                            error_cls=UsageError)
     pat = compile_pattern(pattern, f.ignore_case, f.fixed_string, f.whole_word,
                           f.basic_regexp)
-    stream = grep_stream(
-        source,
-        pat,
-        invert=f.invert,
-        line_numbers=f.line_numbers,
-        only_matching=f.only_matching,
-        max_count=f.max_count,
-        count_only=f.count_only,
-        after_context=f.after_context,
-        before_context=f.before_context,
-    )
-    if f.quiet:
-        io = IOResult(exit_code=1)
-        return quiet_match(stream, io), io
-    io = IOResult()
-    if f.count_only:
-        return count_exit_stream(stream, io), io
-    return exit_on_empty(stream, io), io
+    io = IOResult(exit_code=1)
+    if not paths:
+        source = resolve_source(stdin,
+                                "grep: usage: grep [flags] pattern [path]",
+                                error_cls=UsageError)
+        return grep_input(source, pat, f, "(standard input)", f.with_filename
+                          and not f.no_filename, io), io
+
+    mounts = opts.ns.mounts if opts.ns is not None else None
+    prefix = mount_prefix_of(paths[0].virtual, paths[0].resource_path)
+    rd = mount_parent_readdir(partial(call_readdir, readdir, prefix=prefix),
+                              mounts)
+    st = mount_parent_stat(partial(call_stat, stat, prefix=prefix), mounts)
+    rb = partial(call_read_bytes, read_bytes, prefix=prefix)
+    if not f.recursive and len(paths) == 1 and not (f.files_only or f.quiet):
+        p = paths[0]
+        try:
+            info = await st(p.virtual)
+            if info.type == FileType.DIRECTORY:
+                return b"", IOResult(
+                    exit_code=2,
+                    stderr=f"grep: {p.raw_path}: Is a directory\n".encode())
+            if not file_admitted(p.virtual, f.filters):
+                return b"", io
+            # Start the reader while the mount's cache context is still active.
+            source = read_stream(p) if read_stream is not None else wrap_bytes(
+                await rb(p.virtual))
+        except WALK_ERRORS as exc:
+            return b"", IOResult(
+                exit_code=2,
+                stderr=f"grep: {p.raw_path}: {fs_strerror(exc) or exc}\n".
+                encode())
+        io = IOResult()
+        return grep_input(source, pat, f, p.raw_path, f.with_filename
+                          and not f.no_filename, io), io
+    warnings: list[str] = []
+    diagnostics: list[bytes] = []
+    matched = False
+    printed = False
+
+    def warn(message: str) -> None:
+        warnings.append(message)
+        diagnostics.append((message + "\n").encode())
+
+    async def scan(p: PathSpec, walked: bool = False) -> AsyncIterator[bytes]:
+        nonlocal matched, printed
+        try:
+            info = await st(p.virtual)
+            if info.type == FileType.DIRECTORY:
+                if not f.recursive:
+                    warn(f"grep: {p.raw_path}: Is a directory")
+                    return
+                for entry in await rd(p.virtual):
+                    child = PathSpec(virtual=entry,
+                                     directory=entry,
+                                     resource_path=mount_key(entry, prefix),
+                                     raw_path=respell_one(
+                                         entry, p.virtual, p.raw_path))
+                    if not dir_admitted(entry, f.filters):
+                        try:
+                            if (await st(entry)).type == FileType.DIRECTORY:
+                                continue
+                        except WALK_ERRORS as exc:
+                            warn(f"grep: {child.raw_path}: "
+                                 f"{fs_strerror(exc) or exc}")
+                            continue
+                    async for chunk in scan(child, True):
+                        yield chunk
+                return
+            if walked and info.type != FileType.FILE:
+                return
+            if walked and not f.filters.text and get_extension(
+                    p.virtual) in BINARY_EXTENSIONS:
+                return
+            if not file_admitted(p.virtual, f.filters):
+                return
+            source = read_stream(p) if read_stream is not None else wrap_bytes(
+                await rb(p.virtual))
+            file_io = IOResult(exit_code=1)
+            show = not f.no_filename and (f.with_filename or walked
+                                          or len(paths) > 1)
+            async for chunk in grep_input(source, pat, f, p.raw_path, show,
+                                          file_io, printed):
+                printed = True
+                yield chunk
+            matched = matched or file_io.exit_code == 0
+            if file_io.stderr:
+                diagnostics.append(await materialize(file_io.stderr))
+        except WALK_ERRORS as exc:
+            warn(f"grep: {p.raw_path}: {fs_strerror(exc) or exc}")
+
+    async def run() -> AsyncIterator[bytes]:
+        for path in paths:
+            async for chunk in scan(path):
+                yield chunk
+            if f.quiet and matched:
+                break
+        if diagnostics:
+            io.stderr = b"".join(diagnostics)
+        io.exit_code = exit_code_for(matched, bool(warnings), f.quiet)
+
+    return await materialize(run()), io
 
 
-async def _wrap_bytes(data: bytes) -> AsyncIterator[bytes]:
+async def wrap_bytes(data: bytes) -> AsyncIterator[bytes]:
     yield data
-
-
-__all__ = ["grep"]

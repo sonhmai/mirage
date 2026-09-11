@@ -17,6 +17,7 @@ import type { LanceRow } from './_driver.ts'
 import type { LanceDBConfigResolved } from '../../resource/lancedb/config.ts'
 import type { PathSpec } from '../../types.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { PATH_SAFE } from '../hierarchy/codec.ts'
 import { renderCard } from './render.ts'
 
 const ENC = new TextEncoder()
@@ -47,7 +48,7 @@ function canonicalPath(
   if (config.table === null) segs.push(table)
   for (const column of config.groupBy) {
     const value = row[column]
-    if (value !== null && value !== undefined) segs.push(toStr(value))
+    if (value !== null && value !== undefined) segs.push(PATH_SAFE.encode(toStr(value)))
   }
   segs.push(`${toStr(row[config.idColumn])}.md`)
   const prefix = rstripSlash(mountPrefix)

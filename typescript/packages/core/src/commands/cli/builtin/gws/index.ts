@@ -104,6 +104,12 @@ export const GWS = new CLISpec({
           options: [
             new Option({ long: '--document', type: 'str', required: true }),
             new Option({ long: '--text', type: 'str', required: true }),
+            new Option({
+              long: '--tab',
+              type: 'str',
+              description:
+                'Tab to append to, from tabs[].tabProperties.tabId; the first tab when omitted',
+            }),
           ],
         }),
       ],

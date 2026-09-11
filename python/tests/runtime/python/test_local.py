@@ -16,12 +16,37 @@ import asyncio
 import json
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
 from mirage import MountMode, RAMResource, Workspace
 from mirage.runtime.python import LocalRuntime
 from mirage.runtime.types import RunArgs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('operation, expected', [
+    ('list', 'seed.txt\nsub\n'),
+    ('stat', 'file 5 32768\ndir 16384\nmissing\n'),
+    ('glob', 'seed.txt\nsub/inner.txt\n'),
+])
+async def test_filesystem_operations(tmp_path, operation, expected):
+    (tmp_path / 'seed.txt').write_text('seed\n')
+    (tmp_path / 'sub').mkdir()
+    (tmp_path / 'sub' / 'inner.txt').write_text('inner\n')
+    fixture = (Path(__file__).resolve().parents[4] / 'integ' / 'fixtures' /
+               'runtime' / 'fs' / 'py' / f'{operation}.py')
+    runtime = LocalRuntime()
+    try:
+        result = await runtime.run(
+            RunArgs(code=fixture.read_text(),
+                    env={'MIRAGE_TEST_ROOT': str(tmp_path)}))
+        assert result.exit_code == 0, result.stderr
+        assert result.stdout.decode() == expected
+        assert result.stderr is None
+    finally:
+        await runtime.close()
 
 
 def test_local_runs_on_host_interpreter():
@@ -56,6 +81,26 @@ def test_local_stdin():
             RunArgs(code="import sys; print(sys.stdin.read().upper())",
                     stdin=b"hello")))
     assert result.stdout == b"HELLO\n"
+
+
+@pytest.mark.parametrize("stdin", [None, b"", b"x" * 300_000],
+                         ids=["absent", "empty", "large"])
+def test_script_cli_stdin_is_not_embedded_in_process_argv(stdin):
+    runtime = LocalRuntime()
+    result = asyncio.run(
+        runtime.run(
+            RunArgs(code=("from __future__ import annotations\n"
+                          "import sys\nprint(argv)\n"
+                          "print(stdin is None, len(stdin or b''), "
+                          "sys.stdin.buffer.read() == (stdin or b''))"),
+                    prog="pager",
+                    args=["one"],
+                    script_cli=True,
+                    stdin=stdin)))
+    assert result.exit_code == 0
+    assert result.stdout == (
+        f"['pager', 'one']\n{stdin is None} {len(stdin or b'')} True\n"
+    ).encode()
 
 
 def test_local_exit_code_and_stderr():

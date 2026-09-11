@@ -13,6 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+class UnsupportedExecutionError(ValueError):
+    """The runtime does not support this execution kind or language."""
+
+
 class EvalError(Exception):
     """An evaluation that could not produce a value.
 

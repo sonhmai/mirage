@@ -20,7 +20,8 @@ from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.gmail._provision import file_read_provision
 from mirage.commands.builtin.gmail.io import resolve_glob
 from mirage.commands.builtin.grep_pattern import pattern_arg
-from mirage.commands.builtin.grep_pushdown import pushdown_operand
+from mirage.commands.builtin.grep_pushdown import (pushdown_operand,
+                                                   text_search_results)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
@@ -81,7 +82,8 @@ async def grep(accessor: GmailAccessor, paths: list[PathSpec],
                                         file_prefix, pattern)
             if not lines:
                 return b"", IOResult(exit_code=1)
-            return format_records(lines), IOResult()
+            if text_search_results(lines):
+                return format_records(lines), IOResult()
 
     resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
     return await generic_grep(

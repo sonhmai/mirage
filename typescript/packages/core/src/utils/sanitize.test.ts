@@ -14,8 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  ESCAPE_LEAD,
   NAME_MAX_BYTES,
+  SAFE_SLASH,
   byteLength,
+  isBlank,
   pathSafeName,
   sanitizeLabel,
   sanitizeName,
@@ -146,5 +149,60 @@ describe('sanitizeLabel', () => {
     // where `\w` is unicode-aware -- kept it.
     expect(sanitizeLabel('日本語の文書', { fallback: 'X', maxLen: 100 })).toBe('日本語の文書')
     expect(sanitizeLabel('Café Notes', { fallback: 'X', maxLen: 100 })).toBe('Café_Notes')
+  })
+})
+
+describe('SAFE_SLASH', () => {
+  it('is the one character pathSafeName renders a slash as', () => {
+    // Every backend that renders an API name as a path segment emits it,
+    // and the codec that inverts the rendering imports it from here rather
+    // than copying the literal.
+    expect(SAFE_SLASH).toBe('\u2215')
+    expect(pathSafeName('a/b')).toBe(`a${SAFE_SLASH}b`)
+  })
+})
+
+describe('ESCAPE_LEAD', () => {
+  it('leads a dot-led name so it stays listable and openable', () => {
+    // The hierarchy classifies a dot-led segment as hidden: it is dropped
+    // from every listing and refused as a path. A name that starts with a
+    // dot therefore carries the escape lead, which the segment codec reads
+    // as "the next character is literal".
+    expect(ESCAPE_LEAD).toBe('\u2044')
+    expect(pathSafeName('.env')).toBe(`${ESCAPE_LEAD}.env`)
+    expect(pathSafeName('..')).toBe(`${ESCAPE_LEAD}..`)
+    expect(pathSafeName('./x')).toBe(`${ESCAPE_LEAD}.${SAFE_SLASH}x`)
+    expect(pathSafeName('a.b')).toBe('a.b')
+    expect(pathSafeName(' ')).toBe('unknown')
+  })
+})
+
+describe('isBlank', () => {
+  it('is the White_Space property in both languages', () => {
+    // `trim` also strips U+FEFF and leaves U+0085, and python's `str.strip`
+    // also strips U+001C..U+001F, so the same value was blank in one runtime
+    // and spelled in the other. Blank is Unicode's White_Space property,
+    // spelled out once here and read by every name sanitizer and the codec.
+    for (const blank of ['', ' ', '\t\n', '\u0085', '\u00a0', '\u2028', '\u3000']) {
+      expect(isBlank(blank)).toBe(true)
+      expect(pathSafeName(blank)).toBe('unknown')
+      expect(sanitizeName(blank)).toBe('unknown')
+      expect(sanitizeLabel(blank, { fallback: 'X', maxLen: 10 })).toBe('X')
+    }
+    for (const spelled of ['\u001c', '\u001f', '\ufeff', 'a', ' a ']) {
+      expect(isBlank(spelled)).toBe(false)
+    }
+    expect(pathSafeName('\ufeff')).toBe('\ufeff')
+  })
+
+  it('is the class the unsafe-character sweep reads too', () => {
+    // `\s` kept U+FEFF here and U+001C in python, so the two runtimes
+    // spelled one label differently; both now replace what is not
+    // Unicode White_Space.
+    for (const odd of ['\ufeff', '\u001c', '\u001f']) {
+      expect(sanitizeName(`a${odd}b`)).toBe('a_b')
+      expect(sanitizeLabel(`a${odd}b`, { fallback: 'X', maxLen: 10 })).toBe('a_b')
+    }
+    expect(sanitizeName('a\u0085b')).toBe('a\u0085b')
   })
 })

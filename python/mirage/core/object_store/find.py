@@ -12,14 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import Awaitable
 from typing import Protocol
 
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep,
                                                start_basename)
 from mirage.core.object_store.driver import (A, A_contra, C, FindHints,
-                                             ObjectStoreDriver, TreeEntry)
+                                             ObjectStoreDriver)
+from mirage.core.object_store.readdir import read_tree
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
 
@@ -42,15 +44,9 @@ class FindFn(Protocol[A_contra]):
                  path_pattern: str | None = ...,
                  mindepth: int | None = ...,
                  empty: bool = ...,
-                 tree: PredNode | None = ...) -> Awaitable[list[str]]:
+                 tree: PredNode | None = ...,
+                 index: IndexCacheStore = ...) -> Awaitable[list[str]]:
         ...
-
-
-def _tree_iter(driver: ObjectStoreDriver[A, C], conn: C, pfx: str,
-               hints: FindHints) -> tuple[AsyncIterator[TreeEntry], bool]:
-    if driver.find_tree is None:
-        return driver.list_tree(conn, pfx), False
-    return driver.find_tree(conn, pfx, hints)
 
 
 def make_find(driver: ObjectStoreDriver[A, C]) -> FindFn[A]:
@@ -77,6 +73,7 @@ def make_find(driver: ObjectStoreDriver[A, C]) -> FindFn[A]:
         mindepth: int | None = None,
         empty: bool = False,
         tree: PredNode | None = None,
+        index: IndexCacheStore = NULL_INDEX,
     ) -> list[str]:
         """Find keys under a prefix with filtering.
 
@@ -133,61 +130,56 @@ def make_find(driver: ObjectStoreDriver[A, C]) -> FindFn[A]:
                           pushdown=pushdown)
         saw_descendant = False
         dir_marker_seen = False
-        async with driver.connect(accessor) as conn:
-            iterator, narrowed = _tree_iter(driver, conn, pfx, hints)
-            async for tree_entry in iterator:
-                key = tree_entry.key
-                if key == pfx:
-                    dir_marker_seen = True
+        rows, saw_descendant = await read_tree(driver, accessor, path_spec,
+                                               index, hints)
+        for tree_entry in rows:
+            key = tree_entry.key
+            if key == pfx:
+                dir_marker_seen = True
+                continue
+            saw_descendant = True
+            is_dir = key.endswith("/")
+            norm_key = key[:-1] if is_dir else key
+            full_path = "/" + kp.strip(kpfx, norm_key)
+            size = tree_entry.size or 0
+            if is_dir:
+                if full_path in seen_dirs:
                     continue
-                saw_descendant = True
-                is_dir = key.endswith("/")
-                norm_key = key[:-1] if is_dir else key
-                full_path = "/" + kp.strip(kpfx, norm_key)
-                size = tree_entry.size
-                if is_dir:
-                    if full_path in seen_dirs:
+                seen_dirs.add(full_path)
+            entries: list[tuple[str,
+                                str]] = [(full_path, "d" if is_dir else "f")]
+            # Implicit directories exist only as key prefixes;
+            # synthesize the parent chain so find agrees with readdir
+            # on externally-populated buckets.
+            parent = full_path.rsplit("/", 1)[0] or "/"
+            while parent != base and parent != "/":
+                if parent not in seen_dirs:
+                    seen_dirs.add(parent)
+                    entries.append((parent, "d"))
+                parent = parent.rsplit("/", 1)[0] or "/"
+            for ep, kind in entries:
+                entry_name = ep.rsplit("/", 1)[-1]
+                depth = ep.count("/") - base_depth
+                if maxdepth is not None and depth > maxdepth:
+                    continue
+                is_empty = (None if not empty else
+                            (size == 0 if kind == "f" else False))
+                entry = FindEntry(key=ep,
+                                  name=entry_name,
+                                  kind=kind,
+                                  depth=depth,
+                                  is_empty=is_empty)
+                if not keep(entry, tree, mindepth):
+                    continue
+                if min_size is not None or max_size is not None:
+                    # Directories count as size 0 for -size (deliberate
+                    # GNU divergence).
+                    effective = 0 if kind == "d" else size
+                    if min_size is not None and effective < min_size:
                         continue
-                    seen_dirs.add(full_path)
-                entries: list[tuple[str, str]] = [(full_path,
-                                                   "d" if is_dir else "f")]
-                # Implicit directories exist only as key prefixes;
-                # synthesize the parent chain so find agrees with readdir
-                # on externally-populated buckets.
-                parent = full_path.rsplit("/", 1)[0] or "/"
-                while parent != base and parent != "/":
-                    if parent not in seen_dirs:
-                        seen_dirs.add(parent)
-                        entries.append((parent, "d"))
-                    parent = parent.rsplit("/", 1)[0] or "/"
-                for ep, kind in entries:
-                    entry_name = ep.rsplit("/", 1)[-1]
-                    depth = ep.count("/") - base_depth
-                    if maxdepth is not None and depth > maxdepth:
+                    if max_size is not None and effective > max_size:
                         continue
-                    is_empty = (None if not empty else
-                                (size == 0 if kind == "f" else False))
-                    entry = FindEntry(key=ep,
-                                      name=entry_name,
-                                      kind=kind,
-                                      depth=depth,
-                                      is_empty=is_empty)
-                    if not keep(entry, tree, mindepth):
-                        continue
-                    if min_size is not None or max_size is not None:
-                        # Directories count as size 0 for -size (deliberate
-                        # GNU divergence).
-                        effective = 0 if kind == "d" else size
-                        if min_size is not None and effective < min_size:
-                            continue
-                        if max_size is not None and effective > max_size:
-                            continue
-                    results.append(ep)
-            if narrowed and not (saw_descendant or dir_marker_seen):
-                # The narrowed query may have excluded every key under a
-                # prefix that does exist; probe so the start path still
-                # emits.
-                saw_descendant = await driver.probe_prefix(conn, pfx)
+                results.append(ep)
         if saw_descendant or dir_marker_seen:
             emit_start_path(results,
                             base,

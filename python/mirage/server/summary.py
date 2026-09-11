@@ -46,7 +46,7 @@ async def _build_internals(ws: Workspace) -> WorkspaceInternals:
         cache_bytes=cache.cache_size,
         cache_entries=cache.cache_entries,
         history_length=history_len,
-        in_flight_jobs=len(ws.job_table.list_jobs()),
+        in_flight_jobs=len(ws.job_table.all_jobs()),
     )
 
 

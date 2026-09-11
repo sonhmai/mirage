@@ -427,6 +427,14 @@ export type ResourceName = (typeof ResourceName)[keyof typeof ResourceName]
  * and the render/derivation tables (find letter, st_mode bits, ls char)
  * grow a row for one the moment a backend starts producing it.
  */
+/** `ls` sort keys: name is the default, time `-t`, size `-S`, version
+ * `-v`, extension `-X`, width `--sort=width`, and none `-U`. */
+export type LsSortBy = 'name' | 'time' | 'size' | 'version' | 'extension' | 'width' | 'none'
+
+/** Which timestamp `ls` shows and sorts by: `-u`/`--time=atime`,
+ * `-c`/`--time=ctime`, `--time=birth`, else the modification time. */
+export type LsTimeKind = 'mtime' | 'atime' | 'ctime' | 'birth'
+
 export const FileType = Object.freeze({
   DIRECTORY: 'directory',
   FILE: 'file',

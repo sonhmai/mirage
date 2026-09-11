@@ -102,17 +102,22 @@ def secret_field_names(config: type[BaseModel] | BaseModel) -> list[str]:
     ]
 
 
-def has_redacted_secret(
-    config: Mapping[str, Any] | None,
-    config_cls: type[BaseModel] | None = None,
-) -> bool:
+def has_redacted_secret(config: Mapping[str, Any] | None) -> bool:
+    """Whether a saved config carries the redaction marker anywhere.
+
+    Every value is scanned, never just the secret fields of a config
+    class: the class a saved mount resolves to is a guess when the
+    resource was an alias (MinIO saves its own config under the ``s3``
+    type), and a guess that named the wrong fields let a mount rebuild
+    with the literal marker as its key. TypeScript's
+    ``hasRedactedSecret`` scans values the same way.
+
+    Args:
+        config (Mapping[str, Any] | None): the saved config dump.
+    """
     if config is None:
         return False
-    if config_cls is None:
-        return _contains_redacted_secret(config)
-    return any(
-        _contains_redacted_secret(config.get(name))
-        for name in secret_field_names(config_cls))
+    return _contains_redacted_secret(config)
 
 
 def _contains_redacted_secret(value: Any) -> bool:

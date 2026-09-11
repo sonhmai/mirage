@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { docPlainText } from '../docs/body.ts'
 import type { GwsState } from '../store/state.ts'
 import type { DriveItem } from '../store/types.ts'
 
@@ -86,12 +87,12 @@ export function parseDriveQuery(q: string): QueryClause[] {
 }
 
 // Everything the live index searches for `fullText`: the display name, a
-// Doc's flat text, a Sheet's cell values, and an uploaded file's bytes.
+// Doc's text across every tab, a Sheet's cell values, and an uploaded file's bytes.
 // Case-insensitive, the way the real search index answers.
 export function fullTextOf(st: GwsState, item: DriveItem): string {
   const parts: string[] = [item.name]
   const doc = st.docs.get(item.id)
-  if (doc !== undefined) parts.push(doc.text)
+  if (doc !== undefined) parts.push(docPlainText(doc))
   const sheet = st.sheets.get(item.id)
   if (sheet !== undefined) {
     for (const tab of sheet.tabs) parts.push([...tab.cells.values()].join(' '))

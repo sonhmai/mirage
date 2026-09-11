@@ -121,16 +121,18 @@ describe('gdrive read auto-bootstrap', () => {
     vi.mocked(drive.downloadFile).mockRejectedValue(new Error('should not call downloadFile'))
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
-    await index.put(
-      '/Team Drive',
-      new IndexEntry({
-        id: 'drive1',
-        name: 'Team Drive',
-        resourceType: 'gdrive/shared_drive',
-        vfsName: 'Team Drive',
-        extra: { drive_id: 'drive1' },
-      }),
-    )
+    await index.setDir('/', [
+      [
+        'Team Drive',
+        new IndexEntry({
+          id: 'drive1',
+          name: 'Team Drive',
+          resourceType: 'gdrive/shared_drive',
+          vfsName: 'Team Drive',
+          extra: { drive_id: 'drive1' },
+        }),
+      ],
+    ])
     const path = new PathSpec({
       resourcePath: 'Team Drive',
       virtual: '/Team Drive',

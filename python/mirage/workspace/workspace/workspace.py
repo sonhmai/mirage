@@ -24,6 +24,8 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import IndexConfig
 from mirage.commands.cli import CLISpec
 from mirage.commands.cli.specs import cli_spec_for
+from mirage.context import (get_current_session_for, reset_current_session,
+                            set_current_session)
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.observer import Observer
@@ -37,8 +39,10 @@ from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.runtime.base import Runtime
+from mirage.runtime.binding import WorkspaceBinding, capture_binding
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.routing import RouteDecision, RoutePolicy
+from mirage.runtime.types import RuntimeContext
 from mirage.secrets.config import EnvVar, SecretSource
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import source_for
@@ -64,6 +68,7 @@ from mirage.workspace.session.constants import DEFAULT_PROFILE
 from mirage.workspace.session.resolve import (apply_profile, compile_profile,
                                               resolve_profile, with_inline)
 from mirage.workspace.session.session import vars_from_entries
+from mirage.workspace.session.state import env_snapshot, session_view
 from mirage.workspace.session.validate import check_cli_verbs
 from mirage.workspace.snapshot import (DriftQueue, apply_state_dict,
                                        build_mount_args, install_fingerprints,
@@ -297,8 +302,11 @@ class Workspace:
         self._original_os_names: dict[str, Callable[..., Any]] | None = None
         self._vfs_loop: asyncio.AbstractEventLoop | None = None
 
+        self._runtime_binding = WorkspaceBinding(
+            self.dispatch, self._sandbox_resolver,
+            lambda _binding: self.runtime_context())
         self._runtimes, self._router = wire_runtime_world(
-            self._registry, self.dispatch, self._sandbox_resolver, runtimes)
+            self._registry, self._runtime_binding, runtimes)
         reject_config_script("route_policy", route_policy)
         self._route_policy = route_policy
 
@@ -507,7 +515,8 @@ class Workspace:
         previous = self._registry.mounts()
         # Configure before mount() captures the index in its CacheManager.
         # An alias must retain the index used by the resource's other mounts.
-        if (self._registry.try_mount_for_prefix(prefix) is None
+        if (self._index_config is not None
+                and self._registry.try_mount_for_prefix(prefix) is None
                 and not any(m.resource is resource
                             for m in self._registry.mounts())):
             resource.set_index(self._index_config)
@@ -623,6 +632,29 @@ class Workspace:
                 continue
             prefixes.append(entry.prefix)
         return prefixes
+
+    def runtime_context(self, session_id: str | None = None) -> RuntimeContext:
+        """Capture local workspace doors for an adapter, scoped to one session.
+
+        With no id, use this workspace's active session or its default.
+        Calling a runtime directly remains a host API, outside shell admission.
+        """
+        from mirage.workspace.executor.command.run import namespace_view_of
+
+        session = (self._session_mgr.get(session_id) if session_id is not None
+                   else get_current_session_for(self._session_mgr)
+                   or self._session_mgr.get(self._session_mgr.default_id))
+        token = set_current_session(session, self._session_mgr)
+        try:
+            return capture_binding(
+                self._runtime_binding,
+                ns=namespace_view_of(self._registry, self._namespace,
+                                     self.dispatch),
+                session_view=session_view(session, self.policies),
+                cwd=PathSpec.from_str_path(session.cwd),
+                env=env_snapshot(session))
+        finally:
+            reset_current_session(token)
 
     def add_runtime(self, runtime: Runtime | str) -> Runtime:
         """Append a runtime entry to the workspace's ordered set.
@@ -803,8 +835,9 @@ class Workspace:
         2. If the entry carries only a ``fingerprint`` (no stable
            revision), the load queues a drift check. STRICT raises
            ``ContentDriftError`` on the first mismatch; OFF skips the
-           check entirely and evicts the snapshot cache so reads serve
-           current state.
+           check and drops the restored RAM cache entries so reads
+           serve current state (a Redis cache is never restored from
+           a snapshot, so there is nothing to drop).
 
         Drift check is eager (fires once on the first dispatch or
         execute), so downstream code can rely on consistent state.
@@ -823,8 +856,10 @@ class Workspace:
                 declared instance needs the block supplied here, the
                 way a redacted mount needs `resources`.
             drift_policy: STRICT (default) raises on mismatch. OFF
-                disables drift checking and evicts snapshot cache for
-                fingerprinted paths.
+                disables drift checking and drops the restored RAM
+                cache entries for fingerprinted paths; a Redis cache is
+                never restored from a snapshot, so it has nothing to
+                drop.
         """
         return await cls.from_state(read_tar(source),
                                     resources=resources,
@@ -861,8 +896,10 @@ class Workspace:
             secrets: {instance: declaration} for the restored env
                 pointers; a snapshot never carries the `secrets:` block.
             drift_policy: STRICT (default) raises on mismatch. OFF
-                disables drift checking and evicts snapshot cache for
-                fingerprinted paths.
+                disables drift checking and drops the restored RAM
+                cache entries for fingerprinted paths; a Redis cache is
+                never restored from a snapshot, so it has nothing to
+                drop.
         """
         ws = await cls._from_state(state,
                                    resources=resources,
@@ -1098,10 +1135,20 @@ class Workspace:
         await self._session_mgr.flush()
 
     async def close_session(self, session_id: str) -> None:
+        # The manager refuses the default and an unknown id first; a
+        # session that did close takes its jobs with it, so a later
+        # session reusing the id inherits nothing.
         await self._session_mgr.close(session_id)
+        await self.job_table.close_session(session_id)
 
     async def close_all_sessions(self) -> None:
+        closed = [
+            s.session_id for s in self.list_sessions()
+            if s.session_id != self.default_session_id
+        ]
         await self._session_mgr.close_all()
+        for session_id in closed:
+            await self.job_table.close_session(session_id)
 
     # ── mount management ────────────────────────────────────────────────────
 

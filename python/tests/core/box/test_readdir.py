@@ -83,12 +83,14 @@ async def test_readdir_box_native_files_surface_raw(accessor, index):
 
 @pytest.mark.asyncio
 async def test_readdir_subfolder_resolves_id_via_index(accessor, index):
-    await index.put(
-        "/docs",
-        IndexEntry(id="100",
-                   name="docs",
-                   resource_type="box/folder",
-                   vfs_name="docs"))
+    await index.set_dir(
+        "/",
+        [("docs",
+          IndexEntry(id="100",
+                     name="docs",
+                     resource_type="box/folder",
+                     vfs_name="docs"))],
+    )
     items = [{
         "id": "400",
         "name": "notes.txt",

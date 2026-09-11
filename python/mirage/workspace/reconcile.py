@@ -16,6 +16,7 @@ import logging
 from enum import Enum
 
 from mirage.cache.file.mixin import FileCacheMixin
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.types import ConsistencyPolicy
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace
@@ -65,15 +66,22 @@ class Reconciler:
             mount (MountEntry): the resolved mount for ``path``.
             path (str): absolute virtual path to probe.
         """
+        # Resolve backend IDs without reusing cached metadata.
         try:
-            remote_stat = await mount.execute_op("stat", path)
+            remote_stat = await mount.execute_op("stat",
+                                                 path,
+                                                 index=RAMIndexCacheStore())
         except FileNotFoundError:
             await self.on_missing(path)
+            await mount.index.clear()
             return Verdict.GONE
         if remote_stat is None or remote_stat.fingerprint is None:
+            await self._cache.remove(path)
+            await mount.index.clear()
             return Verdict.UNKNOWN
         if not await self._cache.is_fresh(path, remote_stat.fingerprint):
             await self._cache.remove(path)
+            await mount.index.clear()
             return Verdict.STALE
         return Verdict.FRESH
 
@@ -98,11 +106,12 @@ class Reconciler:
             return True
         if not mount.resource.SUPPORTS_SNAPSHOT:
             await self._cache.remove(path)
+            await mount.index.clear()
             return False
         verdict = await self._probe(mount, path)
         if verdict is Verdict.GONE:
             raise FileNotFoundError(path)
-        return verdict is not Verdict.STALE
+        return verdict is Verdict.FRESH
 
     async def reconcile_read(self, mount: MountEntry, path: str) -> None:
         """Reconcile a single-mount shell read before the command runs.
@@ -128,6 +137,8 @@ class Reconciler:
         try:
             await self._probe(mount, path)
         except Exception as exc:
+            await self._cache.remove(path)
+            await mount.index.clear()
             logger.debug("reconcile_read probe failed for %s: %s", path, exc)
 
     async def on_op_missing(self, op: str, path: str) -> None:

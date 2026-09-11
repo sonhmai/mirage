@@ -34,6 +34,7 @@ interface StoredObject {
   key: string
   size: number
   etag: string
+  modified?: Date | string
 }
 
 function mockListing(objects: StoredObject[]): void {
@@ -47,7 +48,7 @@ function mockListing(objects: StoredObject[]): void {
           Contents: objects.map((obj) => ({
             Key: obj.key,
             Size: obj.size,
-            LastModified: new Date('2026-03-31T00:00:00.000Z'),
+            LastModified: obj.modified ?? new Date('2026-03-31T00:00:00.000Z'),
             ETag: `"${obj.etag}"`,
           })),
           IsTruncated: false,
@@ -121,6 +122,24 @@ describe('s3 delta hook', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
+
+  it.each(['2026-03-31T00:00:00.000Z', '2026-03-31T00:00:00.123Z'])(
+    'preserves persisted fallback fingerprints for %s',
+    async (stamp) => {
+      mockListing([{ key: 'a.txt', size: 5, etag: '', modified: new Date(stamp) }])
+      const checkpoint = JSON.stringify({ '/s3/a.txt': `${stamp}|5` })
+      const hook = buildDeltaHook(accessor())
+      const spec = root('/s3', '')
+      const unchanged = await hook.pull(spec, checkpoint)
+      expect(unchanged.changes).toEqual([])
+      expect(unchanged.checkpoint).toBe(checkpoint)
+      mockListing([
+        { key: 'a.txt', size: 5, etag: '', modified: new Date(Date.parse(stamp) + 1000) },
+      ])
+      const changed = await hook.pull(spec, checkpoint)
+      expect(changed.changes.map((c) => c.kind)).toEqual([FileChangeKind.UPDATE])
+    },
+  )
 
   it('reports nothing on the baseline pull, then create and update', async () => {
     mockListing([{ key: 'data/a.txt', size: 5, etag: 'etag-a' }])

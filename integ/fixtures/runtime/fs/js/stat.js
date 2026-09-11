@@ -1,0 +1,10 @@
+const root = std.getenv('MIRAGE_TEST_ROOT') || '/data'
+const [file, fileError] = os.stat(root + '/seed.txt')
+if (fileError !== 0) throw new Error(`stat file failed: ${fileError}`)
+console.log('file', file.size, file.mode & os.S_IFMT)
+const [dir, dirError] = os.stat(root + '/sub')
+if (dirError !== 0) throw new Error(`stat directory failed: ${dirError}`)
+console.log('dir', dir.mode & os.S_IFMT)
+const [missing, missingError] = os.stat(root + '/missing.txt')
+if (missing !== null || missingError !== 44) throw new Error('expected WASI ENOENT')
+console.log('missing')

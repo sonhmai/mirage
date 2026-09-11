@@ -108,6 +108,44 @@ describe('name-plane writes go through the door', () => {
     expect(ws.namespace.isLink('/b/lk')).toBe(false)
   })
 
+  it('scoped shell ln does not follow a hidden link into its directory', async () => {
+    // A hidden link to a visible directory is not a directory the session
+    // can link into: the door checks the typed path before it follows,
+    // and ln's own directory probe has to agree, or the link lands in
+    // the directory the hidden link points at.
+    const ws = await makeWs()
+    for (const line of ['mkdir -p /a/d', 'ln -s /a/d /a/hl']) {
+      expect((await ws.execute(line)).exitCode).toBe(0)
+    }
+    ws.createSession('agent', { profile: { paths: { hide: ['/a/hl'] } } })
+    const io = await ws.execute('ln -s /a/x.txt /a/hl', { sessionId: 'agent' })
+    expect(io.exitCode).toBe(1)
+    expect(voicedStderr(io)).toBe("ln: failed to create symbolic link '/a/hl': Permission denied\n")
+    expect(ws.namespace.isLink('/a/d/x.txt')).toBe(false)
+  })
+
+  it('scoped shell hard ln of a hidden link has nothing to copy', async () => {
+    // A hard link of a link copies the link, and -L copies its target's
+    // bytes; a hidden link has neither to give.
+    const ws = await makeWs()
+    expect((await ws.execute('ln -s /a/x.txt /a/hl')).exitCode).toBe(0)
+    ws.createSession('agent', { profile: { paths: { hide: ['/a/hl'] } } })
+    for (const line of ['ln /a/hl /a/copy', 'ln -L /a/hl /a/copy2']) {
+      const io = await ws.execute(line, { sessionId: 'agent' })
+      expect(io.exitCode).toBe(1)
+      expect(voicedStderr(io)).toBe("ln: failed to access '/a/hl': No such file or directory\n")
+    }
+    expect(ws.namespace.isLink('/a/copy')).toBe(false)
+  })
+
+  it('scoped shell ln onto a hidden mount root does not say it exists', async () => {
+    const ws = await makeWs()
+    ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
+    const io = await ws.execute('ln -sT /a/x.txt /b', { sessionId: 'agent' })
+    expect(io.exitCode).toBe(1)
+    expect(voicedStderr(io)).toBe("ln: failed to create symbolic link '/b': Permission denied\n")
+  })
+
   it('symlink and readlink answer on the fs facade', async () => {
     // readlink is the read twin: guests and CLIs ask through the same
     // door instead of a bespoke channel.

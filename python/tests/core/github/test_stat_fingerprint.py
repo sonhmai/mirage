@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from datetime import datetime, timedelta, timezone
-
 import pytest
 
 from mirage.cache.index import IndexEntry
@@ -31,9 +29,10 @@ async def test_github_stat_returns_fingerprint_from_blob_sha():
         resource_type="file",
         size=42,
     )
-    index._entries["/src/main.py"] = entry
-    index._children["/src"] = ["/src/main.py"]
-    index._expiry["/src"] = datetime.now(timezone.utc) + timedelta(days=365)
+    await index.set_dir("/", [
+        ("src", IndexEntry(id="dir_sha", name="src", resource_type="folder"))
+    ])
+    await index.set_dir("/src", [("main.py", entry)])
 
     result = await stat(
         None,
@@ -55,7 +54,7 @@ async def test_github_stat_directory_has_no_fingerprint():
         name="src",
         resource_type="folder",
     )
-    index._entries["/src"] = entry
+    await index.set_dir("/", [("src", entry)])
 
     result = await stat(
         None,

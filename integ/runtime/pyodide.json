@@ -552,6 +552,633 @@
           }
         }
       ]
+    },
+    {
+      "id": "shell_cwd",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "sub dir/data.txt": "relative-data\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd '/ram/sub dir'",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path.cwd()); print(Path('data.txt').read_text(), end=''); Path('out.txt').write_text('written')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "/ram/sub dir\nrelative-data\n"
+          }
+        },
+        {
+          "command": "cat out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "written"
+          }
+        },
+        {
+          "command": "python3 -c \"import os; os.chdir('/ram'); raise ValueError('expected')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "ValueError: expected"
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path.cwd())\"; pwd",
+          "expect": {
+            "exit": 0,
+            "stdout": "/ram/sub dir\n/ram/sub dir\n"
+          }
+        },
+        {
+          "command": "printf \"from pathlib import Path; print(Path.cwd())\" > cwd.py; python3 cwd.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "/ram/sub dir\n"
+          }
+        },
+        {
+          "command": "python3 <<'PY'\nfrom pathlib import Path\nprint(Path('data.txt').read_text(), end='')\nPY",
+          "expect": {
+            "exit": 0,
+            "stdout": "relative-data\n"
+          }
+        },
+        {
+          "command": "PWD=/not-the-cwd python3 -c \"from pathlib import Path; print(Path.cwd())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "/ram/sub dir\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import os; os.chdir = lambda _: None\"",
+          "expect": {
+            "exit": 0,
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd /ram",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path.cwd())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "/ram\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "no_mount_preload",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/cold": {
+            "resource": "ram",
+            "files": {
+              "one.txt": "one",
+              "unused.txt": "unused"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(42)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n",
+            "stderr": "",
+            "ops_absent": [
+              "read"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c \"print(open('/cold/one.txt').read())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "one\n",
+            "stderr": "",
+            "ops_absent": [
+              "read /cold/unused.txt"
+            ],
+            "ops_contain": [
+              "read /cold/one.txt"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "root_mount_cwd_fallback",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/": {
+            "resource": "ram",
+            "files": {
+              "work/program.py": "print('root script')\n"
+            }
+          },
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "sub/value.txt": "nested\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /work",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -c 'print(1)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        },
+        {
+          "command": "python3 program.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "root script\n"
+          }
+        },
+        {
+          "command": "pwd",
+          "expect": {
+            "exit": 0,
+            "stdout": "/work\n"
+          }
+        },
+        {
+          "command": "cd /data/sub",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path.cwd()); print(Path('value.txt').read_text(), end='')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "/data/sub\nnested\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "on_demand_mount_access",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "one.txt": "one",
+              "unused.txt": "unused"
+            }
+          },
+          "/data/nested": {
+            "resource": "ram",
+            "files": {
+              "inside.txt": "nested"
+            }
+          },
+          "/large": {
+            "resource": "ram",
+            "generated_files": 47000
+          }
+        },
+        "policies": [
+          {
+            "name": "seal_reads",
+            "suffix": "/large"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "is_file",
+            "path": "/large/file-46999.txt"
+          },
+          "expect": {
+            "value": true
+          }
+        },
+        {
+          "command": "python3 -c 'print(42)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n",
+            "stderr": "",
+            "ops_absent": [
+              "read"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c 'from pathlib import Path; print(Path('\"'\"'/data/one.txt'\"'\"').read_text())'",
+          "expect": {
+            "exit": 0,
+            "stdout": "one\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "append",
+            "path": "/data/one.txt",
+            "data": "-fresh"
+          },
+          "expect": {
+            "ops_contain": [
+              "append /data/one.txt"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c 'from pathlib import Path; print(Path('\"'\"'/data/one.txt'\"'\"').read_text())'",
+          "expect": {
+            "exit": 0,
+            "stdout": "one-fresh\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c 'from pathlib import Path; print(Path('\"'\"'/data/nested/inside.txt'\"'\"').read_text())'",
+          "expect": {
+            "exit": 0,
+            "stdout": "nested\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/nested/inside.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c 'f = open('\"'\"'/data/one.txt'\"'\"', '\"'\"'a'\"'\"'); f.write('\"'\"'!'\"'\"'); f.close()'",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": "",
+            "ops_contain": [
+              "append /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c 'from pathlib import Path; print(Path('\"'\"'/data/one.txt'\"'\"').read_text())'",
+          "expect": {
+            "exit": 0,
+            "stdout": "one-fresh!\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c \"import glob; print(open(glob.glob('/data/*/inside.txt')[0]).read())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "nested\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/nested/inside.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "list_files",
+            "path": "/large"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fs_list",
+      "filesystem": {
+        "pyodide": {
+          "list": true
+        }
+      },
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "inner\n"
+            }
+          }
+        }
+      },
+      "hosts": [
+        "typescript"
+      ],
+      "steps": [
+        {
+          "command": "python3 -c",
+          "script": "fs/py/list.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "seed.txt\nsub\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fs_stat",
+      "filesystem": {
+        "pyodide": {
+          "stat": true
+        }
+      },
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "inner\n"
+            }
+          }
+        }
+      },
+      "hosts": [
+        "typescript"
+      ],
+      "steps": [
+        {
+          "command": "python3 -c",
+          "script": "fs/py/stat.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "file 5 32768\ndir 16384\nmissing\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fs_glob",
+      "filesystem": {
+        "pyodide": {
+          "glob": true
+        }
+      },
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "inner\n"
+            }
+          }
+        }
+      },
+      "hosts": [
+        "typescript"
+      ],
+      "steps": [
+        {
+          "command": "python3 -c",
+          "script": "fs/py/glob.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "seed.txt\nsub/inner.txt\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "closed_output_and_reuse",
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import sys; print('out'); sys.stderr.write('err'); sys.stdout.close(); sys.stderr.close(); assert sys.stdout.closed and sys.stderr.closed\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "out\n",
+            "stderr": "err"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('next'); sys.stderr.write('next err')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "next\n",
+            "stderr": "next err"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; sys.stdout.buffer.write(b'binary'); sys.stdout.detach().close()\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "binary",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('before exit'); sys.stdout.close(); sys.stderr.close(); sys.exit(7)\"",
+          "expect": {
+            "exit": 7,
+            "stdout": "before exit\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"print('after exit')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "after exit\n",
+            "stderr": ""
+          }
+        }
+      ],
+      "hosts": [
+        "typescript"
+      ]
+    },
+    {
+      "id": "json_tool_closes_output",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "input.json": "{\"value\":1}"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -m json.tool /ram/input.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "{\n    \"value\": 1\n}\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /ram/input.json | python3 -m json.tool",
+          "expect": {
+            "exit": 0,
+            "stdout": "{\n    \"value\": 1\n}\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -m json.tool /ram/input.json > /ram/formatted.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /ram/formatted.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "{\n    \"value\": 1\n}\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; sys.stdin.close(); print('still works')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "still works\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "echo reused | python3 -c \"import sys; print(sys.stdin.read(), end='')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "reused\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

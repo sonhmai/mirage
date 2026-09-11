@@ -255,9 +255,9 @@ describe('& inside a compound body', () => {
     const ws = buildWs()
     const io = await ws.execute(`${line}; echo rc=$?`)
     expect(stdoutStr(io)).toBe('rc=0\n')
-    const job = ws.jobTable.get(1)
+    const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
     expect(job?.command).toBe('false')
-    await ws.jobTable.wait(1)
+    await ws.jobTable.wait(1, ws.sessionManager.defaultId)
     expect(job?.exitCode).toBe(1)
   })
 
@@ -319,6 +319,85 @@ describe('background conditions and function scope', () => {
       expect(stdoutStr(result)).toBe(expected)
       expect(stderrStr(result)).toBe('')
       expect(result.exitCode).toBe(code)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('jobs are scoped to the session that launched them', () => {
+  it('another session sees no job and cannot wait on it', async () => {
+    const ws = buildWs()
+    ws.createSession('a')
+    ws.createSession('b')
+    try {
+      await ws.execute('sleep 30 &', { sessionId: 'a' })
+      expect(stdoutStr(await ws.execute('jobs', { sessionId: 'b' }))).toBe('')
+      expect(stdoutStr(await ws.execute('jobs', { sessionId: 'a' }))).toContain('[1]')
+      const io = await ws.execute('wait %1', { sessionId: 'b' })
+      expect(io.exitCode).toBe(127)
+      expect(stderrStr(io)).toContain('no such job')
+      expect(stdoutStr(await ws.execute('ps', { sessionId: 'b' }))).toBe('')
+      expect((await ws.execute('kill %1', { sessionId: 'a' })).exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('closing a session purges its jobs', async () => {
+    const ws = buildWs()
+    ws.createSession('a')
+    try {
+      await ws.execute('sleep 30 &', { sessionId: 'a' })
+      await ws.execute('sleep 30 &', { sessionId: 'a' })
+      const old = ws.jobTable.get(2, 'a')
+      expect(old).not.toBeNull()
+      await ws.closeSession('a')
+      expect(old?.status).toBe(JobStatus.KILLED)
+      expect(ws.jobTable.listJobs('a')).toEqual([])
+      // A session reusing the id starts from one and inherits nothing.
+      ws.createSession('a')
+      expect(stdoutStr(await ws.execute('jobs', { sessionId: 'a' }))).toBe('')
+      expect(stdoutStr(await ws.execute('sleep 30 & echo $!', { sessionId: 'a' }))).toBe('1\n')
+      const io = await ws.execute('wait %2', { sessionId: 'a' })
+      expect(io.exitCode).toBe(127)
+      expect(stderrStr(io)).toContain('no such job')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("closing every session keeps the default one's jobs", async () => {
+    const ws = buildWs()
+    ws.createSession('a')
+    ws.createSession('b')
+    try {
+      await ws.execute('sleep 30 &')
+      await ws.execute('sleep 30 &', { sessionId: 'a' })
+      await ws.execute('sleep 30 &', { sessionId: 'b' })
+      await ws.closeAllSessions()
+      expect(ws.jobTable.listJobs('a')).toEqual([])
+      expect(ws.jobTable.listJobs('b')).toEqual([])
+      const kept = ws.jobTable.get(1, ws.sessionManager.defaultId)
+      expect(kept?.status).toBe(JobStatus.RUNNING)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('each session numbers its jobs from one', async () => {
+    const ws = buildWs()
+    ws.createSession('a')
+    ws.createSession('b')
+    try {
+      const firstA = await ws.execute('sleep 30 & echo $!', { sessionId: 'a' })
+      const firstB = await ws.execute('sleep 30 & echo $!', { sessionId: 'b' })
+      const secondA = await ws.execute('sleep 30 & echo $!', { sessionId: 'a' })
+      expect([stdoutStr(firstA), stdoutStr(firstB), stdoutStr(secondA)]).toEqual([
+        '1\n',
+        '1\n',
+        '2\n',
+      ])
     } finally {
       await ws.close()
     }

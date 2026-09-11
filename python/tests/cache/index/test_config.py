@@ -12,10 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+from pydantic import ValidationError
+
 from mirage.cache.index import (IndexConfig, IndexEntry, ListResult,
                                 LookupResult, LookupStatus, RedisIndexConfig,
                                 ResourceType)
 from mirage.cache.index.config import IndexType
+
+# The one wire format: what pydantic writes for IndexEntry, snake_case and
+# every field. `config.test.ts` pins the same literal.
+WIRE = ('{"id":"/a.txt","name":"a.txt","resource_type":"file",'
+        '"remote_time":"2026-01-01T00:00:00Z",'
+        '"index_time":"2026-01-01T00:00:00Z","vfs_name":"","size":6,'
+        '"extra":{}}')
 
 
 def test_index_entry_defaults():
@@ -29,6 +39,23 @@ def test_index_entry_defaults():
 def test_index_entry_with_size():
     entry = IndexEntry(id="1", name="f", resource_type="file", size=1024)
     assert entry.size == 1024
+
+
+def test_index_entry_json_is_the_shared_wire_format():
+    entry = IndexEntry(id="/a.txt",
+                       name="a.txt",
+                       resource_type="file",
+                       remote_time="2026-01-01T00:00:00Z",
+                       index_time="2026-01-01T00:00:00Z",
+                       size=6)
+    assert entry.model_dump_json() == WIRE
+    assert IndexEntry.model_validate_json(WIRE) == entry
+
+
+def test_index_entry_json_refuses_a_camel_case_row():
+    with pytest.raises(ValidationError):
+        IndexEntry.model_validate_json(
+            '{"id":"/c","name":"c","resourceType":"file"}')
 
 
 def test_lookup_result_not_found():

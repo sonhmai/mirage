@@ -227,6 +227,21 @@ async def test_write_at_offset(rw_ws):
 
 
 @pytest.mark.asyncio
+async def test_open_forwards_o_trunc(rw_ws):
+    # The adapter used to drop the open flags, so a fuse3 O_TRUNC open
+    # (no separate truncate op arrives) merged the new bytes over the
+    # old body (#1032).
+    await rw_ws.execute("tee /f.txt", stdin=b"AAAAAAAAAAAAAAAAAAAA\n")
+    fs = MirageFS(rw_ws.fs)
+    fh = fs.open("/f.txt", os.O_WRONLY | os.O_TRUNC)
+    fs.write("/f.txt", b"BB\n", 0, fh)
+    fs.flush("/f.txt", fh)
+    fs.release("/f.txt", fh)
+    result = await rw_ws.execute("cat /f.txt")
+    assert result.stdout == b"BB\n"
+
+
+@pytest.mark.asyncio
 async def test_statfs(seed_ws):
     fs = MirageFS(seed_ws.fs)
     result = fs.statfs("/")
@@ -539,6 +554,7 @@ class _SizelessOps:
     def __init__(self, ops):
         self._inner = ops
         self.read_calls = 0
+        self.read_error: Exception | None = None
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
@@ -549,6 +565,8 @@ class _SizelessOps:
 
     async def read(self, path, offset=0, size=None, raw=False):
         self.read_calls += 1
+        if self.read_error is not None:
+            raise self.read_error
         return await self._inner.read(path, offset, size, raw)
 
 
@@ -569,6 +587,123 @@ async def test_unknown_size_preopen_stats_zero(sizeless_fs):
     attrs = fs.getattr("/u.json")
     assert attrs["st_size"] == 0
     assert ops.read_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_unknown_size_o_trunc_open_hydrates_the_truncated_file(
+        sizeless_fs):
+    # A size-unknown file is hydrated at open so fstat can answer; under
+    # O_TRUNC that hydration reads the file after the truncation, through
+    # the same rendered path as any other open, so fstat says 0 at once.
+    fs, ops = sizeless_fs
+    fh = fs.open("/u.json", os.O_WRONLY | os.O_TRUNC)
+    assert fs.getattr("/u.json", fh)["st_size"] == 0
+    assert fs.read("/u.json", 100, 0, fh) == b""
+    assert ops.read_calls == 1
+    fs.release("/u.json", fh)
+
+
+@pytest.mark.asyncio
+async def test_unknown_size_truncate_cuts_the_hydrated_handle(sizeless_fs):
+    # A reader hydrated the file at open; an O_TRUNC open elsewhere must
+    # not leave that handle serving the pre-truncation bytes.
+    fs, _ = sizeless_fs
+    reader = fs.open("/u.json", os.O_RDONLY)
+    assert fs.getattr("/u.json", reader)["st_size"] == len(_PAYLOAD)
+    writer = fs.open("/u.json", os.O_WRONLY | os.O_TRUNC)
+    assert fs.getattr("/u.json", reader)["st_size"] == 0
+    assert fs.read("/u.json", 100, 0, reader) == b""
+    fs.release("/u.json", writer)
+    fs.release("/u.json", reader)
+
+
+@pytest.mark.asyncio
+async def test_unknown_size_truncate_rehydrates_with_settled_writes(
+        sizeless_fs):
+    # A nonzero truncate lands after another handle's buffered write, and
+    # the hydrated reader must see both: the settled write and the cut.
+    fs, _ = sizeless_fs
+    reader = fs.open("/u.json", os.O_RDONLY)
+    writer = fs.open("/u.json", os.O_WRONLY)
+    fs.write("/u.json", b"J", 0, writer)
+    fs.truncate("/u.json", 5)
+    assert fs.getattr("/u.json", reader)["st_size"] == 5
+    assert fs.read("/u.json", 100, 0, reader) == b"J" + _PAYLOAD[1:5]
+    fs.release("/u.json", writer)
+    fs.release("/u.json", reader)
+
+
+@pytest.mark.asyncio
+async def test_unknown_size_truncate_through_a_link_drops_the_targets_cache():
+    # The target was opened and released as /u.json, leaving its bytes in
+    # the TTL cache; an O_TRUNC open through a link to it must drop that
+    # entry too, or the next stat of /u.json serves the old length.
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    await ws.execute("tee /u.json", stdin=_PAYLOAD)
+    await ws.execute("ln -s u.json /lk")
+    fs = MirageFS(_SizelessOps(ws.fs))
+    fh = fs.open("/u.json", os.O_RDONLY)
+    fs.release("/u.json", fh)
+    assert fs.getattr("/u.json")["st_size"] == len(_PAYLOAD)
+    writer = fs.open("/lk", os.O_WRONLY | os.O_TRUNC)
+    fs.release("/lk", writer)
+    assert fs.getattr("/u.json")["st_size"] == 0
+
+
+@pytest.mark.asyncio
+async def test_unknown_size_write_refreshes_the_writing_handle(sizeless_fs):
+    # The hydrated bytes on the handle that wrote are refreshed at flush,
+    # so a read-after-write through the same descriptor sees the write.
+    fs, _ = sizeless_fs
+    fh = fs.open("/u.json", os.O_RDWR)
+    fs.write("/u.json", b"J", 0, fh)
+    fs.flush("/u.json", fh)
+    assert fs.read("/u.json", 100, 0, fh) == b"J" + _PAYLOAD[1:]
+    assert fs.getattr("/u.json", fh)["st_size"] == len(_PAYLOAD)
+    fs.release("/u.json", fh)
+
+
+@pytest.mark.asyncio
+async def test_unknown_size_failed_refresh_does_not_fail_the_truncate(
+        sizeless_fs):
+    # The truncation has landed by the time the hydrated reader is
+    # refreshed; a backend hiccup there must not turn a committed
+    # truncate into a failure. The reader just fetches again next time.
+    fs, ops = sizeless_fs
+    reader = fs.open("/u.json", os.O_RDONLY)
+    ops.read_error = OSError(errno.EIO, "backend hiccup")
+    fs.truncate("/u.json", 0)
+    ops.read_error = None
+    assert fs.read("/u.json", 100, 0, reader) == b""
+    fs.release("/u.json", reader)
+
+
+@pytest.mark.asyncio
+async def test_unknown_size_o_trunc_open_survives_a_failed_hydration(
+        sizeless_fs):
+    # The truncation has committed by the time the handle is hydrated; a
+    # backend error there must not fail the open, or the old body is gone
+    # and the replacement is never written. The next read fetches again.
+    fs, ops = sizeless_fs
+    ops.read_error = OSError(errno.EIO, "backend hiccup")
+    fh = fs.open("/u.json", os.O_WRONLY | os.O_TRUNC)
+    ops.read_error = None
+    assert fs.getattr("/u.json", fh)["st_size"] == 0
+    assert fs.read("/u.json", 100, 0, fh) == b""
+    fs.release("/u.json", fh)
+
+
+@pytest.mark.asyncio
+async def test_unknown_size_open_defers_a_failed_hydration_to_read(
+        sizeless_fs):
+    # A plain open stays permissive on any read failure; the error reaches
+    # the caller from the read that follows, as open(2) would have it.
+    fs, ops = sizeless_fs
+    ops.read_error = OSError(errno.EIO, "backend hiccup")
+    fh = fs.open("/u.json", os.O_RDONLY)
+    with pytest.raises(OSError):
+        fs.read("/u.json", 100, 0, fh)
+    fs.release("/u.json", fh)
 
 
 @pytest.mark.asyncio

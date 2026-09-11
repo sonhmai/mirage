@@ -73,6 +73,12 @@ async def test_stat_size_matches_read_after_readdir(accessor):
 
 
 @pytest.mark.asyncio
+async def test_stat_rejects_a_stem_the_listing_never_published(lineage):
+    with pytest.raises(FileNotFoundError):
+        await stat(lineage, _ps("/refund-2026.pdf/wrong__1.txt"))
+
+
+@pytest.mark.asyncio
 async def test_stat_unknown_raises(accessor):
     with pytest.raises(FileNotFoundError):
         await stat(accessor, _ps("/animals/cat/big/1.weird/x"))

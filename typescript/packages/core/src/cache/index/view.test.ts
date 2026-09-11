@@ -20,6 +20,9 @@ import {
   type IndexConfig,
   type RedisIndexConfig,
 } from './config.ts'
+import { RAMFileCacheStore } from '../file/ram.ts'
+import { RAMIndexCacheStore } from './ram.ts'
+import { IndexView } from './view.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
@@ -221,3 +224,34 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
     )
   })
 }
+
+it('filters seeded snapshots and entries through mount ownership', async () => {
+  const store = new RAMIndexCacheStore()
+  const cache = new RAMFileCacheStore()
+  let active = true
+  const view = new IndexView(
+    store,
+    cache,
+    '/data',
+    (path) => active && (path === '/data' || path === '/data/a'),
+  )
+  const entry = new IndexEntry({ id: 'a', name: 'a', resourceType: 'file' })
+  try {
+    view.seed(
+      new Map([
+        ['/data/a', entry],
+        ['/data/hidden', entry],
+      ]),
+      new Map([['/data', ['/data/a', '/data/hidden']]]),
+      new Date(Date.now() + 3600000),
+    )
+    expect((await view.listDir('/data')).entries).toEqual(['/data/a'])
+    expect([...(await view.entries())].map(([path]) => path)).toEqual(['/data/a'])
+    active = false
+    expect(await view.entries()).toEqual(new Map())
+    view.seed(new Map([['/data/late', entry]]), new Map(), new Date())
+    expect((await store.get('/data/late')).status).toBe(LookupStatus.NOT_FOUND)
+  } finally {
+    await cache.close()
+  }
+})

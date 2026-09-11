@@ -44,10 +44,13 @@ async def tail(accessor: PostgresAccessor, paths: list[PathSpec],
     if paths:
         scope = detect_scope(paths[0])
         # Row scopes fetch only the last N rows server-side (COUNT then
-        # OFFSET) instead of reading the whole relation.
+        # OFFSET) instead of reading the whole relation. A follow polls
+        # the file as it grows, and a moving suffix has no byte position
+        # to measure against, so it reads the relation whole.
         if (len(paths) == 1 and not has_unresolved_glob(paths)
                 and scope.kind == "entity_rows" and counts.byte_count is None
-                and counts.from_byte is None and counts.lines is not None):
+                and counts.from_byte is None and counts.lines is not None
+                and not parsed.follow):
             schema = scope.slots["schema"]
             entity = scope.slots["entity"]
             limit = min(counts.lines, accessor.config.default_row_limit)

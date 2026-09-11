@@ -17,7 +17,11 @@ STDIN_ARGV0 = "-"
 STDIN_FILENAME = "<stdin>"
 
 
-def bootstrap(code: str, prog: str | None) -> str:
+def bootstrap(code: str,
+              prog: str | None,
+              *,
+              script_cli: bool = False,
+              stdin: bytes | None = None) -> str:
     """Wrap a program so a `-c` subprocess reports the right argv[0].
 
     The subprocess tiers hand CPython the program through `-c`, because
@@ -45,12 +49,26 @@ def bootstrap(code: str, prog: str | None) -> str:
             resolved it. None or "-c" means a payload, which CPython
             already reports correctly and which passes through
             untouched.
+        script_cli (bool): bind the portable script-CLI globals.
+        stdin (bytes | None): the CLI's input, without consuming sys.stdin.
     """
-    if prog is None or prog == PAYLOAD_ARGV0:
+    if not script_cli and (prog is None or prog == PAYLOAD_ARGV0):
         return code
     # "" (piped in with no operand) and "-" (the explicit operand) are
     # both <stdin> to CPython, which reports the door rather than a
     # path because there is no file to name.
-    filename = (STDIN_FILENAME if prog in ("", STDIN_ARGV0) else prog)
-    return (f"__import__('sys').argv[0] = {prog!r}\n"
+    filename = (STDIN_FILENAME
+                if prog in ("", STDIN_ARGV0) else prog or '<string>')
+    input_source = ("None" if stdin is None else
+                    "__import__('sys').stdin.buffer.read()")
+    bindings = (
+        "argv = list(__import__('sys').argv)\n"
+        f"stdin = {input_source}\n"
+        "__import__('sys').stdin = __import__('io').TextIOWrapper("
+        "__import__('io').BytesIO(stdin or b''), "
+        "encoding=__import__('sys').stdin.encoding, "
+        "errors=__import__('sys').stdin.errors)\n") if script_cli else ""
+    argv0 = prog if prog is not None else PAYLOAD_ARGV0
+    return (f"__import__('sys').argv[0] = {argv0!r}\n"
+            f"{bindings}"
             f"exec(compile({code!r}, {filename!r}, 'exec'), globals())\n")

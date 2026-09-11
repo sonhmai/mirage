@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 // Mirrors python's re \w (unicode letters/digits/underscore), unlike JS \w.
-const UNSAFE_CHARS = /[^\p{L}\p{N}_\s\-.]/gu
 const MULTI_UNDERSCORE = /_+/g
 const MAX_LEN = 100
 // POSIX NAME_MAX on ext4 and APFS alike, and it counts BYTES. Truncating by
@@ -21,9 +20,33 @@ const MAX_LEN = 100
 // 300 bytes.
 export const NAME_MAX_BYTES = 255
 const ELLIPSIS = '...'
+// What `/` becomes inside a path segment: U+2215 DIVISION SLASH, the one
+// character every backend renders a slash as, so a value cannot open a
+// directory boundary. `core/hierarchy/codec` is what inverts it.
+export const SAFE_SLASH = '∕'
+// What marks the next character of a path segment as literal: U+2044
+// FRACTION SLASH. `pathSafeName` leads a dot-led name with it, since the
+// hierarchy hides a dot-led segment, and `core/hierarchy/codec` spells its
+// reversible encoding with it.
+export const ESCAPE_LEAD = '⁄'
+// Unicode's White_Space property (PropList.txt), spelled out rather than read
+// off `trim`: JavaScript's `trim` also strips U+FEFF and leaves U+0085, and
+// python's `str.strip` also strips U+001C..U+001F, so a value blank in one
+// runtime rendered a segment the other runtime spelled out.
+const WHITE_SPACE_CLASS =
+  '\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'
+const WHITE_SPACE = new RegExp(`^[${WHITE_SPACE_CLASS}]*$`, 'u')
+// The same class, not `\s`: JavaScript's `\s` takes U+FEFF and python's
+// takes U+001C..U+001F, so one runtime kept a character the other replaced.
+const UNSAFE_CHARS = new RegExp(`[^\\p{L}\\p{N}_${WHITE_SPACE_CLASS}\\-.]`, 'gu')
 
 const UTF8 = new TextEncoder()
 const UTF8_DECODER = new TextDecoder('utf-8')
+
+/** Whether the text is empty or nothing but white space: Unicode White_Space. */
+export function isBlank(text: string): boolean {
+  return WHITE_SPACE.test(text)
+}
 
 /** Measure a string the way the filesystem does: in UTF-8 bytes. */
 export function byteLength(text: string): number {
@@ -79,7 +102,7 @@ export function stripUnderscores(value: string): string {
  * with underscores. Safe for use in shell commands without quoting.
  */
 export function sanitizeName(name: string): string {
-  if (name.trim() === '') return 'unknown'
+  if (isBlank(name)) return 'unknown'
   let cleaned = name.replace(UNSAFE_CHARS, '_')
   cleaned = cleaned.replace(/ /g, '_')
   cleaned = cleaned.replace(MULTI_UNDERSCORE, '_')
@@ -94,14 +117,17 @@ export function sanitizeName(name: string): string {
  * Make a name safe to embed in a VFS path segment.
  *
  * Preserves the original spelling (spaces, apostrophes, emoji, etc.) and only
- * replaces the path separator `/` with `∕` (U+2215) so the value cannot
- * collide with a directory boundary. Use this for resource directory and file
- * names where keeping the original display name matters more than shell
- * ergonomics.
+ * replaces the path separator `/` with `SAFE_SLASH` (`∕`, U+2215), so the value
+ * cannot collide with a directory boundary, and leads a name that starts with
+ * `.` with `ESCAPE_LEAD` (`⁄`, U+2044), since the hierarchy classifies a
+ * dot-led segment as hidden: it would be dropped from every listing and refused
+ * as a path. Use this for resource directory and file names where keeping the
+ * original display name matters more than shell ergonomics.
  */
 export function pathSafeName(name: string): string {
-  if (name.trim() === '') return 'unknown'
-  return name.replace(/\//g, '∕')
+  if (isBlank(name)) return 'unknown'
+  const safe = name.replace(/\//g, SAFE_SLASH)
+  return safe.startsWith('.') ? ESCAPE_LEAD + safe : safe
 }
 
 /**
@@ -128,7 +154,7 @@ export function sanitizeLabel(
   text: string,
   options: { fallback: string; maxLen: number; maxBytes?: number },
 ): string {
-  if (text.trim() === '') return options.fallback
+  if (isBlank(text)) return options.fallback
   let cleaned = text.replace(UNSAFE_CHARS, '_').replace(/ /g, '_').replace(MULTI_UNDERSCORE, '_')
   cleaned = stripUnderscores(cleaned)
   // The budget counts characters, and python counts code points where

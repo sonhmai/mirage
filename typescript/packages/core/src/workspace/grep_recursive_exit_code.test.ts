@@ -93,3 +93,31 @@ describe('grep -r recursive exit code (issue #43)', () => {
     await ws.close()
   })
 })
+
+it('keeps binary-only matches through nested mount fan-out', async () => {
+  const outer = new RAMResource()
+  const inner = new RAMResource()
+  outer.store.dirs.add('/')
+  outer.store.dirs.add('/work')
+  inner.store.files.set('/paper.pdf', ENC.encode('needle\0tail\n'))
+  const registry = new OpsRegistry()
+  registry.registerResource(outer)
+  registry.registerResource(inner)
+  const ws = new Workspace(
+    { '/': outer, '/work/remote': inner },
+    { mode: MountMode.WRITE, ops: registry, shellParser: await getTestParser() },
+  )
+  try {
+    const normal = await ws.execute('grep -r needle /work')
+    expect(normal.exitCode).toBe(0)
+    expect(stdoutStr(normal)).toBe('')
+    expect(new TextDecoder().decode(normal.stderr)).toContain(
+      '/work/remote/paper.pdf: binary file matches',
+    )
+    const skipped = await ws.execute('grep -Ir needle /work')
+    expect(skipped.exitCode).toBe(1)
+    expect(stdoutStr(skipped)).toBe('')
+  } finally {
+    await ws.close()
+  }
+})

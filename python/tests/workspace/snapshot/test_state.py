@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+import os
 from functools import partial
 from pathlib import Path
 
@@ -21,16 +23,24 @@ from pydantic import BaseModel, ConfigDict
 from mirage import (NULL_INDEX, Accessor, CommandIO, FileStat, GenericResource,
                     IndexCacheStore, MountMode, PathSpec, Workspace,
                     stream_from_bytes)
+from mirage.cache.file.config import RedisCacheConfig
+from mirage.policy import Action, Deny, Policy, PolicyDenied
+from mirage.policy.types import SessionContext
 from mirage.resource import registry as resource_registry
 from mirage.resource.loader import SCRIPT_MODULE_NAME, load_backend_class
+from mirage.resource.minio import MinIOConfig, MinIOResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.registry import build_resource, register_resource
 from mirage.secrets import registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
 from mirage.types import ContentType, FileType
-from mirage.workspace.snapshot.keys import MountKey, StateKey
-from mirage.workspace.snapshot.state import build_mount_args, to_state_dict
+from mirage.workspace.snapshot.keys import (CacheKey, MountKey,
+                                            ResourceStateKey, StateKey)
+from mirage.workspace.snapshot.state import (apply_state_dict,
+                                             build_mount_args,
+                                             requires_resource_override,
+                                             to_state_dict)
 
 
 class FakeConfig(BaseModel):
@@ -365,3 +375,217 @@ async def test_a_ref_this_process_cannot_resolve_is_not_guessed_from_the_type(
     with pytest.raises(ValueError, match="resources= must include") as exc:
         build_mount_args(state)
     assert "/s/" in str(exc.value)
+
+
+class DenyGate(Policy):
+    """Refuse env writes to GATE_* names, the deployment's rule."""
+
+    async def pre_session(self, ctx: SessionContext) -> Action | None:
+        if ctx.plane == "env" and ctx.key.startswith("GATE_"):
+            return Deny("GATE_* refused by policy\n")
+        return None
+
+
+# The restore used to seed `session.vars` directly, past the gate a live
+# `export GATE_X=1` clears (#1017); a snapshot is the one env input the
+# deployment did not author, so this is the door where the rule matters.
+@pytest.mark.asyncio
+async def test_a_restored_variable_clears_the_session_gate():
+    source = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        assert (await source.execute("export GATE_X=1")).exit_code == 0
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    target = Workspace({"/": RAMResource()},
+                       mode=MountMode.WRITE,
+                       policies=[DenyGate()])
+    try:
+        with pytest.raises(PolicyDenied):
+            await apply_state_dict(target, state)
+        assert "GATE_X" not in target.env
+    finally:
+        await target.close()
+
+
+@pytest.mark.asyncio
+async def test_a_restore_the_gate_allows_lands_every_variable():
+    source = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        assert (await source.execute("export PUBLIC_X=1")).exit_code == 0
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    target = Workspace({"/": RAMResource()},
+                       mode=MountMode.WRITE,
+                       policies=[DenyGate()])
+    try:
+        await apply_state_dict(target, state)
+        assert target.env.get("PUBLIC_X") == "1"
+    finally:
+        await target.close()
+
+
+# A snapshot holding several sessions used to land each one as its table
+# cleared the gate, so a refusal on a later session left the earlier ones
+# overwritten, the default identity adopted and every mount's state
+# loaded: a workspace matching no snapshot, and one a close would then
+# persist. Every table is vetted before anything lands.
+@pytest.mark.asyncio
+async def test_a_refused_session_table_leaves_the_workspace_untouched():
+    source = Workspace({"/": RAMResource()},
+                       mode=MountMode.WRITE,
+                       session_id="src")
+    try:
+        assert (await source.execute("echo restored > /f.txt")).exit_code == 0
+        assert (await source.execute("export PUBLIC_A=1")).exit_code == 0
+        source.create_session("s2")
+        assert (await source.execute("export GATE_X=1",
+                                     session_id="s2")).exit_code == 0
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    target = Workspace({"/": RAMResource()},
+                       mode=MountMode.WRITE,
+                       session_id="tgt",
+                       policies=[DenyGate()])
+    try:
+        assert (await target.execute("export KEEP=1")).exit_code == 0
+        with pytest.raises(PolicyDenied):
+            await apply_state_dict(target, state)
+        assert "PUBLIC_A" not in target.env
+        assert target.env.get("KEEP") == "1"
+        assert [s.session_id for s in target.list_sessions()] == ["tgt"]
+        assert (await target.execute("test -e /f.txt")).exit_code == 1
+    finally:
+        await target.close()
+
+
+# The env template is vetted with the tables, so a refused template
+# lands no session either.
+@pytest.mark.asyncio
+async def test_a_refused_env_template_lands_no_session():
+    source = Workspace({"/": RAMResource()},
+                       mode=MountMode.WRITE,
+                       env={"GATE_X": "1"})
+    try:
+        assert (
+            await
+            source.execute("unset GATE_X; export PUBLIC_A=1")).exit_code == 0
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    target = Workspace({"/": RAMResource()},
+                       mode=MountMode.WRITE,
+                       policies=[DenyGate()])
+    try:
+        with pytest.raises(PolicyDenied):
+            await apply_state_dict(target, state)
+        assert "PUBLIC_A" not in target.env
+        assert "GATE_X" not in target.env
+    finally:
+        await target.close()
+
+
+# A session the restore had to create was a bare one, under no profile,
+# while its table had cleared the gate under the default profile's
+# policy (`script_of` for an id the manager does not know); the created
+# session now runs under that profile, so what the gate judged is what
+# lands, and a restored session no longer wakes unrestricted.
+@pytest.mark.asyncio
+async def test_a_session_the_restore_creates_runs_under_the_default_profile():
+    source = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        assert (await source.execute("echo kept > /f.txt")).exit_code == 0
+        source.create_session("s2")
+        assert (await source.execute("export PUBLIC_A=1",
+                                     session_id="s2")).exit_code == 0
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    target = Workspace({"/": RAMResource()},
+                       mode=MountMode.WRITE,
+                       profiles={"default": {
+                           "commands": {
+                               "deny": ["rm"]
+                           }
+                       }})
+    try:
+        await apply_state_dict(target, state)
+        compiled = target._session_mgr.default_profile
+        assert compiled is not None
+        restored = target.get_session("s2")
+        assert restored.profile == "default"
+        assert restored.commands is compiled.commands
+        assert restored.script is compiled.script
+        assert target._session_mgr.script_of("s2") is compiled.script
+        assert restored.env.get("PUBLIC_A") == "1"
+        refused = await target.execute("rm /f.txt", session_id="s2")
+        assert refused.exit_code == 126
+        assert refused.stderr == b"rm: Permission denied\n"
+        assert (await target.execute("test -e /f.txt")).exit_code == 0
+    finally:
+        await target.close()
+
+
+# A snapshot prefix the workspace does not mount was skipped in silence
+# (#1019); the state is still not restored (never into an ancestor
+# mount), but the load now says so.
+@pytest.mark.asyncio
+async def test_a_snapshot_mount_with_no_matching_prefix_is_reported(caplog):
+    source = Workspace({"/a": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    target = Workspace({"/b": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        with caplog.at_level(logging.WARNING,
+                             logger="mirage.workspace.snapshot.state"):
+            await apply_state_dict(target, state)
+    finally:
+        await target.close()
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("/a" in m and "not restored" in m for m in messages)
+    assert not any("/b" in m for m in messages)
+
+
+# An alias resource saves its own config under its parent's `type`
+# (MinIO reports `s3`), so the class the type names has the wrong secret
+# field names; the redaction check scans every value instead (#1019).
+@pytest.mark.asyncio
+async def test_an_alias_saved_with_redacted_creds_requires_an_override():
+    minio = MinIOResource(
+        MinIOConfig(bucket="b",
+                    endpoint_url="http://localhost:9000",
+                    access_key_id="k",
+                    secret_access_key="s"))
+    ws = Workspace({"/s3": minio}, mode=MountMode.READ)
+    try:
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    (mount, ) = (m for m in state[StateKey.MOUNTS]
+                 if m[MountKey.PREFIX].rstrip("/") == "/s3")
+    assert mount[MountKey.RESOURCE_STATE][ResourceStateKey.TYPE] == "s3"
+    assert requires_resource_override(mount)
+    with pytest.raises(ValueError, match="/s3"):
+        build_mount_args(state, None, None)
+
+
+# The capture side used to read `cache._entries` unconditionally, which
+# only a RAM cache has, so `Workspace.snapshot()` raised AttributeError
+# under a Redis cache while the restore side already skipped it.
+@pytest.mark.skipif(not os.environ.get("REDIS_URL"),
+                    reason="REDIS_URL not set")
+@pytest.mark.asyncio
+async def test_to_state_dict_carries_no_entries_for_a_redis_cache():
+    ws = Workspace({"/r": RAMResource()},
+                   mode=MountMode.WRITE,
+                   cache=RedisCacheConfig(url=os.environ["REDIS_URL"],
+                                          key_prefix="test-snapshot:"))
+    try:
+        state = await to_state_dict(ws)
+        assert state[StateKey.CACHE][CacheKey.ENTRIES] == []
+    finally:
+        await ws.close()

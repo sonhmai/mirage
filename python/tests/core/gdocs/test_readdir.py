@@ -292,7 +292,7 @@ async def test_readdir_filtered_then_stat_succeeds(accessor, index):
             "mirage.core.gdocs.readdir.list_all_files",
             new_callable=AsyncMock,
             return_value=(files, True),
-    ):
+    ) as mock_list:
         listed = await readdir(
             accessor,
             PathSpec(resource_path=mount_key("/gdocs/shared/2026-05-*",
@@ -300,16 +300,18 @@ async def test_readdir_filtered_then_stat_succeeds(accessor, index):
                      virtual="/gdocs/shared/2026-05-*",
                      directory="/gdocs/shared",
                      pattern="2026-05-*"), index)
-    assert len(listed) == 1
-    matched = listed[0]
-    result = await stat(
-        accessor,
-        PathSpec(resource_path=mount_key(matched, "/gdocs"),
-                 virtual=matched,
-                 directory=matched),
-        index,
-    )
+        assert len(listed) == 1
+        matched = listed[0]
+        result = await stat(
+            accessor,
+            PathSpec(resource_path=mount_key(matched, "/gdocs"),
+                     virtual=matched,
+                     directory=matched),
+            index,
+        )
     assert result.extra["doc_id"] == "may1"
+    # The filtered result cannot prove the full parent is fresh.
+    assert mock_list.await_count == 2
 
 
 @pytest.mark.asyncio

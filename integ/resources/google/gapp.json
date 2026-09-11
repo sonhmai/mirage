@@ -63,7 +63,7 @@
         "gapps"
       ],
       "clear_cache": true,
-      "command": "cat /docs/owned/*.gdoc.json | jq -r '.body.content[1].paragraph.elements[0].textRun.content'",
+      "command": "cat /docs/owned/*.gdoc.json | jq -r '[.. | .textRun? // empty | .content] | add'",
       "expect": {
         "exit": 0,
         "stdout": "HELLO gdoc\n\n",

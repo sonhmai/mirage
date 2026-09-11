@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RAMIndexCacheStore } from '../cache/index/ram.ts'
 import { NOOPAccessor } from '../accessor/base.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
@@ -86,18 +87,26 @@ export class Reconciler {
         resource,
         resource.accessor ?? NOOP_ACCESSOR,
         scope,
+        [],
+        { index: new RAMIndexCacheStore() },
       )
     } catch (err) {
       if (isEnoent(err)) {
         await this.onMissing(path)
+        await mount.index?.clear()
         return Verdict.GONE
       }
       throw err
     }
     const fp = remoteStat instanceof FileStat ? remoteStat.fingerprint : null
-    if (fp === null) return Verdict.UNKNOWN
+    if (fp === null) {
+      await this.cache.remove(path)
+      await mount.index?.clear()
+      return Verdict.UNKNOWN
+    }
     if (!(await this.cache.isFresh(path, fp))) {
       await this.cache.remove(path)
+      await mount.index?.clear()
       return Verdict.STALE
     }
     return Verdict.FRESH
@@ -113,11 +122,12 @@ export class Reconciler {
     if (this.consistency !== ConsistencyPolicy.ALWAYS) return true
     if (mount.resource.supportsSnapshot !== true) {
       await this.cache.remove(path)
+      await mount.index?.clear()
       return false
     }
     const verdict = await this.probe(mount, path)
     if (verdict === Verdict.GONE) throw enoent(path)
-    return verdict !== Verdict.STALE
+    return verdict === Verdict.FRESH
   }
 
   // Reconcile a single-mount shell read before the command runs.
@@ -134,6 +144,8 @@ export class Reconciler {
       await this.probe(mount, path)
     } catch {
       // transient probe error: let the command read the backend directly
+      await this.cache.remove(path)
+      await mount.index?.clear()
     }
   }
 

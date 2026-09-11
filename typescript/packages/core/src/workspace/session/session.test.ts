@@ -393,7 +393,7 @@ describe('varsFromEntries', () => {
   })
 
   it('a bad entry throws naming the rule', () => {
-    expect(() => varsFromEntries({ X: { value: 'v', from: 'env' } })).toThrowError(/not both/)
+    expect(() => varsFromEntries({ X: { value: 'v', from: 'env' } })).toThrow(/not both/)
   })
 })
 

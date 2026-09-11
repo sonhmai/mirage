@@ -13,7 +13,8 @@ from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.stream import async_chain, chain_cachables
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.types import FileType, Limit, PathSpec, PolymorphicReadFn, StatFn
+from mirage.types import (FileStat, FileType, Limit, PathSpec,
+                          PolymorphicReadFn, StatFn)
 from mirage.utils.stream import ensure_stream
 
 
@@ -89,14 +90,21 @@ async def cat_generic(
     parsed = parse_flags(opts.flags)
     read = normalized_read(stream)
     if paths:
-        readable, err = await split_readable(paths, stat, "cat")
+        stats: dict[str, FileStat] = {}
+
+        async def remember_stat(p: PathSpec) -> FileStat:
+            row = await stat(p)
+            stats[p.virtual] = row
+            return row
+
+        readable, err = await split_readable(paths, remember_stat, "cat")
         if not readable:
             return None, operands_io(err)
         io = IOResult()
 
         async def source_for(p: PathSpec) -> AsyncIterator[bytes]:
             source = read(p)
-            if (await stat(p)).type is FileType.CHAR_DEVICE:
+            if stats[p.virtual].type is FileType.CHAR_DEVICE:
                 source = truncate_stream(
                     source, io, Limit(max_bytes=CHAR_DEVICE_MAX_BYTES))
             return source

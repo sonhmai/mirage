@@ -17,6 +17,7 @@ import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { LookupStatus } from '@struktoai/mirage-core/cache/index/config'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { ensureLiveIndex, localRows, refillIndex } from './tree.ts'
+import { withIndexLock } from '@struktoai/mirage-core/cache/index/lock'
 
 /**
  * What sits at one mount-absolute key.
@@ -57,20 +58,26 @@ export async function lookup(
     const { entries, children } = await localRows(accessor, prefix)
     return { entry: entries.get(key) ?? null, children: children.get(key) ?? null }
   }
-  await ensureLiveIndex(accessor, index, prefix)
-  let result = await index.get(key)
-  let listing = await index.listDir(key)
-  // The index is the whole listing rather than a cache in front of one, so an
-  // *expired* answer means the tree aged out, not that the path is gone.
-  // Refetch once and ask again; a miss against a live index is a real absence
-  // and must not cost a tree fetch.
-  if (result.status === LookupStatus.EXPIRED || listing.status === LookupStatus.EXPIRED) {
-    if (await refillIndex(accessor, index, prefix)) {
-      result = await index.get(key)
-      listing = await index.listDir(key)
+  return withIndexLock(index, keyOf(prefix, ''), async () => {
+    await ensureLiveIndex(accessor, index, prefix)
+    let result = await index.get(key)
+    let listing = await index.listDir(key)
+    const parent =
+      key === keyOf(prefix, '')
+        ? listing
+        : await index.listDir(key.replace(/\/+$/, '').replace(/\/[^/]+$/, '') || '/')
+    // The index is the whole listing rather than a cache in front of one, so an
+    // *expired* answer means the tree aged out, not that the path is gone.
+    // Refetch once and ask again; a miss against a live index is a real absence
+    // and must not cost a tree fetch.
+    if (parent.status === LookupStatus.EXPIRED || listing.status === LookupStatus.EXPIRED) {
+      if (await refillIndex(accessor, index, prefix)) {
+        result = await index.get(key)
+        listing = await index.listDir(key)
+      }
     }
-  }
-  return { entry: result.entry ?? null, children: listing.entries ?? null }
+    return { entry: result.entry ?? null, children: listing.entries ?? null }
+  })
 }
 
 /** The mount-absolute key for a mount-local path. */

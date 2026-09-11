@@ -279,6 +279,44 @@ describe('mirage CLI end-to-end', () => {
     await runCli(env, ['workspace', 'delete', 'stdin-ws'])
   }, 30000)
 
+  it('execute uploads large piped stdin without JSON size limits', async () => {
+    const cfgPath = writeRamConfig(tmp, 'large-stdin.yaml')
+    const created = (await runCli(env, ['workspace', 'create', cfgPath])) as { id: string }
+    try {
+      const input = Buffer.from('α\0\r\n'.repeat(240_000))
+      await runCli(env, ['execute', '-w', created.id, '-c', 'cat > /input.bin'], input)
+      const read = (await runCli(env, [
+        'execute',
+        '-w',
+        created.id,
+        '-c',
+        'base64 /input.bin',
+      ])) as { stdout: string }
+      expect(Buffer.from(read.stdout, 'base64')).toEqual(input)
+      const submitted = (await runCli(env, [
+        'execute',
+        '-w',
+        created.id,
+        '--bg',
+        '-c',
+        'base64 /input.bin; false',
+      ])) as { jobId: string }
+      for (const command of ['wait', 'get']) {
+        const job = await runCliRaw(env, ['job', command, submitted.jobId])
+        expect(job.status).toBe(1)
+        const result = (job.parsed as { result: { stdout: string } }).result
+        expect(Buffer.from(result.stdout, 'base64')).toEqual(input)
+      }
+      await runCli(env, ['execute', '-w', created.id, '-c', 'cat > /input.bin'], new Uint8Array())
+      const empty = (await runCli(env, ['execute', '-w', created.id, '-c', 'cat /input.bin'])) as {
+        stdout: string
+      }
+      expect(empty.stdout).toBe('')
+    } finally {
+      await runCli(env, ['workspace', 'delete', created.id])
+    }
+  }, 30000)
+
   it('execute propagates inner exit code to process exit', async () => {
     const cfgPath = writeRamConfig(tmp, 'exit-cfg.yaml')
     const created = (await runCli(env, ['workspace', 'create', cfgPath])) as { id: string }

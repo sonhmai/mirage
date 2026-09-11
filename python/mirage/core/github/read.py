@@ -15,14 +15,13 @@
 import base64
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, LookupStatus
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.api.client import SessionArg
 from mirage.core.github.client import github_get
 from mirage.core.github.config import GitHubConfig
-from mirage.core.github.tree import ensure_live_index, refill_index
-from mirage.types import PathSpec
+from mirage.core.github.stat import stat
+from mirage.types import FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.key_prefix import mount_prefix_of
 
 
 async def read_bytes(config: GitHubConfig,
@@ -47,28 +46,10 @@ async def read(
     path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
-    virtual = path_spec.virtual
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
-    key = path_spec.mount_path.strip("/")
-    key = prefix + "/" + key if key else prefix or "/"
-    # Freshness is tracked per directory, never per entry, so a blob's row
-    # is exactly as fresh as its parent's listing and `get` can never
-    # report staleness of its own. The parent is therefore the probe:
-    # after a write invalidated the index the row survives carrying the
-    # *pre-write* blob sha, and reading it back served the old bytes. A
-    # miss is not a probe either -- against a live index it is a real
-    # absence, and refetching the whole tree on every ENOENT costs a
-    # recursive-tree call per miss.
-    await ensure_live_index(accessor, index, prefix)
-    if not accessor.truncated:
-        cut = key.rfind("/")
-        parent = key[:cut] if cut > 0 else "/"
-        if (await index.list_dir(parent)).status == LookupStatus.EXPIRED:
-            await refill_index(accessor, index, prefix)
-    result = await index.get(key)
-    if result.status == LookupStatus.NOT_FOUND or result.entry is None:
-        raise enoent(virtual)
-    if result.entry.resource_type == "folder":
-        raise IsADirectoryError(virtual)
+    result = await stat(accessor, path_spec, index)
+    if result.type == FileType.DIRECTORY:
+        raise IsADirectoryError(path_spec.virtual)
+    if result.fingerprint is None:
+        raise enoent(path_spec.virtual)
     return await read_bytes(accessor.config, accessor.owner, accessor.repo,
-                            result.entry.id, accessor.pool)
+                            result.fingerprint, accessor.pool)

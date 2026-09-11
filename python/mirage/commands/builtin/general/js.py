@@ -51,8 +51,12 @@ async def _js(
     as_module = fl.as_bool("module") or (
         prepared.script_path is not None
         and prepared.script_path.virtual.endswith(".mjs"))
-    return await run_code(label, prepared, opts.env, {"module": as_module},
-                          opts.runtime, opts.runtime_unavailable)
+    return await run_code(label,
+                          prepared,
+                          opts.env, {"module": as_module},
+                          opts.runtime,
+                          opts.runtime_unavailable,
+                          cwd=opts.cwd)
 
 
 js = command("js", resource=None, spec=SPECS["js"])(_js)

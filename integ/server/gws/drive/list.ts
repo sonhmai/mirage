@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { JsonValue, Reply } from '../../kit/typescript/index.ts'
+import { docPlainText } from '../docs/body.ts'
 import type { GwsState } from '../store/state.ts'
 import type { DriveItem } from '../store/types.ts'
 import type { JsonObj } from '../wire/json.ts'
@@ -85,9 +86,11 @@ export function listFiles(st: GwsState, query: URLSearchParams): Reply {
 export function exportFile(st: GwsState, item: DriveItem, mimeType: string): Reply {
   if (item.mimeType === DOC_MIME && mimeType === 'text/plain') {
     const doc = st.docs.get(item.id)
+    // An export is of the document, not of one tab, so every tab's text
+    // is in it; a single-tab doc renders exactly as it always did.
     return {
       status: 200,
-      body: Buffer.from(doc?.text ?? ''),
+      body: Buffer.from(doc === undefined ? '' : docPlainText(doc)),
       headers: { 'Content-Type': 'text/plain' },
     }
   }

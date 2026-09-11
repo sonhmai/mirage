@@ -21,6 +21,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume._helpers import is_directory_metadata
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
+from mirage.core.timeutil import to_iso_z
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import content_type_for_path
@@ -33,17 +34,17 @@ def modified_to_iso(value) -> str | None:
     if isinstance(value, datetime):
         if value.tzinfo is None:
             value = value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc).isoformat()
+        return to_iso_z(value)
     if isinstance(value, (int, float)):
         timestamp = value / 1000 if value > 10_000_000_000 else value
-        return datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
+        return to_iso_z(datetime.fromtimestamp(timestamp, timezone.utc))
     try:
         parsed = parsedate_to_datetime(str(value))
     except (TypeError, ValueError):
         return str(value)
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc).isoformat()
+    return to_iso_z(parsed)
 
 
 def _name_from_backend_path(path: str) -> str:

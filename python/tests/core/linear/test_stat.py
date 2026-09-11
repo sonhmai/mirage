@@ -59,15 +59,16 @@ async def test_stat_teams(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_team_entry(accessor, index):
-    await index.put(
-        "/teams/ENG__Engineering__TEAM1",
-        IndexEntry(
-            id="TEAM1",
-            name="Engineering",
-            resource_type="linear/team",
-            remote_time="2026-04-05T00:00:00Z",
-            vfs_name="ENG__Engineering__TEAM1",
-        ),
+    await index.set_dir(
+        "/teams",
+        [("ENG__Engineering__TEAM1",
+          IndexEntry(
+              id="TEAM1",
+              name="Engineering",
+              resource_type="linear/team",
+              remote_time="2026-04-05T00:00:00Z",
+              vfs_name="ENG__Engineering__TEAM1",
+          ))],
     )
     result = await stat(
         accessor, PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1"),
@@ -79,15 +80,16 @@ async def test_stat_team_entry(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_issue_directory(accessor, index):
-    await index.put(
-        "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1",
-        IndexEntry(
-            id="ISSUE1",
-            name="ENG-123",
-            resource_type="linear/issue",
-            remote_time="2026-04-05T00:00:00Z",
-            vfs_name="ENG-123__ISSUE1",
-        ),
+    await index.set_dir(
+        "/teams/ENG__Engineering__TEAM1/issues",
+        [("ENG-123__ISSUE1",
+          IndexEntry(
+              id="ISSUE1",
+              name="ENG-123",
+              resource_type="linear/issue",
+              remote_time="2026-04-05T00:00:00Z",
+              vfs_name="ENG-123__ISSUE1",
+          ))],
     )
     result = await stat(
         accessor,
@@ -102,16 +104,17 @@ async def test_stat_issue_directory(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_issue_json(accessor, index):
-    await index.put(
-        _ISSUE_PATH,
-        IndexEntry(
-            id="ISSUE1",
-            name="issue.json",
-            resource_type="linear/issue_json",
-            remote_time="2026-04-05T00:00:00Z",
-            vfs_name="issue.json",
-            size=321,
-        ),
+    await index.set_dir(
+        "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1",
+        [("issue.json",
+          IndexEntry(
+              id="ISSUE1",
+              name="issue.json",
+              resource_type="linear/issue_json",
+              remote_time="2026-04-05T00:00:00Z",
+              vfs_name="issue.json",
+              size=321,
+          ))],
     )
     result = await stat(accessor, PathSpec.from_str_path(_ISSUE_PATH), index)
     assert result.content == ContentType.JSON
@@ -122,16 +125,17 @@ async def test_stat_issue_json(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_comments_jsonl(accessor, index):
-    await index.put(
-        _COMMENTS_PATH,
-        IndexEntry(
-            id="ISSUE1",
-            name="comments.jsonl",
-            resource_type="linear/comments",
-            remote_time="2026-04-06T00:00:00Z",
-            vfs_name="comments.jsonl",
-            size=57,
-        ),
+    await index.set_dir(
+        "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1",
+        [("comments.jsonl",
+          IndexEntry(
+              id="ISSUE1",
+              name="comments.jsonl",
+              resource_type="linear/comments",
+              remote_time="2026-04-06T00:00:00Z",
+              vfs_name="comments.jsonl",
+              size=57,
+          ))],
     )
     result = await stat(accessor, PathSpec.from_str_path(_COMMENTS_PATH),
                         index)

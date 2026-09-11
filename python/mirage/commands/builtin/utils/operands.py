@@ -19,7 +19,7 @@ from functools import partial
 
 from mirage.commands.spec.usage import read_fail_exit
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.ops.types import MountView, StatPath
+from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.types import (FileStat, FileType, PathSpec, PolymorphicReadFn,
                           ReadBytesFn, StatFn)
 from mirage.utils.errors import FS_ERRORS, eisdir, fs_error_line
@@ -44,17 +44,18 @@ async def operand_stat(
     stat_fn: StatFn,
     stat_path: StatPath | None = None,
     mounts: MountView | None = None,
+    links: LinkView | None = None,
 ) -> FileStat:
     """Stat one operand the way a reporting command needs it.
 
     Two things no single backend stat can get right, both about paths
     that are namespace structure rather than backend state:
 
-    A path that only exists because mounts sit under it (``/repos`` when
-    ``/repos/alpha`` is mounted) has no backend to answer for it, so the
+    A path that only exists because mounts or links sit under it (``/repos``
+    when ``/repos/alpha`` is mounted) has no backend to answer for it, so the
     backend stat raises and the operand reads as absent. ``stat_path``
     routes through the dispatcher, which answers such a path from the
-    mount table, so it is asked second and only on a miss. Its row is
+    namespace, so it is asked second and only on a miss. Its row is
     already named from the path.
 
     A mount root has a backend, but that backend names its own root
@@ -70,6 +71,8 @@ async def operand_stat(
             absent outside a workspace.
         mounts (MountView | None): the mount boundaries; absent outside a
             workspace.
+        links (LinkView | None): namespace links, including descendants
+            that can make an otherwise absent directory exist.
 
     Raises:
         OSError: neither channel could answer, re-raised from the backend
@@ -78,6 +81,9 @@ async def operand_stat(
     try:
         row = await stat_fn(path)
     except FS_ERRORS:
+        if (mounts is not None and not mounts.visible_descendants(path.virtual)
+                and (links is None or not links.subtree(path.virtual))):
+            raise
         fallback = None if stat_path is None else await stat_path(path.virtual)
         if fallback is None:
             raise

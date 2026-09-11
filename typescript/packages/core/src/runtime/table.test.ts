@@ -27,8 +27,8 @@ import {
 } from './table.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PythonRuntime } from './python/base.ts'
-import { PyodideRuntime } from './python/pyodide.ts'
-import { QuickJsRuntime } from './js/quickjs.ts'
+import { PyodideRuntime } from './python/pyodide/runtime.ts'
+import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 
 class FakeRuntime extends Runtime {
   readonly name = 'fake'

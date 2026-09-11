@@ -31,6 +31,36 @@ export default tseslint.config(
     },
   },
   {
+    ...tseslint.configs.disableTypeChecked,
+    files: ['packages/core/src/runtime/js/quickjs/js/*.js'],
+    languageOptions: {
+      globals: {
+        std: 'readonly',
+        os: 'readonly',
+        __mirage_log: 'readonly',
+        __mirage_error: 'readonly',
+        __mirage_stdin: 'readonly',
+        __mirage_setExit: 'readonly',
+        __mirage_env: 'readonly',
+        __mirage_open: 'readonly',
+        __mirage_read: 'readonly',
+        __mirage_getline: 'readonly',
+        __mirage_write: 'readonly',
+        __mirage_seek: 'readonly',
+        __mirage_tell: 'readonly',
+        __mirage_eof: 'readonly',
+        __mirage_close: 'readonly',
+        __mirage_readdir: 'readonly',
+        __mirage_stat: 'readonly',
+        __mirage_remove: 'readonly',
+        __mirage_mkdir: 'readonly',
+        __mirage_rename: 'readonly',
+        __mirage_utimes: 'readonly',
+      },
+      parserOptions: { projectService: false },
+    },
+  },
+  {
     // Commands read flags only through FlagView, which is constructed
     // with the command's spec and throws on a name the spec does not
     // declare. Reaching into the bag directly reads a renamed or

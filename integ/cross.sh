@@ -119,8 +119,62 @@ run_direction() {
   freeport
 }
 
+# The same round trip with the file cache on Redis instead of RAM. The
+# snapshot step is the one under test: `workspace snapshot` used to raise
+# when the cache store was not the RAM one, so a deployment with a shared
+# Redis cache could not be snapshotted at all. Nothing is restored INTO
+# the Redis cache on load; the reader must answer through the backend.
+CACHE_YAML="$HERE/cross_cache.yaml"
+CACHE_FINGERPRINTS=(
+  "cat /minio/data/c.txt"
+  "cat /ram/c.txt"
+)
+
+run_cache_direction() {
+  local writer_cli="$1" writer_name="$2" reader_cli="$3" reader_name="$4"
+  local tar="$CROSS_SNAPSHOT_ROOT/cross-cache-${writer_name}-to-${reader_name}.tar"
+  echo
+  echo "===== $writer_name snapshot under a redis file cache -> $reader_name load ====="
+  freeport
+  $writer_cli workspace delete cross_cw >/dev/null 2>&1 || true
+  $writer_cli workspace create "$CACHE_YAML" --id cross_cw >/dev/null
+  $writer_cli execute -w cross_cw -c "printf 'cached-1\ncached-2\n' > /minio/data/c.txt" >/dev/null
+  $writer_cli execute -w cross_cw -c "printf 'ram-c\n' > /ram/c.txt" >/dev/null
+  local expected=()
+  local i
+  for i in "${!CACHE_FINGERPRINTS[@]}"; do
+    expected[$i]="$($writer_cli execute -w cross_cw -c "${CACHE_FINGERPRINTS[$i]}" | stdout_of)"
+  done
+  if $writer_cli workspace snapshot cross_cw "$tar" >/dev/null; then
+    echo "  OK   snapshot written under a redis cache ($writer_name)"
+  else
+    echo "  FAIL snapshot under a redis cache ($writer_name)"
+    fail=1
+  fi
+  $writer_cli workspace delete cross_cw >/dev/null 2>&1 || true
+  freeport
+  $reader_cli workspace delete cross_cr >/dev/null 2>&1 || true
+  $reader_cli workspace load "$tar" "$CACHE_YAML" --id cross_cr >/dev/null
+  for i in "${!CACHE_FINGERPRINTS[@]}"; do
+    local got
+    got="$($reader_cli execute -w cross_cr -c "${CACHE_FINGERPRINTS[$i]}" | stdout_of)"
+    if [ "$got" == "${expected[$i]}" ]; then
+      echo "  OK   ${CACHE_FINGERPRINTS[$i]} => $(printf '%q' "$got")"
+    else
+      echo "  FAIL ${CACHE_FINGERPRINTS[$i]}"
+      echo "       expected $(printf '%q' "${expected[$i]}")"
+      echo "       got      $(printf '%q' "$got")"
+      fail=1
+    fi
+  done
+  $reader_cli workspace delete cross_cr >/dev/null 2>&1 || true
+  freeport
+}
+
 run_direction "$PY_CLI" "py" "$TS_CLI" "ts"
 run_direction "$TS_CLI" "ts" "$PY_CLI" "py"
+run_cache_direction "$PY_CLI" "py" "$TS_CLI" "ts"
+run_cache_direction "$TS_CLI" "ts" "$PY_CLI" "py"
 
 if [ "$fail" != "0" ]; then
   echo

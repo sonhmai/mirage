@@ -23,7 +23,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { prefixAggregate } from '../aggregators.ts'
 import { patternArg } from '../grep_pattern.ts'
-import { grepGeneric } from '../generic/grep.ts'
+import { grepGeneric, labelled } from '../generic/grep.ts'
 import { narrowScope } from './pushdown.ts'
 import { FlagView } from '../../spec/types.ts'
 
@@ -51,7 +51,9 @@ async function grepCommand(
       recursive,
       fl.asBool('w'),
       opts.index ?? undefined,
+      fl.asBool('v') || fl.asBool('c') || fl.asBool('text') || fl.asStr('binary_files') === 'text',
     )
+    if (narrowed.usedSearch) opts = labelled(opts)
     resolved = narrowed.resolved
     if (narrowed.fileCount > SCOPE_ERROR) {
       return [

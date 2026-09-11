@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createAsyncContext } from '../utils/async_context.ts'
+import type { ContextCall } from '../utils/async_context.ts'
 import { OpRecord } from './record.ts'
 import { rstripSlash } from '../utils/slash.ts'
 
@@ -34,6 +35,11 @@ interface RevisionsState {
 }
 
 const revisionsStorage = createAsyncContext<RevisionsState>()
+
+/** Preserve attribution and revision pins when an operation crosses a worker boundary. */
+export function captureRecordingContext(): ContextCall[] {
+  return [storage.capture(), revisionsStorage.capture()]
+}
 
 export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpRecord[]]> {
   const state: RecordingState = { records: [], mountPrefix: '', mountId: null }

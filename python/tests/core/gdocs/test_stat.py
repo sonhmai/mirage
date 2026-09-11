@@ -15,10 +15,13 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fakeredis.aioredis import FakeRedis
 
 from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index import IndexEntry
+from mirage.cache.index import IndexEntry, LookupStatus
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index.redis import RedisIndexCacheStore
+from mirage.core.gdocs.readdir import readdir
 from mirage.core.gdocs.stat import stat
 from mirage.types import ContentType, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -149,3 +152,69 @@ async def test_stat_cache_miss_falls_back_via_readdir(accessor, index):
     assert result.size is None
     assert result.extra["source_size"] == 1234
     assert mock_list.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["ram", "fake-redis"])
+@pytest.mark.parametrize("outcome", ["updated", "renamed", "deleted"])
+@pytest.mark.parametrize("complete", [False, True])
+async def test_stat_refreshes_invalidated_incomplete_listing(
+        accessor, backend, outcome, complete):
+    """A partial Drive search cannot prove a retained document still exists."""
+    client = FakeRedis() if backend == "fake-redis" else None
+    store = RAMIndexCacheStore() if client is None else RedisIndexCacheStore(
+        client=client)
+    original = {
+        "id": "doc1",
+        "name": "My Doc",
+        "modifiedTime": "2026-04-01T00:00:00.000Z",
+        "size": "1000",
+        "owners": [{
+            "me": True
+        }],
+    }
+    refreshed = {
+        **original,
+        "name": "Renamed Doc" if outcome == "renamed" else "My Doc",
+        "modifiedTime": "2026-04-01T12:00:00.000Z",
+        "size": "2000",
+    }
+    directory = PathSpec(resource_path="owned",
+                         virtual="/gdocs/owned",
+                         directory="/gdocs/owned")
+    try:
+        with patch("mirage.core.gdocs.readdir.list_all_files",
+                   new_callable=AsyncMock,
+                   return_value=([original], False)) as mock_list:
+            listed = await readdir(accessor, directory, store)
+            assert len(listed) == 1
+            target = listed[0]
+            path = PathSpec(resource_path=mount_key(target, "/gdocs"),
+                            virtual=target,
+                            directory=target)
+            assert (await store.list_dir("/gdocs/owned")).status == (
+                LookupStatus.NOT_FOUND)
+            await store.invalidate()
+            assert (await store.get(target)).entry.remote_time == (
+                original["modifiedTime"])
+            mock_list.return_value = ([] if outcome == "deleted" else
+                                      [refreshed], complete)
+
+            if outcome == "updated":
+                result = await stat(accessor, path, store)
+                assert result.modified == refreshed["modifiedTime"]
+                assert result.extra["source_size"] == 2000
+                assert result.extra["doc_id"] == "doc1"
+            else:
+                with pytest.raises(FileNotFoundError):
+                    await stat(accessor, path, store)
+                assert (await store.get(target)).entry is None
+            assert mock_list.call_count == 2
+            if not complete:
+                assert (await store.list_dir("/gdocs/owned")).status == (
+                    LookupStatus.NOT_FOUND)
+    finally:
+        await store.clear()
+        await store.close()
+        if client is not None:
+            await client.aclose()

@@ -15,65 +15,97 @@
 import { guardInput } from '../utils/limit.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/types.ts'
-import { isMissingPath } from '../../../utils/errors.ts'
+import { fsStrerror, isWalkError } from '../../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { respellOne } from '../../../utils/path.ts'
 import { cacheAwareStream } from '../../../cache/read_through.ts'
-import { exitOnEmpty, quietMatch } from '../../../io/stream.ts'
 import { mountParentReaddir, mountParentStat } from '../utils/operands.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
-import { respellRaw } from '../../../utils/path.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { compilePattern, resolvePattern } from '../grep_pattern.ts'
-import {
-  countExitStream,
-  countRecordsHaveMatches,
-  exitCodeFor,
-  grepFilesOnly,
-  grepLines,
-  grepRecursive,
-  grepStream,
-  prefixLines,
-  type GrepFilesOnlyOptions,
-} from '../grep_scan.ts'
-import { fileAdmitted, parseFileGlobs, type WalkFilters } from '../grep_select.ts'
+import { BINARY_EXTENSIONS } from '../constants.ts'
+import { getExtension } from '../../resolve.ts'
+import { grepInput, type FlagSet } from '../grep_binary.ts'
+import { fileAdmitted, dirAdmitted, parseFileGlobs } from '../grep_select.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { UsageError } from '../../errors.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
-
 type Stat = (p: PathSpec) => Promise<FileStat>
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
-interface FlagSet {
-  filters: WalkFilters
-  ignoreCase: boolean
-  invert: boolean
-  lineNumbers: boolean
-  countOnly: boolean
-  filesOnly: boolean
-  wholeWord: boolean
-  fixedString: boolean
-  basicRegexp: boolean
-  onlyMatching: boolean
-  maxCount: number | null
-  quiet: boolean
-  withFilename: boolean
-  noFilename: boolean
-  afterContext: number
-  beforeContext: number
+function binaryMode(fl: FlagView): string {
+  let mode = 'binary'
+  for (const name of fl.typedOrder('text', 'args_I', 'binary_files')) {
+    if (name === 'text' && fl.asBool('text')) mode = 'text'
+    else if (name === 'args_I' && fl.asBool('args_I')) mode = 'without-match'
+    else if (name === 'binary_files') {
+      mode = fl.asStr('binary_files') ?? 'binary'
+      if (!['binary', 'text', 'without-match'].includes(mode))
+        throw new Error('grep: unknown binary-files type')
+    }
+  }
+  return mode
 }
 
-function parseFlags(fl: FlagView): FlagSet {
-  const aCtx = fl.asInt('A')
-  const bCtx = fl.asInt('B')
-  const cCtx = fl.asInt('C')
+/** One -A/-B/-C value, refused the way GNU refuses it. */
+function contextLength(fl: FlagView, name: string): number | undefined {
+  const raw = fl.asStr(name)
+  let value: number | undefined
+  try {
+    value = fl.asInt(name)
+  } catch {
+    throw new UsageError(`grep: ${raw ?? ''}: invalid context length argument`)
+  }
+  if (value !== undefined && value < 0) {
+    throw new UsageError(`grep: ${raw ?? String(value)}: invalid context length argument`)
+  }
+  return value
+}
+
+/** The winning filename flag: true for -H, false for -h, null for neither. */
+export function filenameMode(fl: FlagView): boolean | null {
+  let mode: boolean | null = null
+  for (const name of fl.typedOrder('H', 'h')) {
+    if (fl.asBool(name)) mode = name === 'H'
+  }
+  return mode
+}
+
+/**
+ * Ask for the filename a walk would have printed on its own. A content
+ * search hands the generic explicit files where the user named a directory,
+ * so the label is requested here; an explicit -h still wins, and an explicit
+ * -H is already on the line.
+ */
+export function labelled(opts: CommandOpts): CommandOpts {
+  if (filenameMode(new FlagView(opts.flags, specOf('grep'))) !== null) return opts
+  return { ...opts, flags: { ...opts.flags, H: true } }
+}
+
+function reason(error: unknown): string {
+  return fsStrerror(error) ?? (error instanceof Error ? error.message : String(error))
+}
+
+export function parseFlags(fl: FlagView): FlagSet {
+  const mode = binaryMode(fl)
+  const filename = filenameMode(fl)
+  // GNU checks each context option as it is read, so the first bad one on
+  // the line is the one named.
+  const contexts = new Map<string, number | undefined>()
+  for (const name of fl.typedOrder('A', 'B', 'C')) contexts.set(name, contextLength(fl, name))
+  const aCtx = contexts.get('A')
+  const bCtx = contexts.get('B')
+  const cCtx = contexts.get('C')
   return {
+    binaryMode: mode,
+    recursive: fl.asBool('r') || fl.asBool('R'),
     filters: {
       fileGlobs: parseFileGlobs(fl),
       excludeDir: fl.asList('exclude_dir'),
-      text: fl.asBool('text'),
+      text: mode === 'text',
     },
     ignoreCase: fl.asBool('i'),
     invert: fl.asBool('v'),
@@ -88,16 +120,11 @@ function parseFlags(fl: FlagView): FlagSet {
     onlyMatching: fl.asBool('o'),
     maxCount: fl.asInt('m') ?? null,
     quiet: fl.asBool('q'),
-    withFilename: fl.asBool('H'),
-    noFilename: fl.asBool('h'),
+    withFilename: filename === true,
+    noFilename: filename === false,
     afterContext: aCtx ?? cCtx ?? 0,
     beforeContext: bCtx ?? cCtx ?? 0,
   }
-}
-
-function splitLinesNoTrailing(text: string): string[] {
-  const stripped = text.endsWith('\n') ? text.slice(0, -1) : text
-  return stripped === '' ? [] : stripped.split('\n')
 }
 
 function makeSpec(path: string, template: PathSpec): PathSpec {
@@ -109,22 +136,6 @@ function makeSpec(path: string, template: PathSpec): PathSpec {
   })
 }
 
-function filesOnlyOpts(f: FlagSet, recursive: boolean): GrepFilesOnlyOptions {
-  return {
-    recursive,
-    filters: f.filters,
-    ignoreCase: f.ignoreCase,
-    invert: f.invert,
-    lineNumbers: f.lineNumbers,
-    countOnly: f.countOnly,
-    fixedString: f.fixedString,
-    onlyMatching: f.onlyMatching,
-    maxCount: f.maxCount,
-    wholeWord: f.wholeWord,
-    basic: f.basicRegexp,
-  }
-}
-
 export async function grepGeneric(
   name: string,
   paths: PathSpec[],
@@ -134,246 +145,156 @@ export async function grepGeneric(
   readdir: Readdir,
   stream: Stream,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('grep'))
   const cachedStream = cacheAwareStream(stream)
   stream = (path) => guardInput(cachedStream(path), opts)
+  const fl = new FlagView(opts.flags, specOf('grep'))
   const resolution = await resolvePattern(name, texts, opts.flags, paths, opts.mountPrefix, stream)
-  if (resolution.error !== null) {
-    return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(resolution.error) })]
-  }
-  const pattern = resolution.pattern
-  if (pattern === null) {
+  if (resolution.error !== null || resolution.pattern === null)
     return [
       null,
       new IOResult({
         exitCode: 2,
-        stderr: ENC.encode(`${name}: usage: ${name} [flags] pattern [path]\n`),
+        stderr: ENC.encode(resolution.error ?? `${name}: usage: ${name} [flags] pattern [path]\n`),
       }),
     ]
+  let f: FlagSet
+  try {
+    f = parseFlags(fl)
+  } catch (error) {
+    if (!(error instanceof Error)) throw error
+    return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(error.message + '\n') })]
   }
-  const f = parseFlags(fl)
   if (resolution.neverMatch) f.fixedString = false
-  const recursive = fl.asBool('r') || fl.asBool('R')
-
-  if (paths.length > 0) {
-    const first = paths[0]
-    if (first === undefined) return [null, new IOResult()]
-    const mounts = opts.ns?.mounts
-    const readdirFn = mountParentReaddir(
-      (p: string): Promise<string[]> => readdir(makeSpec(p, first)),
-      mounts,
-    )
-    const statFn = mountParentStat(
-      (p: string): Promise<FileStat> => stat(makeSpec(p, first)),
-      mounts,
-    )
-    const readBytesFn = (p: string): Promise<Uint8Array> => materialize(stream(makeSpec(p, first)))
-
-    if (f.filesOnly) {
-      const warnings: string[] = []
-      const results: string[] = []
-      for (const p of paths) {
-        const hits = await grepFilesOnly(
-          readdirFn,
-          statFn,
-          readBytesFn,
-          p.virtual,
-          pattern,
-          filesOnlyOpts(f, recursive),
-          warnings,
-        )
-        for (const h of respellRaw(hits, p.virtual, p.rawPath)) results.push(h)
-      }
-      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
-      // Under -c a result is a count, and a zero count is not a match, so
-      // emptiness alone cannot decide the exit status.
-      const hit = results.length > 0 && (!f.countOnly || countRecordsHaveMatches(results))
-      const code = exitCodeFor(hit, warnings.length > 0, f.quiet)
-      if (f.quiet || results.length === 0)
-        return [
-          new Uint8Array(0),
-          new IOResult({ exitCode: code, ...(stderr !== undefined ? { stderr } : {}) }),
-        ]
+  const pat = compilePattern(
+    resolution.pattern,
+    f.ignoreCase,
+    f.fixedString,
+    f.wholeWord,
+    f.basicRegexp,
+  )
+  const io = new IOResult({ exitCode: 1 })
+  const first = paths[0]
+  if (first === undefined) {
+    try {
+      const source = guardInput(
+        resolveSource(opts.stdin, `${name}: usage: ${name} [flags] pattern [path]`),
+        opts,
+      )
       return [
-        ENC.encode(results.join('\n') + '\n'),
-        new IOResult({ exitCode: code, ...(stderr !== undefined ? { stderr } : {}) }),
+        grepInput(source, pat, f, '(standard input)', f.withFilename && !f.noFilename, io),
+        io,
       ]
+    } catch (error) {
+      if (!(error instanceof Error)) throw error
+      return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(error.message + '\n') })]
     }
-
-    const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord, f.basicRegexp)
-
-    if (recursive) {
-      // OPTIMIZATION (see #207): this buffers every match into allResults and returns it
-      // materialized, so `grep -r PATTERN dir | head -n 3` still scans the whole
-      // tree before head sees a line. For plain line output (not -c/-l, which
-      // must aggregate) this could instead yield prefixed matches lazily per file
-      // as an async iterable wrapped in exitOnEmpty, letting an early-exiting
-      // consumer (head, grep -m, grep -q) abort the walk after enough matches.
-      const warnings: string[] = []
-      const allResults: string[] = []
-      for (const p of paths) {
-        let s: FileStat
-        try {
-          s = await statFn(p.virtual)
-        } catch (err) {
-          if (!isMissingPath(err)) throw err
-          warnings.push(`${name}: ${p.rawPath}: No such file or directory`)
-          continue
-        }
-        if (s.type === FileType.DIRECTORY) {
-          const res = await grepRecursive(
-            readdirFn,
-            statFn,
-            readBytesFn,
-            p.virtual,
-            pat,
-            filesOnlyOpts(f, recursive),
-            warnings,
-            false,
-          )
-          for (const r of respellRaw(res, p.virtual, p.rawPath)) allResults.push(r)
-        } else if (s.type === FileType.CHAR_DEVICE) {
-          continue
-        } else if (!fileAdmitted(p.virtual, f.filters)) {
-          continue
-        } else {
-          const data = splitLinesNoTrailing(DEC.decode(await readBytesFn(p.virtual)))
-          const hits = grepLines(p.rawPath, data, pat, f)
-          const label = f.noFilename ? '' : `${p.rawPath}:`
-          if (f.countOnly) {
-            if (hits.length > 0) allResults.push(`${label}${hits[0] ?? ''}`)
-          } else {
-            for (const rl of hits) allResults.push(`${label}${rl}`)
-          }
-        }
-      }
-      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
-      const matched = allResults.length > 0 && (!f.countOnly || countRecordsHaveMatches(allResults))
-      const code = exitCodeFor(matched, warnings.length > 0, f.quiet)
-      if (f.quiet || allResults.length === 0)
+  }
+  const prefix = mountPrefixOf(first.virtual, first.resourcePath)
+  const mounts = opts.ns?.mounts
+  const rd = mountParentReaddir((p: string) => readdir(makeSpec(p, first)), mounts)
+  const st = mountParentStat((p: string) => stat(makeSpec(p, first)), mounts)
+  if (!f.recursive && paths.length === 1 && !(f.filesOnly || f.quiet)) {
+    try {
+      const info = await st(first.virtual)
+      if (info.type === FileType.DIRECTORY)
         return [
-          new Uint8Array(0),
-          new IOResult({ exitCode: code, ...(stderr !== undefined ? { stderr } : {}) }),
-        ]
-      return [
-        ENC.encode(allResults.join('\n') + '\n'),
-        new IOResult({ exitCode: code, ...(stderr !== undefined ? { stderr } : {}) }),
-      ]
-    }
-
-    if (paths.length > 1) {
-      const allResults: string[] = []
-      const multiWarnings: string[] = []
-      for (const p of paths) {
-        let s: FileStat
-        try {
-          s = await statFn(p.virtual)
-        } catch (err) {
-          if (!isMissingPath(err)) throw err
-          multiWarnings.push(`${name}: ${p.rawPath}: No such file or directory`)
-          continue
-        }
-        if (s.type === FileType.DIRECTORY) {
-          multiWarnings.push(`${name}: ${p.rawPath}: Is a directory`)
-          continue
-        }
-        if (s.type === FileType.CHAR_DEVICE) continue
-        if (!fileAdmitted(p.virtual, f.filters)) continue
-        const data = splitLinesNoTrailing(DEC.decode(await materialize(stream(p))))
-        const hits = grepLines(p.rawPath, data, pat, f)
-        const label = f.noFilename ? '' : `${p.rawPath}:`
-        if (f.countOnly) {
-          if (hits.length > 0) allResults.push(`${label}${hits[0] ?? ''}`)
-        } else {
-          for (const h of hits) allResults.push(`${label}${h}`)
-        }
-      }
-      const multiStderr =
-        multiWarnings.length > 0 ? ENC.encode(multiWarnings.join('\n') + '\n') : undefined
-      const multiMatched =
-        allResults.length > 0 && (!f.countOnly || countRecordsHaveMatches(allResults))
-      const multiCode = exitCodeFor(multiMatched, multiWarnings.length > 0, f.quiet)
-      if (f.quiet || allResults.length === 0)
-        return [
-          new Uint8Array(0),
+          new Uint8Array(),
           new IOResult({
-            exitCode: multiCode,
-            ...(multiStderr !== undefined ? { stderr: multiStderr } : {}),
+            exitCode: 2,
+            stderr: ENC.encode(`${name}: ${first.rawPath}: Is a directory\n`),
           }),
         ]
-      const out: ByteSource = ENC.encode(allResults.join('\n') + '\n')
+      if (!fileAdmitted(first.virtual, f.filters)) return [new Uint8Array(), io]
+      // Start the reader while the mount's cache context is still active.
+      const source = stream(first)
+      const singleIO = new IOResult()
       return [
-        out,
+        grepInput(source, pat, f, first.rawPath, f.withFilename && !f.noFilename, singleIO),
+        singleIO,
+      ]
+    } catch (error) {
+      if (!isWalkError(error)) throw error
+      return [
+        new Uint8Array(),
         new IOResult({
-          exitCode: multiCode,
-          ...(multiStderr !== undefined ? { stderr: multiStderr } : {}),
+          exitCode: 2,
+          stderr: ENC.encode(`${name}: ${first.rawPath}: ${reason(error)}\n`),
         }),
       ]
     }
+  }
+  const warnings: string[] = []
+  const notices: Uint8Array[] = []
+  let matched = false
+  let printed = false
 
-    // An unreadable operand is grep's own error to report, not the
-    // dispatcher's: the shared handler flattens every filesystem error to
-    // exit 1, which is right for cat and wrong for grep.
-    let firstStat: FileStat
+  function warn(message: string): void {
+    warnings.push(message)
+    notices.push(ENC.encode(message + '\n'))
+  }
+
+  async function* scan(p: PathSpec, walked = false): AsyncIterable<Uint8Array> {
     try {
-      firstStat = await statFn(first.virtual)
-    } catch (err) {
-      if (!isMissingPath(err)) throw err
-      return [
-        new Uint8Array(0),
-        new IOResult({
-          exitCode: 2,
-          stderr: ENC.encode(`${name}: ${first.rawPath}: No such file or directory\n`),
-        }),
-      ]
+      const info = await st(p.virtual)
+      if (info.type === FileType.DIRECTORY) {
+        if (!f.recursive) {
+          warn(`${name}: ${p.rawPath}: Is a directory`)
+          return
+        }
+        for (const entry of await rd(p.virtual)) {
+          const child = new PathSpec({
+            virtual: entry,
+            directory: entry,
+            resourcePath: mountKey(entry, prefix),
+            rawPath: respellOne(entry, p.virtual, p.rawPath),
+          })
+          if (!dirAdmitted(entry, f.filters)) {
+            let probe: FileStat
+            try {
+              probe = await st(entry)
+            } catch (error) {
+              if (!isWalkError(error)) throw error
+              warn(`${name}: ${child.rawPath}: ${reason(error)}`)
+              continue
+            }
+            if (probe.type === FileType.DIRECTORY) continue
+          }
+          yield* scan(child, true)
+        }
+        return
+      }
+      if (walked && info.type !== FileType.FILE) return
+      if (walked && !f.filters.text && BINARY_EXTENSIONS.has(getExtension(p.virtual) ?? '')) return
+      if (!fileAdmitted(p.virtual, f.filters)) return
+      const fileIO = new IOResult({ exitCode: 1 })
+      const show = !f.noFilename && (f.withFilename || walked || paths.length > 1)
+      for await (const chunk of grepInput(stream(p), pat, f, p.rawPath, show, fileIO, printed)) {
+        printed = true
+        yield chunk
+      }
+      matched ||= fileIO.exitCode === 0
+      if (fileIO.stderr instanceof Uint8Array) notices.push(fileIO.stderr)
+    } catch (error) {
+      if (!isWalkError(error)) throw error
+      warn(`${name}: ${p.rawPath}: ${reason(error)}`)
     }
-    if (firstStat.type === FileType.DIRECTORY) {
-      return [
-        new Uint8Array(0),
-        new IOResult({
-          exitCode: 2,
-          stderr: ENC.encode(`${name}: ${first.rawPath}: Is a directory\n`),
-        }),
-      ]
-    }
-    if (!fileAdmitted(first.virtual, f.filters)) {
-      // GNU passes over a command-line file --include leaves out in
-      // silence: no output, no diagnostic, exit "no match".
-      return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-    }
-    const source = stream(first)
-    const matched = grepStream(source, pat, f)
-    if (f.quiet) {
-      const io = new IOResult({ exitCode: 1 })
-      return [quietMatch(matched, io), io]
-    }
-    const io = new IOResult()
-    let out = f.countOnly ? countExitStream(matched, io) : exitOnEmpty(matched, io)
-    if (f.withFilename && f.afterContext === 0 && f.beforeContext === 0) {
-      // GNU labels context lines with `-` instead of `:`, which the uniform
-      // prefix cannot reproduce, so -H skips context output.
-      out = prefixLines(out, `${first.rawPath}:`)
-    }
-    return [out, io]
   }
-
-  let source: AsyncIterable<Uint8Array>
-  try {
-    source = guardInput(
-      resolveSource(opts.stdin, `${name}: usage: ${name} [flags] pattern [path]`),
-      opts,
-    )
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
+  async function* run(): AsyncIterable<Uint8Array> {
+    for (const path of paths) {
+      yield* scan(path)
+      if (f.quiet && matched) break
+    }
+    const length = notices.reduce((n, part) => n + part.length, 0)
+    if (length) {
+      const stderr = new Uint8Array(length)
+      let offset = 0
+      for (const notice of notices) {
+        stderr.set(notice, offset)
+        offset += notice.length
+      }
+      io.stderr = stderr
+    }
+    io.exitCode = f.quiet && matched ? 0 : warnings.length ? 2 : matched ? 0 : 1
   }
-  const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord, f.basicRegexp)
-  const matched = grepStream(source, pat, f)
-  if (f.quiet) {
-    const io = new IOResult({ exitCode: 1 })
-    return [quietMatch(matched, io), io]
-  }
-  const io = new IOResult()
-  if (f.countOnly) return [countExitStream(matched, io), io]
-  return [exitOnEmpty(matched, io), io]
+  return [await materialize(run()), io]
 }

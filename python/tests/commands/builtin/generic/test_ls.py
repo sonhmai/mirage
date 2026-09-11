@@ -6,11 +6,14 @@ import pytest
 
 from mirage.commands.builtin.generic.ls import (LS_FAILURE, LS_MINOR_PROBLEM,
                                                 LS_OK, LsWarning,
-                                                exit_status_for, format_simple,
-                                                ls, walk)
+                                                exit_status_for, filevercmp,
+                                                format_simple, ls, parse_flags,
+                                                sort_stats, walk)
+from mirage.commands.builtin.utils.formatting import BlockSize, LsColumns
+from mirage.commands.errors import UsageError
 from mirage.ops.types import LinkView, MountView
 from mirage.types import (LINK_TARGET_KEY, ContentType, FileStat, FileType,
-                          LsSortBy, PathSpec)
+                          LsSortBy, LsTimeKind, PathSpec)
 
 
 def _spec(path: str) -> PathSpec:
@@ -227,21 +230,6 @@ async def test_ls_long_format_renders_via_format_ls_long():
     decoded = output.decode()
     assert "a.txt" in decoded
     assert "42" in decoded
-
-
-@pytest.mark.asyncio
-async def test_ls_one_per_line_overrides_long():
-    tree = {
-        "/dir": _dir("dir"),
-        "/dir/a.txt": _file("a.txt", 42),
-    }
-    readdir, stat = _make_fs_backend(tree)
-    out_long, _ = await ls([_spec("/dir")],
-                           readdir=readdir,
-                           stat=stat,
-                           long=True,
-                           one_per_line=True)
-    assert out_long == b"a.txt\n"
 
 
 @pytest.mark.asyncio
@@ -945,3 +933,310 @@ async def test_link_operand_on_a_backend_whose_readdir_returns_empty():
                        links=_link_view(_LINK_ROW))
     assert io.exit_code == 0
     assert out.decode().strip().endswith("flink -> /data/symx/real.txt")
+
+
+# ── the flag set beyond -l: sort orders, columns, time styles ──────────
+
+_VERSION_TREE = {
+    "/v": _dir("v"),
+    "/v/file10.txt": _file("file10.txt", 10),
+    "/v/file2.txt": _file("file2.txt", 2),
+    "/v/Z.txt": _file("Z.txt", 1),
+    "/v/a.txt": _file("a.txt", 6),
+    "/v/b.md": _file("b.md", 1),
+    "/v/c": _file("c", 0),
+    "/v/dir1": _dir("dir1"),
+    "/v/dir2": _dir("dir2"),
+}
+
+
+async def _names(sort_by=LsSortBy.NAME, **kwargs) -> list[str]:
+    readdir, stat = _make_fs_backend(_VERSION_TREE)
+    output, _ = await ls([_spec("/v")],
+                         readdir=readdir,
+                         stat=stat,
+                         sort_by=sort_by,
+                         **kwargs)
+    return output.decode().split()
+
+
+@pytest.mark.asyncio
+async def test_version_sort_reads_numbers_as_numbers():
+    # Pinned on GNU coreutils 9.7: `ls -v`.
+    assert await _names(LsSortBy.VERSION) == [
+        "Z.txt", "a.txt", "b.md", "c", "dir1", "dir2", "file2.txt",
+        "file10.txt"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_extension_sort_groups_by_suffix_then_name():
+    # Pinned on GNU coreutils 9.7: `ls -X`; a name without a dot has the
+    # empty suffix and sorts first.
+    assert await _names(LsSortBy.EXTENSION) == [
+        "c", "dir1", "dir2", "b.md", "Z.txt", "a.txt", "file10.txt",
+        "file2.txt"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_group_directories_first_partitions_after_sorting():
+    assert await _names(group_dirs_first=True) == [
+        "dir1", "dir2", "Z.txt", "a.txt", "b.md", "c", "file10.txt",
+        "file2.txt"
+    ]
+    assert await _names(group_dirs_first=True, reverse=True) == [
+        "dir2", "dir1", "file2.txt", "file10.txt", "c", "b.md", "a.txt",
+        "Z.txt"
+    ]
+
+
+def test_unsorted_keeps_the_listing_order_and_ignores_grouping():
+    rows = [_file("b"), _dir("d"), _file("a")]
+    assert [s.name for s in sort_stats(rows, LsSortBy.NONE, False)
+            ] == ["b", "d", "a"]
+    assert [
+        s.name
+        for s in sort_stats(rows, LsSortBy.NONE, False, group_dirs_first=True)
+    ] == ["b", "d", "a"]
+    # -r reverses while sorting, and -U does not sort (GNU: `ls -Ur`
+    # lists exactly what `ls -U` lists).
+    assert [s.name
+            for s in sort_stats(rows, LsSortBy.NONE, True)] == ["b", "d", "a"]
+
+
+def test_width_sort_orders_by_rendered_width_then_name():
+    rows = [_file("ccc"), _file("b"), _file("aa"), _file("a")]
+    assert [s.name for s in sort_stats(rows, LsSortBy.WIDTH, False)
+            ] == ["a", "b", "aa", "ccc"]
+    # Pinned on coreutils 9.7 under C.UTF-8: a wide character counts two
+    # columns and a combining mark none.
+    names = ["界", "aa", "é", "a", "e\u0301x"]
+    rows = [_file(n) for n in names]
+    assert [s.name for s in sort_stats(rows, LsSortBy.WIDTH, False)
+            ] == ["a", "é", "aa", "e\u0301x", "界"]
+
+
+def test_filevercmp_pins_gnu_corner_cases():
+    assert filevercmp("file2.txt", "file10.txt") < 0
+    assert filevercmp("a.txt", "a.tar.gz") > 0
+    assert filevercmp("", "a") < 0
+    assert filevercmp(".", "..") < 0
+    assert filevercmp(".hidden", "a") < 0
+    assert filevercmp("1.0~rc1", "1.0") < 0
+    assert filevercmp("abc", "abc") == 0
+
+
+def test_filevercmp_orders_bytes_past_the_letters():
+    # Pinned on coreutils 9.7 under LC_ALL=C: `_ { é ÿ Ā €` and
+    # `a- a{ aé`, since gnulib classifies bytes, not code points.
+    assert filevercmp("_", "{") < 0
+    assert filevercmp("{", "é") < 0
+    assert filevercmp("é", "ÿ") < 0
+    assert filevercmp("ÿ", "Ā") < 0
+    assert filevercmp("Ā", "€") < 0
+    assert filevercmp("a-", "a{") < 0
+    assert filevercmp("a{", "aé") < 0
+    assert filevercmp("\uffff", "\U0001d11e") < 0
+
+
+@pytest.mark.asyncio
+async def test_access_time_sorts_and_shows_under_u():
+    tree = {
+        "/t":
+        _dir("t"),
+        "/t/old.txt":
+        FileStat(name="old.txt",
+                 size=1,
+                 modified="2025-01-01T00:00:00Z",
+                 atime="2025-06-01T00:00:00Z",
+                 type=FileType.FILE),
+        "/t/new.txt":
+        FileStat(name="new.txt",
+                 size=1,
+                 modified="2025-03-01T00:00:00Z",
+                 atime="2025-02-01T00:00:00Z",
+                 type=FileType.FILE),
+    }
+    readdir, stat = _make_fs_backend(tree)
+    output, _ = await ls([_spec("/t")],
+                         readdir=readdir,
+                         stat=stat,
+                         sort_by=LsSortBy.TIME,
+                         time_kind=LsTimeKind.ATIME)
+    assert output.decode().split() == ["old.txt", "new.txt"]
+    output, _ = await ls([_spec("/t")],
+                         readdir=readdir,
+                         stat=stat,
+                         long=True,
+                         columns=LsColumns(owner=False,
+                                           group=False,
+                                           time_kind=LsTimeKind.ATIME,
+                                           time_style="long-iso"))
+    assert output.decode().splitlines() == [
+        "-rw-r--r-- 1 1 2025-02-01 00:00 new.txt",
+        "-rw-r--r-- 1 1 2025-06-01 00:00 old.txt",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_long_columns_drop_owner_and_group_and_lead_with_question_marks(
+):
+    tree = {
+        "/d": _dir("d"),
+        "/d/a.txt": _file("a.txt", 42, "2025-01-15T10:30:00Z")
+    }
+    readdir, stat = _make_fs_backend(tree)
+    output, _ = await ls([_spec("/d")],
+                         readdir=readdir,
+                         stat=stat,
+                         long=True,
+                         columns=LsColumns(owner=False,
+                                           group=False,
+                                           inode=True,
+                                           context=True,
+                                           time_style="long-iso"))
+    assert output.decode() == "? -rw-r--r-- 1 ? 42 2025-01-15 10:30 a.txt\n"
+    output, _ = await ls([_spec("/d")],
+                         readdir=readdir,
+                         stat=stat,
+                         columns=LsColumns(inode=True, context=True))
+    assert output.decode() == "? ? a.txt\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("style,expected", [
+    ("full-iso", "2025-01-15 10:30:00.000000000 +0000"),
+    ("long-iso", "2025-01-15 10:30"),
+    ("iso", "2025-01-15 "),
+    ("+%Y/%m/%d", "2025/01/15"),
+    ("+%Y\n%H:%M", "2025"),
+])
+async def test_time_styles_spell_an_old_time_as_gnu_does(style, expected):
+    tree = {
+        "/d": _dir("d"),
+        "/d/a.txt": _file("a.txt", 42, "2025-01-15T10:30:00Z")
+    }
+    readdir, stat = _make_fs_backend(tree)
+    output, _ = await ls([_spec("/d")],
+                         readdir=readdir,
+                         stat=stat,
+                         long=True,
+                         columns=LsColumns(owner=False,
+                                           group=False,
+                                           time_style=style))
+    assert output.decode() == f"-rw-r--r-- 1 42 {expected} a.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_hyperlink_wraps_the_name_in_osc8():
+    tree = {"/d": _dir("d"), "/d/a.txt": _file("a.txt", 1)}
+    readdir, stat = _make_fs_backend(tree)
+    output, _ = await ls([_spec("/d")],
+                         readdir=readdir,
+                         stat=stat,
+                         hyperlink=True)
+    assert output == b"\x1b]8;;file:///d/a.txt\x07a.txt\x1b]8;;\x07\n"
+
+
+@pytest.mark.parametrize("flags,sort_by,time_kind", [
+    ({
+        "t": True,
+        "S": True
+    }, LsSortBy.SIZE, LsTimeKind.MTIME),
+    ({
+        "S": True,
+        "sort": "version"
+    }, LsSortBy.VERSION, LsTimeKind.MTIME),
+    ({
+        "u": True
+    }, LsSortBy.TIME, LsTimeKind.ATIME),
+    ({
+        "u": True,
+        "args_l": True
+    }, LsSortBy.NAME, LsTimeKind.ATIME),
+    ({
+        "c": True,
+        "u": True,
+        "time": "status"
+    }, LsSortBy.TIME, LsTimeKind.CTIME),
+    ({
+        "X": True,
+        "U": True
+    }, LsSortBy.NONE, LsTimeKind.MTIME),
+])
+def test_parse_flags_last_sort_and_time_spelling_win(flags, sort_by,
+                                                     time_kind):
+    parsed = parse_flags(flags)
+    assert parsed.sort_by is sort_by
+    assert parsed.time_kind is time_kind
+
+
+def test_parse_flags_g_o_n_imply_long_and_shape_the_columns():
+    parsed = parse_flags({"g": True, "o": True, "inode": True})
+    assert parsed.long
+    assert not parsed.columns.owner and not parsed.columns.group
+    assert parsed.columns.inode
+    assert parse_flags({"numeric_uid_gid": True}).long
+    assert parse_flags({"g": True, "args_1": True}).long
+    assert parse_flags({"args_l": True, "args_1": True}).long
+    assert not parse_flags({"args_1": True}).long
+    assert parse_flags({
+        "block_size": "K"
+    }).columns.block_size == BlockSize(1024, "K")
+    with pytest.raises(UsageError, match="invalid --block-size argument '0K'"):
+        parse_flags({"block_size": "0K"})
+    # The later of -h and --block-size wins (dict order is typed order).
+    assert parse_flags({
+        "block_size": "K",
+        "human_readable": True
+    }).columns.block_size is None
+    assert parse_flags({
+        "human_readable": True,
+        "block_size": "K"
+    }).columns.block_size == BlockSize(1024, "K")
+    with pytest.raises(UsageError):
+        parse_flags({"block_size": "bogus", "human_readable": True})
+    assert parse_flags({"hyperlink": "always"}).hyperlink
+    assert not parse_flags({"hyperlink": "auto"}).hyperlink
+    assert parse_flags({
+        "time_style": "posix-long-iso"
+    }).columns.time_style == "locale"
+
+
+@pytest.mark.parametrize("flags,message,code", [
+    ({
+        "sort": "bogus"
+    }, "ls: invalid argument 'bogus' for '--sort'\n"
+     "Valid arguments are:\n  - 'none'\n  - 'size'\n  - 'time'\n"
+     "  - 'version'\n  - 'extension'\n  - 'name'\n  - 'width'\n"
+     "Try 'ls --help' for more information.", 1),
+    ({
+        "time": "bogus"
+    }, "ls: invalid argument 'bogus' for '--time'\n"
+     "Valid arguments are:\n  - 'atime', 'access', 'use'\n"
+     "  - 'ctime', 'status'\n  - 'mtime', 'modification'\n"
+     "  - 'birth', 'creation'\n"
+     "Try 'ls --help' for more information.", 1),
+    ({
+        "time_style": "bogus"
+    }, "ls: invalid argument 'bogus' for 'time style'\n"
+     "Valid arguments are:\n  - [posix-]full-iso\n  - [posix-]long-iso\n"
+     "  - [posix-]iso\n  - [posix-]locale\n"
+     "  - +FORMAT (e.g., +%H:%M) for a 'date'-style format\n"
+     "Try 'ls --help' for more information.", 2),
+    ({
+        "block_size": "bogus"
+    }, "ls: invalid --block-size argument 'bogus'", 2),
+    ({
+        "hyperlink": "bogus"
+    }, "ls: invalid argument 'bogus' for '--hyperlink'\n"
+     "Valid arguments are:\n  - 'always', 'yes', 'force'\n"
+     "  - 'never', 'no', 'none'\n  - 'auto', 'tty', 'if-tty'\n"
+     "Try 'ls --help' for more information.", 1),
+])
+def test_parse_flags_refuses_in_gnu_words(flags, message, code):
+    with pytest.raises(UsageError) as info:
+        parse_flags(flags)
+    assert str(info.value) == message
+    assert info.value.exit_code == code

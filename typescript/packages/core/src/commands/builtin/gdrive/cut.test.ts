@@ -61,17 +61,19 @@ describe('gdrive cut', () => {
   it('-f with -d on an indexed file', async () => {
     vi.mocked(drive.downloadFile).mockResolvedValue(ENC.encode('a,b,c\n1,2,3\n'))
     const index = new RAMIndexCacheStore()
-    await index.put(
-      '/test/file.csv',
-      new IndexEntry({
-        id: 'file123',
-        name: 'file.csv',
-        resourceType: 'gdrive/file',
-        remoteTime: '2026-01-01T00:00:00Z',
-        vfsName: 'file.csv',
-        size: 100,
-      }),
-    )
+    await index.setDir('/test', [
+      [
+        'file.csv',
+        new IndexEntry({
+          id: 'file123',
+          name: 'file.csv',
+          resourceType: 'gdrive/file',
+          remoteTime: '2026-01-01T00:00:00Z',
+          vfsName: 'file.csv',
+          size: 100,
+        }),
+      ],
+    ])
     const cmd = GDRIVE_CUT[0]
     if (cmd === undefined) throw new Error('cut not registered')
     const result = await cmd.fn(
@@ -92,17 +94,19 @@ describe('gdrive cut', () => {
   it('-c char range on an indexed file', async () => {
     vi.mocked(drive.downloadFile).mockResolvedValue(ENC.encode('hello\nworld\n'))
     const index = new RAMIndexCacheStore()
-    await index.put(
-      '/test/file.txt',
-      new IndexEntry({
-        id: 'file456',
-        name: 'file.txt',
-        resourceType: 'gdrive/file',
-        remoteTime: '2026-01-01T00:00:00Z',
-        vfsName: 'file.txt',
-        size: 100,
-      }),
-    )
+    await index.setDir('/test', [
+      [
+        'file.txt',
+        new IndexEntry({
+          id: 'file456',
+          name: 'file.txt',
+          resourceType: 'gdrive/file',
+          remoteTime: '2026-01-01T00:00:00Z',
+          vfsName: 'file.txt',
+          size: 100,
+        }),
+      ],
+    ])
     const cmd = GDRIVE_CUT[0]
     if (cmd === undefined) throw new Error('cut not registered')
     const result = await cmd.fn(

@@ -14,7 +14,8 @@
 
 import { SPECS } from '../../commands/spec/index.ts'
 import { compileSpec } from '../../commands/spec/compile.ts'
-import { ShellBuiltin } from '../../shell/types.ts'
+import { BUILTIN_GROUP } from '../../shell/constants.ts'
+import { BuiltinGroup, ShellBuiltin } from '../../shell/types.ts'
 import type { PathSpec } from '../../types.ts'
 
 // Bash builtins the parser accepts but the executor cannot honor; they
@@ -27,6 +28,13 @@ export const UNSUPPORTED_BUILTINS: ReadonlySet<string> = new Set([
 ])
 
 export const NAMESPACE_COMMANDS: ReadonlySet<string> = new Set(['ln', 'readlink'])
+
+// Interpreter names select runtime adapters; session builtins stay in Mirage.
+export const INTERPRETER_NAMES: ReadonlySet<string> = new Set(
+  [...BUILTIN_GROUP]
+    .filter(([, group]) => group === BuiltinGroup.INTERPRETERS)
+    .map(([name]) => name),
+)
 
 // bash reserved words that mirage's grammar implements. The parser, not
 // the executor, consumes them, so they never reach lookup; `type` reports
@@ -119,7 +127,7 @@ const LAST_WINS_LINK_OPTIONS: Record<string, Record<string, boolean>> = {
 // itself. GNU ls dereferences a command-line symlink to a directory,
 // but -l and -d suppress that and show the link's own row instead.
 const NO_FOLLOW_FLAGS: Record<string, [string, string[]]> = {
-  ls: ['ld', []],
+  ls: ['ld', ['directory']],
 }
 
 // Whether any of the given options appears among a command's words.

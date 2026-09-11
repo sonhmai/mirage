@@ -28,9 +28,12 @@ async def tail(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
+    read_range = (bound_op(ops.read_range, accessor, opts.index)
+                  if ops.read_range is not None else None)
     return await tail_generic(resolved, list(texts), opts,
                               dir_aware_stat(ops, accessor, opts),
-                              bound_op(ops.read_stream, accessor, opts.index))
+                              bound_op(ops.read_stream, accessor, opts.index),
+                              read_range)
 
 
 BUILDER = Builder('tail', tail, None, False, header_aggregate, read=True)

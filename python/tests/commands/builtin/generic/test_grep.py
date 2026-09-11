@@ -1,6 +1,6 @@
 import pytest
 
-from mirage.commands.builtin.generic.grep import grep
+from mirage.commands.builtin.generic.grep import grep, labelled
 from mirage.commands.config import CommandOpts
 from mirage.ops.types import MountView, NamespaceView
 from mirage.types import ContentType, FileStat, FileType, PathSpec
@@ -238,7 +238,7 @@ async def test_grep_recursive_finds_files_in_subdirs():
 
 
 @pytest.mark.asyncio
-async def test_grep_recursive_single_file_prefixes_filename():
+async def test_grep_recursive_single_file_keeps_single_file_output():
     readdir, stat, rb, rs = _make_backend({
         "/log.txt":
         b"one\nerror here\ntwo\nerror again\n",
@@ -256,7 +256,7 @@ async def test_grep_recursive_single_file_prefixes_filename():
         read_stream=rs,
     )
     decoded = (await _drain_async(output)).decode()
-    assert decoded == "/log.txt:2:error here\n/log.txt:4:error again\n"
+    assert decoded == "2:error here\n4:error again\n"
 
 
 @pytest.mark.asyncio
@@ -739,3 +739,144 @@ async def test_grep_still_reports_a_path_with_no_mount_below_it():
     )
     assert io.exit_code == 2
     assert b"/nope" in (io.stderr or b"")
+
+
+@pytest.mark.parametrize("flags, expected", [
+    ({
+        "r": True
+    }, {
+        "r": True,
+        "H": True
+    }),
+    ({
+        "r": True,
+        "h": True
+    }, {
+        "r": True,
+        "h": True
+    }),
+    ({
+        "H": True,
+        "h": True
+    }, {
+        "H": True,
+        "h": True
+    }),
+    ({
+        "h": True,
+        "H": True
+    }, {
+        "h": True,
+        "H": True
+    }),
+])
+def test_labelled_asks_for_filenames_only_when_the_line_did_not_decide(
+        flags, expected):
+    out = labelled(CommandOpts(flags=flags))
+    assert out.flags == expected
+    assert list(out.flags) == list(expected)
+
+
+@pytest.mark.asyncio
+async def test_excluded_entry_that_fails_stat_does_not_stop_the_walk():
+    readdir, stat, rb, rs = _make_backend({
+        "/data/a.txt": b"apple\n",
+        "/data/b.txt": b"apple\n",
+    })
+
+    async def listing(path):
+        return ["/data/0ghost", *await readdir(path)]
+
+    output, io = await grep(
+        [_spec("/data")],
+        ["apple"],
+        CommandOpts(flags={
+            "r": True,
+            "exclude_dir": ["0ghost"]
+        }),
+        readdir=listing,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert (await
+            _drain_async(output)) == b"/data/a.txt:apple\n/data/b.txt:apple\n"
+    assert io.stderr == b"grep: /data/0ghost: No such file or directory\n"
+    assert io.exit_code == 2
+
+
+@pytest.mark.parametrize("flags, expected", [
+    ({
+        "A": "1"
+    }, b"/g1:a\n/g1-b\n--\n/g2:a\n/g2-y\n"),
+    ({
+        "B": "1"
+    }, b"/g1:a\n--\n/g2-x\n/g2:a\n"),
+    ({
+        "h": True,
+        "A": "1"
+    }, b"a\nb\n--\na\ny\n"),
+    ({
+        "c": True,
+        "A": "1"
+    }, b"/g1:1\n/g2:1\n"),
+    ({}, b"/g1:a\n/g2:a\n"),
+])
+@pytest.mark.asyncio
+async def test_grep_separates_context_groups_between_files(flags, expected):
+    readdir, stat, rb, rs = _make_backend({
+        "/g1": b"a\nb\nc\n",
+        "/g2": b"x\na\ny\n",
+    })
+    output, io = await grep(
+        [_spec("/g1"), _spec("/g2")],
+        ["a"],
+        CommandOpts(flags=flags),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert await _drain_async(output) == expected
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_grep_context_separator_needs_earlier_output():
+    readdir, stat, rb, rs = _make_backend({
+        "/g0": b"zzz\n",
+        "/g2": b"x\na\ny\n",
+    })
+    output, io = await grep(
+        [_spec("/g0"), _spec("/g2")],
+        ["a"],
+        CommandOpts(flags={"A": "1"}),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert await _drain_async(output) == b"/g2:a\n/g2-y\n"
+
+
+@pytest.mark.asyncio
+async def test_grep_recursive_separates_context_groups_between_files():
+    readdir, stat, rb, rs = _make_backend({
+        "/d/f1": b"a\nb\n",
+        "/d/f2": b"x\na\ny\n",
+    })
+    output, io = await grep(
+        [_spec("/d")],
+        ["a"],
+        CommandOpts(flags={
+            "r": True,
+            "A": "1"
+        }),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert (
+        await
+        _drain_async(output)) == b"/d/f1:a\n/d/f1-b\n--\n/d/f2:a\n/d/f2-y\n"

@@ -39,3 +39,25 @@ async def test_read_blob_returns_raw_bytes(accessor):
 async def test_read_missing_row_raises(accessor):
     with pytest.raises(FileNotFoundError):
         await read(accessor, _ps("/animals/cat/big/999.json"))
+
+
+@pytest.mark.asyncio
+async def test_read_named_chunk_with_nested_text_field(lineage):
+    data = await read(lineage, _ps("/refund-2026.pdf/004__1.txt"))
+    assert data == b"Refunds are processed within 14 days\n"
+
+
+@pytest.mark.asyncio
+async def test_read_rejects_a_stem_the_listing_never_published(lineage):
+    # The label is stripped before the retrieve, so any spelling that ends
+    # in __<id> fetches the point; only the stem readdir publishes opens.
+    with pytest.raises(FileNotFoundError):
+        await read(lineage, _ps("/refund-2026.pdf/wrong__1.txt"))
+    with pytest.raises(FileNotFoundError):
+        await read(lineage, _ps("/refund-2026.pdf/1.txt"))
+
+
+@pytest.mark.asyncio
+async def test_read_rejects_an_alias_of_the_point_id(accessor):
+    with pytest.raises(FileNotFoundError):
+        await read(accessor, _ps("/animals/cat/big/01.json"))

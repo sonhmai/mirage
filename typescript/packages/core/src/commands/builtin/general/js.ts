@@ -14,7 +14,7 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import { handleJs } from '../../../workspace/executor/js/handle.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
@@ -124,6 +124,7 @@ async function jsCommand(
       command: label,
       stdin: stdinForRuntime,
       env: opts.env ?? {},
+      cwd: PathSpec.fromStrPath(opts.cwd),
       code: resolvedCode,
       module,
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),

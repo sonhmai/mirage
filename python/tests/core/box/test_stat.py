@@ -44,14 +44,16 @@ async def test_stat_root_fetches_folder_info(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_file_carries_box_metadata(accessor, index):
-    await index.put(
-        "/a.txt",
-        IndexEntry(id="200",
-                   name="a.txt",
-                   resource_type="box/file",
-                   remote_time="2026-04-01T00:00:00+00:00",
-                   vfs_name="a.txt",
-                   size=5))
+    await index.set_dir(
+        "/",
+        [("a.txt",
+          IndexEntry(id="200",
+                     name="a.txt",
+                     resource_type="box/file",
+                     remote_time="2026-04-01T00:00:00+00:00",
+                     vfs_name="a.txt",
+                     size=5))],
+    )
     info = await stat(
         accessor,
         PathSpec(resource_path="a.txt", virtual="/a.txt", directory="/"),
@@ -66,13 +68,15 @@ async def test_stat_file_carries_box_metadata(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_folder_is_directory(accessor, index):
-    await index.put(
-        "/docs",
-        IndexEntry(id="100",
-                   name="docs",
-                   resource_type="box/folder",
-                   remote_time="2026-04-01T00:00:00+00:00",
-                   vfs_name="docs"))
+    await index.set_dir(
+        "/",
+        [("docs",
+          IndexEntry(id="100",
+                     name="docs",
+                     resource_type="box/folder",
+                     remote_time="2026-04-01T00:00:00+00:00",
+                     vfs_name="docs"))],
+    )
     info = await stat(
         accessor, PathSpec(resource_path="docs",
                            virtual="/docs",

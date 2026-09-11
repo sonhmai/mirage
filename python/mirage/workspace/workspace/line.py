@@ -19,8 +19,10 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.policy import (ExecuteResultContext, Policies, post_execute_gate,
                            refusal_of, render_deny, resolve_limit)
+from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
-from mirage.types import Producer
+from mirage.runtime.types import ShellExecution
+from mirage.types import PathSpec, Producer
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.session import Session, env_snapshot
 from mirage.workspace.workspace.utils import command_name
@@ -48,14 +50,19 @@ async def run_whole_line(
         invalidate (Callable[[], Awaitable[None]]): drops local read
             caches once the line has run.
     """
+    assert isinstance(runtime, Runtime)
     data = await materialize(stdin) if stdin is not None else None
     name = command_name(command)
     guard = resolve_limit(name, mounts)
     timeout = guard.timeout_seconds if guard is not None else None
     try:
         result = await run_with_timeout(
-            runtime.run_line(command, data, env_snapshot(session),
-                             session.cwd), timeout, name)
+            runtime.execute(
+                ShellExecution(line=command,
+                               stdin=data,
+                               env=env_snapshot(session),
+                               cwd=PathSpec.from_str_path(session.cwd))),
+            timeout, name)
     finally:
         # The line may have written anywhere in the runtime's view of
         # the workspace; local read caches are stale.

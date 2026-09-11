@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
+import { buffer } from 'node:stream/consumers'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { emit, exitCodeFromResponse, handleResponse } from './output.ts'
@@ -41,18 +41,30 @@ export function registerExecuteCommand(program: Command): void {
         if (opts.session !== undefined) body.sessionId = opts.session
         if (opts.cwd !== undefined) body.cwd = opts.cwd
         if (opts.runtime !== undefined) body.runtime = opts.runtime
-        if (opts.bg !== true && !process.stdin.isTTY) {
-          body.stdinBase64 = readFileSync(0).toString('base64')
-        }
         const path =
           `/v1/workspaces/${opts.workspace}/execute` + (opts.bg === true ? '?background=true' : '')
         const c = makeClient(loadDaemonSettings())
         await c.ensureRunning({ allowSpawn: false })
-        const response = await handleResponse(
-          await c.request('POST', path, { body: JSON.stringify(body) }),
-        )
+        let result: Response
+        if (opts.bg !== true && !process.stdin.isTTY) {
+          const form = new FormData()
+          form.set(
+            'request',
+            new Blob([JSON.stringify(body)], { type: 'application/json' }),
+            'request.json',
+          )
+          form.set(
+            'stdin',
+            new Blob([await buffer(process.stdin)], { type: 'application/octet-stream' }),
+            'stdin.bin',
+          )
+          result = await c.requestMultipart('POST', path, form)
+        } else {
+          result = await c.request('POST', path, { body: JSON.stringify(body) })
+        }
+        const response = await handleResponse(result)
         emit(response)
-        process.exit(exitCodeFromResponse(response))
+        process.exitCode = exitCodeFromResponse(response)
       },
     )
 }

@@ -559,6 +559,12 @@ class GwsService:
         forms = cls._manifest(target.get("forms"))
         if forms:
             extras["forms"] = forms
+        # A multi-tab document is the third such state: the Docs API has
+        # no request that creates a tab, so one cannot be seeded through
+        # the editor APIs the way the single-tab `apps` docs are.
+        docs = cls._manifest(target.get("docs"))
+        if docs:
+            extras["docs"] = docs
         if extras:
             reset_body["extras"] = extras
         async with aiohttp.ClientSession() as session:

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult, materialize } from '../../../io/types.ts'
-import type { MountView, StatPath } from '../../../ops/types.ts'
+import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { eisdir, fsErrorLine, isEisdir, isFsError, isMissError } from '../../../utils/errors.ts'
@@ -42,10 +42,10 @@ function operandName(virtual: string): string {
  * Two things no single backend stat can get right, both about paths that
  * are namespace structure rather than backend state:
  *
- * A path that only exists because mounts sit under it (`/repos` when
- * `/repos/alpha` is mounted) has no backend to answer for it, so the
+ * A path that only exists because mounts or links sit under it (`/repos`
+ * when `/repos/alpha` is mounted) has no backend to answer for it, so the
  * backend stat throws and the operand reads as absent. `statPath` routes
- * through the dispatcher, which answers such a path from the mount table,
+ * through the dispatcher, which answers such a path from the namespace,
  * so it is asked second and only on a miss. Its row is already named from
  * the path.
  *
@@ -61,12 +61,18 @@ export async function operandStat(
   stat: Stat,
   statPath?: StatPath | null,
   mounts?: MountView | null,
+  links?: LinkView | null,
 ): Promise<FileStat> {
   let row: FileStat
   try {
     row = await stat(path)
   } catch (e) {
     if (!isFsError(e)) throw e
+    if (
+      mounts?.visibleDescendants(path.virtual).length === 0 &&
+      (links?.subtree(path.virtual).length ?? 0) === 0
+    )
+      throw e
     const fallback =
       statPath === undefined || statPath === null ? null : await statPath(path.virtual)
     if (fallback === null) throw e

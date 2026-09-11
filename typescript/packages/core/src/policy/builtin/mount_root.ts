@@ -23,12 +23,46 @@ import type { PathSpec } from '../../types.ts'
  * the refusal by link kind ("failed to create symbolic link" vs
  * "failed to create link").
  */
-function hasSymlinkFlag(argv: readonly string[]): boolean {
+const LN_VALUED_SHORTS = 'tS'
+const LN_VALUED_LONGS: ReadonlySet<string> = new Set(['--target-directory', '--suffix'])
+
+// Whether ln's raw argv carries one short flag or its long spelling. The
+// scan is option-aware so an operand cannot pose as a flag: it stops at
+// `--`, skips the value of a valued option (`-t DIR`, `-S SUF`, their
+// long forms), and inside a cluster stops at the first valued letter,
+// whose remainder is its attached value (`-SfooT` carries no -T).
+export function lnFlagPresent(argv: readonly string[], letter: string, long: string): boolean {
+  let skip = false
   for (const tok of argv) {
-    if (tok === '--symbolic') return true
-    if (tok.startsWith('-') && !tok.startsWith('--') && tok.includes('s')) return true
+    if (skip) {
+      skip = false
+      continue
+    }
+    if (tok === '--') return false
+    if (tok === long) return true
+    if (tok.startsWith('--')) {
+      skip = LN_VALUED_LONGS.has(tok)
+      continue
+    }
+    if (!tok.startsWith('-') || tok.length < 2) continue
+    for (let pos = 1; pos < tok.length; pos++) {
+      const ch = tok[pos]
+      if (ch === letter) return true
+      if (ch !== undefined && LN_VALUED_SHORTS.includes(ch)) {
+        skip = pos === tok.length - 1
+        break
+      }
+    }
   }
   return false
+}
+
+function hasNoTargetFlag(argv: readonly string[]): boolean {
+  return lnFlagPresent(argv, 'T', '--no-target-directory')
+}
+
+function hasSymlinkFlag(argv: readonly string[]): boolean {
+  return lnFlagPresent(argv, 's', '--symbolic')
 }
 
 /**
@@ -138,8 +172,11 @@ export class MountRootPolicy implements Policy {
     }
 
     if (cmd === 'ln') {
+      // A mount root is refused only as the link NAME. Without -T a
+      // directory operand is the directory to link into, GNU's rule, and
+      // creating inside a mount is ordinary.
       const last = ctx.paths[ctx.paths.length - 1]
-      if (last !== undefined && isRoot(last.virtual)) {
+      if (last !== undefined && hasNoTargetFlag(ctx.argv) && isRoot(last.virtual)) {
         const kind = hasSymlinkFlag(ctx.argv) ? 'symbolic link' : 'link'
         return deny(`failed to create ${kind} '${last.virtual}': File exists`)
       }

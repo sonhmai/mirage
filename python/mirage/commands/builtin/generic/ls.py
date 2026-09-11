@@ -1,21 +1,27 @@
+import functools
+import posixpath
+import string
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.utils.formatting import format_ls_long
+from mirage.commands.builtin.utils import formatting
 from mirage.commands.builtin.utils.identity import Identity, identity_of
 from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
 from mirage.commands.config import CommandOpts
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.usage import invalid_argument_error, usage_hint
 from mirage.io.types import IOResult
 from mirage.ops.types import ChildMounts, LinkView, MountView, StatPath
-from mirage.types import FileStat, FileType, LsSortBy, PathSpec
+from mirage.types import FileStat, FileType, LsSortBy, LsTimeKind, PathSpec
 from mirage.utils.errors import fs_strerror
 from mirage.utils.key_prefix import rekey
 from mirage.utils.path import CycleError, respell_one
+from mirage.utils.width import char_width
 
 Readdir = Callable[[PathSpec, IndexCacheStore | None], Awaitable[list[str]]]
 Stat = Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]]
@@ -28,7 +34,6 @@ LS_FAILURE = 2
 @dataclass(frozen=True, slots=True)
 class LsFlags:
     long: bool = False
-    one_per_line: bool = False
     all_files: bool = False
     human: bool = False
     sort_by: LsSortBy = LsSortBy.NAME
@@ -37,27 +42,211 @@ class LsFlags:
     list_dir: bool = False
     classify: bool = False
     deref: bool = False
+    time_kind: LsTimeKind = LsTimeKind.MTIME
+    group_dirs_first: bool = False
+    columns: formatting.LsColumns = formatting.DEFAULT_COLUMNS
+    hyperlink: bool = False
+
+
+_SORT_WORDS = {
+    "none": LsSortBy.NONE,
+    "size": LsSortBy.SIZE,
+    "time": LsSortBy.TIME,
+    "version": LsSortBy.VERSION,
+    "extension": LsSortBy.EXTENSION,
+    "name": LsSortBy.NAME,
+    "width": LsSortBy.WIDTH,
+}
+_SORT_FLAGS = {
+    "t": LsSortBy.TIME,
+    "S": LsSortBy.SIZE,
+    "X": LsSortBy.EXTENSION,
+    "v": LsSortBy.VERSION,
+    "U": LsSortBy.NONE,
+}
+_TIME_GROUPS = (("atime", "access", "use"), ("ctime", "status"),
+                ("mtime", "modification"), ("birth", "creation"))
+_TIME_KINDS = {
+    "atime": LsTimeKind.ATIME,
+    "ctime": LsTimeKind.CTIME,
+    "mtime": LsTimeKind.MTIME,
+    "birth": LsTimeKind.BIRTH,
+}
+_HYPERLINK_GROUPS = (("always", "yes", "force"), ("never", "no", "none"),
+                     ("auto", "tty", "if-tty"))
+
+
+def _grouped_argument_error(option: str, value: str,
+                            groups: tuple[tuple[str, ...], ...]) -> UsageError:
+    """GNU's ARGMATCH refusal for an option whose values have aliases,
+    listed one group per line (``--time``, ``--hyperlink``); exit 1, as
+    ls answers it.
+
+    Args:
+        option (str): the option's long spelling.
+        value (str): the rejected value.
+        groups (tuple[tuple[str, ...], ...]): the valid values, aliases
+            grouped.
+    """
+    valid = "\n".join("  - " + ", ".join(f"'{w}'" for w in g) for g in groups)
+    return UsageError(
+        f"ls: invalid argument '{value}' for '{option}'\n"
+        f"Valid arguments are:\n{valid}\n{usage_hint('ls')}", 1)
+
+
+def _sort_flag(fl: FlagView) -> tuple[LsSortBy, bool]:
+    """The sort key the line asked for, last spelling winning, and
+    whether it asked at all.
+
+    Args:
+        fl (FlagView): the ls flag view.
+    """
+    typed = fl.typed_order("t", "S", "X", "v", "U", "sort")
+    if not typed:
+        return LsSortBy.NAME, False
+    last = typed[-1]
+    if last != "sort":
+        return _SORT_FLAGS[last], True
+    word = fl.as_str("sort") or ""
+    key = _SORT_WORDS.get(word)
+    if key is None:
+        msg, _ = invalid_argument_error("ls", "--sort", word,
+                                        tuple(_SORT_WORDS))
+        raise UsageError(msg.decode().rstrip("\n"), 1)
+    return key, True
+
+
+def _time_flag(fl: FlagView) -> LsTimeKind:
+    """Which timestamp ``-c``, ``-u`` or ``--time`` asked for, last one
+    winning.
+
+    Args:
+        fl (FlagView): the ls flag view.
+    """
+    typed = fl.typed_order("c", "u", "time")
+    if not typed:
+        return LsTimeKind.MTIME
+    last = typed[-1]
+    if last == "c":
+        return LsTimeKind.CTIME
+    if last == "u":
+        return LsTimeKind.ATIME
+    word = fl.as_str("time") or ""
+    for group in _TIME_GROUPS:
+        if word in group:
+            return _TIME_KINDS[group[0]]
+    raise _grouped_argument_error("--time", word, _TIME_GROUPS)
+
+
+def _time_style_flag(fl: FlagView) -> str:
+    """``--time-style``, its ``posix-`` prefix stripped (the C locale
+    makes the two spellings one), validated the way GNU words it (exit
+    2).
+
+    Args:
+        fl (FlagView): the ls flag view.
+    """
+    style = fl.as_str("time_style")
+    if style is None:
+        return "locale"
+    posix = style.startswith("posix-")
+    bare = style[6:] if posix else style
+    if bare in formatting.LS_TIME_STYLES or bare.startswith("+"):
+        return "locale" if posix else bare
+    raise UsageError(
+        f"ls: invalid argument '{style}' for 'time style'\n"
+        "Valid arguments are:\n"
+        "  - [posix-]full-iso\n"
+        "  - [posix-]long-iso\n"
+        "  - [posix-]iso\n"
+        "  - [posix-]locale\n"
+        "  - +FORMAT (e.g., +%H:%M) for a 'date'-style format\n"
+        f"{usage_hint('ls')}", 2)
+
+
+def _hyperlink_flag(fl: FlagView) -> bool:
+    """Whether ``--hyperlink`` asked for OSC 8 links: ``always`` does,
+    ``never`` does not, and ``auto`` does not either, since command
+    output here is never a terminal.
+
+    Args:
+        fl (FlagView): the ls flag view.
+    """
+    raw = fl.raw("hyperlink")
+    if raw is None or raw is False:
+        return False
+    if raw is True:
+        return True
+    word = str(raw)
+    for group in _HYPERLINK_GROUPS:
+        if word in group:
+            return group[0] == "always"
+    raise _grouped_argument_error("--hyperlink", word, _HYPERLINK_GROUPS)
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> LsFlags:
+    """Parse the ls flag bag once into a frozen struct.
+
+    GNU's rules that are easy to get wrong: ``-g``, ``-o`` and ``-n``
+    imply the long format, and ``-1`` never undoes it in either order
+    (GNU ignores ``-1`` beside ``-l``, and with no terminal there are
+    never columns, so ``-1`` has nothing else to do); ``-n`` prints the
+    same columns as ``-l``,
+    because a mirage owner is already the id (an agent, a profile) and
+    never a name looked up from one; the last of ``-t``, ``-S``, ``-X``,
+    ``-v``, ``-U`` and ``--sort`` wins, as does the last of ``-c``, ``-u``
+    and ``--time``; and ``-c`` or ``-u`` with neither ``-l`` nor a sort
+    sorts by that time; and the later of ``-h`` and ``--block-size``
+    wins. Raises ``UsageError`` for a value GNU refuses, with GNU's
+    exit status for that option.
+
+    Args:
+        flags (Mapping[str, FlagValue]): flags for the shared ls spec.
+    """
     fl = FlagView(flags, spec=SPECS["ls"])
-    if fl.as_bool("t"):
+    sort_by, sorted_explicitly = _sort_flag(fl)
+    time_kind = _time_flag(fl)
+    no_owner = fl.as_bool("g")
+    no_group = fl.as_bool("o")
+    long = (fl.as_bool("args_l") or no_owner or no_group
+            or fl.as_bool("numeric_uid_gid"))
+    if (not sorted_explicitly and time_kind is not LsTimeKind.MTIME
+            and not long):
         sort_by = LsSortBy.TIME
-    elif fl.as_bool("S"):
-        sort_by = LsSortBy.SIZE
-    else:
-        sort_by = LsSortBy.NAME
+    block = None
+    block_text = fl.as_str("block_size")
+    if block_text is not None:
+        block = formatting.parse_block_size(block_text)
+        if block is None:
+            raise UsageError(
+                f"ls: invalid --block-size argument '{block_text}'", 2)
+        # The later of -h and --block-size wins (GNU: `--block-size=1 -h`
+        # prints 1.5K, `-h --block-size=1` prints 1536); the value is
+        # still checked either way.
+        if fl.typed_order("human_readable",
+                          "block_size")[-1] == "human_readable":
+            block = None
+    columns = formatting.LsColumns(owner=not no_owner,
+                                   group=not no_group,
+                                   inode=fl.as_bool("inode"),
+                                   context=fl.as_bool("context"),
+                                   time_kind=time_kind,
+                                   time_style=_time_style_flag(fl),
+                                   block_size=block)
     return LsFlags(
-        long=fl.as_bool("args_l"),
-        one_per_line=fl.as_bool("args_1"),
-        all_files=fl.as_bool("a") or fl.as_bool("A"),
-        human=fl.as_bool("h"),
+        long=long,
+        all_files=fl.as_bool("all") or fl.as_bool("almost_all"),
+        human=fl.as_bool("human_readable"),
         sort_by=sort_by,
-        reverse=fl.as_bool("r"),
-        recursive=fl.as_bool("R"),
-        list_dir=fl.as_bool("d"),
-        classify=fl.as_bool("F"),
-        deref=fl.as_bool("L"),
+        reverse=fl.as_bool("reverse"),
+        recursive=fl.as_bool("recursive"),
+        list_dir=fl.as_bool("directory"),
+        classify=fl.as_bool("classify"),
+        deref=fl.as_bool("dereference"),
+        time_kind=time_kind,
+        group_dirs_first=fl.as_bool("group_directories_first"),
+        columns=columns,
+        hyperlink=_hyperlink_flag(fl),
     )
 
 
@@ -66,12 +255,14 @@ def ls_options(flags: Mapping[str, FlagValue]) -> dict[str, Any]:
 
     ``LsFlags`` names every field after the ``ls`` parameter it feeds,
     so both entry points -- the single-mount ``ls_generic`` and the
-    cross-mount relay -- share one mapping instead of restating it.
+    cross-mount relay -- share one mapping instead of restating it. A
+    shallow view, so the nested column struct rides through whole.
 
     Args:
         flags (Mapping[str, FlagValue]): Flags for the shared ls spec.
     """
-    return asdict(parse_flags(flags))
+    parsed = parse_flags(flags)
+    return {f.name: getattr(parsed, f.name) for f in fields(parsed)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,51 +336,257 @@ _CLASSIFY_SUFFIX = {FileType.DIRECTORY: "/", FileType.SYMLINK: "@"}
 
 def format_simple(entries: list[FileStat],
                   *,
-                  classify: bool = False) -> list[str]:
+                  classify: bool = False,
+                  columns: formatting.LsColumns = formatting.DEFAULT_COLUMNS,
+                  names: list[str] | None = None) -> list[str]:
+    """Short rows: the name, ``-F``'s mark, and ``-i``/``-Z``'s lead.
+
+    Args:
+        entries (list[FileStat]): the rows.
+        classify (bool): ``-F``.
+        columns (formatting.LsColumns): the requested columns.
+        names (list[str] | None): the name per row when the caller
+            decorated it (``--hyperlink``), else the row's own.
+    """
+    lead = formatting.ls_prefix(columns)
     out: list[str] = []
-    for e in entries:
+    for i, e in enumerate(entries):
         suffix = ""
         if classify and e.type is not None:
             suffix = _CLASSIFY_SUFFIX.get(e.type, "")
-        out.append(e.name + suffix)
+        out.append(lead + (names[i] if names is not None else e.name) + suffix)
     return out
 
 
-def _primary_value(entry: FileStat, sort_by: LsSortBy) -> str | int:
+def _is_digit(c: int) -> bool:
+    """Whether a byte is an ASCII digit.
+
+    Args:
+        c (int): one byte.
+    """
+    return 0x30 <= c <= 0x39
+
+
+def _is_alpha(c: int) -> bool:
+    """Whether a byte is an ASCII letter.
+
+    Args:
+        c (int): one byte.
+    """
+    return 0x41 <= c <= 0x5A or 0x61 <= c <= 0x7A
+
+
+def _version_order(c: int) -> int:
+    """gnulib ``filevercmp``'s byte order: a tilde sorts before the end
+    of the string, ASCII letters by code, and every other byte after the
+    letters. gnulib classifies in the C locale one byte at a time, so a
+    multibyte letter such as ``é`` is two bytes past the letters, not a
+    letter.
+
+    Args:
+        c (int): one byte.
+    """
+    if _is_digit(c):
+        return 0
+    if _is_alpha(c):
+        return c
+    if c == 0x7E:
+        return -1
+    return c + 256
+
+
+def _verrevcmp(a: bytes, b: bytes) -> int:
+    """Debian's version comparison as gnulib's ``verrevcmp`` runs it:
+    alternating non-digit and digit runs, the digit runs compared as
+    numbers.
+
+    Args:
+        a (bytes): left operand.
+        b (bytes): right operand.
+    """
+    i = j = 0
+    while i < len(a) or j < len(b):
+        while ((i < len(a) and not _is_digit(a[i]))
+               or (j < len(b) and not _is_digit(b[j]))):
+            ac = _version_order(a[i]) if i < len(a) else 0
+            bc = _version_order(b[j]) if j < len(b) else 0
+            if ac != bc:
+                return ac - bc
+            i += 1
+            j += 1
+        while i < len(a) and a[i] == 0x30:
+            i += 1
+        while j < len(b) and b[j] == 0x30:
+            j += 1
+        first_diff = 0
+        while (i < len(a) and j < len(b) and _is_digit(a[i])
+               and _is_digit(b[j])):
+            if not first_diff:
+                first_diff = a[i] - b[j]
+            i += 1
+            j += 1
+        if i < len(a) and _is_digit(a[i]):
+            return 1
+        if j < len(b) and _is_digit(b[j]):
+            return -1
+        if first_diff:
+            return first_diff
+    return 0
+
+
+def _version_prefix_len(s: bytes) -> int:
+    """How much of a name ``filevercmp`` compares first: everything but
+    a trailing run of suffixes (``.txt``, ``.tar.gz``, ``~``).
+
+    Args:
+        s (bytes): the name.
+    """
+    n = len(s)
+    i = 0
+    prefix = 0
+    while True:
+        if i == n:
+            return prefix
+        i += 1
+        prefix = i
+        while i + 1 < n and s[i] == 0x2E and (_is_alpha(s[i + 1])
+                                              or s[i + 1] == 0x7E):
+            i += 2
+            while i < n and (_is_alpha(s[i]) or _is_digit(s[i])
+                             or s[i] == 0x7E):
+                i += 1
+
+
+def filevercmp(a: str, b: str) -> int:
+    """gnulib's ``filevercmp``, the order behind ``ls -v``: the empty
+    name, ``.`` and ``..`` first, then hidden names, then the names
+    compared as versions with their suffixes set aside, the suffixes
+    breaking a tie. The comparison runs over the names' UTF-8 bytes,
+    which is what GNU sees; a lone surrogate maps back to the byte it
+    was decoded from.
+
+    Args:
+        a (str): left name.
+        b (str): right name.
+    """
+    if a == b:
+        return 0
+    for special in ("", ".", ".."):
+        if a == special:
+            return -1
+        if b == special:
+            return 1
+    a_hidden, b_hidden = a.startswith("."), b.startswith(".")
+    if a_hidden != b_hidden:
+        return -1 if a_hidden else 1
+    ab = a.encode("utf-8", "surrogateescape")
+    bb = b.encode("utf-8", "surrogateescape")
+    result = _verrevcmp(ab[:_version_prefix_len(ab)],
+                        bb[:_version_prefix_len(bb)])
+    if result == 0:
+        result = _verrevcmp(ab, bb)
+    if result == 0:
+        result = (ab > bb) - (ab < bb)
+    return result
+
+
+def name_width(name: str) -> int:
+    """The columns a name occupies, the key ``--sort=width`` compares:
+    GNU measures the rendered width, so a wide character counts two
+    and a combining mark none.
+
+    Args:
+        name (str): the entry name.
+    """
+    return sum(char_width(ch) for ch in name)
+
+
+def _extension(name: str) -> str:
+    """The key ``ls -X`` compares first: the name from its last dot,
+    empty for a name without one.
+
+    Args:
+        name (str): the entry name.
+    """
+    dot = name.rfind(".")
+    return name[dot:] if dot >= 0 else ""
+
+
+def _primary_value(entry: FileStat, sort_by: LsSortBy,
+                   time_kind: LsTimeKind) -> str | int:
     if sort_by is LsSortBy.TIME:
-        return entry.modified or ""
+        return formatting.time_of(entry, time_kind) or ""
     if sort_by is LsSortBy.SIZE:
         return entry.size or 0
     return entry.name
 
 
-def _order_rows(rows: list[FileStat], sort_by: LsSortBy,
-                reverse: bool) -> list[int]:
+def _order_rows(rows: list[FileStat],
+                sort_by: LsSortBy,
+                reverse: bool,
+                *,
+                time_kind: LsTimeKind = LsTimeKind.MTIME,
+                group_dirs_first: bool = False) -> list[int]:
     """Indices of ``rows`` in GNU ls order.
 
     GNU's `-t`/`-S` comparators fall back to the name when the timestamps or
     sizes tie, and `-r` negates the whole comparison, tie-break included. A
     stable name sort followed by the primary key reproduces the first half;
-    reversing the finished order reproduces the second.
+    reversing the finished order reproduces the second. `-X` and
+    `--sort=width` are stable sorts over the name order too; `-v` is
+    gnulib's version order; `-U` keeps the listing order, and `-r` does
+    not reverse it (GNU's `-r` reverses while sorting, and `-U` does not
+    sort). `--group-directories-first` partitions the finished
+    order, so the directories come first in every sort but `-U`, where
+    GNU ignores it.
 
     Args:
         rows (list[FileStat]): The stats to order.
         sort_by (LsSortBy): The active sort key.
         reverse (bool): Whether `-r` is in effect.
+        time_kind (LsTimeKind): Which timestamp `-t` compares.
+        group_dirs_first (bool): `--group-directories-first`.
     """
-    order = sorted(range(len(rows)), key=lambda i: rows[i].name)
-    if sort_by is not LsSortBy.NAME:
-        # -t and -S list newest/largest first.
-        order.sort(key=lambda i: _primary_value(rows[i], sort_by),
-                   reverse=True)
-    if reverse:
+    if sort_by is LsSortBy.NONE:
+        order = list(range(len(rows)))
+    elif sort_by is LsSortBy.VERSION:
+
+        def by_version(i: int, j: int) -> int:
+            return filevercmp(rows[i].name, rows[j].name)
+
+        order = sorted(range(len(rows)), key=functools.cmp_to_key(by_version))
+    else:
+        order = sorted(range(len(rows)), key=lambda i: rows[i].name)
+        if sort_by is LsSortBy.EXTENSION:
+            order.sort(key=lambda i: _extension(rows[i].name))
+        elif sort_by is LsSortBy.WIDTH:
+            order.sort(key=lambda i: name_width(rows[i].name))
+        elif sort_by is not LsSortBy.NAME:
+            # -t and -S list newest/largest first.
+            order.sort(
+                key=lambda i: _primary_value(rows[i], sort_by, time_kind),
+                reverse=True)
+    if reverse and sort_by is not LsSortBy.NONE:
         order.reverse()
+    if group_dirs_first and sort_by is not LsSortBy.NONE:
+        order = ([i for i in order if rows[i].type is FileType.DIRECTORY] +
+                 [i for i in order if rows[i].type is not FileType.DIRECTORY])
     return order
 
 
-def sort_stats(entries: list[FileStat], sort_by: LsSortBy,
-               reverse: bool) -> list[FileStat]:
-    return [entries[i] for i in _order_rows(entries, sort_by, reverse)]
+def sort_stats(entries: list[FileStat],
+               sort_by: LsSortBy,
+               reverse: bool,
+               *,
+               time_kind: LsTimeKind = LsTimeKind.MTIME,
+               group_dirs_first: bool = False) -> list[FileStat]:
+    return [
+        entries[i] for i in _order_rows(entries,
+                                        sort_by,
+                                        reverse,
+                                        time_kind=time_kind,
+                                        group_dirs_first=group_dirs_first)
+    ]
 
 
 async def _file_entry(
@@ -404,6 +801,8 @@ async def probe_operand(
     child_mounts: ChildMounts | None = None,
     mounts: MountView | None = None,
     stat_path: StatPath | None = None,
+    time_kind: LsTimeKind = LsTimeKind.MTIME,
+    group_dirs_first: bool = False,
 ) -> tuple[Operand, list[LsWarning]]:
     """List one operand and report whether it turned out to be a directory.
 
@@ -432,6 +831,8 @@ async def probe_operand(
             nested mount itself.
         stat_path (StatPath | None): dispatcher-backed stat, for the
             child-mount rows no backend can supply.
+        time_kind (LsTimeKind): which timestamp ``-t`` compares.
+        group_dirs_first (bool): ``--group-directories-first``.
     """
     warnings: list[LsWarning] = []
     structure_only = False
@@ -483,7 +884,11 @@ async def probe_operand(
                                             child_mounts=child_mounts,
                                             stat_path=stat_path)
     warnings.extend(entry_ws)
-    entries = sort_stats(entries, sort_by, reverse)
+    entries = sort_stats(entries,
+                         sort_by,
+                         reverse,
+                         time_kind=time_kind,
+                         group_dirs_first=group_dirs_first)
     groups: list[tuple[PathSpec, list[FileStat]]] = [(path, entries)]
     if recursive:
         for entry in entries:
@@ -495,20 +900,23 @@ async def probe_operand(
                 # listing is another backend's, which this walk cannot
                 # read: the cross-mount fan-out renders that group.
                 continue
-            child, child_ws = await probe_operand(child_path,
-                                                  readdir=readdir,
-                                                  stat=stat,
-                                                  all_files=all_files,
-                                                  sort_by=sort_by,
-                                                  reverse=reverse,
-                                                  recursive=True,
-                                                  command_line_arg=False,
-                                                  index=index,
-                                                  links=links,
-                                                  deref=deref,
-                                                  child_mounts=child_mounts,
-                                                  mounts=mounts,
-                                                  stat_path=stat_path)
+            child, child_ws = await probe_operand(
+                child_path,
+                readdir=readdir,
+                stat=stat,
+                all_files=all_files,
+                sort_by=sort_by,
+                reverse=reverse,
+                recursive=True,
+                command_line_arg=False,
+                index=index,
+                links=links,
+                deref=deref,
+                child_mounts=child_mounts,
+                mounts=mounts,
+                stat_path=stat_path,
+                time_kind=time_kind,
+                group_dirs_first=group_dirs_first)
             groups.extend(child.groups)
             warnings.extend(child_ws)
     return Operand(path, None, groups), warnings
@@ -531,6 +939,8 @@ async def walk(
     child_mounts: ChildMounts | None = None,
     mounts: MountView | None = None,
     stat_path: StatPath | None = None,
+    time_kind: LsTimeKind = LsTimeKind.MTIME,
+    group_dirs_first: bool = False,
 ) -> WalkResult:
     """Flat listing for one operand: a directory's entries, or the operand
     itself when it is not one. ``recursive`` flattens the whole subtree in
@@ -556,6 +966,8 @@ async def walk(
             descending it.
         stat_path (StatPath | None): dispatcher-backed stat, for the
             child-mount rows no backend can supply.
+        time_kind (LsTimeKind): which timestamp ``-t`` compares.
+        group_dirs_first (bool): ``--group-directories-first``.
     """
     if list_dir:
         link_row = _link_row(path, links)
@@ -592,7 +1004,9 @@ async def walk(
                                             deref=deref,
                                             child_mounts=child_mounts,
                                             mounts=mounts,
-                                            stat_path=stat_path)
+                                            stat_path=stat_path,
+                                            time_kind=time_kind,
+                                            group_dirs_first=group_dirs_first)
     if operand.row is not None:
         return WalkResult([operand.row], warnings)
     entries = [e for _, group in operand.groups for e in group]
@@ -627,12 +1041,63 @@ async def _sorted_operands(
     reverse: bool,
     stat: Stat,
     index: IndexCacheStore,
+    time_kind: LsTimeKind = LsTimeKind.MTIME,
 ) -> list[Operand]:
     keys = [
         await _operand_key(o, sort_by=sort_by, stat=stat, index=index)
         for o in operands
     ]
-    return [operands[i] for i in _order_rows(keys, sort_by, reverse)]
+    return [
+        operands[i]
+        for i in _order_rows(keys, sort_by, reverse, time_kind=time_kind)
+    ]
+
+
+def _hyperlinked(name: str, virtual: str) -> str:
+    """A name wrapped in the OSC 8 hyperlink GNU emits under
+    ``--hyperlink``, pointing at the entry's virtual path.
+
+    Args:
+        name (str): the name as rendered.
+        virtual (str): the entry's absolute virtual path.
+    """
+    return f"\x1b]8;;file://{uri_escape(virtual)}\x07{name}\x1b]8;;\x07"
+
+
+URI_SAFE = frozenset(string.ascii_letters + string.digits + "~_-./")
+
+
+def uri_escape(path: str) -> str:
+    """Percent-encode a path for a ``file:`` URI the way GNU ls does:
+    every byte outside the unreserved set and ``/`` is ``%xx`` in
+    lowercase hex, so a space, ``?`` or ``#`` cannot end the path.
+
+    Args:
+        path (str): the absolute virtual path.
+    """
+    return "".join(c if c in URI_SAFE else "".join(f"%{b:02x}"
+                                                   for b in c.encode())
+                   for c in path)
+
+
+def _decorated_names(entries: list[FileStat], hrefs: list[str] | None,
+                     long: bool) -> list[str] | None:
+    """The name column per row under ``--hyperlink``, None otherwise.
+
+    Args:
+        entries (list[FileStat]): the rows.
+        hrefs (list[str] | None): each row's virtual path, when linking.
+        long (bool): whether the long format's ``-> target`` applies.
+    """
+    if hrefs is None:
+        return None
+    out: list[str] = []
+    for e, href in zip(entries, hrefs):
+        linked = _hyperlinked(e.name, href)
+        out.append(
+            formatting.ls_name(e.model_copy(
+                update={"name": linked})) if long else linked)
+    return out
 
 
 def _render_group(
@@ -640,15 +1105,26 @@ def _render_group(
     entries: list[FileStat],
     *,
     long: bool,
-    one_per_line: bool,
     human: bool,
     classify: bool,
     identity: Identity | None,
+    columns: formatting.LsColumns = formatting.DEFAULT_COLUMNS,
+    hrefs: list[str] | None = None,
 ) -> None:
-    if long and not one_per_line:
-        results.extend(format_ls_long(entries, human=human, identity=identity))
+    names = _decorated_names(entries, hrefs, long)
+    if long:
+        results.extend(
+            formatting.format_ls_long(entries,
+                                      human=human,
+                                      identity=identity,
+                                      columns=columns,
+                                      names=names))
     else:
-        results.extend(format_simple(entries, classify=classify))
+        results.extend(
+            format_simple(entries,
+                          classify=classify,
+                          columns=columns,
+                          names=names))
 
 
 def _finish(results: list[str],
@@ -664,7 +1140,6 @@ async def ls(
     readdir: Readdir,
     stat: Stat,
     long: bool = False,
-    one_per_line: bool = False,
     all_files: bool = False,
     human: bool = False,
     sort_by: LsSortBy = LsSortBy.NAME,
@@ -679,6 +1154,10 @@ async def ls(
     mounts: MountView | None = None,
     stat_path: StatPath | None = None,
     identity: Identity | None = None,
+    time_kind: LsTimeKind = LsTimeKind.MTIME,
+    group_dirs_first: bool = False,
+    columns: formatting.LsColumns = formatting.DEFAULT_COLUMNS,
+    hyperlink: bool = False,
 ) -> tuple[bytes, IOResult]:
     results: list[str] = []
     warnings: list[LsWarning] = []
@@ -687,6 +1166,7 @@ async def ls(
         # -d turns every operand into a plain row, sorted together and
         # printed with no headers.
         rows: list[FileStat] = []
+        row_hrefs: list[str] = []
         for p in paths:
             result = await walk(p,
                                 readdir=readdir,
@@ -699,16 +1179,24 @@ async def ls(
                                 mounts=mounts,
                                 stat_path=stat_path)
             rows.extend(result.entries)
+            row_hrefs.extend(p.virtual for _ in result.entries)
             warnings.extend(result.warnings)
         if len(rows) > 1:
-            rows = sort_stats(rows, sort_by, reverse)
+            order = _order_rows(rows,
+                                sort_by,
+                                reverse,
+                                time_kind=time_kind,
+                                group_dirs_first=group_dirs_first)
+            rows = [rows[i] for i in order]
+            row_hrefs = [row_hrefs[i] for i in order]
         _render_group(results,
                       rows,
                       long=long,
-                      one_per_line=one_per_line,
                       human=human,
                       classify=classify,
-                      identity=identity)
+                      identity=identity,
+                      columns=columns,
+                      hrefs=row_hrefs if hyperlink else None)
         return _finish(results, warnings)
 
     operands: list[Operand] = []
@@ -725,7 +1213,9 @@ async def ls(
                                             deref=deref,
                                             child_mounts=child_mounts,
                                             mounts=mounts,
-                                            stat_path=stat_path)
+                                            stat_path=stat_path,
+                                            time_kind=time_kind,
+                                            group_dirs_first=group_dirs_first)
         warnings.extend(p_ws)
         operands.append(operand)
     if len(operands) > 1:
@@ -733,19 +1223,23 @@ async def ls(
                                           sort_by=sort_by,
                                           reverse=reverse,
                                           stat=stat,
-                                          index=index)
+                                          index=index,
+                                          time_kind=time_kind)
 
     # GNU names every listed directory once there is more than one operand
     # (or under -R); a lone directory operand is listed bare.
     headed = recursive or len(paths) > 1
     rows = [o.row for o in operands if o.row is not None]
-    _render_group(results,
-                  rows,
-                  long=long,
-                  one_per_line=one_per_line,
-                  human=human,
-                  classify=classify,
-                  identity=identity)
+    _render_group(
+        results,
+        rows,
+        long=long,
+        human=human,
+        classify=classify,
+        identity=identity,
+        columns=columns,
+        hrefs=[o.path.virtual for o in operands
+               if o.row is not None] if hyperlink else None)
     printed = bool(rows)
     for operand in operands:
         for dir_spec, entries in operand.groups:
@@ -758,10 +1252,14 @@ async def ls(
             _render_group(results,
                           entries,
                           long=long,
-                          one_per_line=one_per_line,
                           human=human,
                           classify=classify,
-                          identity=identity)
+                          identity=identity,
+                          columns=columns,
+                          hrefs=[
+                              posixpath.join(dir_spec.virtual, e.name)
+                              for e in entries
+                          ] if hyperlink else None)
             printed = True
 
     return _finish(results, warnings)

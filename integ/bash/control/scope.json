@@ -1,0 +1,174 @@
+{
+  "cases": [
+    {
+      "id": "ctl_for_leaves_last_value",
+      "seq": 502171,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gdrive",
+        "gdrive-folder",
+        "gridfs",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "i=orig; for i in a b c; do :; done; echo \"$i\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "c\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_for_break_leaves_current",
+      "seq": 502172,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gdrive",
+        "gdrive-folder",
+        "gridfs",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "for i in 1 2 3; do if [ $i = 2 ]; then break; fi; done; echo \"$i\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_for_empty_list_keeps_value",
+      "seq": 502173,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gdrive",
+        "gdrive-folder",
+        "gridfs",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "i=orig; for i in; do :; done; echo \"$i\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "orig\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_nested_for_vars_survive",
+      "seq": 502174,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gdrive",
+        "gdrive-folder",
+        "gridfs",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "for i in 1 2; do for j in a b; do :; done; done; echo \"$i$j\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "2b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_select_leaves_choice",
+      "seq": 502175,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gdrive",
+        "gdrive-folder",
+        "gridfs",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "select sx in aa bb; do break; done <<< '1'; echo \"$sx\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "aa\n",
+        "stderr": "1) aa\n2) bb\n#? "
+      }
+    }
+  ]
+}

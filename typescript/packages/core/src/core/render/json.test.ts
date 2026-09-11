@@ -13,7 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { compactJsonBytes, compactJsonText, jsonBytes, jsonlBytes, jsonText } from './json.ts'
+import {
+  compactJsonBytes,
+  compactJsonText,
+  jsonBytes,
+  jsonlBytes,
+  jsonText,
+  numberText,
+  valueText,
+} from './json.ts'
 
 const DEC = new TextDecoder()
 
@@ -71,5 +79,49 @@ describe('json render kit', () => {
 
   it('keeps the given jsonl order', () => {
     expect(DEC.decode(jsonlBytes([{ i: 2 }, { i: 1 }]))).toBe('{"i":2}\n{"i":1}\n')
+  })
+})
+
+describe('valueText', () => {
+  it('spells a value as its JSON does', () => {
+    // A string is itself; anything else is its compact JSON, so a boolean
+    // is `true` in both languages rather than Python's `True`, and an
+    // integral float is the integer this side never told apart.
+    expect(valueText('x')).toBe('x')
+    expect(valueText('True')).toBe('True')
+    expect(valueText(true)).toBe('true')
+    expect(valueText(false)).toBe('false')
+    expect(valueText(7)).toBe('7')
+    expect(valueText(1.0)).toBe('1')
+    expect(valueText(1.5)).toBe('1.5')
+    expect(valueText(null)).toBe('null')
+    expect(valueText({ a: 1.0, b: [true, null] })).toBe('{"a":1,"b":[true,null]}')
+  })
+
+  it('spells a float the way python does', () => {
+    // A label holding 1e-7 spelled 1e-07 in python and 1e-7 here, so one
+    // point had two paths; a nested number spells the same way.
+    expect(valueText(1e-7)).toBe('1e-7')
+    expect(valueText(1e21)).toBe('1e+21')
+    expect(valueText({ a: 1e-7, b: [1e21] })).toBe('{"a":1e-7,"b":[1e+21]}')
+  })
+})
+
+describe('numberText', () => {
+  it('lays a float out as ECMAScript does', () => {
+    // String() is the spec here; the python twin reproduces this table from
+    // repr, whose digits agree and whose layout does not.
+    expect(numberText(1e-7)).toBe('1e-7')
+    expect(numberText(0.00001)).toBe('0.00001')
+    expect(numberText(1.5e-5)).toBe('0.000015')
+    expect(numberText(1e16)).toBe('10000000000000000')
+    expect(numberText(1e21)).toBe('1e+21')
+    expect(numberText(1.5e22)).toBe('1.5e+22')
+    expect(numberText(123.0)).toBe('123')
+    expect(numberText(-0)).toBe('0')
+    expect(numberText(-1e-7)).toBe('-1e-7')
+    expect(numberText(0.30000000000000004)).toBe('0.30000000000000004')
+    expect(numberText(Number.NaN)).toBe('null')
+    expect(numberText(Number.POSITIVE_INFINITY)).toBe('null')
   })
 })

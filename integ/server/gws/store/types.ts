@@ -76,9 +76,19 @@ export interface Presentation {
   slides: SlidePage[]
 }
 
-export interface DocBody {
+// One tab of a document. `childTabs` is always present (empty for a leaf)
+// so a walk never has to test for it; the wire shape omits it when empty,
+// which is the renderer's business, not the store's.
+export interface DocTab {
+  tabId: string
   title: string
   text: string
+  childTabs: DocTab[]
+}
+
+export interface DocBody {
+  title: string
+  tabs: DocTab[]
 }
 
 export interface GmailAttachment {

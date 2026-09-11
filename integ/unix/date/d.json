@@ -154,6 +154,68 @@
         "stdout": "2026-08-16|13:45:30|3|20|13:45|01:45:30 PM\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "date_width_pads_a_composite_whole",
+      "seq": 962335,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d '2026-09-03T05:07:09Z' '+%12F|%-12F|%012F|%+12F|%9F|%12D|%012D|%+12D|%012T|%12R'",
+      "expect": {
+        "exit": 0,
+        "stdout": "002026-09-03|2026-09-03|002026-09-03|+02026-09-03|2026-09-03|    09/03/26|000009/03/26|000009/03/26|000005:07:09|       05:07\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "date_flags_reach_names_short_years_and_plain_offsets",
+      "seq": 962336,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d '2026-09-03T05:07:09Z' '+%-5a|%_5a|%05a|%^5a|%#5a|%+3y|%+5g|%+2y|%-z|%_z|%6z|%_8z|%3z|%-:z|%_:::z'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Thu|  Thu|00Thu|  THU|  THU|+26|+0026|26|+0|   +0|+00000|      +0|+00|+0:00| +0\n",
+        "stderr": ""
+      }
     }
   ]
 }

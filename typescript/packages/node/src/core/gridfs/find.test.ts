@@ -122,7 +122,11 @@ function runFind(
   const queries: Record<string, unknown>[] = []
   vi.mocked(clientMod.iterLatest).mockImplementation((_accessor, query) => {
     queries.push(query)
-    return docsGen(docs.map(([filename, length]) => ({ filename, length }) as GridFSFileDoc))
+    return docsGen(
+      docs.map(
+        ([filename, length]) => ({ filename, length, uploadDate: new Date(0) }) as GridFSFileDoc,
+      ),
+    )
   })
   const accessor = new GridFSAccessor({
     uri: 'mongodb://localhost:27017',

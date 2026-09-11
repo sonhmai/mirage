@@ -15,6 +15,9 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
+import type { Policy } from '@struktoai/mirage-core/policy/index'
+import type { Action, SessionContext } from '@struktoai/mirage-core/policy/types'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { seedVar } from '@struktoai/mirage-core/workspace/session/state'
 import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
@@ -28,6 +31,16 @@ import { stateDiff } from './stateDiff.ts'
 import { VersionStore } from './store.ts'
 
 type AnyDict = Record<string, unknown>
+
+/** Refuse env writes to GATE_* names, the deployment's rule. */
+class DenyGate implements Policy {
+  preSession(ctx: SessionContext): Action | null {
+    if (ctx.plane === 'env' && ctx.key.startsWith('GATE_')) {
+      return { kind: 'deny', reason: 'GATE_* refused by policy' }
+    }
+    return null
+  }
+}
 
 describe('stateDiff + restore', () => {
   let root: string
@@ -116,5 +129,17 @@ describe('stateDiff + restore', () => {
     await expect(
       restore(store, ws, v1, { paths: ['/m/a.txt'], categories: ['files'] }),
     ).rejects.toThrow('not both')
+  })
+
+  // The live cache was cleared ahead of the restore's gate, so a refused
+  // restore still sent every cached read back to its origin while the
+  // rest of the workspace stayed as it was; the clear now sits behind it.
+  it('a refused restore leaves the live cache alone', async () => {
+    seedVar(ws.createSession('s2'), 'GATE_X', '1')
+    const v1 = await commitState(store, await toStateDict(ws), 'main', 'v1')
+    await ws.cache.set('k', new TextEncoder().encode('cached'))
+    ws.policies.add(new DenyGate())
+    await expect(restore(store, ws, v1)).rejects.toBeInstanceOf(PolicyDenied)
+    expect(await ws.cache.get('k')).toEqual(new TextEncoder().encode('cached'))
   })
 })

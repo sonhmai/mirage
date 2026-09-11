@@ -335,7 +335,7 @@ async def execute_line(
                                agent_id=agent or ""), timeout, name)
         held = False
         try:
-            line_runtime = ws._runtimes.whole_line(ast, decision)
+            line_runtime = ws._runtimes.whole_line(decision)
             if line_runtime is not None:
                 # A whole line is a command like any other: the same
                 # visibility and admission gate as the tree, per parsed
@@ -546,7 +546,10 @@ async def execute_line(
         reset_current_session(session_token)
         await ws._session_mgr.flush()
         ws._ops.records.extend(scope.records)
-        if is_line:
+        # bash adds a line to history only when it is non-empty
+        # (`shell_input_line[0]`): a blank line is skipped, while a
+        # whitespace-only or comment-only line is kept.
+        if is_line and command.strip("\n"):
             await ws.observer.log_execution(command, io, scope.records, agent
                                             or "", session_id,
                                             session_cwd(ws, session_id))

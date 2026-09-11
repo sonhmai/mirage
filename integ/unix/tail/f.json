@@ -1,0 +1,227 @@
+{
+  "cases": [
+    {
+      "id": "tail_follow_bogus_how",
+      "seq": 960014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail --follow=bogus /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tail: invalid argument 'bogus' for '--follow'\nValid arguments are:\n  - 'descriptor'\n  - 'name'\nTry 'tail --help' for more information.\n"
+      },
+      "flags": [
+        "follow"
+      ]
+    },
+    {
+      "id": "tail_f_sleep_interval_bogus",
+      "seq": 960015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -f -s bogus /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tail: invalid number of seconds: 'bogus'\n"
+      },
+      "flags": [
+        "f",
+        "s"
+      ]
+    },
+    {
+      "id": "tail_f_missing_has_no_files_remaining",
+      "seq": 960016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -f /data/tf_nope.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tail: /data/tf_nope.txt: No such file or directory\ntail: no files remaining\n"
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "tail_retry_without_follow_warns",
+      "seq": 960017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'l1\\nl2\\n' > /data/tfr.txt && tail -n1 --retry /data/tfr.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "l2\n",
+        "stderr": "tail: warning: --retry ignored; --retry is useful only when following\n"
+      },
+      "flags": [
+        "n",
+        "retry"
+      ]
+    },
+    {
+      "id": "tail_f_gives_up_on_a_directory",
+      "command": "mkdir -p /data/tfd2 && printf k > /data/tfd2/k && tail -f /data/tfd2; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\n",
+        "stderr": "tail: /data/tfd2: Is a directory\ntail: /data/tfd2: cannot follow end of this type of file; giving up on this name\ntail: no files remaining\n"
+      },
+      "flags": [
+        "f"
+      ],
+      "seq": 960019,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "tail_follow_name_gives_up_on_a_replacing_directory",
+      "seq": 960020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/tfd3; printf 'a\\n' > /data/tfd3/f; (sleep 1.5; rm /data/tfd3/f; mkdir /data/tfd3/f) & tail --follow=name -s 3 /data/tfd3/f; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\ncode=1\n",
+        "stderr": "tail: '/data/tfd3/f' has been replaced with an untailable file; giving up on this name\ntail: no files remaining\n"
+      },
+      "flags": [
+        "follow",
+        "s"
+      ]
+    }
+  ]
+}

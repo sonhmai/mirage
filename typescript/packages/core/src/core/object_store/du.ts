@@ -14,8 +14,9 @@
 
 import type { Accessor } from '../../accessor/base.ts'
 import * as kp from '../../utils/key_prefix.ts'
-import { lstripSlash, rstripSlash } from '../../utils/slash.ts'
+import { lstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+import { readTree } from './readdir.ts'
 import type { DuEntriesFn, DuSizeFn, ObjectStoreDriver } from './driver.ts'
 
 /**
@@ -28,21 +29,17 @@ import type { DuEntriesFn, DuSizeFn, ObjectStoreDriver } from './driver.ts'
 export function makeDuEntries<A extends Accessor, C>(
   driver: ObjectStoreDriver<A, C>,
 ): DuEntriesFn<A> {
-  return async function entries(accessor, path, _index) {
+  return async function entries(accessor, path, index) {
     const kpfx = driver.keyPrefixOf(accessor)
-    const stem = rstripSlash(kp.apply(kpfx, path.mountPath))
     const found: [string, number][] = []
     let total = 0
-    const { conn, close } = await driver.connect(accessor)
-    try {
-      for await (const entry of driver.listSubtree(conn, stem)) {
-        const rel = kp.strip(kpfx, entry.key)
-        const size = entry.size ?? 0
-        found.push(['/' + lstripSlash(rel), size])
-        total += size
-      }
-    } finally {
-      await close()
+    const [rows] = await readTree(driver, accessor, path, index)
+    for (const entry of rows) {
+      if (entry.key === '' || entry.key.endsWith('/')) continue
+      const rel = kp.strip(kpfx, entry.key)
+      const size = entry.size ?? 0
+      found.push(['/' + lstripSlash(rel), size])
+      total += size
     }
     found.sort((a, b) => compareCodePoints(a[0], b[0]) || a[1] - b[1])
     return [found, total]
@@ -51,18 +48,11 @@ export function makeDuEntries<A extends Accessor, C>(
 
 /** Build the recursive byte total over one driver. */
 export function makeDuSize<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): DuSizeFn<A> {
-  return async function size(accessor, path, _index) {
-    const kpfx = driver.keyPrefixOf(accessor)
-    const stem = rstripSlash(kp.apply(kpfx, path.mountPath))
-    let total = 0
-    const { conn, close } = await driver.connect(accessor)
-    try {
-      for await (const entry of driver.listSubtree(conn, stem)) {
-        total += entry.size ?? 0
-      }
-    } finally {
-      await close()
-    }
-    return total
+  return async function size(accessor, path, index) {
+    const [rows] = await readTree(driver, accessor, path, index)
+    return rows.reduce(
+      (total, row) => total + (row.key !== '' && !row.key.endsWith('/') ? (row.size ?? 0) : 0),
+      0,
+    )
   }
 }

@@ -19,6 +19,7 @@ import pytest
 from mirage.commands.builtin.github.grep import grep
 from mirage.commands.builtin.github.pushdown import narrow_scope
 from mirage.commands.config import CommandOpts
+from mirage.io.types import IOResult
 from mirage.types import PathSpec
 from tests.fixtures.github_mock import MOCK_BLOBS
 
@@ -83,6 +84,25 @@ async def test_grep_subdir_uses_search(mock_github_api, github_env,
                    'w': True
                }))
     spy.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_explicit_h_survives_narrowing(github_env, monkeypatch):
+    accessor, index = github_env
+    hit = PathSpec(resource_path="src/a.py",
+                   virtual="/src/a.py",
+                   directory="",
+                   resolved=True)
+    monkeypatch.setitem(_GLOBALS, "narrow_scope",
+                        AsyncMock(return_value=([hit], 1, True)))
+    generic = AsyncMock(return_value=(b"", IOResult()))
+    monkeypatch.setitem(_GLOBALS, "generic_grep", generic)
+    await grep(accessor, [_subdir()], ['import'],
+               CommandOpts(index=index, flags={
+                   'r': True,
+                   'h': True
+               }))
+    assert "H" not in generic.await_args.args[2].flags
 
 
 @pytest.mark.asyncio

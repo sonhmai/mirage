@@ -74,7 +74,7 @@ include = ["mirage*"]
 # to read an installed package's annotations and every mirage import
 # resolves to Any, so our own gated-at-zero mypy proves nothing to anyone
 # downstream. It caught the 0.0.5 build_resource break in one line.
-mirage = ["**/*.lua", "py.typed"]
+mirage = ["**/*.lua", "**/*.js", "py.typed"]
 
 [project.optional-dependencies]
 # --- python runtime (sandboxed python3 default) ---

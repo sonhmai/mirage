@@ -112,3 +112,14 @@ describe('lancedb scope', () => {
     expect(detectFor(other)(ps('/animals/cat/3.md')).kind).toBe('row_card')
   })
 })
+
+describe('lancedb group segments', () => {
+  it('decode the path-safe rendering back to the exact value', () => {
+    // `a/b` lists as `a∕b` and `a∕b` as `a⁄∕b`; the WHERE clause each
+    // directory builds must hold the value it was rendered from.
+    expect(filtersOf(config, detect(config)(ps('/animals/a∕b')))).toEqual({ label: 'a/b' })
+    expect(filtersOf(config, detect(config)(ps('/animals/a⁄∕b')))).toEqual({ label: 'a∕b' })
+    expect(filtersOf(config, detect(config)(ps('/animals/⁄')))).toEqual({ label: '' })
+    expect(filtersOf(config, detect(config)(ps('/animals/⁄.env')))).toEqual({ label: '.env' })
+  })
+})

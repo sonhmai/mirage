@@ -181,6 +181,19 @@
         "stdout": "/repo/docs/architecture.md\n/repo/docs/contributing.md\n/repo/docs/release.md\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "github_grep_search_keeps_explicit_h",
+      "seq": 530015,
+      "targets": [
+        "github"
+      ],
+      "command": "grep -rhw wombat /repo",
+      "expect": {
+        "exit": 0,
+        "stdout": "Run the wombat suite before pushing.\n# wombat invalidates the warm entries\n# wombat compaction pass\n",
+        "stderr": ""
+      }
     }
   ]
 }

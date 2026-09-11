@@ -13,17 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { resolvePostgresConfig } from '@struktoai/mirage-core/resource/postgres/config'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { PostgresStore } from './store.ts'
 
+// vitest 4 types a bare `vi.fn()` as neither callable nor constructable.
+type AnyMock = Mock<(...args: never[]) => unknown>
+
 interface MockPool {
-  query: ReturnType<typeof vi.fn>
-  end: ReturnType<typeof vi.fn>
+  query: AnyMock
+  end: AnyMock
   options: Record<string, unknown>
 }
 
 const pools: MockPool[] = []
-const PoolCtor = vi.fn((options: Record<string, unknown>) => {
+const PoolCtor = vi.fn(function (options: Record<string, unknown>) {
   const pool: MockPool = {
     options,
     query: vi.fn((_sql: string, _params?: unknown[]) =>
@@ -87,7 +90,7 @@ describe('PostgresStore', () => {
     const store = new PostgresStore(resolvePostgresConfig({ dsn: 'postgres://localhost/acme' }))
     pools.length = 0
     PoolCtor.mockClear()
-    PoolCtor.mockImplementationOnce((options: Record<string, unknown>) => {
+    PoolCtor.mockImplementationOnce(function (options: Record<string, unknown>) {
       const pool: MockPool = {
         options,
         query: vi.fn(() => Promise.resolve({ rows: [{ db: 'acme' }], rowCount: 1 })),

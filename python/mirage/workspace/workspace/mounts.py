@@ -123,10 +123,21 @@ def install_mounts(registry: MountRegistry, specs: list[MountSpec],
                    index: IndexConfig | None, default_mode: MountMode) -> bool:
     """Mount every spec, adding an implicit scratch root if none claims /.
 
+    A workspace-level ``index`` is installed on every resource, its TTL
+    included: the config names the store the whole workspace shares, so
+    a resource that declares ``index_ttl = 0`` caches its listings for the
+    workspace's TTL under it (the redis index example relies on exactly
+    that to share a RAM mount's listing between two processes). With no
+    workspace config a resource keeps the index it was constructed with
+    or given through ``set_index``, as the TypeScript workspace does;
+    resetting it to a RAM default here silently discarded a
+    ``RedisIndexConfig`` passed to the resource itself.
+
     Args:
         registry (MountRegistry): the workspace's mount table.
         specs (list[MountSpec]): the normalized mount specs.
-        index (IndexConfig | None): index config installed per resource.
+        index (IndexConfig | None): index config installed per resource,
+            or None to leave each resource's own index in place.
         default_mode (MountMode): mode for the implicit root.
 
     Returns:
@@ -134,7 +145,8 @@ def install_mounts(registry: MountRegistry, specs: list[MountSpec],
     """
     for spec in specs:
         registry.check_resource_available(spec.resource)
-        spec.resource.set_index(index)
+        if index is not None:
+            spec.resource.set_index(index)
         entry = registry.mount(spec.prefix, spec.resource, spec.mode)
         if spec.command_limits:
             entry.command_limits.update(spec.command_limits)

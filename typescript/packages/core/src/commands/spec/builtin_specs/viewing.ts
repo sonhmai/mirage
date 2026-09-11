@@ -126,7 +126,18 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-c', type: 'str' }),
       new Option({ short: '-q' }),
       new Option({ short: '-v' }),
-      new Option({ short: '-f', long: '--follow' }),
+      // GNU: -f never takes an argument; only --follow= carries the
+      // descriptor/name choice, so the short stays clusterable.
+      new Option({
+        short: '-f',
+        long: '--follow',
+        type: 'str',
+        valueOptional: true,
+        shortValue: false,
+      }),
+      new Option({ short: '-F' }),
+      new Option({ long: '--retry' }),
+      new Option({ short: '-s', long: '--sleep-interval', type: 'str' }),
     ],
     rest: new Operand({ type: 'path' }),
   }),

@@ -21,7 +21,7 @@ def test_modified_none_and_empty_string_return_none():
 
 def test_modified_parses_http_date_to_iso_utc():
     assert modified_to_iso(
-        "Tue, 14 Nov 2023 22:13:20 GMT") == "2023-11-14T22:13:20+00:00"
+        "Tue, 14 Nov 2023 22:13:20 GMT") == "2023-11-14T22:13:20Z"
 
 
 def test_modified_returns_unparseable_string_verbatim():
@@ -30,16 +30,16 @@ def test_modified_returns_unparseable_string_verbatim():
 
 def test_modified_coerces_naive_datetime_to_utc():
     naive = datetime(2023, 11, 14, 22, 13, 20)
-    assert modified_to_iso(naive) == "2023-11-14T22:13:20+00:00"
+    assert modified_to_iso(naive) == "2023-11-14T22:13:20Z"
 
 
 def test_modified_converts_aware_datetime_to_utc():
     aware = datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
-    assert modified_to_iso(aware) == "2023-11-14T22:13:20+00:00"
+    assert modified_to_iso(aware) == "2023-11-14T22:13:20Z"
 
 
 def test_modified_treats_large_int_as_epoch_milliseconds():
-    assert modified_to_iso(1_700_000_000_000) == "2023-11-14T22:13:20+00:00"
+    assert modified_to_iso(1_700_000_000_000) == "2023-11-14T22:13:20Z"
 
 
 def test_name_from_backend_path_file():
@@ -64,7 +64,7 @@ async def test_stat_file(accessor, files, remote_root):
     result = await stat(accessor, path)
     assert result.name == "latest.md"
     assert result.size == 6
-    assert result.modified == "2023-11-14T22:13:20+00:00"
+    assert result.modified == "2023-11-14T22:13:20Z"
     assert result.type != FileType.DIRECTORY
 
 
@@ -86,7 +86,7 @@ async def test_stat_file_from_index_skips_sdk(accessor, files, index,
     result = await stat(accessor, path, index)
     assert result.name == "latest.md"
     assert result.size == 6
-    assert result.modified == "2023-11-14T22:13:20+00:00"
+    assert result.modified == "2023-11-14T22:13:20Z"
     assert result.type != FileType.DIRECTORY
     assert files.get_metadata_calls == []
     assert files.get_directory_metadata_calls == []

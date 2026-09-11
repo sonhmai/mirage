@@ -21,6 +21,7 @@ from typing import Any
 from mirage.accessor.hf_hub import HfHubAccessor
 from mirage.cache.index import (NULL_INDEX, IndexCacheStore, IndexEntry,
                                 LookupStatus)
+from mirage.cache.index.lock import index_lock
 from mirage.core.hf_hub.client import (HfHubError, api_url, hub_get_response,
                                        rev_segment)
 from mirage.core.hf_hub.constants import (MAX_TREE_PAGES, TREE_PAGE_SIZE,
@@ -377,12 +378,15 @@ async def refill_index(
         bool: whether a refill happened; False when there is no index to
         seed, so a caller does not retry a lookup that cannot change.
     """
+    # The caller holds index_lock through replacement and its final lookup.
     if index is NULL_INDEX:
         return False
     tree = await fetch_tree(accessor)
     accessor.tree = tree
     accessor.tree_loaded = True
     accessor.rows_cache = None
+    # Refilling replaces the snapshot; merging would retain deleted paths.
+    await index.invalidate_prefix(prefix.rstrip("/") or "/")
     seed_index(accessor, index, prefix)
     return True
 
@@ -392,7 +396,7 @@ async def ensure_live_index(
     index: IndexCacheStore,
     prefix: str,
 ) -> bool:
-    """Refetch when the index holds no listing at all.
+    """Refetch when the root listing is missing or expired.
 
     Every reader treats a missing listing as a real absence, which is
     right against a *live* index and wrong against one that was never
@@ -411,7 +415,8 @@ async def ensure_live_index(
     if index is NULL_INDEX:
         return False
     if (await index.list_dir(prefix.rstrip("/")
-                             or "/")).status != LookupStatus.NOT_FOUND:
+                             or "/")).status not in (LookupStatus.NOT_FOUND,
+                                                     LookupStatus.EXPIRED):
         return False
     return await refill_index(accessor, index, prefix)
 
@@ -444,8 +449,10 @@ async def ensure_tree(
         if accessor.tree_loaded:
             return
         if index is not NULL_INDEX:
-            await refill_index(accessor, index, prefix)
-            return
+            async with index_lock(index, prefix.rstrip("/") or "/"):
+                if not accessor.tree_loaded:
+                    await refill_index(accessor, index, prefix)
+                return
         accessor.tree = await fetch_tree(accessor)
         accessor.tree_loaded = True
         accessor.rows_cache = None

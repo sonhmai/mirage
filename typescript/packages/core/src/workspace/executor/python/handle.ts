@@ -19,7 +19,7 @@ import type { LanguageRuntime } from '../../../runtime/language.ts'
 import { PythonRuntime } from '../../../runtime/python/base.ts'
 import type { InitFlags } from '../../../runtime/python/flags.ts'
 import { MontyUnavailableError } from '../../../runtime/python/monty/index.ts'
-import { PyodideUnavailableError } from '../../../runtime/python/types.ts'
+import { PyodideUnavailableError } from '../../../runtime/python/pyodide/errors.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { ExecutionNode } from '../../types.ts'
@@ -59,6 +59,7 @@ export async function handlePython(
     command?: string
     stdin: ByteSource | null
     env: Record<string, string>
+    cwd?: PathSpec
     code: string | null
     // argv[0], derived from which door the source came through; '' is
     // CPython's own answer for a program piped in with no operand, so a
@@ -82,6 +83,7 @@ export async function handlePython(
       command: opts.command ?? 'python3',
       stdin: opts.stdin,
       env: opts.env,
+      ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
       code: opts.code,
       refuse: (runtime: LanguageRuntime) =>
         moduleRefusal(opts.mode, runtime, opts.command ?? 'python3'),

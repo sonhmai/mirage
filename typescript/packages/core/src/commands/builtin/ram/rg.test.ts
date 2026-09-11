@@ -57,6 +57,33 @@ async function runRg(
 }
 
 describe('rg', () => {
+  it.each([
+    [{}, ''],
+    [{ H: true }, '/tmp/binary.txt:'],
+    [{ args_I: true }, ''],
+    [{ H: true, args_I: true }, ''],
+  ])('keeps rg filename flags separate from grep binary flags: %j', async (flags, prefix) => {
+    const resource = new RAMResource()
+    resource.store.files.set('/tmp/binary.txt', ENC.encode('needle\0tail\n'))
+    const r = await runRg(resource, ['needle'], [PathSpec.fromStrPath('/tmp/binary.txt')], flags)
+    expect(r.out).toBe(`${prefix}needle\0tail\n`)
+    expect(r.exitCode).toBe(0)
+  })
+
+  it('-I keeps NUL-containing matches across multiple files', async () => {
+    const resource = new RAMResource()
+    resource.store.files.set('/tmp/a.txt', ENC.encode('needle\0a\n'))
+    resource.store.files.set('/tmp/b.txt', ENC.encode('needle\0b\n'))
+    const r = await runRg(
+      resource,
+      ['needle'],
+      [PathSpec.fromStrPath('/tmp/a.txt'), PathSpec.fromStrPath('/tmp/b.txt')],
+      { args_I: true },
+    )
+    expect(r.out).toBe('needle\0a\nneedle\0b\n')
+    expect(r.exitCode).toBe(0)
+  })
+
   it('matches basic pattern in single file', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/a.txt', ENC.encode('hello world\nfoo bar\nhello again\n'))

@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.index import NULL_INDEX
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import PredNode, start_basename
 from mirage.core.msgraph.drive_ops import find_items
 from mirage.core.onedrive.client import drive_loc, split_path
@@ -48,6 +48,7 @@ async def find(
     mindepth: int | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     _, base = split_path(path)
     return await find_items(accessor.config,

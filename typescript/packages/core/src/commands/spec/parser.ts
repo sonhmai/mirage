@@ -44,6 +44,7 @@ function setValueFlag(
       flags[name] = [value]
     }
   } else {
+    Reflect.deleteProperty(flags, name)
     flags[name] = value
   }
 }
@@ -83,6 +84,7 @@ function setBoolFlag(flags: Record<string, FlagValue>, cs: CompiledSpec, spellin
     const prev = flags[name]
     flags[name] = typeof prev === 'number' ? prev + 1 : 1
   } else {
+    Reflect.deleteProperty(flags, name)
     flags[name] = true
   }
 }

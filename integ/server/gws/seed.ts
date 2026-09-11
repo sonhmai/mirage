@@ -18,11 +18,11 @@ import { createDriveItem } from './drive/item.ts'
 import { eventsOf, makeEvent } from './calendar/event.ts'
 import { DEFAULT_CALENDAR_TZ } from './store/state.ts'
 import type { GwsState } from './store/state.ts'
-import type { FormDoc } from './store/types.ts'
+import type { DocTab, FormDoc } from './store/types.ts'
 import { newFormItem } from './forms/form.ts'
 import { asBool, asObjArr, asStr, isObj } from './wire/json.ts'
 import type { JsonObj } from './wire/json.ts'
-import { FORM_MIME } from './wire/mime.ts'
+import { DOC_MIME, FORM_MIME } from './wire/mime.ts'
 
 // A secondary calendar and a form carrying responses are both harness state
 // rather than anything the API can mint: you own every calendar you create,
@@ -53,6 +53,71 @@ export function seedCalendars(st: GwsState, entries: JsonObj[]): void {
       }
       bucket.set(ev.id, ev)
     }
+  }
+}
+
+// Every id a fixture pinned, collected before any is minted so a mint can
+// step over one, whichever order the two appear in. A pin repeated is a
+// fixture bug and is named here: DocTab is keyed by (tenant, documentId,
+// tabId), so the alternative is a primary-key violation at save time,
+// reported against a table rather than against the line that caused it.
+function pinnedTabIds(entries: JsonObj[], seen: Set<string>): Set<string> {
+  for (const raw of entries) {
+    const pinned = asStr(raw.tabId)
+    if (pinned !== undefined) {
+      if (seen.has(pinned)) {
+        throw new ResetBodyError(`/reset extras.docs pins tab id "${pinned}" twice`)
+      }
+      seen.add(pinned)
+    }
+    pinnedTabIds(asObjArr(raw.childTabs), seen)
+  }
+  return seen
+}
+
+// Tab ids are minted in pre-order (t.0, t.1, ... across the whole
+// document, children before the next sibling) so a truth file can name one
+// and stay stable. A fixture may pin its own instead, and a minted id then
+// steps over every pinned one rather than colliding with it.
+function docTabsFrom(entries: JsonObj[], mint: () => string): DocTab[] {
+  return entries.map((raw) => {
+    const tabId = asStr(raw.tabId) ?? mint()
+    return {
+      tabId,
+      title: asStr(raw.title) ?? '',
+      text: asStr(raw.text) ?? '',
+      childTabs: docTabsFrom(asObjArr(raw.childTabs), mint),
+    }
+  })
+}
+
+// A MULTI-TAB document is a state the Docs API cannot produce: there is no
+// request that creates a tab, so unlike the single-tab docs in the `apps`
+// fixture -- which seed through documents.create plus a batchUpdate -- one
+// of these cannot be built by driving the same API a backend speaks. It
+// therefore rides `extras`, for the same reason a secondary calendar and a
+// submitted form response do.
+export function seedDocs(st: GwsState, entries: JsonObj[]): void {
+  for (const entry of entries) {
+    const name = asStr(entry.name) ?? ''
+    // Through the Drive table because the documentId IS the Drive file id,
+    // which is what makes a seeded doc findable the one way an agent can
+    // find one.
+    const item = createDriveItem(st, name, DOC_MIME, [], Buffer.alloc(0), st.nextId('doc'))
+    const doc = st.docs.get(item.id)
+    if (doc === undefined) throw new ResetBodyError(`doc ${item.id} was not auto-linked`)
+    const declared = asObjArr(entry.tabs)
+    const pinned = pinnedTabIds(declared, new Set<string>())
+    let next = 0
+    const mint = (): string => {
+      let id = `t.${String(next++)}`
+      while (pinned.has(id)) id = `t.${String(next++)}`
+      return id
+    }
+    const tabs = docTabsFrom(declared, mint)
+    // No tabs declared is one tab, which is what autoLink already made:
+    // every document has at least one, and a tabless one cannot be read.
+    if (tabs.length > 0) doc.tabs = tabs
   }
 }
 
@@ -97,7 +162,7 @@ function listField(name: string, value: JsonValue | undefined): JsonObj[] {
   return value.filter(isObj)
 }
 
-const KNOWN = new Set(['calendarTimeZone', 'calendars', 'forms'])
+const KNOWN = new Set(['calendarTimeZone', 'calendars', 'docs', 'forms'])
 
 export function applyExtras(st: GwsState, extras: Record<string, JsonValue>): void {
   const unknown = Object.keys(extras).filter((k) => !KNOWN.has(k))
@@ -115,5 +180,6 @@ export function applyExtras(st: GwsState, extras: Record<string, JsonValue>): vo
     for (const cal of st.calendars.values()) if (cal.primary === true) cal.timeZone = tz
   }
   seedCalendars(st, listField('calendars', extras.calendars))
+  seedDocs(st, listField('docs', extras.docs))
   seedForms(st, listField('forms', extras.forms))
 }

@@ -31,7 +31,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "ln: target '/data/lnk_multi': Not a directory\n"
+        "stderr": "ln: target '/data/lnk_multi': No such file or directory\n"
       }
     }
   ]

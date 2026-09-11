@@ -47,16 +47,18 @@ describe('gdrive stat shared drives', () => {
   it('reports a shared drive as a directory', async () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
-    await index.put(
-      '/Team Drive',
-      new IndexEntry({
-        id: 'drive1',
-        name: 'Team Drive',
-        resourceType: 'gdrive/shared_drive',
-        vfsName: 'Team Drive',
-        extra: { drive_id: 'drive1' },
-      }),
-    )
+    await index.setDir('/', [
+      [
+        'Team Drive',
+        new IndexEntry({
+          id: 'drive1',
+          name: 'Team Drive',
+          resourceType: 'gdrive/shared_drive',
+          vfsName: 'Team Drive',
+          extra: { drive_id: 'drive1' },
+        }),
+      ],
+    ])
     const result = await stat(
       accessor,
       new PathSpec({

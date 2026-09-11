@@ -1713,6 +1713,26 @@
       ]
     },
     {
+      "id": "gapps-tabs",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "epoch": "2026-01-01T00:00:00Z",
+      "docs": "gdocs-tabs/v1",
+      "mounts": [
+        {
+          "path": "/docs",
+          "resource": "gdocs",
+          "backend": "gdocs"
+        }
+      ],
+      "clis": [
+        "gws"
+      ]
+    },
+    {
       "id": "gcal",
       "hosts": [
         "python",

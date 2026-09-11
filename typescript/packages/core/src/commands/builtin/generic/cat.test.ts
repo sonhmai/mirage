@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { stripSlash } from '../../../utils/slash.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
@@ -112,4 +112,13 @@ describe('displayLines flags', () => {
     // TextEncoder emits UTF-8, so \u00ff arrives as the two bytes C3 BF.
     expect(await run('\x01\x7f\u00ff\n', { show_nonprinting: true })).toBe('^A^?M-CM-?\n')
   })
+})
+
+it('stats each operand once while retaining its stream', async () => {
+  const stat = vi.fn(statFn)
+  const [stdout] = (await catGeneric([spec('/a.txt'), spec('/b.txt')], [], opts(), stat, (p) =>
+    fileStream(p.virtual, []),
+  )) ?? [null]
+  expect(DEC.decode(await materialize(stdout))).toBe('a1\na2\na3\nb1\nb2\n')
+  expect(stat).toHaveBeenCalledTimes(2)
 })

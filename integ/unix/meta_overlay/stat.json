@@ -1,6 +1,33 @@
 {
   "cases": [
     {
+      "id": "ometa_stat_type_survives_touch",
+      "seq": 201015,
+      "targets": [
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "box"
+      ],
+      "command": "touch -t 202401010000 /data/metao/f.txt && stat /data/metao/f.txt | cut -d' ' -f4",
+      "expect": {
+        "exit": 0,
+        "stdout": "type=text\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "ometa_stat_c_mtime",
       "seq": 201016,
       "targets": [

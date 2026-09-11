@@ -45,6 +45,14 @@
       "types": "./dist/shell/parse/index.d.ts",
       "import": "./dist/shell/parse/index.js"
     },
+    "./runtime/js/quickjs": {
+      "types": "./dist/runtime/js/quickjs/runtime.d.ts",
+      "import": "./dist/runtime/js/quickjs/runtime.js"
+    },
+    "./runtime/python/pyodide": {
+      "types": "./dist/runtime/python/pyodide/runtime.d.ts",
+      "import": "./dist/runtime/python/pyodide/runtime.js"
+    },
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/*.js"
@@ -55,9 +63,10 @@
     "dist"
   ],
   "scripts": {
-    "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "build": "node scripts/embed-runtime.mjs && node scripts/clean.mjs && tsc -p tsconfig.build.json",
+    "test": "node scripts/embed-runtime.mjs && vitest run",
+    "typecheck": "node scripts/embed-runtime.mjs && tsc --noEmit",
+    "prepare": "node scripts/embed-runtime.mjs"
   },
   "devDependencies": {
     "@pydantic/monty": "0.0.21",
@@ -67,7 +76,8 @@
     "quickjs-emscripten": "^0.32.0",
     "tree-sitter-bash": "^0.25.1",
     "typescript": "^6.0.0",
-    "vitest": "^3.2.6",
+    "@types/node": "^22.0.0",
+    "vitest": "^4.1.11",
     "e2b": "^2.45.0"
   },
   "dependencies": {

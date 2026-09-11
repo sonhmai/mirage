@@ -42,9 +42,9 @@ describe('secrets registry', () => {
 
   it('an unknown source throws naming the known ones', () => {
     registerSecrets('vault-known', VaultConfig, () => Promise.resolve({ fields: {} }))
-    expect(() => sourceFor('nope')).toThrowError(SecretsError)
-    expect(() => sourceFor('nope')).toThrowError(/nope/)
-    expect(() => sourceFor('nope')).toThrowError(/vault-known/)
+    expect(() => sourceFor('nope')).toThrow(SecretsError)
+    expect(() => sourceFor('nope')).toThrow(/nope/)
+    expect(() => sourceFor('nope')).toThrow(/vault-known/)
   })
 
   it('sourceFor refuses a source whose optional peer is absent', () => {
@@ -59,11 +59,11 @@ describe('secrets registry', () => {
         throw new SecretsError("the 'vault-nopeer' source needs its optional dependency (x)")
       },
     )
-    expect(() => sourceFor('vault-nopeer')).toThrowError(/optional dependency \(x\)/)
+    expect(() => sourceFor('vault-nopeer')).toThrow(/optional dependency \(x\)/)
     // A source without a probe still resolves, so a workspace that
     // does not declare this one pays nothing.
     registerSecrets('vault-peerless', VaultConfig, () => Promise.resolve({ fields: {} }))
-    expect(() => sourceFor('vault-peerless')).not.toThrowError()
+    expect(() => sourceFor('vault-peerless')).not.toThrow()
   })
 
   it('knownSources sorts every registered name', () => {
@@ -85,7 +85,7 @@ describe('secrets registry', () => {
   })
 
   it('fetchSecret on an unknown source throws SecretsError', async () => {
-    await expect(fetchSecret('never-registered', 'r')).rejects.toThrowError(SecretsError)
+    await expect(fetchSecret('never-registered', 'r')).rejects.toThrow(SecretsError)
   })
 
   it('fetchSecret prefers a declared instance', async () => {
@@ -115,8 +115,8 @@ describe('secrets registry', () => {
       },
     }
     for (const name of ['constructor', 'toString', 'hasOwnProperty']) {
-      await expect(fetchSecret(name, '', sources)).rejects.toThrowError(SecretsError)
-      await expect(fetchSecret(name, '', sources)).rejects.toThrowError(/unknown secrets source/)
+      await expect(fetchSecret(name, '', sources)).rejects.toThrow(SecretsError)
+      await expect(fetchSecret(name, '', sources)).rejects.toThrow(/unknown secrets source/)
     }
   })
 

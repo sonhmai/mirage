@@ -21,7 +21,8 @@ from mirage.commands.builtin.discord.io import resolve_glob
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_pattern import pattern_arg
-from mirage.commands.builtin.grep_pushdown import pushdown_operand
+from mirage.commands.builtin.grep_pushdown import (pushdown_operand,
+                                                   text_search_results)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
@@ -104,7 +105,8 @@ async def grep(accessor: DiscordAccessor, paths: list[PathSpec],
                                             channel_map)
                 if not lines:
                     return b"", IOResult(exit_code=1)
-                return format_records(lines), IOResult()
+                if text_search_results(lines):
+                    return format_records(lines), IOResult()
             except Exception as exc:
                 msg = str(exc)
                 pushdown_warnings.append(

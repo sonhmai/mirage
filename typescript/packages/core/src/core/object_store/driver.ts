@@ -94,6 +94,7 @@ export interface TreeEntry {
   key: string
   /** Byte size; markers report 0 and may omit it. */
   size?: number
+  modified?: string
 }
 
 /** What a point lookup of one key returned. */

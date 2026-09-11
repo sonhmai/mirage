@@ -38,7 +38,6 @@ import { HEAD_BUILDER } from './head.ts'
 import { ICONV_BUILDER } from './iconv.ts'
 import { JOIN_BUILDER } from './join.ts'
 import { JQ_BUILDER } from './jq.ts'
-import { LN_BUILDER } from './ln.ts'
 import { LOOK_BUILDER } from './look.ts'
 import { LS_BUILDER } from './ls.ts'
 import { MD5_BUILDER } from './md5.ts'
@@ -112,7 +111,6 @@ export const BUILDERS: readonly Builder[] = [
   ICONV_BUILDER,
   JOIN_BUILDER,
   JQ_BUILDER,
-  LN_BUILDER,
   LOOK_BUILDER,
   LS_BUILDER,
   MD5_BUILDER,

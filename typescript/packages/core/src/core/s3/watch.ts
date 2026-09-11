@@ -31,6 +31,7 @@ interface ListedObject {
 
 function isoOf(value: Date | string | undefined): string | null {
   if (value === undefined) return null
+  // Checkpoints persist this spelling as part of the fallback fingerprint.
   return value instanceof Date ? value.toISOString() : value
 }
 

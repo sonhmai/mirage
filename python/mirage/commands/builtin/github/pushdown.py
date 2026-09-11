@@ -36,6 +36,7 @@ async def narrow_scope(
     fixed_string: bool,
     recursive: bool,
     whole_word: bool,
+    exact_file_set: bool = False,
 ) -> tuple[list[PathSpec], int, bool]:
     """Resolve grep/rg scope paths, narrowing via GitHub code search.
 
@@ -62,6 +63,7 @@ async def narrow_scope(
         pattern (str | None): the search pattern, or None for -f-only greps.
         fixed_string (bool): True if -F is set.
         recursive (bool): True if -r/-R is set.
+        exact_file_set (bool): Bypass narrowing when every file is needed.
         whole_word (bool): True if -w is set; required for push-down.
 
     Returns:
@@ -84,8 +86,9 @@ async def narrow_scope(
     # The scope size moved ahead of should_use_search: it is free, and
     # resolving the default branch is the one term here that can cost a
     # request.
-    use_search = (query is not None and whole_word and literal
-                  and file_count > SCOPE_WARN and should_use_search(
+    use_search = (not exact_file_set and query is not None and whole_word
+                  and literal and file_count > SCOPE_WARN
+                  and should_use_search(
                       recursive=recursive,
                       on_default_branch=(await ensure_ref(accessor) == await
                                          ensure_default_branch(accessor)),

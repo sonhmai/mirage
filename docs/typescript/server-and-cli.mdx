@@ -55,6 +55,17 @@ mirage execute --bg -w <workspace-id> -c "wc -l /large.csv"
 mirage job wait <job-id>
 ```
 
+Piped input is uploaded as a binary multipart `stdin` file, preserving empty
+input and arbitrary bytes. HTTP clients can send `request` (the JSON execute
+options) and `stdin` as multipart parts for synchronous or background execution.
+The JSON `stdinBase64` form remains available for small requests; multipart
+avoids its base64 expansion and the daemon's JSON request-size limit. Input is
+buffered before execution.
+
+```bash
+cat report.json | mirage execute -w <workspace-id> -c 'cat > /report.json'
+```
+
 ## Workspace lifecycle
 
 | Command | Purpose |

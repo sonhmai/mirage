@@ -71,6 +71,28 @@ async def test_read_doc(token_manager):
 
 
 @pytest.mark.asyncio
+async def test_read_doc_requests_tab_content(token_manager):
+    doc_json = {
+        "documentId": "abc123",
+        "title": "Test Doc",
+        "tabs": [],
+    }
+    with patch(
+            "mirage.core.gdocs.read.google_get",
+            new_callable=AsyncMock,
+            return_value=doc_json,
+    ) as mock_get:
+        result = await read_doc(token_manager, "abc123")
+        parsed = json.loads(result)
+        assert parsed["tabs"] == []
+        mock_get.assert_called_once_with(
+            token_manager,
+            "https://docs.googleapis.com/v1/documents/abc123",
+            params={"includeTabsContent": "true"},
+        )
+
+
+@pytest.mark.asyncio
 async def test_read_via_index(accessor, index):
     await index.set_dir("/gdocs/owned", [
         ("2026-04-01_My_Doc__doc1.gdoc.json",

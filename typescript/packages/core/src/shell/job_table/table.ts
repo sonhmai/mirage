@@ -66,9 +66,27 @@ async function settle(run: JobRunner, job: Job): Promise<void> {
   await job.console.finish(exitOutcome(job.exitCode))
 }
 
+/**
+ * The shell's job table: bash's per-shell job list, one list per session.
+ *
+ * This is job control, not a process table. A job is numbered `%N`
+ * within the session that launched it, numbering restarts at 1 once that
+ * session's list empties (GNU bash), and `jobs`, `wait`, `fg`, `kill` and
+ * `disown` only ever see the calling session's list, exactly as one bash
+ * never lists another bash's jobs. Mirage has no pid: `$!` and `jobs -l`
+ * answer with the job number.
+ *
+ * The table is still owned by the workspace rather than by a session,
+ * because the workspace owns the tasks: teardown must stop every job in
+ * every session (`killAll`), snapshot capture reads every finished one
+ * (`allJobs`), and a disowned job keeps running after its shell forgot
+ * it. Those are the only cross-session doors; every other method takes
+ * the session whose list it reads, and the empty session id is the list
+ * a caller with no session (a bare table in a test) shares.
+ */
 export class JobTable {
-  private readonly jobs = new Map<number, Job>()
-  private nextId = 1
+  private readonly jobs = new Map<string, Map<number, Job>>()
+  private readonly nextIds = new Map<string, number>()
   private readonly consoleFactory: ConsoleFactory | null
   private factoryConsoles: JobConsole[] = []
   // Jobs `disown` removed while still running: the shell forgets them,
@@ -78,21 +96,30 @@ export class JobTable {
   /**
    * @param consoleFactory builds each new job's console from its job
    *   id; null means an in-memory console per job. A factory must hand
-   *   every job a fresh backing: ids restart at 1 when the table
-   *   empties (GNU numbering), so a store keyed on the id alone gets
-   *   reused, and a reused stream replays the previous job's chunks,
-   *   ending chunk included. The table tracks what the factory builds
-   *   and closeConsoles() releases it at workspace teardown, because a
-   *   config-provisioned store (a Redis client per job) is invisible
-   *   to the embedder; a console still outlives its table entry, so
-   *   reap() never closes one.
+   *   every job a fresh backing: ids restart at 1 when a session's list
+   *   empties (GNU numbering) and two sessions can both hold a job 1,
+   *   so a store keyed on the id alone gets reused, and a reused stream
+   *   replays the previous job's chunks, ending chunk included. The
+   *   table tracks what the factory builds and closeConsoles() releases
+   *   it at workspace teardown, because a config-provisioned store (a
+   *   Redis client per job) is invisible to the embedder; a console
+   *   still outlives its table entry, so reap() never closes one.
    */
   constructor(consoleFactory: ConsoleFactory | null = null) {
     this.consoleFactory = consoleFactory
   }
 
+  private sessionJobs(sessionId: string): Map<number, Job> {
+    let jobs = this.jobs.get(sessionId)
+    if (jobs === undefined) {
+      jobs = new Map()
+      this.jobs.set(sessionId, jobs)
+    }
+    return jobs
+  }
+
   /**
-   * Register a job and start it.
+   * Register a job in its session's list and start it.
    *
    * The table creates the task itself so the runner is handed a job that
    * already has a console. Building the task first would leave a window
@@ -106,47 +133,66 @@ export class JobTable {
     agent?: string
     sessionId?: string
   }): Job {
+    const sessionId = init.sessionId ?? ''
+    const jobs = this.sessionJobs(sessionId)
     // GNU bash restarts job numbering at 1 once the job list empties.
     // Without this, reaping after a targeted `wait` would leave a
     // later `wait %1` pointing at nothing.
-    if (this.jobs.size === 0) this.nextId = 1
+    if (jobs.size === 0) this.nextIds.set(sessionId, 1)
+    const jobId = this.nextIds.get(sessionId) ?? 1
     let jobConsole: JobConsole
     if (this.consoleFactory === null) {
       jobConsole = new JobConsole()
     } else {
-      jobConsole = this.consoleFactory(this.nextId)
+      jobConsole = this.consoleFactory(jobId)
       this.factoryConsoles.push(jobConsole)
     }
     const job = new Job({
-      id: this.nextId,
+      id: jobId,
       command: init.command,
       abort: init.abort,
       cwd: init.cwd,
       agent: init.agent ?? 'unknown',
-      sessionId: init.sessionId ?? '',
+      sessionId,
       console: jobConsole,
     })
-    this.jobs.set(job.id, job)
-    this.nextId += 1
+    jobs.set(job.id, job)
+    this.nextIds.set(sessionId, jobId + 1)
     job.task = settle(init.run, job)
     return job
   }
 
+  /** Insert a finished job restored from a snapshot into its session. */
   loadJob(job: Job): void {
-    this.jobs.set(job.id, job)
-    if (job.id >= this.nextId) this.nextId = job.id + 1
+    this.sessionJobs(job.sessionId).set(job.id, job)
+    if (job.id >= (this.nextIds.get(job.sessionId) ?? 1)) {
+      this.nextIds.set(job.sessionId, job.id + 1)
+    }
   }
 
-  get(jobId: number): Job | null {
-    return this.jobs.get(jobId) ?? null
+  get(jobId: number, sessionId = ''): Job | null {
+    return this.jobs.get(sessionId)?.get(jobId) ?? null
   }
 
-  listJobs(): Job[] {
-    return [...this.jobs.values()]
+  listJobs(sessionId = ''): Job[] {
+    return [...(this.jobs.get(sessionId)?.values() ?? [])]
   }
 
-  runningJobs(): Job[] {
-    return [...this.jobs.values()].filter((j) => j.status === JobStatus.RUNNING)
+  runningJobs(sessionId = ''): Job[] {
+    return this.listJobs(sessionId).filter((j) => j.status === JobStatus.RUNNING)
+  }
+
+  /**
+   * Every session's jobs, for the workspace-wide doors only. Snapshot
+   * capture and the server summary read this; a shell builtin never
+   * does, since bash lists only its own jobs.
+   */
+  allJobs(): Job[] {
+    return [...this.jobs.values()].flatMap((jobs) => [...jobs.values()])
+  }
+
+  allRunningJobs(): Job[] {
+    return this.allJobs().filter((j) => j.status === JobStatus.RUNNING)
   }
 
   /**
@@ -164,8 +210,8 @@ export class JobTable {
    * past its own death, and `settle` returns early once the job is no
    * longer RUNNING so it cannot relabel it.
    */
-  async kill(jobId: number): Promise<boolean> {
-    const job = this.jobs.get(jobId)
+  async kill(jobId: number, sessionId = ''): Promise<boolean> {
+    const job = this.get(jobId, sessionId)
     if (job?.status !== JobStatus.RUNNING) return false
     job.abort?.abort()
     job.status = JobStatus.KILLED
@@ -176,26 +222,46 @@ export class JobTable {
   }
 
   /**
-   * Drop a job from the table without stopping it (`disown`): the job
-   * keeps running, `jobs` no longer lists it and `wait` no longer knows
-   * it. It stays on a side list so `killAll` at teardown reaches its
-   * task.
+   * Drop a job from its session's list without stopping it (`disown`):
+   * the job keeps running, `jobs` no longer lists it and `wait` no
+   * longer knows it. It stays on a side list so `killAll` at teardown
+   * reaches its task.
    */
-  disown(jobId: number): boolean {
-    const job = this.jobs.get(jobId)
-    if (job === undefined) return false
-    this.jobs.delete(jobId)
+  disown(jobId: number, sessionId = ''): boolean {
+    const jobs = this.jobs.get(sessionId)
+    const job = jobs?.get(jobId)
+    if (jobs === undefined || job === undefined) return false
+    jobs.delete(jobId)
     if (job.status === JobStatus.RUNNING) this.disowned.push(job)
     return true
   }
 
-  /** Stop every running job, returning the ones that were running.
-   * Disowned jobs are stopped too: the shell forgot them, the workspace
-   * did not, and a teardown that left them running would leak tasks. */
+  /**
+   * Drop a session's job list when the session closes, stopping what is
+   * still running, and return what was stopped.
+   *
+   * What happens to a bash's jobs when that bash exits: they are hung
+   * up, and a later shell that reuses the same id starts from an empty
+   * list numbered from 1 rather than inheriting jobs it never launched,
+   * under a profile it may not share. A disowned job is off the list
+   * already and keeps running, as in bash, until `killAll` at teardown.
+   */
+  async closeSession(sessionId: string): Promise<Job[]> {
+    const running = this.runningJobs(sessionId)
+    for (const job of running) await this.kill(job.id, sessionId)
+    this.jobs.delete(sessionId)
+    this.nextIds.delete(sessionId)
+    return running
+  }
+
+  /** Stop every running job in every session, returning the ones that
+   * were running. Disowned jobs are stopped too: the shell forgot them,
+   * the workspace did not, and a teardown that left them running would
+   * leak tasks. */
   async killAll(): Promise<Job[]> {
-    const running = this.runningJobs()
+    const running = this.allRunningJobs()
     for (const job of running) {
-      await this.kill(job.id)
+      await this.kill(job.id, job.sessionId)
     }
     for (const job of this.disowned) {
       if (job.status === JobStatus.RUNNING) {
@@ -238,9 +304,9 @@ export class JobTable {
    * task and its console already holds the ending chunk, so it
    * returns without waiting.
    */
-  async wait(jobId: number): Promise<Job> {
-    const job = this.jobs.get(jobId)
-    if (job === undefined) {
+  async wait(jobId: number, sessionId = ''): Promise<Job> {
+    const job = this.get(jobId, sessionId)
+    if (job === null) {
       throw new Error(`unknown job: ${jobId.toString()}`)
     }
     if (job.task === null) return job
@@ -249,42 +315,46 @@ export class JobTable {
   }
 
   /**
-   * Join every job in the table, returning the ones still running.
+   * Join every job in a session's list, returning the ones still
+   * running.
    *
    * Every job, not only the running ones: a killed job's `Killed`
    * marker can still be in flight (see wait()), and bare `wait`
    * snapshots each console right after this returns. Joining a
    * finished job costs one read.
    */
-  async waitAll(): Promise<Job[]> {
-    const running = this.runningJobs()
-    for (const job of this.listJobs()) {
-      await this.wait(job.id)
+  async waitAll(sessionId = ''): Promise<Job[]> {
+    const running = this.runningJobs(sessionId)
+    for (const job of this.listJobs(sessionId)) {
+      await this.wait(job.id, sessionId)
     }
     return running
   }
 
   /**
-   * Remove one job from the table.
+   * Remove one job from its session's list.
    *
    * What a targeted `wait`/`fg` does after adopting the job's output,
    * matching GNU bash, where a job waited on by id is deleted from the
    * job list. Leaving it would let a later bare `wait` snapshot the
    * same console and print the output twice.
    */
-  reap(jobId: number): void {
-    this.jobs.delete(jobId)
+  reap(jobId: number, sessionId = ''): void {
+    this.jobs.get(sessionId)?.delete(jobId)
   }
 
   /**
-   * Return completed/killed jobs and remove them from the table.
+   * Return a session's completed/killed jobs and remove them from its
+   * list.
    *
    * A reader holding a job's console keeps reading it: the console
    * outlives its table entry and dies with its last reader.
    */
-  popCompleted(): Job[] {
-    const completed = [...this.jobs.values()].filter((j) => j.status !== JobStatus.RUNNING)
-    for (const j of completed) this.jobs.delete(j.id)
+  popCompleted(sessionId = ''): Job[] {
+    const jobs = this.jobs.get(sessionId)
+    if (jobs === undefined) return []
+    const completed = [...jobs.values()].filter((j) => j.status !== JobStatus.RUNNING)
+    for (const j of completed) jobs.delete(j.id)
     return completed
   }
 }

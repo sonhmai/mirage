@@ -59,16 +59,15 @@ async def test_stat_root_is_directory(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_indexed_file(accessor, index):
-    await index.put(
-        "/docs/readme.txt",
-        IndexEntry(
-            id="file123",
-            name="readme",
-            resource_type="gdrive/file",
-            remote_time="2026-04-01T00:00:00Z",
-            vfs_name="readme.txt",
-            size=7,
-        ))
+    await index.set_dir('/docs', [('readme.txt',
+                                   IndexEntry(
+                                       id="file123",
+                                       name="readme",
+                                       resource_type="gdrive/file",
+                                       remote_time="2026-04-01T00:00:00Z",
+                                       vfs_name="readme.txt",
+                                       size=7,
+                                   ))])
     result = await stat(accessor, _scope("/docs/readme.txt"), index=index)
     assert result.name == "readme.txt"
     assert result.size == 7

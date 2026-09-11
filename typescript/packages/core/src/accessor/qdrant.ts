@@ -18,6 +18,7 @@ import { loadOptionalPeer } from '../utils/optional_peer.ts'
 import {
   buildFilter,
   candidateIds,
+  exactNameTest,
   idPrefixTest,
   pointToRow,
   SCROLL_BATCH,
@@ -26,8 +27,11 @@ import {
   type QdrantPoint,
   type QdrantRow,
 } from '../core/qdrant/client.ts'
+import { valueText } from '../core/render/json.ts'
 import type { QdrantConfigResolved } from '../resource/qdrant/config.ts'
 import { compareCodePoints } from '../utils/sort.ts'
+import { rowStem } from '../core/qdrant/naming.ts'
+import { fieldValue } from '../core/qdrant/payload.ts'
 
 type QdrantClientCtor = new (opts: {
   url?: string
@@ -149,16 +153,41 @@ export class QdrantAccessor extends Accessor {
     filters: Record<string, string>,
     limit: number,
     prefix = '',
+    basename = false,
   ): Promise<string[]> {
-    const keep = prefix === '' ? undefined : valuePrefixTest(column, prefix)
+    const keep = prefix === '' ? undefined : valuePrefixTest(column, prefix, basename)
     const points = await this.scrollFiltered(table, filters, limit, keep)
     const values = new Set<string>()
     for (const point of points) {
-      const value = point.payload?.[column]
-      if (value !== null && value !== undefined)
-        values.add(String(value as string | number | boolean))
+      const value = fieldValue(point.payload ?? {}, column)
+      if (value !== null && value !== undefined) values.add(valueText(value))
     }
     return [...values].sort(compareCodePoints)
+  }
+
+  /**
+   * The raw payload values one rendered group segment stands for.
+   *
+   * A basename drops the value's parents, so two sources can render as the
+   * same directory. Telling them apart is a question about every point under
+   * the parent group, not about the first `maxRows`: the scroll runs until it
+   * is exhausted or a second distinct value has rendered as `name`, whichever
+   * comes first. One value is the answer; two is a collision for the caller
+   * to refuse.
+   */
+  async resolveGroup(
+    table: string,
+    column: string,
+    filters: Record<string, string>,
+    name: string,
+    basename = false,
+  ): Promise<string[]> {
+    const seen = new Set<string>()
+    const keep = exactNameTest(column, name, basename, seen)
+    const points = await this.scrollFiltered(table, filters, 2, keep)
+    return points
+      .map((point) => valueText(fieldValue(point.payload ?? {}, column)))
+      .sort(compareCodePoints)
   }
 
   async rowsMatching(
@@ -168,7 +197,13 @@ export class QdrantAccessor extends Accessor {
     limit: number,
     prefix = '',
   ): Promise<QdrantRow[]> {
-    const keep = prefix === '' ? undefined : idPrefixTest(prefix)
+    const keep =
+      prefix === ''
+        ? undefined
+        : this.config.nameField !== null
+          ? (point: QdrantPoint) =>
+              rowStem(pointToRow(point, this.config.idField), this.config).startsWith(prefix)
+          : idPrefixTest(prefix)
     const points = await this.scrollFiltered(table, filters, limit, keep)
     return points.map((point) => pointToRow(point, this.config.idField))
   }
@@ -190,8 +225,14 @@ export class QdrantAccessor extends Accessor {
     const hit = this.searchCache.get(key)
     if (hit !== undefined) return hit
     const client = await this.getClient()
+    // A caller-supplied `embed` vectorizes the query here; without one the
+    // text goes to the server, which only a cluster with inference answers.
+    const vector =
+      this.config.embed !== null
+        ? await this.config.embed(query)
+        : { text: query, model: this.config.embeddingModel }
     const res = (await client.query(table, {
-      query: { text: query, model: this.config.embeddingModel },
+      query: vector,
       limit,
       with_payload: true,
     })) as { points: QdrantPoint[] }

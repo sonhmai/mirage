@@ -24,10 +24,30 @@ from mirage.core.render.json import compact_json_bytes
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
+TABS_CONTENT_PARAM = "true"
+
 
 async def read_doc(token_manager: TokenManager, doc_id: str) -> bytes:
+    """Fetch full document JSON, every tab included.
+
+    `documents.get` fills the singleton fields from the first tab and
+    leaves `tabs` empty unless asked otherwise, so without
+    `includeTabsContent` a multi-tab document renders as tab 1 and the
+    rest are absent rather than truncated. Asking for it moves the
+    content under `tabs[]` and leaves `body` empty, which is the shape
+    the resource prompt documents.
+
+    Args:
+        token_manager (TokenManager): manages OAuth2 tokens.
+        doc_id (str): Google Docs document ID.
+
+    Returns:
+        bytes: JSON response as bytes.
+    """
     url = f"{docs_base(token_manager)}/documents/{doc_id}"
-    data = await google_get(token_manager, url)
+    data = await google_get(token_manager,
+                            url,
+                            params={"includeTabsContent": TABS_CONTENT_PARAM})
     return compact_json_bytes(data)
 
 

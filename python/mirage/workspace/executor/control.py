@@ -35,7 +35,7 @@ from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.executor.jobs import run_statement
 from mirage.workspace.executor.statement import finish_statement, record_status
 from mirage.workspace.session import Session
-from mirage.workspace.session.state import seed_var, session_view
+from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
 # Safety cap on while/until iterations. Independent of stdin size:
@@ -210,7 +210,6 @@ async def handle_for(
         err = f"bash: {variable}: readonly variable\n".encode()
         return _collect_loop_result([], IOResult(exit_code=1, stderr=err),
                                     "for")
-    saved = session.env.get(variable)
 
     # Save and materialize stdin for re-reading across iterations
     prev_buffer = session._stdin_buffer
@@ -259,11 +258,10 @@ async def handle_for(
             merged_io = await merged_io.merge(io)
             all_stdout.append(stdout)
     finally:
+        # The loop variable is an ordinary variable in bash and keeps
+        # its last value after the loop (`for X in a b; do :; done;
+        # echo $X` prints b); nothing is put back.
         session._stdin_buffer = prev_buffer
-        if saved is not None:
-            seed_var(session, variable, saved)
-        else:
-            session.vars.pop(variable, None)
     return _collect_loop_result(all_stdout, merged_io, "for")
 
 
@@ -591,7 +589,6 @@ async def handle_select(
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
     view = session_view(session, policies)
-    saved = session.env.get(variable)
 
     prev_buffer = session._stdin_buffer
     if stdin is not None:
@@ -666,9 +663,6 @@ async def handle_select(
             merged_io = await merged_io.merge(io)
             all_stdout.append(stdout)
     finally:
+        # As with `for`, the selection variable keeps its last value.
         session._stdin_buffer = prev_buffer
-        if saved is not None:
-            seed_var(session, variable, saved)
-        else:
-            session.vars.pop(variable, None)
     return _collect_loop_result(all_stdout, merged_io, "select")

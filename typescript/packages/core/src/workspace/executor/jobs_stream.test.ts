@@ -40,8 +40,8 @@ function buildWs(): Workspace {
 async function runBg(cmd: string): Promise<{ out: string; err: string }> {
   const ws = buildWs()
   await ws.execute(cmd)
-  await ws.jobTable.wait(1)
-  const job = ws.jobTable.get(1)
+  await ws.jobTable.wait(1, ws.sessionManager.defaultId)
+  const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
   if (job === null) throw new Error('job 1 missing')
   return {
     out: DEC.decode(await job.console.snapshot(Channel.STDOUT)),
@@ -53,13 +53,13 @@ describe('streaming: output lands while the job is still running', () => {
   it('streams each loop iteration instead of batching at the end', async () => {
     const ws = buildWs()
     await ws.execute('for i in 1 2 3; do echo $i; sleep 0.25; done &')
-    const job = ws.jobTable.get(1)
+    const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
     if (job === null) throw new Error('job 1 missing')
 
     await new Promise((resolve) => setTimeout(resolve, 350))
     const mid = DEC.decode(await job.console.snapshot(Channel.STDOUT))
 
-    await ws.jobTable.wait(1)
+    await ws.jobTable.wait(1, ws.sessionManager.defaultId)
     const end = DEC.decode(await job.console.snapshot(Channel.STDOUT))
 
     expect(end).toBe('1\n2\n3\n')
@@ -96,8 +96,8 @@ describe('capture sites: a sink must never leak into a captured value', () => {
   it('sends redirected output to the file, not the console', async () => {
     const ws = buildWs()
     await ws.execute('echo hi > /m/f.txt &')
-    await ws.jobTable.wait(1)
-    const job = ws.jobTable.get(1)
+    await ws.jobTable.wait(1, ws.sessionManager.defaultId)
+    const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
     if (job === null) throw new Error('job 1 missing')
     expect(DEC.decode(await job.console.snapshot(Channel.STDOUT))).toBe('')
     const res = await ws.execute('cat /m/f.txt')
@@ -139,8 +139,8 @@ describe('bare wait adopts job output', () => {
   it('gives a job nested in a backgrounded subshell its own console', async () => {
     const ws = buildWs()
     await ws.execute('( (sleep 0.15; echo a) & echo b & wait ) &')
-    await ws.jobTable.wait(1)
-    const job = ws.jobTable.get(1)
+    await ws.jobTable.wait(1, ws.sessionManager.defaultId)
+    const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
     if (job === null) throw new Error('job 1 missing')
     expect(DEC.decode(await job.console.snapshot(Channel.STDOUT))).toBe('a\nb\n')
   })
@@ -152,7 +152,7 @@ describe('kill reaches a real running command', () => {
     // Grouped, so `&` backgrounds the whole sequence rather than only
     // the last command.
     await ws.execute('(echo started; sleep 10; echo never) &')
-    const job = ws.jobTable.get(1)
+    const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
     if (job === null) throw new Error('job 1 missing')
 
     // Wait until the job is genuinely inside the long command. Killing
@@ -174,4 +174,23 @@ describe('kill reaches a real running command', () => {
     // for `sleep` to finish on its own.
     expect(elapsed).toBeLessThan(3000)
   })
+})
+
+// `timeout N tail -f` cannot show partial output: the line barrier
+// materializes stdout before `timeout` drains it. A job is the shape that
+// works, and the one an agent reaches for: the console shows each line as
+// the file gains it, and `kill` ends the follow.
+it('a followed tail streams to its job console until killed', async () => {
+  const ws = buildWs()
+  ws.createSession('writer')
+  await ws.execute("printf 'l1\\n' > /m/log")
+  await ws.execute('tail -f -s 0.05 /m/log &')
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  await ws.execute("printf 'l2\\n' >> /m/log", { sessionId: 'writer' })
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
+  expect(job?.status).toBe(JobStatus.RUNNING)
+  expect(new TextDecoder().decode(await job?.console.snapshot(Channel.STDOUT))).toBe('l1\nl2\n')
+  expect((await ws.execute('kill %1')).exitCode).toBe(0)
+  await ws.close()
 })

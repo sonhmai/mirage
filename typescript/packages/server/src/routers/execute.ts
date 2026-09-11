@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
+import { z } from '@struktoai/mirage-core/resource/secrets'
 import type { WorkspaceRegistry } from '../registry.ts'
 import { JobStatus, type JobTable } from '../jobs.ts'
 import { ioResultToDict } from '../io_serde.ts'
@@ -27,15 +28,44 @@ interface ExecuteParams {
   wsId: string
 }
 
-interface ExecuteBody {
-  command: string
-  sessionId?: string
-  provision?: boolean
-  agentId?: string
-  cwd?: string
-  runtime?: string
-  stdinBase64?: string
-  record?: boolean
+const ExecuteBodySchema = z.object({
+  command: z.string(),
+  sessionId: z.string().optional(),
+  provision: z.boolean().optional(),
+  agentId: z.string().optional(),
+  cwd: z.string().optional(),
+  runtime: z.string().optional(),
+  stdinBase64: z.string().optional(),
+  record: z.boolean().optional(),
+})
+
+type ExecuteBody = z.infer<typeof ExecuteBodySchema>
+
+async function parseExecuteBody(
+  req: FastifyRequest,
+): Promise<[ExecuteBody, Uint8Array | undefined]> {
+  if (!req.isMultipart()) {
+    const body = ExecuteBodySchema.parse(req.body)
+    return [
+      body,
+      body.stdinBase64 === undefined ? undefined : Buffer.from(body.stdinBase64, 'base64'),
+    ]
+  }
+  let request: unknown
+  let stdin: Uint8Array | undefined
+  for await (const part of req.parts({ limits: { parts: 2 } })) {
+    if (part.type === 'field' && part.valueTruncated) {
+      throw Object.assign(new Error('multipart field is too large'), { statusCode: 413 })
+    }
+    const value = part.type === 'file' ? await part.toBuffer() : part.value
+    if (part.fieldname === 'request') {
+      request =
+        typeof value === 'string' || Buffer.isBuffer(value) ? JSON.parse(value.toString()) : value
+    } else if (part.fieldname === 'stdin') {
+      stdin = Buffer.isBuffer(value) ? value : Buffer.from(String(value))
+    }
+  }
+  return [ExecuteBodySchema.parse(request), stdin]
 }
 
 interface ExecuteQuery {
@@ -50,7 +80,16 @@ export function registerExecuteRoutes(app: FastifyInstance, deps: ExecuteRoutesD
       if (!deps.registry.has(wsId)) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
-      const body = req.body
+      let body: ExecuteBody
+      let stdin: Uint8Array | undefined
+      try {
+        ;[body, stdin] = await parseExecuteBody(req)
+      } catch (error) {
+        if (error instanceof SyntaxError || error instanceof z.ZodError) {
+          return reply.status(400).send({ detail: `bad execute request: ${error.message}` })
+        }
+        throw error
+      }
       const background = req.query.background === 'true'
       const entry = deps.registry.get(wsId)
       const job = deps.jobs.submit(wsId, body.command, async (signal) =>
@@ -61,9 +100,8 @@ export function registerExecuteRoutes(app: FastifyInstance, deps: ExecuteRoutesD
           ...(body.runtime !== undefined ? { runtime: body.runtime } : {}),
           ...(body.record !== undefined ? { record: body.record } : {}),
           ...(body.provision === true ? { provision: true as const } : {}),
-          ...(body.stdinBase64 !== undefined
-            ? { stdin: new Uint8Array(Buffer.from(body.stdinBase64, 'base64')) }
-            : {}),
+          // Pyodide rejects Node Buffer even though it subclasses Uint8Array.
+          ...(stdin !== undefined ? { stdin: new Uint8Array(stdin) } : {}),
           signal,
         }),
       )

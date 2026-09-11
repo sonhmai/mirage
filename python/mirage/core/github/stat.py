@@ -16,7 +16,8 @@ import logging
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.github.readdir import readdir as _readdir
+from mirage.cache.index.lock import index_lock
+from mirage.core.github.readdir import _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import content_type_for_path
@@ -36,11 +37,12 @@ async def stat(
     if not rel:
         return FileStat(name="/", type=FileType.DIRECTORY)
     key = prefix + "/" + rel if prefix else "/" + rel
-    result = await index.get(key)
-    if result.entry is None:
+    async with index_lock(index, prefix.rstrip("/") or "/"):
+        # Entries survive invalidation and replacement listings. Only the
+        # parent's current listing establishes freshness and membership.
         parent_path = key.rsplit("/", 1)[0] or "/"
         try:
-            await _readdir(
+            children = await _readdir(
                 accessor,
                 PathSpec(virtual=parent_path,
                          directory=parent_path,
@@ -49,19 +51,22 @@ async def stat(
             )
         except FileNotFoundError as exc:
             logger.debug("stat populate failed for %s: %s", key, exc)
+            raise enoent(virtual) from exc
+        if key not in children:
+            raise enoent(virtual)
         result = await index.get(key)
-    if result.entry is not None:
-        if result.entry.resource_type == "folder":
+        if result.entry is not None:
+            if result.entry.resource_type == "folder":
+                return FileStat(
+                    name=result.entry.name,
+                    type=FileType.DIRECTORY,
+                )
             return FileStat(
                 name=result.entry.name,
-                type=FileType.DIRECTORY,
+                size=result.entry.size,
+                type=FileType.FILE,
+                content=content_type_for_path(result.entry.name),
+                fingerprint=result.entry.id,
+                extra={"sha": result.entry.id},
             )
-        return FileStat(
-            name=result.entry.name,
-            size=result.entry.size,
-            type=FileType.FILE,
-            content=content_type_for_path(result.entry.name),
-            fingerprint=result.entry.id,
-            extra={"sha": result.entry.id},
-        )
-    raise enoent(virtual)
+        raise enoent(virtual)

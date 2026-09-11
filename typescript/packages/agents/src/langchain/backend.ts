@@ -250,7 +250,7 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
     glob?: string | null,
     maxCount?: number | null,
   ): Promise<GrepResult> {
-    const parts: string[] = ['grep', '-rn']
+    const parts: string[] = ['grep', '-rnH']
     if (glob !== undefined && glob !== null && glob.length > 0) {
       parts.push('--include', shellQuote(glob))
     }

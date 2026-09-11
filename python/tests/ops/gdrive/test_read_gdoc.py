@@ -50,15 +50,14 @@ def index():
 
 @pytest.mark.asyncio
 async def test_read_gdoc_renders_doc_json(accessor, index):
-    await index.put(
-        "/docs/report.gdoc.json",
-        IndexEntry(
-            id="doc123",
-            name="Report",
-            resource_type="gdrive/gdoc",
-            remote_time="2026-04-01T00:00:00Z",
-            vfs_name="report.gdoc.json",
-        ))
+    await index.set_dir('/docs', [('report.gdoc.json',
+                                   IndexEntry(
+                                       id="doc123",
+                                       name="Report",
+                                       resource_type="gdrive/gdoc",
+                                       remote_time="2026-04-01T00:00:00Z",
+                                       vfs_name="report.gdoc.json",
+                                   ))])
     doc_json = json.dumps({"documentId": "doc123"}).encode()
     with patch(
             "mirage.core.gdrive.read.read_doc",

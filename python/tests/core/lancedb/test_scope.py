@@ -116,3 +116,16 @@ def test_detect_for_caches_per_accessor():
     assert detect_for(accessor) is detect_for(accessor)
     other = LanceDBAccessor(_cfg(group_by=["label"]))
     assert detect_for(other)(_ps("/animals/cat/3.md")).kind == "row_card"
+
+
+def test_filters_decode_escaped_group_segments():
+    # ``a/b`` lists as ``a∕b`` and ``a∕b`` as ``a⁄∕b``; the WHERE clause
+    # each directory builds must hold the value it was rendered from.
+    config = _cfg()
+    detect = _detect(config)
+    assert filters_of(config, detect(_ps("/animals/a∕b"))) == {"label": "a/b"}
+    assert filters_of(config, detect(_ps("/animals/a⁄∕b"))) == {"label": "a∕b"}
+    assert filters_of(config, detect(_ps("/animals/⁄"))) == {"label": ""}
+    assert filters_of(config, detect(_ps("/animals/⁄.env"))) == {
+        "label": ".env"
+    }

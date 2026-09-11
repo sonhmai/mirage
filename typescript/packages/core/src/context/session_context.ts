@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createAsyncContext } from '../utils/async_context.ts'
+import type { ContextCall } from '../utils/async_context.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
 import type { Session } from '../workspace/session/session.ts'
 import { stripSlash } from '../utils/slash.ts'
@@ -392,6 +393,22 @@ export function runWithRedirectPaths<T>(
 }
 
 const programStorage = createAsyncContext<Session | null>()
+
+/** Capture all command admission state for a deferred workspace callback. */
+export function captureSessionContext(session?: Session, owner?: SessionManager): ContextCall[] {
+  const sessionScope: ContextCall =
+    session === undefined
+      ? sessionStorage.capture()
+      : (fn) => sessionStorage.run({ session, owner: owner ?? null }, fn)
+  return [
+    sessionScope,
+    admissionStorage.capture(),
+    opPoliciesStorage.capture(),
+    mountGateStorage.capture(),
+    redirectStorage.capture(),
+    programStorage.capture(),
+  ]
+}
 
 /**
  * Run a line as a program run in a session: `find -exec` hands its words

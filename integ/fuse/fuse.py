@@ -257,6 +257,16 @@ def main() -> None:
         with open(f"{logs_mp}/b.txt", "rb") as fh:
             result["logs_cat_b"] = fh.read().decode().strip()
         result["logs_size_b"] = os.path.getsize(f"{logs_mp}/b.txt")
+        # A shorter overwrite must truncate. Under libfuse 3 the kernel
+        # hands O_TRUNC to open instead of sending a truncate first, and
+        # a mount that ignored the flag kept the old tail (#1032).
+        with open(f"{data_mp}/t.txt", "wb") as fh:
+            fh.write(b"AAAAAAAAAAAAAAAAAAAA\n")
+        with open(f"{data_mp}/t.txt", "wb") as fh:
+            fh.write(b"BB\n")
+        result["overwrite_short_size"] = os.path.getsize(f"{data_mp}/t.txt")
+        with open(f"{data_mp}/t.txt", "rb") as fh:
+            result["overwrite_short_body"] = fh.read().decode().strip()
         result["data_pinned"] = data_mp == pinned
         result["distinct_mounts"] = data_mp != logs_mp
 

@@ -14,13 +14,29 @@
 
 import { docsBase, type TokenManager, googlePost } from '../google/client.ts'
 
-export async function appendText(tm: TokenManager, docId: string, text: string): Promise<unknown> {
+/**
+ * Append text to the end of a Google Doc, or of one of its tabs.
+ *
+ * A request that names no tab lands on the first one, which is Google's own
+ * default for every request but the three that default to all tabs
+ * (replaceAllText, deleteNamedRange, replaceNamedRangeContent). Omitting
+ * `tabId` therefore keeps the first-tab behaviour rather than guessing at a
+ * better one; naming it is the only way to reach any other tab.
+ */
+export async function appendText(
+  tm: TokenManager,
+  docId: string,
+  text: string,
+  tabId?: string,
+): Promise<unknown> {
+  const location: Record<string, string> = { segmentId: '' }
+  if (tabId !== undefined && tabId !== '') location.tabId = tabId
   const payload = {
     requests: [
       {
         insertText: {
           text,
-          endOfSegmentLocation: { segmentId: '' },
+          endOfSegmentLocation: location,
         },
       },
     ],

@@ -1,7 +1,7 @@
 from functools import partial
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.cache.index import NULL_INDEX
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep,
                                                start_basename)
@@ -148,6 +148,7 @@ async def find(
     mindepth: int | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     resolved = await resolve(accessor, path)
     if resolved.drive_id is None:

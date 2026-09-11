@@ -94,8 +94,10 @@ async def _list_tree(op: AsyncOperator, pfx: str) -> AsyncIterator[TreeEntry]:
             if is_dir:
                 yield TreeEntry(key=rel.rstrip("/") + "/")
                 continue
-            size = int(meta.content_length or 0) if meta is not None else 0
-            yield TreeEntry(key=rel, size=size)
+            size = meta.content_length if meta is not None else None
+            modified = (meta.last_modified.isoformat()
+                        if meta is not None and meta.last_modified else "")
+            yield TreeEntry(key=rel, size=size, modified=modified)
     except NotFound:
         return
 
@@ -111,7 +113,10 @@ async def _list_subtree(op: AsyncOperator,
         if md is not None and md.mode != EntryMode.Dir:
             # A repo cannot hold a file and a directory of the same name,
             # so a stem that is a file has nothing under it.
-            yield TreeEntry(key=stem, size=int(md.content_length or 0))
+            modified = md.last_modified.isoformat() if md.last_modified else ""
+            yield TreeEntry(key=stem,
+                            size=md.content_length,
+                            modified=modified)
             return
     base = stem + "/" if stem else "/"
     try:
@@ -120,8 +125,10 @@ async def _list_subtree(op: AsyncOperator,
             if not rel or rel.endswith("/"):
                 continue
             meta = entry.metadata
-            size = int(meta.content_length or 0) if meta is not None else 0
-            yield TreeEntry(key=rel, size=size)
+            size = meta.content_length if meta is not None else None
+            modified = (meta.last_modified.isoformat()
+                        if meta is not None and meta.last_modified else "")
+            yield TreeEntry(key=rel, size=size, modified=modified)
     except NotFound:
         return
 

@@ -100,6 +100,62 @@ describe('qdrant readdir sizes', () => {
   })
 })
 
+describe('qdrant document lineage', () => {
+  const lineageConfig = resolveQdrantConfig({
+    collection: 'docs',
+    groupBy: ['metadata.source'],
+    basenameFields: ['metadata.source'],
+    nameField: 'metadata.page',
+    textField: 'page_content',
+  })
+  const lineageRow: QdrantRow = {
+    id: 17,
+    page_content: 'Refunds are processed within 14 days',
+    metadata: { source: 's3://docs/policies/refund-2026.pdf', page: '004' },
+  }
+  const lineageAccessor = {
+    config: lineageConfig,
+    tableExists: () => Promise.resolve(true),
+    distinct: (
+      _table: string,
+      _column: string,
+      filters: Record<string, string>,
+    ): Promise<string[]> =>
+      Promise.resolve(
+        Object.keys(filters).length === 0
+          ? ['s3://docs/policies/refund-2026.pdf']
+          : ['s3://docs/policies/refund-2026.pdf'],
+      ),
+    resolveGroup: () => Promise.resolve(['s3://docs/policies/refund-2026.pdf']),
+    rowsMatching: () => Promise.resolve([lineageRow]),
+  } as unknown as QdrantAccessor
+
+  it('lists a source basename then meaningful chunk files', async () => {
+    await expect(readdir(lineageAccessor, spec('/'))).resolves.toEqual(['/refund-2026.pdf'])
+    await expect(readdir(lineageAccessor, spec('/refund-2026.pdf'))).resolves.toEqual([
+      '/refund-2026.pdf/004__17.json',
+      '/refund-2026.pdf/004__17.txt',
+    ])
+  })
+
+  it('refuses a basename two sources render as, wherever the second scrolls', async () => {
+    // Resolution asks the accessor for every source behind the rendered
+    // name, so a collision is refused even when the capped listing showed
+    // only the first one.
+    const seen: { args?: unknown[] } = {}
+    const acc = {
+      config: lineageConfig,
+      tableExists: () => Promise.resolve(true),
+      resolveGroup: (...args: unknown[]) => {
+        seen.args = args
+        return Promise.resolve(['s3://one/report.pdf', 's3://two/report.pdf'])
+      },
+    } as unknown as QdrantAccessor
+    await expect(readdir(acc, spec('/report.pdf'))).rejects.toThrow('basename collision')
+    expect(seen.args).toEqual(['docs', 'metadata.source', {}, 'report.pdf', true])
+  })
+})
+
 const CAP = 5
 const WIDE = 40
 
@@ -167,6 +223,37 @@ describe('qdrant readdir narrows a capped listing', () => {
     expect(seen.prefix).toBe('')
   })
 
+  it('passes a rendered basename prefix into the capped scan', async () => {
+    const seen: { prefix?: string; basename?: boolean } = {}
+    const acc = {
+      config: resolveQdrantConfig({
+        collection: 'wide',
+        groupBy: ['source'],
+        basenameFields: ['source'],
+        maxRows: CAP,
+      }),
+      tableExists: () => Promise.resolve(true),
+      distinct: (
+        _table: string,
+        _column: string,
+        _filters: Record<string, string>,
+        _limit: number,
+        prefix: string,
+        basename: boolean,
+      ) => {
+        seen.prefix = prefix
+        seen.basename = basename
+        const values = Array.from({ length: WIDE }, (_, i) => `s3://docs/other-${String(i)}.pdf`)
+        values.push('s3://archive/target-late.pdf')
+        return Promise.resolve(
+          values.filter((value) => (value.split('/').pop() ?? '').startsWith(prefix)).slice(0, CAP),
+        )
+      },
+    } as unknown as QdrantAccessor
+    await expect(readdir(acc, globbed('/', 'target*'))).resolves.toEqual(['/target-late.pdf'])
+    expect(seen).toEqual({ prefix: 'target', basename: true })
+  })
+
   it('does not cache a narrowed listing as the directory', async () => {
     const seen: { prefix: string | undefined } = { prefix: undefined }
     const acc = cappedAccessor(seen)
@@ -176,5 +263,36 @@ describe('qdrant readdir narrows a capped listing', () => {
     expect(listed.entries === undefined || listed.entries === null).toBe(true)
     const plain = await readdir(acc, spec('/all'), idx)
     expect(ids(plain)).toEqual(['doc-000', 'doc-001', 'doc-002', 'doc-003', 'doc-004'])
+  })
+})
+
+describe('qdrant blank and dot-led group values', () => {
+  const edgedConfig = resolveQdrantConfig({
+    collection: 'animals',
+    groupBy: ['label'],
+    textField: 'name',
+  })
+
+  function edgedAccessor(seen: Record<string, string>[]): QdrantAccessor {
+    return {
+      config: edgedConfig,
+      tableExists: () => Promise.resolve(true),
+      distinct: () => Promise.resolve(['', '.env']),
+      rowsMatching: (_table: string, filters: Record<string, string>) => {
+        seen.push(filters)
+        return Promise.resolve([ROW])
+      },
+    } as unknown as QdrantAccessor
+  }
+
+  it('list with the escape lead and filter for their own value', async () => {
+    // A blank value listed as `unknown` and then filtered for that word; a
+    // dot-led one was dropped as hidden and refused as a path. Both carry
+    // the escape lead, so each lists and filters for its own value.
+    const seen: Record<string, string>[] = []
+    await expect(readdir(edgedAccessor(seen), spec('/'))).resolves.toEqual(['/⁄', '/⁄.env'])
+    await readdir(edgedAccessor(seen), spec('/⁄'))
+    await readdir(edgedAccessor(seen), spec('/⁄.env'))
+    expect(seen).toEqual([{ label: '' }, { label: '.env' }])
   })
 })

@@ -103,7 +103,7 @@ def close_sync_parts(ws: "Workspace", ) -> None:
         return
     ws._closed = True
     ws._kernel_mounts.close()
-    for job in ws.job_table.running_jobs():
+    for job in ws.job_table.all_running_jobs():
         # Last resort only: with no loop to await on, a job can be asked
         # to stop but not settled, so it keeps its RUNNING status and its
         # console never ends. ``close_async`` settles first, so anything

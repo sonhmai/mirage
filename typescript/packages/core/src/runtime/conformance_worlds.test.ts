@@ -18,7 +18,7 @@ import { RAMResource } from '../resource/ram/ram.ts'
 import { FileType, MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
-import { QuickJsRuntime } from './js/quickjs.ts'
+import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 
 // One world, three surfaces, one door: the TS half of the conformance

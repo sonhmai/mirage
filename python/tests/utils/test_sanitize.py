@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len, sanitize_label
+from mirage.utils.sanitize import (ESCAPE_LEAD, NAME_MAX_BYTES, SAFE_SLASH,
+                                   byte_len, is_blank, path_safe_name,
+                                   sanitize_label, sanitize_name)
 
 
 def test_sanitize_label_replaces_unsafe_and_spaces():
@@ -95,3 +97,49 @@ def test_sanitize_label_drops_the_ellipsis_when_it_cannot_fit():
     # whatever of the label actually fits.
     assert sanitize_label("abcdef", fallback="X", max_len=100,
                           max_bytes=2) == "ab"
+
+
+def test_path_safe_name_renders_a_slash_as_the_shared_stand_in():
+    # Every backend that renders an API name as a path segment emits this
+    # one character for ``/``, and the codec that inverts the rendering
+    # imports it from here rather than copying the literal.
+    assert SAFE_SLASH == "\u2215"
+    assert path_safe_name("a/b") == f"a{SAFE_SLASH}b"
+
+
+def test_path_safe_name_leads_a_dot_led_name_with_the_escape():
+    # The hierarchy classifies a dot-led segment as hidden: it is dropped
+    # from every listing and refused as a path. A name that starts with a
+    # dot therefore carries the escape lead, which the segment codec reads
+    # as "the next character is literal".
+    assert ESCAPE_LEAD == "\u2044"
+    assert path_safe_name(".env") == f"{ESCAPE_LEAD}.env"
+    assert path_safe_name("..") == f"{ESCAPE_LEAD}.."
+    assert path_safe_name("./x") == f"{ESCAPE_LEAD}.{SAFE_SLASH}x"
+    assert path_safe_name("a.b") == "a.b"
+    assert path_safe_name(" ") == "unknown"
+
+
+def test_is_blank_is_the_white_space_property_in_both_languages():
+    # ``str.strip`` also eats U+001C..U+001F and JavaScript's ``trim`` eats
+    # U+FEFF but not U+0085, so the same value was blank in one runtime and
+    # spelled in the other. Blank is Unicode's White_Space property, spelled
+    # out once here and read by every name sanitizer and the segment codec.
+    for blank in ("", " ", "\t\n", "\x85", "\xa0", "\u2028", "\u3000"):
+        assert is_blank(blank)
+        assert path_safe_name(blank) == "unknown"
+        assert sanitize_name(blank) == "unknown"
+        assert sanitize_label(blank, fallback="X", max_len=10) == "X"
+    for spelled in ("\x1c", "\x1f", "\ufeff", "a", " a "):
+        assert not is_blank(spelled)
+    assert path_safe_name("\x1c") == "\x1c"
+
+
+def test_unsafe_chars_read_the_same_white_space_class():
+    # ``\\s`` kept U+001C here and U+FEFF in TypeScript, so the two
+    # runtimes spelled one label differently; both now replace what is
+    # not Unicode White_Space.
+    for odd in ("\ufeff", "\x1c", "\x1f"):
+        assert sanitize_name(f"a{odd}b") == "a_b"
+        assert sanitize_label(f"a{odd}b", fallback="X", max_len=10) == "a_b"
+    assert sanitize_name("a\x85b") == "a\x85b"

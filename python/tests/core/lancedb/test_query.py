@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.lancedb.query import _predicate
+import pytest
+
+from mirage.core.lancedb.query import _predicate, distinct_values
 
 
 def test_narrows_on_a_name_prefix_with_a_cast():
@@ -49,3 +51,16 @@ def test_is_the_filters_alone_with_no_prefix_and_empty_with_neither():
     assert _predicate("id", {"label": "cat"}, "") == "`label` = 'cat'"
     assert _predicate("id", {}, "") == ""
     assert _predicate("", {}, "doc-1") == ""
+
+
+@pytest.mark.asyncio
+async def test_a_kept_test_bounds_the_cap_by_matches(accessor):
+    # Without a test the cap is a window over the table head; with one it
+    # counts the values the test keeps, so a value past the head still lists.
+    assert await distinct_values(accessor, "animals", "label", {},
+                                 1) == ["cat"]
+    assert await distinct_values(accessor,
+                                 "animals",
+                                 "label", {},
+                                 1,
+                                 keep=lambda value: value == "dog") == ["dog"]

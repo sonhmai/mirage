@@ -138,3 +138,5 @@ async def main() -> None:
 
 asyncio.run(main())
 ```
+
+`grep` classifies the bytes it reads, including downloaded attachments. Use `-I` to skip binary inputs or `-a` (`--binary-files=text`) to search them as text. Text mode bypasses the content-search index and scans files directly.

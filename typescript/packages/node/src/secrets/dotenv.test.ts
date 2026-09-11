@@ -46,10 +46,8 @@ describe('fetchDotenv', () => {
 
   it('a missing file is a SecretsError naming the path', async () => {
     const path = join(dir, 'absent.env')
-    await expect(fetchDotenv(DotenvConfig.parse({}), path)).rejects.toThrowError(SecretsError)
-    await expect(fetchDotenv(DotenvConfig.parse({}), path)).rejects.toThrowError(
-      /dotenv file not found/,
-    )
+    await expect(fetchDotenv(DotenvConfig.parse({}), path)).rejects.toThrow(SecretsError)
+    await expect(fetchDotenv(DotenvConfig.parse({}), path)).rejects.toThrow(/dotenv file not found/)
   })
 
   it('never interpolates: a ${NAME} in a value stays literal', async () => {

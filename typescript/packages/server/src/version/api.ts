@@ -155,7 +155,5 @@ export async function statusState(
 export async function checkout(store: VersionStore, ws: CoreWorkspace, ref: string): Promise<void> {
   const version = await resolveRef(store, ref)
   const { entries, meta } = await readVersion(store, version)
-  const cache = ws.cache as { clear?: () => Promise<void> }
-  if (typeof cache.clear === 'function') await cache.clear()
-  await applyStateDict(ws, toState(entries, meta))
+  await applyStateDict(ws, toState(entries, meta), { replaceCache: true })
 }

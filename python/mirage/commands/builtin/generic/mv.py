@@ -372,7 +372,10 @@ async def mv(
             errors.append(f"mv: cannot move '{src.virtual}' to a "
                           f"subdirectory of itself, '{target.virtual}'")
             continue
-        target_exists, target_is_dir = await entry_kind(stat, target)
+        if not flags.no_target_dir and target.virtual == dst.virtual:
+            target_exists, target_is_dir = dst_exists, dst_is_dir
+        else:
+            target_exists, target_is_dir = await entry_kind(stat, target)
         mismatch = overwrite_type_error("mv", src, src_is_dir, target,
                                         target_exists, target_is_dir)
         if mismatch is not None:

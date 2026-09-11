@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from mirage.accessor.hf_hub import HfHubAccessor
 from mirage.cache.index import (NULL_INDEX, IndexCacheStore, IndexEntry,
                                 LookupStatus)
+from mirage.cache.index.lock import index_lock
 from mirage.core.hf_hub.tree import ensure_live_index, local_rows, refill_index
 
 
@@ -74,18 +75,22 @@ async def lookup(
     if index is NULL_INDEX:
         entries, children = await local_rows(accessor, prefix)
         return Found(entry=entries.get(key), children=children.get(key))
-    await ensure_live_index(accessor, index, prefix)
-    result = await index.get(key)
-    listing = await index.list_dir(key)
-    # The index is the whole listing rather than a cache in front of one,
-    # so an *expired* answer means the tree aged out, not that the path
-    # is gone. Refetch once and ask again; a miss against a live index is
-    # a real absence and must not cost a tree fetch.
-    if LookupStatus.EXPIRED in (result.status, listing.status):
-        if await refill_index(accessor, index, prefix):
-            result = await index.get(key)
-            listing = await index.list_dir(key)
-    return Found(entry=result.entry, children=listing.entries)
+    async with index_lock(index, prefix.rstrip("/") or "/"):
+        await ensure_live_index(accessor, index, prefix)
+        result = await index.get(key)
+        listing = await index.list_dir(key)
+        parent = listing if key == (
+            prefix.rstrip("/") or "/") else await index.list_dir(
+                key.rstrip("/").rsplit("/", 1)[0] or "/")
+        # The index is the whole listing rather than a cache in front of one,
+        # so an *expired* answer means the tree aged out, not that the path
+        # is gone. Refetch once and ask again; a miss against a live index is
+        # a real absence and must not cost a tree fetch.
+        if LookupStatus.EXPIRED in (parent.status, listing.status):
+            if await refill_index(accessor, index, prefix):
+                result = await index.get(key)
+                listing = await index.list_dir(key)
+        return Found(entry=result.entry, children=listing.entries)
 
 
 def key_of(prefix: str, local: str) -> str:

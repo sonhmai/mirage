@@ -12,9 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
 from typing import Any
 
+from lancedb.query import AsyncQuery
+
 from mirage.accessor.lancedb import LanceDBAccessor
+
+ValueTest = Callable[[str], bool]
 
 
 def _quote(value: str) -> str:
@@ -87,20 +92,76 @@ async def table_exists(accessor: LanceDBAccessor, name: str) -> bool:
     return name in await list_tables(accessor)
 
 
+async def _kept_texts(query: AsyncQuery, column: str, limit: int,
+                      keep: ValueTest) -> list[str]:
+    """The first ``limit`` values of ``column`` that pass ``keep``.
+
+    Streams the unbounded query batch by batch and stops at the cap, so
+    a scan past the head of the table costs one batch of memory.
+
+    Args:
+        query (AsyncQuery): the query, filtered and without a limit.
+        column (str): the selected column.
+        limit (int): how many kept values end the stream.
+        keep (ValueTest): the test on each value's text.
+    """
+    texts: list[str] = []
+    async for batch in await query.to_batches():
+        for row in batch.to_pylist():
+            value = row.get(column)
+            if value is None:
+                continue
+            text = str(value)
+            if keep(text):
+                texts.append(text)
+                if len(texts) >= limit:
+                    return texts
+    return texts
+
+
 async def distinct_values(accessor: LanceDBAccessor,
                           table: str,
                           column: str,
                           filters: dict[str, str],
                           limit: int,
-                          prefix: str = "") -> list[str]:
+                          prefix: str = "",
+                          keep: ValueTest | None = None) -> list[str]:
+    """The distinct values of one group column, as text.
+
+    Without a test the limit bounds the rows, which is the ordinary
+    capped listing over the head of the table. With one it bounds the
+    MATCHES: the prefix a glob narrows the query to loses nothing, but
+    it can let through rows the glob does not match (a head cut inside
+    an escape pair decodes to a shorter value prefix) or narrow nothing
+    at all (a head that is only the escape lead), and those rows would
+    fill the cap and hide every match past it. A glob is a targeted
+    request, so it pays a scan up to its matches where the plain
+    listing pays one window.
+
+    Args:
+        accessor (LanceDBAccessor): the mount's accessor.
+        table (str): the table to read.
+        column (str): the group column.
+        filters (dict[str, str]): the parent groups' equality filters.
+        limit (int): the row cap.
+        prefix (str): the literal value prefix a glob narrows to, empty
+            for none.
+        keep (ValueTest | None): the test on each value's text the cap
+            counts, or None to cap the rows themselves.
+    """
     tbl = await accessor.table(table)
-    query = tbl.query().select([column]).limit(limit)
+    query = tbl.query().select([column])
     clause = _predicate(column, filters, prefix)
     if clause:
         query = query.where(clause)
-    rows = await query.to_list()
-    values = {str(row[column]) for row in rows if row.get(column) is not None}
-    return sorted(values)
+    if keep is None:
+        rows = await query.limit(limit).to_list()
+        texts = [
+            str(row[column]) for row in rows if row.get(column) is not None
+        ]
+    else:
+        texts = await _kept_texts(query, column, limit, keep)
+    return sorted(set(texts))
 
 
 async def table_columns(accessor: LanceDBAccessor, table: str) -> list[str]:

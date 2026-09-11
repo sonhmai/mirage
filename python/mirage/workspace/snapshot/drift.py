@@ -16,6 +16,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.types import DriftPolicy
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.snapshot.keys import FingerprintKey
@@ -178,13 +179,17 @@ def install_fingerprints(
     """Install snapshot fingerprints/revisions onto a reconstructed ws.
 
     Revisions pin replay reads to exact backend versions; bare
-    fingerprints queue an eager drift check. OFF evicts the snapshot
-    cache for fingerprinted paths so reads serve current state.
+    fingerprints queue an eager drift check. OFF drops the restored RAM
+    cache entries for fingerprinted paths so reads serve current state;
+    a Redis cache is never restored from a snapshot (``_restore_cache``
+    skips it), so its ``evict_paths`` is a documented no-op and there
+    is nothing to drop.
 
     Args:
         ws: the reconstructed workspace to install onto.
         fingerprint_entries: entries from a snapshot's FINGERPRINTS.
-        drift_policy: STRICT queues drift checks; OFF skips and evicts.
+        drift_policy: STRICT queues drift checks; OFF skips them and
+            drops the restored cache entries.
     """
     if drift_policy == DriftPolicy.OFF:
         if fingerprint_entries:
@@ -252,8 +257,9 @@ async def check_drift(mount_for: TryMountFor,
         return
     if not getattr(mount.resource, "SUPPORTS_SNAPSHOT", False):
         return
+    # Resolve backend IDs afresh without consulting the restored index.
     try:
-        stat = await mount.execute_op("stat", path)
+        stat = await mount.execute_op("stat", path, index=RAMIndexCacheStore())
     except FileNotFoundError as exc:
         if mount_for(path) is not mount:
             return

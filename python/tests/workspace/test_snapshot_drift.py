@@ -17,6 +17,7 @@ from contextlib import ExitStack
 
 import pytest
 
+from mirage.cache.index import IndexEntry
 from mirage.commands.cli.types import CLISpec
 from mirage.io import IOResult
 from mirage.observe.context import RecordingScope, record, start_op
@@ -78,6 +79,7 @@ def test_strict_load_raises_when_s3_etag_drifts(tmp_path):
         stack.enter_context(patch_s3_multi({"test-bucket": store}))
         src = Workspace({"/s3": (S3Resource(_config()), MountMode.WRITE)},
                         mode=MountMode.WRITE)
+        asyncio.run(src.execute("ls /s3/"))
         result = asyncio.run(src.execute("cat /s3/data.csv"))
         assert b"version 1" in result.stdout
 
@@ -85,7 +87,18 @@ def test_strict_load_raises_when_s3_etag_drifts(tmp_path):
         asyncio.run(src.snapshot(snap))
         store["data.csv"] = b"VERSION 2 DRIFTED\n"
 
-        dst = _load(snap, resources={"/s3": S3Resource(_config())})
+        resource = S3Resource(_config())
+        dst = _load(snap, resources={"/s3": resource})
+        # A warm index must not hide the backend fingerprint from drift.
+        asyncio.run(
+            resource.index.put(
+                "/s3/data.csv",
+                IndexEntry(id="data.csv",
+                           name="data.csv",
+                           resource_type="file",
+                           size=len(b"version 1 bytes\n"))))
+        assert asyncio.run(
+            resource.index.get("/s3/data.csv")).entry is not None
         with pytest.raises(ContentDriftError) as exc_info:
             asyncio.run(dst.execute("cat /s3/data.csv"))
         assert exc_info.value.path == "/s3/data.csv"

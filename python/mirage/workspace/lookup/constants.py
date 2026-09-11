@@ -16,6 +16,8 @@ from collections.abc import Sequence
 
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.compile import compile_spec
+from mirage.shell.constants import BUILTIN_GROUP
+from mirage.shell.types import BuiltinGroup
 from mirage.types import PathSpec
 from mirage.workspace.names import (JOB_BUILTINS, NAMESPACE_COMMANDS,
                                     NO_FOLLOW_COMMANDS, SHELL_NAMES,
@@ -31,6 +33,11 @@ __all__ = [
     "SHELL_ONLY_BUILTINS",
     "UNSUPPORTED_BUILTINS",
 ]
+
+# Interpreter names select runtime adapters; session builtins stay in Mirage.
+INTERPRETER_NAMES = frozenset(
+    str(name) for name, group in BUILTIN_GROUP.items()
+    if group is BuiltinGroup.INTERPRETERS)
 
 # Per-command flags that turn a no-follow command back into a following
 # one, GNU's -L / --dereference.
@@ -162,7 +169,7 @@ def end_options_after_program(name: str, words: list[str]) -> list[str]:
 # The mirror: flags that make a following command report the link
 # itself. GNU ls dereferences a command-line symlink to a directory, but
 # -l and -d suppress that and show the link's own row instead.
-NO_FOLLOW_FLAGS = {"ls": ("ld", ())}
+NO_FOLLOW_FLAGS = {"ls": ("ld", ("directory", ))}
 
 # Commands whose traversal descends into descendant mounts (the
 # executor's fan-out reruns them per mount), always or under a flag.

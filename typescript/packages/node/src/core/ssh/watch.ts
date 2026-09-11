@@ -54,6 +54,7 @@ async function* descend(
       yield* descend(sftp, root, child)
       continue
     }
+    // Checkpoints persist this spelling as part of the fingerprint.
     const modified = new Date(entry.attrs.mtime * 1000).toISOString()
     yield {
       virtual: child,

@@ -17,9 +17,10 @@ import type { GitHubAccessor } from '../../accessor/github.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { readdir as coreReaddir } from './readdir.ts'
+import { readdirUnlocked as coreReaddir } from './readdir.ts'
+import { withIndexLock } from '../../cache/index/lock.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent, isEnoent } from '../../utils/errors.ts'
 
 function stripPrefix(path: PathSpec): string {
   const prefix = mountPrefixOf(path.virtual, path.resourcePath)
@@ -43,16 +44,13 @@ export async function stat(
   }
   if (index === undefined) throw enoent(path)
   const ikey = `${rstripSlash(prefix)}/${trimmed}`
-  let result = await index.get(ikey)
-  if (result.entry === undefined || result.entry === null) {
-    // `ikey` is already mount-absolute, so its parent is too: prepending
-    // the prefix again asks for `/repo/repo`, whose listing never populates
-    // the entry this is here to find. stat then reports ENOENT for a file
-    // that exists, and the read family's implicit-directory probe finds it
-    // in the parent listing and answers EISDIR instead.
-    const parentPath = ikey.includes('/') ? ikey.slice(0, ikey.lastIndexOf('/')) || '/' : '/'
+  return withIndexLock(index, rstripSlash(prefix) || '/', async () => {
+    // Entries survive invalidation and replacement listings. Only the
+    // parent's current listing establishes freshness and membership.
+    const parentPath = ikey.slice(0, ikey.lastIndexOf('/')) || '/'
+    let children: string[]
     try {
-      await coreReaddir(
+      children = await coreReaddir(
         accessor,
         new PathSpec({
           virtual: parentPath,
@@ -62,21 +60,23 @@ export async function stat(
         }),
         index,
       )
-    } catch {
-      // parent listing failed — fall through
+    } catch (error) {
+      if (isEnoent(error)) throw enoent(path)
+      throw error
     }
-    result = await index.get(ikey)
+    if (!children.includes(ikey)) throw enoent(path)
+    const result = await index.get(ikey)
     if (result.entry === undefined || result.entry === null) throw enoent(path)
-  }
-  if (result.entry.resourceType === 'folder') {
-    return new FileStat({ name: result.entry.name, type: FileType.DIRECTORY })
-  }
-  return new FileStat({
-    name: result.entry.name,
-    size: result.entry.size,
-    type: FileType.FILE,
-    content: contentTypeForPath(result.entry.name),
-    fingerprint: result.entry.id,
-    extra: { sha: result.entry.id },
+    if (result.entry.resourceType === 'folder') {
+      return new FileStat({ name: result.entry.name, type: FileType.DIRECTORY })
+    }
+    return new FileStat({
+      name: result.entry.name,
+      size: result.entry.size,
+      type: FileType.FILE,
+      content: contentTypeForPath(result.entry.name),
+      fingerprint: result.entry.id,
+      extra: { sha: result.entry.id },
+    })
   })
 }

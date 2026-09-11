@@ -20,6 +20,7 @@ from typing import Any
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import (NULL_INDEX, IndexCacheStore, IndexEntry,
                                 LookupStatus)
+from mirage.cache.index.lock import index_lock
 from mirage.core.api.client import SessionArg
 from mirage.core.github.client import github_get
 from mirage.core.github.config import GitHubConfig
@@ -138,6 +139,8 @@ def index_rows(
     # of one; `ls` on it also read as ENOENT rather than as empty.
     dirs[stem or "/"] = []
     for path, entry in tree.items():
+        if entry.type == "tree":
+            dirs.setdefault(stem + "/" + path, [])
         parts = path.rsplit("/", 1)
         if len(parts) == 2:
             parent, name = stem + "/" + parts[0], parts[1]
@@ -176,8 +179,11 @@ def seed_index(
         prefix (str): the mount prefix the keys are built against.
     """
     entries, children = index_rows(accessor.tree, prefix)
-    index.seed(entries, children,
-               datetime.now(timezone.utc) + timedelta(days=365))
+    # A truncated response cannot establish that any listing is complete,
+    # including an apparently empty directory. Readdir must fill it first.
+    expires_at = (datetime.fromtimestamp(0, timezone.utc) if accessor.truncated
+                  else datetime.now(timezone.utc) + timedelta(days=365))
+    index.seed(entries, children, expires_at)
 
 
 async def refill_index(
@@ -205,6 +211,7 @@ async def refill_index(
         bool: whether a refill happened; False when there is no index to
         seed, so a caller does not retry a lookup that cannot change.
     """
+    # The caller holds index_lock through replacement and its final lookup.
     if index is NULL_INDEX:
         return False
     ref = await ensure_ref(accessor)
@@ -213,6 +220,8 @@ async def refill_index(
     accessor.truncated = truncated
     accessor.tree = tree
     accessor.tree_loaded = True
+    # A refill replaces this mount's snapshot, including paths now absent.
+    await index.invalidate_prefix(prefix.rstrip("/") or "/")
     seed_index(accessor, index, prefix)
     return True
 
@@ -305,9 +314,10 @@ async def ensure_tree(
         if accessor.tree_loaded:
             return
         if index is not NULL_INDEX:
-            await ensure_live_index(accessor, index, prefix)
-            if accessor.tree_loaded:
-                return
+            async with index_lock(index, prefix.rstrip("/") or "/"):
+                await ensure_live_index(accessor, index, prefix)
+                if accessor.tree_loaded:
+                    return
         ref = await ensure_ref(accessor)
         tree, truncated = await fetch_tree(accessor.config, accessor.owner,
                                            accessor.repo, ref, accessor.pool)

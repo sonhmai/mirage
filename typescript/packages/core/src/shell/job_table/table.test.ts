@@ -390,3 +390,97 @@ describe('JobTable.popCompleted', () => {
     expect(j.console.store.closed).toBe(false)
   })
 })
+
+/** A live job in one session, ended only by its own abort. */
+function live(jt: JobTable, sessionId: string): Job {
+  const abort = new AbortController()
+  return jt.submit({ command: 'x', run: pending(abort), abort, cwd: '/', sessionId })
+}
+
+describe('JobTable per-session scoping', () => {
+  it('numbers each session from one', async () => {
+    const jt = new JobTable()
+    const a1 = live(jt, 'a')
+    const b1 = live(jt, 'b')
+    const a2 = live(jt, 'a')
+    expect([a1.id, b1.id, a2.id]).toEqual([1, 1, 2])
+    await jt.killAll()
+  })
+
+  it('scopes every view to one session', async () => {
+    const jt = new JobTable()
+    const a1 = live(jt, 'a')
+    const b1 = live(jt, 'b')
+    expect(jt.listJobs('a')).toEqual([a1])
+    expect(jt.runningJobs('b')).toEqual([b1])
+    expect(jt.get(1, 'b')).toBe(b1)
+    expect(jt.get(2, 'b')).toBeNull()
+    expect(jt.listJobs()).toEqual([])
+    expect(
+      jt
+        .allJobs()
+        .map((j) => j.sessionId)
+        .sort(),
+    ).toEqual(['a', 'b'])
+    await jt.killAll()
+  })
+
+  it('killAll reaches every session', async () => {
+    const jt = new JobTable()
+    const a1 = live(jt, 'a')
+    const b1 = live(jt, 'b')
+    const killed = await jt.killAll()
+    expect(new Set(killed.map((j) => j.sessionId))).toEqual(new Set(['a', 'b']))
+    expect(a1.status).toBe(JobStatus.KILLED)
+    expect(b1.status).toBe(JobStatus.KILLED)
+    expect(jt.allRunningJobs()).toEqual([])
+  })
+
+  it('resets numbering per session when its list empties', async () => {
+    const jt = new JobTable()
+    const a1 = live(jt, 'a')
+    live(jt, 'b')
+    expect(await jt.kill(a1.id, 'a')).toBe(true)
+    jt.reap(a1.id, 'a')
+    expect(live(jt, 'a').id).toBe(1)
+    expect(live(jt, 'b').id).toBe(2)
+    await jt.killAll()
+  })
+
+  it("closeSession stops and forgets the session's jobs", async () => {
+    const jt = new JobTable()
+    const a1 = live(jt, 'a')
+    const a2 = live(jt, 'a')
+    const b1 = live(jt, 'b')
+    expect(jt.disown(a2.id, 'a')).toBe(true)
+    expect(await jt.closeSession('a')).toEqual([a1])
+    expect(a1.status).toBe(JobStatus.KILLED)
+    // Disowned: off the list, still running, bash's own rule.
+    expect(a2.status).toBe(JobStatus.RUNNING)
+    expect(jt.listJobs('a')).toEqual([])
+    expect(jt.get(1, 'a')).toBeNull()
+    expect(jt.listJobs('b')).toEqual([b1])
+    // A session reusing the id starts from one and inherits nothing.
+    expect(live(jt, 'a').id).toBe(1)
+    await jt.killAll()
+    expect(a2.status).toBe(JobStatus.KILLED)
+  })
+
+  it('loadJob restores a job into its session', async () => {
+    const jt = new JobTable()
+    const restored = new Job({
+      id: 3,
+      command: 'x',
+      cwd: '/',
+      status: JobStatus.COMPLETED,
+      sessionId: 'a',
+      console: new JobConsole(),
+    })
+    jt.loadJob(restored)
+    expect(jt.get(3, 'a')).toBe(restored)
+    expect(jt.get(3)).toBeNull()
+    expect(live(jt, 'a').id).toBe(4)
+    expect(live(jt, 'b').id).toBe(1)
+    await jt.killAll()
+  })
+})

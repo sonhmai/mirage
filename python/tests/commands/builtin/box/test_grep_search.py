@@ -97,6 +97,25 @@ async def test_narrowed_files_reach_the_generic_grep(harness, index):
     await grep(make_accessor(), [scope()], ['needle'],
                CommandOpts(index=index, flags={'r': True}))
     assert generic.await_args.args[0] == hits
+    assert generic.await_args.args[2].flags["H"] is True
+
+
+@pytest.mark.asyncio
+async def test_explicit_h_survives_narrowing(harness, index):
+    narrow, generic = harness
+    hits = [
+        PathSpec(resource_path="a.txt",
+                 virtual="/data/a.txt",
+                 directory="",
+                 resolved=True)
+    ]
+    narrow.return_value = (hits, True)
+    await grep(make_accessor(), [scope()], ['needle'],
+               CommandOpts(index=index, flags={
+                   'r': True,
+                   'h': True
+               }))
+    assert "H" not in generic.await_args.args[2].flags
 
 
 @pytest.mark.asyncio
@@ -108,3 +127,16 @@ async def test_empty_narrowed_set_exits_one_without_reading(harness, index):
     assert stdout == b""
     assert io.exit_code == 1
     generic.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flags", [{"text": True}, {"binary_files": "text"}])
+async def test_binary_text_search_does_not_use_content_index(
+        harness, index, flags):
+    narrow, _ = harness
+    await grep(make_accessor(), [scope()], ["needle"],
+               CommandOpts(index=index, flags={
+                   "r": True,
+                   **flags
+               }))
+    assert narrow.await_args.kwargs["exact_file_set"]

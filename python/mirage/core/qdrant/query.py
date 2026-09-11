@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 import logging
 import uuid
 from collections.abc import Callable
@@ -21,28 +22,71 @@ from qdrant_client import models
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from mirage.accessor.qdrant import QdrantAccessor
+from mirage.core.qdrant.naming import group_name, row_stem
+from mirage.core.qdrant.payload import field_value
+from mirage.core.render.json import value_text
 
 logger = logging.getLogger(__name__)
 
 SCROLL_BATCH = 256
 
 
-def _coerce(value: str) -> Any:
-    if value.lstrip("-").isdigit():
-        as_int = int(value)
-        if str(as_int) == value:
-            return as_int
-    return value
+def _json_scalar(text: str) -> bool | int | float | None:
+    """The non-string JSON scalar a rendered group segment also spells.
+
+    A group value renders through ``value_text``, so a boolean or a number
+    lists as its compact JSON and the segment alone cannot say which type
+    the payload holds. Only a spelling ``value_text`` would produce counts:
+    ``007``, ``-0`` and ``1.50`` are strings and nothing else.
+
+    Args:
+        text (str): the decoded group segment.
+    """
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return None
+    if isinstance(parsed, bool):
+        return parsed
+    if isinstance(parsed, (int, float)) and value_text(parsed) == text:
+        return parsed
+    return None
+
+
+def _condition(column: str,
+               text: str) -> models.FieldCondition | models.Filter:
+    """What one rendered group segment matches in the payload.
+
+    The string itself always, and when the segment also spells a JSON
+    scalar, that typed value too, so descending into the ``true`` or
+    ``1.5`` directory the listing advertised finds the boolean or float
+    points behind it. A number matches as a closed range, which Qdrant
+    applies to integer and float payloads alike where ``match`` does not.
+
+    Args:
+        column (str): the payload field the group level is named from.
+        text (str): the decoded group segment.
+    """
+    as_text = models.FieldCondition(key=column,
+                                    match=models.MatchValue(value=text))
+    scalar = _json_scalar(text)
+    if scalar is None:
+        return as_text
+    if isinstance(scalar, bool):
+        typed = models.FieldCondition(key=column,
+                                      match=models.MatchValue(value=scalar))
+    else:
+        typed = models.FieldCondition(key=column,
+                                      range=models.Range(gte=scalar,
+                                                         lte=scalar))
+    return models.Filter(should=[as_text, typed])
 
 
 def _filter(filters: dict[str, str]) -> models.Filter | None:
     if not filters:
         return None
-    return models.Filter(must=[
-        models.FieldCondition(key=column,
-                              match=models.MatchValue(value=_coerce(value)))
-        for column, value in filters.items()
-    ])
+    return models.Filter(
+        must=[_condition(column, value) for column, value in filters.items()])
 
 
 def _point_to_row(point: Any, id_field: str) -> dict[str, Any]:
@@ -78,17 +122,45 @@ def id_prefix_test(prefix: str) -> PointTest:
     return keep
 
 
-def value_prefix_test(column: str, prefix: str) -> PointTest:
+def value_prefix_test(column: str,
+                      prefix: str,
+                      basename: bool = False) -> PointTest:
     """Keep points whose payload value starts with a literal prefix.
 
     Args:
         column (str): the payload field the group level is named from.
         prefix (str): the literal prefix a group glob asked for.
+        basename (bool): compare against the rendered path basename.
     """
 
     def keep(point: Any) -> bool:
-        value = (point.payload or {}).get(column)
-        return value is not None and str(value).startswith(prefix)
+        value = field_value(point.payload or {}, column)
+        return value is not None and group_name(
+            value, basename=basename).startswith(prefix)
+
+    return keep
+
+
+def exact_name_test(column: str, name: str, basename: bool,
+                    seen: set[str]) -> PointTest:
+    """Keep the first point of every raw value that renders as one name.
+
+    Args:
+        column (str): the payload field the group level is named from.
+        name (str): the rendered segment a path spelled.
+        basename (bool): compare against the rendered path basename.
+        seen (set[str]): raw values already kept, shared across pages.
+    """
+
+    def keep(point: Any) -> bool:
+        value = field_value(point.payload or {}, column)
+        if value is None:
+            return False
+        raw = value_text(value)
+        if raw in seen or group_name(raw, basename=basename) != name:
+            return False
+        seen.add(raw)
+        return True
 
     return keep
 
@@ -175,15 +247,47 @@ async def distinct_values(accessor: QdrantAccessor,
                           column: str,
                           filters: dict[str, str],
                           limit: int,
-                          prefix: str = "") -> list[str]:
-    keep = value_prefix_test(column, prefix) if prefix else None
+                          prefix: str = "",
+                          basename: bool = False) -> list[str]:
+    keep = value_prefix_test(column, prefix, basename) if prefix else None
     points = await _scroll_all(accessor, table, filters, limit, keep)
     values = {
-        str(payload[column])
+        value_text(value)
         for point in points
-        if (payload := point.payload or {}).get(column) is not None
+        if (value := field_value(point.payload or {}, column)) is not None
     }
     return sorted(values)
+
+
+async def resolve_group(accessor: QdrantAccessor,
+                        table: str,
+                        column: str,
+                        filters: dict[str, str],
+                        name: str,
+                        basename: bool = False) -> list[str]:
+    """The raw payload values one rendered group segment stands for.
+
+    A basename drops the value's parents, so two sources can render as
+    the same directory. Telling them apart is a question about every
+    point under the parent group, not about the first ``max_rows``: the
+    scroll runs until it is exhausted or a second distinct value has
+    rendered as ``name``, whichever comes first. One value is the
+    answer; two is a collision for the caller to refuse.
+
+    Args:
+        accessor (QdrantAccessor): the mount's accessor.
+        table (str): the collection.
+        column (str): the payload field the group level is named from.
+        filters (dict[str, str]): the parent groups, already resolved.
+        name (str): the rendered segment a path spelled.
+        basename (bool): whether the level renders basenames.
+    """
+    seen: set[str] = set()
+    points = await _scroll_all(accessor, table, filters, 2,
+                               exact_name_test(column, name, basename, seen))
+    return sorted(
+        value_text(field_value(point.payload or {}, column))
+        for point in points)
 
 
 async def rows_matching(accessor: QdrantAccessor,
@@ -191,7 +295,14 @@ async def rows_matching(accessor: QdrantAccessor,
                         filters: dict[str, str],
                         limit: int,
                         prefix: str = "") -> list[dict[str, Any]]:
-    keep = id_prefix_test(prefix) if prefix else None
+    keep: PointTest | None
+    if prefix and accessor.config.name_field:
+
+        def keep(point: Any) -> bool:
+            return row_stem(_point_to_row(point, accessor.config.id_field),
+                            accessor.config).startswith(prefix)
+    else:
+        keep = id_prefix_test(prefix) if prefix else None
     points = await _scroll_all(accessor, table, filters, limit, keep)
     return [_point_to_row(point, accessor.config.id_field) for point in points]
 

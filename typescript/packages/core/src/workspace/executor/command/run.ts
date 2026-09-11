@@ -361,7 +361,7 @@ function prefixKeys(obj: Record<string, ByteSource>, prefix: string): Record<str
   return out
 }
 
-// The symlink facts on offer, or null when there are no links, built
+// The live symlink facts on offer, or null without a namespace, built
 // with the namespace's own attr overlay so a link's target stat carries
 // the same rows `ls -l` renders.
 function linkViewFor(namespace: Namespace | null, dispatch: DispatchFn): LinkView | null {
@@ -377,7 +377,7 @@ function linkView(
   dispatch: DispatchFn,
   overlay: StatOverlay | null,
 ): LinkView | null {
-  if (!namespace?.hasLinks()) return null
+  if (namespace === null) return null
   return {
     statAt: (path: string) => namespace.linkStatAt(path),
     children: (directory: string) => namespace.linkStatsUnder(directory),

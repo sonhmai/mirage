@@ -138,6 +138,6 @@
     "langchain": "^1.5.9",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",
-    "vitest": "^3.2.6"
+    "vitest": "^4.1.11"
   }
 }

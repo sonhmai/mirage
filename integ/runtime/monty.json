@@ -513,6 +513,328 @@
           }
         }
       ]
+    },
+    {
+      "id": "on_demand_mount_access",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "one.txt": "one",
+              "unused.txt": "unused"
+            }
+          },
+          "/data/nested": {
+            "resource": "ram",
+            "files": {
+              "inside.txt": "nested"
+            }
+          },
+          "/large": {
+            "resource": "ram",
+            "generated_files": 47000
+          }
+        },
+        "policies": [
+          {
+            "name": "seal_reads",
+            "suffix": "/large"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "is_file",
+            "path": "/large/file-46999.txt"
+          },
+          "expect": {
+            "value": true
+          }
+        },
+        {
+          "command": "python3 -c 'print(42)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n",
+            "stderr": "",
+            "ops_absent": [
+              "read"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c 'from pathlib import Path; print(Path('\"'\"'/data/one.txt'\"'\"').read_text())'",
+          "expect": {
+            "exit": 0,
+            "stdout": "one\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "append",
+            "path": "/data/one.txt",
+            "data": "-fresh"
+          },
+          "expect": {
+            "ops_contain": [
+              "append /data/one.txt"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c 'from pathlib import Path; print(Path('\"'\"'/data/one.txt'\"'\"').read_text())'",
+          "expect": {
+            "exit": 0,
+            "stdout": "one-fresh\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c 'from pathlib import Path; print(Path('\"'\"'/data/nested/inside.txt'\"'\"').read_text())'",
+          "expect": {
+            "exit": 0,
+            "stdout": "nested\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/nested/inside.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c 'f = open('\"'\"'/data/one.txt'\"'\"', '\"'\"'a'\"'\"'); f.write('\"'\"'!'\"'\"'); f.close()'",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": "",
+            "ops_contain": [
+              "append /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c 'from pathlib import Path; print(Path('\"'\"'/data/one.txt'\"'\"').read_text())'",
+          "expect": {
+            "exit": 0,
+            "stdout": "one-fresh!\n",
+            "stderr": "",
+            "ops_contain": [
+              "read /data/one.txt"
+            ],
+            "ops_absent": [
+              "read /data/unused.txt",
+              "read /large/file-0.txt",
+              "read /large/file-46999.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "list_files",
+            "path": "/large"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fs_list",
+      "filesystem": {
+        "monty": {
+          "list": true
+        }
+      },
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "inner\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c",
+          "script": "fs/py/list.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "seed.txt\nsub\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fs_stat",
+      "filesystem": {
+        "monty": {
+          "stat": true
+        }
+      },
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "inner\n"
+            }
+          }
+        }
+      },
+      "hosts": [
+        "python"
+      ],
+      "steps": [
+        {
+          "command": "python3 -c",
+          "script": "fs/py/stat.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "file 5 32768\ndir 16384\nmissing\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fs_stat_requires_js_named_tuple",
+      "filesystem": {
+        "monty": {
+          "stat": false
+        }
+      },
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "inner\n"
+            }
+          }
+        }
+      },
+      "hosts": [
+        "typescript"
+      ],
+      "steps": [
+        {
+          "command": "python3 -c",
+          "script": "fs/py/stat.py",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "PermissionError"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fs_glob",
+      "filesystem": {
+        "monty": {
+          "glob": false
+        }
+      },
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "inner\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c",
+          "script": "fs/py/glob.py",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "No module named 'glob'"
+          }
+        }
+      ]
+    },
+    {
+      "id": "output_survives_failure_and_reuse",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print('before failure'); raise ValueError('original failure')\"",
+          "expect": {
+            "exit": 1,
+            "stdout": "before failure\n",
+            "stderr_contains": "original failure"
+          }
+        },
+        {
+          "command": "python3 -c \"print('next')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "next\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

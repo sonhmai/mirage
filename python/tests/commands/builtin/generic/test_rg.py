@@ -699,3 +699,51 @@ async def test_rg_not_a_directory_operand_keeps_the_others():
     decoded = (await _drain_async(output)).decode()
     assert decoded == "/real/b.txt\n"
     assert b"/a.txt/x" in (io.stderr or b"")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flags,prefix", [
+    ({}, ""),
+    ({
+        "H": True
+    }, "/binary.txt:"),
+    ({
+        "args_I": True
+    }, ""),
+    ({
+        "H": True,
+        "args_I": True
+    }, ""),
+])
+async def test_rg_filename_flags_preserve_nul_matches(flags, prefix):
+    readdir, stat, rb, rs = _make_backend({"/binary.txt": b"needle\0tail\n"})
+    output, io = await rg(
+        [_spec("/binary.txt")],
+        ["needle"],
+        CommandOpts(flags=flags),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert await _drain_async(output) == prefix.encode() + b"needle\0tail\n"
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_rg_no_filename_preserves_multi_file_nul_matches():
+    readdir, stat, rb, rs = _make_backend({
+        "/a.txt": b"needle\0a\n",
+        "/b.txt": b"needle\0b\n",
+    })
+    output, io = await rg(
+        [_spec("/a.txt"), _spec("/b.txt")],
+        ["needle"],
+        CommandOpts(flags={"args_I": True}),
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert await _drain_async(output) == b"needle\0a\nneedle\0b\n"
+    assert io.exit_code == 0

@@ -298,10 +298,12 @@ describe('pipeline', () => {
     expect(out).toContain('bbb')
   })
 
-  it('for loop variable restored', async () => {
+  // bash 5.2: the loop variable is an ordinary variable and keeps its last
+  // value after the loop; the shadowed value is not put back.
+  it('for loop variable keeps its last value', async () => {
     await ws.execute('export i=original')
     await ws.execute('for i in 1 2 3; do echo $i; done')
-    expect(ws.getSession(ws.defaultSessionId).env.i).toBe('original')
+    expect(ws.getSession(ws.defaultSessionId).env.i).toBe('3')
   })
 
   // ── If/else ──────────────────────────────────────────────────────

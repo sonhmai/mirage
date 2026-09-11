@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.render.json import (compact_json_bytes, compact_json_text,
-                                     json_bytes, json_text, jsonl_bytes)
+                                     json_bytes, json_text, jsonl_bytes,
+                                     number_text, value_text)
 
 # Byte-for-byte the fixture in the typescript twin
 # (packages/core/src/core/render/json.test.ts). Both languages pin the same
@@ -74,3 +75,48 @@ def test_jsonl_bytes_renders_no_rows_as_empty():
 def test_jsonl_bytes_keeps_the_given_order():
     rows = [{"i": 2}, {"i": 1}]
     assert jsonl_bytes(rows) == b'{"i":2}\n{"i":1}\n'
+
+
+def test_value_text_spells_a_value_as_its_json_does():
+    # A string is itself; anything else is its compact JSON, so a boolean
+    # is ``true`` in both languages rather than Python's ``True``, and an
+    # integral float is the integer TypeScript never told it apart from.
+    assert value_text("x") == "x"
+    assert value_text("True") == "True"
+    assert value_text(True) == "true"
+    assert value_text(False) == "false"
+    assert value_text(7) == "7"
+    assert value_text(1.0) == "1"
+    assert value_text(1.5) == "1.5"
+    assert value_text(None) == "null"
+    assert value_text({
+        "a": 1.0,
+        "b": [True, None]
+    }) == '{"a":1,"b":[true,null]}'
+
+
+def test_number_text_lays_a_float_out_as_ecmascript_does():
+    # Python's repr and V8 agree on the digits and differ only on layout:
+    # Python pads the exponent and switches to it below 1e-4 and from 1e16,
+    # ECMAScript switches below 1e-6 and from 1e21. The same table as the
+    # typescript twin, where String() is the spec this reproduces.
+    assert number_text(1e-7) == "1e-7"
+    assert number_text(0.00001) == "0.00001"
+    assert number_text(1.5e-5) == "0.000015"
+    assert number_text(1e16) == "10000000000000000"
+    assert number_text(1e21) == "1e+21"
+    assert number_text(1.5e22) == "1.5e+22"
+    assert number_text(123.0) == "123"
+    assert number_text(-0.0) == "0"
+    assert number_text(-1e-7) == "-1e-7"
+    assert number_text(0.30000000000000004) == "0.30000000000000004"
+    assert number_text(float("nan")) == "null"
+    assert number_text(float("inf")) == "null"
+
+
+def test_value_text_spells_a_float_the_way_typescript_does():
+    # A label holding 1e-7 used to spell 1e-07 here and 1e-7 there, so one
+    # point had two paths; a nested number spells the same way.
+    assert value_text(1e-7) == "1e-7"
+    assert value_text(1e21) == "1e+21"
+    assert value_text({"a": 1e-7, "b": [1e21]}) == '{"a":1e-7,"b":[1e+21]}'

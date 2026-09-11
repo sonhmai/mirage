@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WorkspaceBinding } from './binding.ts'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
@@ -19,8 +20,8 @@ import { ContentType, FileStat, FileType, MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { MontyRuntime } from './python/monty/index.ts'
-import { PyodideRuntime } from './python/pyodide.ts'
-import { QuickJsRuntime } from './js/quickjs.ts'
+import { PyodideRuntime } from './python/pyodide/runtime.ts'
+import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import type { BridgeDispatchFn, RunArgs } from './types.ts'
 import { PrefixResolver } from './resolver.ts'
 
@@ -666,7 +667,7 @@ describe('append ships only the deltas', () => {
   it('monty', async () => {
     const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
     const rt = new MontyRuntime()
-    rt.attach(counting.dispatch, new PrefixResolver(() => ['/data/']))
+    rt.bind(new WorkspaceBinding(counting.dispatch, new PrefixResolver(() => ['/data/'])))
     const result = await rt.run(runArgs(APPEND_LOOP_PY))
     await rt.close()
     expect(result.exitCode).toBe(0)
@@ -676,7 +677,7 @@ describe('append ships only the deltas', () => {
   it('pyodide', async () => {
     const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
     const rt = new PyodideRuntime()
-    rt.attach(counting.dispatch, new PrefixResolver(() => ['/data/']))
+    rt.bind(new WorkspaceBinding(counting.dispatch, new PrefixResolver(() => ['/data/'])))
     const result = await rt.run(runArgs(APPEND_LOOP_PY))
     await rt.close()
     expect(result.exitCode).toBe(0)
@@ -688,7 +689,7 @@ describe('append ships only the deltas', () => {
   it('quickjs', async () => {
     const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
     const rt = new QuickJsRuntime()
-    rt.attach(counting.dispatch, new PrefixResolver(() => ['/data/']))
+    rt.bind(new WorkspaceBinding(counting.dispatch, new PrefixResolver(() => ['/data/'])))
     const result = await rt.run(runArgs(APPEND_LOOP_JS))
     await rt.close()
     expect(result.exitCode).toBe(0)

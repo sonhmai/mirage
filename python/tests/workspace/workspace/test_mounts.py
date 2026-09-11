@@ -16,10 +16,13 @@ import asyncio
 
 import pytest
 
+from mirage.cache.index import IndexConfig, RedisIndexConfig
+from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.resource.ram import RAMResource
 from mirage.types import Limit, MountBackend, MountMode
+from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.mount.spec import Mount
-from mirage.workspace.workspace.mounts import (kernel_targets,
+from mirage.workspace.workspace.mounts import (install_mounts, kernel_targets,
                                                normalize_resources)
 
 
@@ -128,3 +131,28 @@ def test_the_guard_runs_before_any_mount_is_installed():
             "/good": RAMResource(),
             "/bad": "nope",
         }, MountMode.WRITE)
+
+
+# A resource keeps the index it was given when the workspace passes none
+# (#1012): `set_index(None)` used to run on every mount and replace a
+# `RedisIndexConfig` the resource itself carried with a RAM default.
+def test_install_mounts_keeps_a_resources_own_index_without_a_config():
+    resource = RAMResource()
+    resource.set_index(
+        RedisIndexConfig(url="redis://127.0.0.1:1/0", key_prefix="own:"))
+    own = resource.index
+    install_mounts(MountRegistry(),
+                   normalize_resources({"/a": resource}, MountMode.WRITE),
+                   None, MountMode.WRITE)
+    assert resource.index is own
+    assert isinstance(resource.index, RedisIndexCacheStore)
+
+
+def test_install_mounts_applies_a_workspace_index_to_every_resource():
+    resource = RAMResource()
+    own = resource.index
+    install_mounts(MountRegistry(),
+                   normalize_resources({"/a": resource}, MountMode.WRITE),
+                   IndexConfig(ttl=5), MountMode.WRITE)
+    assert resource.index is not own
+    assert resource.index._ttl == 5

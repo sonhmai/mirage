@@ -430,7 +430,6 @@
               "typescript/server-and-cli",
               "typescript/setup/fuse",
               "typescript/python",
-              "typescript/python-fs",
               "typescript/limitations"
             ]
           },

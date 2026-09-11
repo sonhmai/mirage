@@ -21,7 +21,8 @@ from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.types import DispatchFn, ExecPathFn, RunArgs, RunResult
+from mirage.runtime.types import (CodeExecution, DispatchFn, ExecPathFn,
+                                  RunResult)
 from mirage.types import PathSpec
 
 
@@ -309,6 +310,7 @@ async def run_code(
     flags: dict[str, Any],
     runtime: Runtime | None,
     unavailable: str | None,
+    cwd: PathSpec | None = None,
 ) -> CommandOutput:
     """Run a prepared source on the bound runtime, shared by all.
 
@@ -328,6 +330,7 @@ async def run_code(
             runtime (each runtime reads its own).
         runtime (Runtime | None): the workspace-bound runtime for this
             command; None when no entry captures it.
+        cwd (PathSpec | None): virtual working directory for the guest.
         unavailable (str | None): the dispatcher-recorded reason this
             command has no runtime (a default entry's build error),
             None when nothing captures it at all.
@@ -349,11 +352,13 @@ async def run_code(
         err = (f"{label}: -m is not supported by the {runtime.name!r} "
                f"runtime\n").encode()
         return None, IOResult(exit_code=1, stderr=err)
-    result = await runtime.run(
-        RunArgs(code=prepared.code,
-                args=prepared.args,
-                prog=prepared.argv0,
-                env=env or {},
-                stdin=prepared.stdin,
-                flags=flags))
+    result = await runtime.execute(
+        CodeExecution(language=runtime.language,
+                      code=prepared.code,
+                      args=prepared.args,
+                      prog=prepared.argv0,
+                      env=env or {},
+                      stdin=prepared.stdin,
+                      flags=flags,
+                      cwd=cwd))
     return run_output(result)

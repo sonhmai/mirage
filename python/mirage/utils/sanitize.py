@@ -14,7 +14,6 @@
 
 import re
 
-UNSAFE_CHARS = re.compile(r"[^\w\s\-.]")
 MULTI_UNDERSCORE = re.compile(r"_+")
 MAX_LEN = 100
 # POSIX NAME_MAX on ext4 and APFS alike, and it counts BYTES. Truncating by
@@ -22,6 +21,38 @@ MAX_LEN = 100
 # 300 bytes.
 NAME_MAX_BYTES = 255
 ELLIPSIS = "..."
+# What ``/`` becomes inside a path segment: U+2215 DIVISION SLASH, the one
+# character every backend renders a slash as, so a value cannot open a
+# directory boundary. ``core.hierarchy.codec`` is what inverts it.
+SAFE_SLASH = "∕"
+# What marks the next character of a path segment as literal: U+2044
+# FRACTION SLASH. ``path_safe_name`` leads a dot-led name with it, since the
+# hierarchy hides a dot-led segment, and ``core.hierarchy.codec`` spells its
+# reversible encoding with it.
+ESCAPE_LEAD = "⁄"
+# Unicode's White_Space property (PropList.txt), spelled out rather than
+# read off ``str.strip``: Python also strips U+001C..U+001F, and
+# JavaScript's ``trim`` strips U+FEFF but not U+0085, so a value blank in
+# one runtime rendered a segment the other runtime spelled out.
+WHITE_SPACE_CLASS = ("\t\n\x0b\x0c\r \x85\xa0\u1680\u2000-\u200a"
+                     "\u2028\u2029\u202f\u205f\u3000")
+WHITE_SPACE = re.compile(f"[{WHITE_SPACE_CLASS}]*")
+# The same class, not ``\s``: python's ``\s`` takes U+001C..U+001F and
+# JavaScript's takes U+FEFF, so one runtime kept a character the other
+# replaced.
+UNSAFE_CHARS = re.compile(f"[^\\w{WHITE_SPACE_CLASS}\\-.]")
+
+
+def is_blank(text: str) -> bool:
+    """Whether the text is empty or nothing but white space.
+
+    Args:
+        text (str): the string to test.
+
+    Returns:
+        bool: True when every character is Unicode White_Space.
+    """
+    return WHITE_SPACE.fullmatch(text) is not None
 
 
 def byte_len(text: str) -> int:
@@ -70,7 +101,7 @@ def sanitize_name(name: str) -> str:
     Returns:
         str: sanitized name.
     """
-    if not name.strip():
+    if is_blank(name):
         return "unknown"
     cleaned = UNSAFE_CHARS.sub("_", name)
     cleaned = cleaned.replace(" ", "_")
@@ -85,10 +116,14 @@ def path_safe_name(name: str) -> str:
     """Make a name safe to embed in a VFS path segment.
 
     Preserves the original spelling (spaces, apostrophes, emoji, etc.)
-    and only replaces the path separator ``/`` with ``∕`` (U+2215)
-    so the value cannot collide with a directory boundary. Use this
-    for resource directory and file names where keeping the original
-    display name matters more than shell ergonomics.
+    and only replaces the path separator ``/`` with ``SAFE_SLASH``
+    (``∕``, U+2215), so the value cannot collide with a directory
+    boundary, and leads a name that starts with ``.`` with
+    ``ESCAPE_LEAD`` (``⁄``, U+2044), since the hierarchy classifies a
+    dot-led segment as hidden: it would be dropped from every listing
+    and refused as a path. Use this for resource directory and file
+    names where keeping the original display name matters more than
+    shell ergonomics.
 
     Args:
         name (str): raw name from API.
@@ -96,9 +131,12 @@ def path_safe_name(name: str) -> str:
     Returns:
         str: path-safe name, or "unknown" if empty.
     """
-    if not name.strip():
+    if is_blank(name):
         return "unknown"
-    return name.replace("/", "∕")
+    safe = name.replace("/", SAFE_SLASH)
+    if safe.startswith("."):
+        return ESCAPE_LEAD + safe
+    return safe
 
 
 def sanitize_label(text: str,
@@ -139,7 +177,7 @@ def sanitize_label(text: str,
     Returns:
         str: the sanitized label.
     """
-    if not text.strip():
+    if is_blank(text):
         return fallback
     cleaned = UNSAFE_CHARS.sub("_", text).replace(" ", "_")
     cleaned = MULTI_UNDERSCORE.sub("_", cleaned).strip("_")

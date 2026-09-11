@@ -66,7 +66,7 @@ async def test_readdir_populates_index_with_size_and_modified(
     assert file_lookup.entry is not None
     assert file_lookup.entry.resource_type == "file"
     assert file_lookup.entry.size == 6
-    assert file_lookup.entry.remote_time == "2023-11-14T22:13:20+00:00"
+    assert file_lookup.entry.remote_time == "2023-11-14T22:13:20Z"
     dir_lookup = await index.get("/volume/reports/archive")
     assert dir_lookup.entry is not None
     assert dir_lookup.entry.resource_type == "folder"

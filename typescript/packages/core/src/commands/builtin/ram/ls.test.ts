@@ -102,7 +102,7 @@ describe('ls', () => {
       '/tmp/.hidden': 'secret',
       '/tmp/visible.txt': 'hi',
     })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { a: true })
+    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { all: true })
     expect(out.trimEnd().split('\n').sort()).toEqual(['.hidden', 'visible.txt'])
   })
 
@@ -113,7 +113,7 @@ describe('ls', () => {
       '/tmp/b.txt': 'b',
       '/tmp/c.txt': 'c',
     })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { r: true })
+    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { reverse: true })
     expect(out.trimEnd().split('\n')).toEqual(['c.txt', 'b.txt', 'a.txt'])
   })
 
@@ -135,7 +135,7 @@ describe('ls', () => {
       '/tmp/small.txt': 'x',
       '/tmp/medium.txt': 'x'.repeat(50),
     })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { S: true, r: true })
+    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { S: true, reverse: true })
     expect(out.trimEnd().split('\n')).toEqual(['small.txt', 'medium.txt', 'big.txt'])
   })
 
@@ -146,7 +146,7 @@ describe('ls', () => {
       '/tmp/a.txt': 'a',
       '/tmp/m.txt': 'm',
     })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { a: true, r: true })
+    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { all: true, reverse: true })
     expect(out.trimEnd().split('\n')).toEqual(['m.txt', 'a.txt', '.z_hidden'])
   })
 
@@ -156,7 +156,7 @@ describe('ls', () => {
       '/tmp/a.txt': 'a',
       '/tmp/sub/b.txt': 'b',
     })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { R: true })
+    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { recursive: true })
     expect(out).toContain('a.txt')
     expect(out).toContain('sub')
     expect(out).toContain('/tmp/sub:')
@@ -166,19 +166,19 @@ describe('ls', () => {
   it('list-dir mode (-d) lists directory entries themselves, not contents', async () => {
     const resource = new RAMResource()
     seed(resource, ['/tmp'], { '/tmp/a.txt': 'a' })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { d: true })
+    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { directory: true })
     // GNU ls -d prints the operand as given.
     expect(out).toBe('/tmp\n')
   })
 
-  it('-1 overrides -l: forces short (one-per-line) format', async () => {
+  it('-1 never undoes -l, as in GNU', async () => {
     const resource = new RAMResource()
     seed(resource, ['/tmp'], { '/tmp/a.txt': 'a', '/tmp/b.txt': 'b' })
-    const short = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { args_1: true })
-    const overridden = await runLs(resource, [PathSpec.fromStrPath('/tmp')], {
+    const long = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { args_l: true })
+    const both = await runLs(resource, [PathSpec.fromStrPath('/tmp')], {
       args_l: true,
       args_1: true,
     })
-    expect(overridden).toBe(short)
+    expect(both).toBe(long)
   })
 })

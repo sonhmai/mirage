@@ -60,6 +60,21 @@ async def test_search_top_k_limits_results(accessor):
 
 
 @pytest.mark.asyncio
+async def test_search_spells_group_values_as_the_listing_does(edged):
+    # A path the listing never shows is one ``cat`` cannot open: the group
+    # segment renders the way readdir renders it, escape lead and all.
+    for query, head in (("one", "/db/docs/a∕b/1.md:"),
+                        ("two", "/db/docs/⁄/2.md:"), ("three",
+                                                      "/db/docs/⁄.env/3.md:")):
+        out = (await search_rows_output(edged,
+                                        query, [_ps("/db/docs")],
+                                        top_k=1,
+                                        threshold=0.0,
+                                        mount_prefix="/db")).decode()
+        assert out.splitlines()[0].startswith(head)
+
+
+@pytest.mark.asyncio
 async def test_search_empty_query_raises(accessor):
     with pytest.raises(ValueError):
         await search_rows_output(accessor,

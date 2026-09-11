@@ -32,7 +32,7 @@ import { envSnapshot } from '../session/state.ts'
 import { commandName } from './utils.ts'
 import { makeAbortError, mergeSignals } from '../abort.ts'
 import { isControlFlowError } from './failure.ts'
-import type { Refusal } from '../../types.ts'
+import { PathSpec, type Refusal } from '../../types.ts'
 
 /**
  * What a whole line answers: the runtime's own result plus the
@@ -71,7 +71,14 @@ export async function runWholeLine(
   let result: RunResult
   try {
     result = await runWithTimeout(
-      runtime.runLine(command, data, envSnapshot(session), session.cwd, runSignal),
+      runtime.execute({
+        kind: 'shell',
+        line: command,
+        stdin: data,
+        env: envSnapshot(session),
+        cwd: PathSpec.fromStrPath(session.cwd),
+        ...(runSignal === undefined ? {} : { signal: runSignal }),
+      }),
       timeout,
       name,
     )

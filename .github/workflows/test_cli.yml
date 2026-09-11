@@ -9,6 +9,7 @@ permissions:
     paths:
       - python/**
       - typescript/**
+      - integ/execute_stdin.py
       - .github/workflows/test_cli.yml
       - .github/actions/setup-node-pnpm/action.yml
   pull_request:
@@ -44,6 +45,7 @@ jobs:
               - 'integ/cross.sh'
               - 'integ/cross.yaml'
               - 'integ/parity.sh'
+              - 'integ/execute_stdin.py'
               - 'integ/fuse/cli_fuse.sh'
               - 'integ/cli_config.sh'
               - 'integ/cli_env.sh'
@@ -728,6 +730,9 @@ jobs:
           /tmp/mc mb local/mirage-cross || true
           /tmp/mc mb local/mirage-state || true
 
+      - name: Run daemon large-stdin and grep round trips (both languages)
+        run: ./python/.venv/bin/python integ/execute_stdin.py
+
       - name: Run cross-language snapshot interop (both directions)
         run: |
           bash integ/cross.sh \
@@ -740,6 +745,9 @@ jobs:
           STORE_S3: "1"
           STORE_S3_ENDPOINT: http://localhost:9000
           STORE_S3_BUCKET: mirage-state
+
+      - name: Run cross-language index store interop (both directions)
+        run: bash integ/index_store.sh
 
       - name: Run CLI feature parity (subshell, sessions, session modes, versioning, fuse)
         run: |

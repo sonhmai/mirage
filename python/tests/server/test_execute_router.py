@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import base64
 import json
 
 import pytest
@@ -274,6 +275,60 @@ async def test_execute_with_stdin_multipart():
         body = r.json()
         assert body["exit_code"] == 0
         assert body["stdout"].strip().startswith("3")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("background", [False, True])
+@pytest.mark.parametrize("resource", ["ram", "disk"])
+async def test_large_multipart_stdin_roundtrip(tmp_path, resource, background):
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport,
+                           base_url="http://test") as client:
+        mount = {"resource": resource, "mode": "WRITE"}
+        if resource == "disk":
+            mount["config"] = {"root": str(tmp_path)}
+        created = await client.post(
+            "/v1/workspaces", json={"config": {
+                "mounts": {
+                    "/work": mount
+                }
+            }})
+        assert created.status_code == 201, created.text
+        wid = created.json()["id"]
+        try:
+            for stdin in [("α\0\r\n" * 240_000).encode(), b""]:
+                payload = json.dumps({
+                    "command": "cat > input.bin",
+                    "cwd": "/work",
+                    "record": False
+                })
+                result = await client.post(
+                    f"/v1/workspaces/{wid}/execute",
+                    params={"background": str(background).lower()},
+                    files={
+                        "request":
+                        ("request.json", payload, "application/json"),
+                        "stdin":
+                        ("stdin.bin", stdin, "application/octet-stream")
+                    },
+                )
+                assert result.status_code == (202 if background else
+                                              200), result.text
+                if background:
+                    job = result.json()["job_id"]
+                    waited = await client.post(f"/v1/jobs/{job}/wait", json={})
+                    assert waited.json()["status"] == "done", waited.text
+                else:
+                    assert result.json()["exit_code"] == 0, result.text
+                read = await client.post(
+                    f"/v1/workspaces/{wid}/execute",
+                    json={"command": "base64 /work/input.bin"})
+                assert read.status_code == 200, read.text
+                assert read.json()["exit_code"] == 0
+                assert base64.b64decode(read.json()["stdout"]) == stdin
+        finally:
+            await client.delete(f"/v1/workspaces/{wid}")
 
 
 @pytest.mark.asyncio

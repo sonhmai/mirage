@@ -55,6 +55,7 @@ export async function narrowScope(
   recursive: boolean,
   wholeWord: boolean,
   index?: IndexCacheStore,
+  exactFileSet = false,
 ): Promise<NarrowResult> {
   const first = paths[0]
   if (first === undefined) return { resolved: [], fileCount: 0, usedSearch: false }
@@ -62,6 +63,7 @@ export async function narrowScope(
   const fileCount = countScopeFiles(accessor.tree, key)
   const query = pattern !== null ? searchQuery(pattern, fixedString) : null
   const useSearch =
+    !exactFileSet &&
     query !== null &&
     wholeWord &&
     pattern !== null &&

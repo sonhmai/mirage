@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Container, Iterator
+from collections.abc import Callable, Container, Iterator
 
 import tree_sitter
 
@@ -43,7 +43,9 @@ def command_nodes(ast: tree_sitter.Node) -> Iterator[tree_sitter.Node]:
 
 
 def parsed_commands(
-    ast: tree_sitter.Node, clis: Container[str] = frozenset()
+    ast: tree_sitter.Node,
+    clis: Container[str] = frozenset(),
+    match_command_prefix: Callable[[list[str]], int] | None = None,
 ) -> tuple[ParsedCommand, ...]:
     """Distill a parsed line into one ParsedCommand per command.
 
@@ -51,18 +53,24 @@ def parsed_commands(
         ast (tree_sitter.Node): the parsed tree-sitter root node.
         clis (Container[str]): installed CLI head words; a command whose
             name is one of them carries it as ``cli``.
+        match_command_prefix (Callable | None): the workspace's registered
+            command-prefix matcher; absent means single-word names.
     """
     commands: list[ParsedCommand] = []
     for node in command_nodes(ast):
         words = tuple(child.text.decode() for child in node.children
                       if child.type in _WORD_TYPES and child.text is not None)
         if words:
+            consumed = match_command_prefix(
+                list(words)) if match_command_prefix else 1
+            name = " ".join(words[:consumed])
             commands.append(
                 ParsedCommand(
-                    command=words[0],
+                    command=name,
                     words=words,
-                    builtin=words[0] in SPECS,
-                    paths=tuple(w for w in words[1:] if w.startswith("/")),
+                    builtin=name in SPECS,
+                    paths=tuple(w for w in words[consumed:]
+                                if w.startswith("/")),
                     cli=words[0] if words[0] in clis else None,
                 ))
     return tuple(commands)

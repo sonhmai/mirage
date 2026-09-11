@@ -184,3 +184,5 @@ End-to-end runnable scripts are in
 - [`dropbox.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox.ts), `Workspace.execute('ls/stat/cat/tree …')` shell demo
 - [`dropbox_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox_vfs.ts), `patchNodeFs` + native `fs.promises.*` calls
 - [`dropbox_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox_fuse.ts), FUSE mount with shell access in another terminal
+
+`grep` classifies the bytes it reads, including downloaded attachments. Use `-I` to skip binary inputs or `-a` (`--binary-files=text`) to search them as text. Text mode bypasses the content-search index and scans files directly.

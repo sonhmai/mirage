@@ -14,6 +14,8 @@
 
 import pytest
 
+from mirage.policy import Action, Deny, Policy, PolicyDenied
+from mirage.policy.types import SessionContext
 from mirage.resource.ram import RAMResource
 from mirage.server.version.api import (branch, checkout, commit, commit_state,
                                        diff_live_vs_ref, read_version,
@@ -329,3 +331,32 @@ async def test_checkout_rebuilds_content_in_place(tmp_path):
         "modified": [],
         "deleted": [],
     }
+
+
+class DenyGate(Policy):
+    """Refuse env writes to GATE_* names, the deployment's rule."""
+
+    async def pre_session(self, ctx: SessionContext) -> Action | None:
+        if ctx.plane == "env" and ctx.key.startswith("GATE_"):
+            return Deny("GATE_* refused by policy\n")
+        return None
+
+
+# The live cache was cleared ahead of the restore's gate, so a refused
+# checkout still sent every cached read back to its origin while the
+# rest of the workspace stayed as it was; the clear now sits behind it.
+@pytest.mark.asyncio
+async def test_a_refused_checkout_leaves_the_live_cache_alone(tmp_path):
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.EXEC)
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
+    try:
+        seed_var(ws.create_session("s2"), "GATE_X", "1")
+        await commit(store, ws, branch="main", message="v1")
+        await ws.cache.set("k", b"cached")
+        ws.policies.add(DenyGate())
+        with pytest.raises(PolicyDenied):
+            await checkout(store, ws, "main")
+        assert await ws.cache.get("k") == b"cached"
+    finally:
+        await ws.close()

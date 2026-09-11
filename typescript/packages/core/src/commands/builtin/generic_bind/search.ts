@@ -24,6 +24,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView, type FlagValue } from '../../spec/types.ts'
 import { grepGeneric } from '../generic/grep.ts'
 import { rgGeneric } from '../generic/rg.ts'
+import { textSearchResults } from '../grep_pushdown.ts'
 import { patternArg } from '../grep_pattern.ts'
 import { formatRecords } from '../utils/output.ts'
 import { resolveGlobOf, type CommandIO } from './adapter.ts'
@@ -142,7 +143,8 @@ export function makeSearch<A extends Accessor>(
         }
         const lines = await searcher(accessor, match, query)
         if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-        return [formatRecords(lines), new IOResult()]
+        if (name !== 'grep' || textSearchResults(lines))
+          return [formatRecords(lines), new IOResult()]
       }
     }
 

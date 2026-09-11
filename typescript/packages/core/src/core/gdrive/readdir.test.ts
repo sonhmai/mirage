@@ -22,10 +22,12 @@ vi.mock('../google/drive.ts', async () => {
 
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { RedisIndexCacheStore } from '../../cache/index/redis.ts'
 import { PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/client.ts'
 import * as drive from '../google/drive.ts'
 import { readdir } from './readdir.ts'
+import { stat } from './stat.ts'
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 
@@ -40,6 +42,77 @@ function makeAccessor(): GDriveAccessor {
 beforeEach(() => {
   vi.mocked(drive.listSharedDrives).mockResolvedValue([])
 })
+
+for (const backend of ['ram', 'redis']) {
+  describe.skipIf(backend === 'redis' && process.env.REDIS_URL === undefined)(
+    `direct Drive stat with ${backend}`,
+    () => {
+      it.each(['updated', 'deleted', 'renamed-folder'])(
+        'refreshes invalidated ids: %s',
+        async (change) => {
+          const url = process.env.REDIS_URL
+          const index =
+            backend === 'ram'
+              ? new RAMIndexCacheStore()
+              : new RedisIndexCacheStore({
+                  ...(url === undefined ? {} : { url }),
+                  keyPrefix: `drive-refresh:${crypto.randomUUID()}:`,
+                })
+          let refreshed = false
+          const calls: string[] = []
+          vi.mocked(drive.listFiles).mockImplementation((_tm, opts) => {
+            const folderId = opts?.folderId ?? 'root'
+            calls.push(folderId)
+            if (
+              refreshed &&
+              change === 'renamed-folder' &&
+              folderId === 'root' &&
+              opts?.name === 'docs'
+            )
+              return Promise.resolve([])
+            if (folderId === 'root')
+              return Promise.resolve([
+                {
+                  id: refreshed ? 'new-folder' : 'old-folder',
+                  name: refreshed && change === 'renamed-folder' ? 'renamed' : 'docs',
+                  mimeType: FOLDER_MIME,
+                },
+              ])
+            expect(folderId).toBe(refreshed ? 'new-folder' : 'old-folder')
+            if (refreshed && change === 'deleted') return Promise.resolve([])
+            return Promise.resolve([
+              {
+                id: refreshed ? 'new-file' : 'old-file',
+                name: 'report.pdf',
+                mimeType: 'application/pdf',
+                size: refreshed ? '42' : '3',
+              },
+            ])
+          })
+          try {
+            const accessor = makeAccessor()
+            await readdir(accessor, PathSpec.fromStrPath('/drive/docs', 'docs'), index)
+            await index.invalidate()
+            refreshed = true
+            calls.length = 0
+            const path = PathSpec.fromStrPath('/drive/docs/report.pdf', 'docs/report.pdf')
+            if (change === 'updated') {
+              const result = await stat(accessor, path, index)
+              expect(result.extra.file_id).toBe('new-file')
+              expect(result.size).toBe(42)
+            } else
+              await expect(stat(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
+            expect(calls[0]).toBe('root')
+            expect(calls).not.toContain('old-folder')
+          } finally {
+            await index.clear()
+            await index.close()
+          }
+        },
+      )
+    },
+  )
+}
 
 describe('readdir parent recursion', () => {
   it('repopulates evicted subfolder entry by refetching parent', async () => {
@@ -227,6 +300,50 @@ describe('readdir shared drives', () => {
     const out = await readdir(accessor, root, index)
     expect(out).toContain('/Team/')
     expect((await index.listDir('/')).entries).toBeDefined()
+  })
+
+  it.each(['updated', 'deleted'])('revalidates an orphaned root child: %s', async (change) => {
+    const accessor = makeAccessor()
+    const index = new RAMIndexCacheStore()
+    let phase: 'initial' | 'refresh' = 'initial'
+    vi.mocked(drive.listFiles).mockImplementation(() => {
+      if (phase === 'initial')
+        return Promise.resolve([
+          { id: 'old-file', name: 'readme.txt', mimeType: 'text/plain', size: '3' },
+        ])
+      if (change === 'deleted') return Promise.resolve([])
+      return Promise.resolve([
+        { id: 'new-file', name: 'readme.txt', mimeType: 'text/plain', size: '42' },
+      ])
+    })
+    vi.mocked(drive.listSharedDrives).mockImplementation(() => {
+      if (phase === 'initial') return Promise.reject(new Error('missing scope'))
+      return Promise.resolve([])
+    })
+    try {
+      const root = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
+      await readdir(accessor, root, index)
+      expect((await index.listDir('/')).entries).toBeUndefined()
+      expect((await index.get('/readme.txt')).entry?.id).toBe('old-file')
+      await index.invalidate()
+      phase = 'refresh'
+      const path = new PathSpec({
+        resourcePath: 'readme.txt',
+        virtual: '/readme.txt',
+        directory: '/',
+      })
+      if (change === 'updated') {
+        const result = await stat(accessor, path, index)
+        expect(result.extra.file_id).toBe('new-file')
+        expect(result.size).toBe(42)
+      } else await expect(stat(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
+      const cached = (await index.get('/readme.txt')).entry
+      if (change === 'updated') expect(cached?.id).toBe('new-file')
+      else expect(cached ?? null).toBeNull()
+    } finally {
+      await index.clear()
+      await index.close()
+    }
   })
 
   it('passes drive_id from the cached entry when listing inside a shared drive', async () => {

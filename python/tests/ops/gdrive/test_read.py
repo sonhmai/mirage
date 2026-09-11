@@ -49,15 +49,14 @@ def index():
 
 @pytest.mark.asyncio
 async def test_read_downloads_plain_file(accessor, index):
-    await index.put(
-        "/docs/readme.txt",
-        IndexEntry(
-            id="file123",
-            name="readme",
-            resource_type="gdrive/file",
-            remote_time="2026-04-01T00:00:00Z",
-            vfs_name="readme.txt",
-        ))
+    await index.set_dir('/docs', [('readme.txt',
+                                   IndexEntry(
+                                       id="file123",
+                                       name="readme",
+                                       resource_type="gdrive/file",
+                                       remote_time="2026-04-01T00:00:00Z",
+                                       vfs_name="readme.txt",
+                                   ))])
     with patch(
             "mirage.core.gdrive.read.download_file",
             new_callable=AsyncMock,

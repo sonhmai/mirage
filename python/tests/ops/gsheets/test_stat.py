@@ -60,15 +60,15 @@ async def test_stat_root_is_directory(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_sheet(accessor, index):
-    await index.put(
-        "/gsheets/owned/Budget__sheet1.gsheet.json",
-        IndexEntry(
-            id="sheet1",
-            name="Budget",
-            resource_type="gsheets/sheet",
-            remote_time="2026-04-01T00:00:00Z",
-            vfs_name="Budget__sheet1.gsheet.json",
-        ))
+    await index.set_dir('/gsheets/owned',
+                        [('Budget__sheet1.gsheet.json',
+                          IndexEntry(
+                              id="sheet1",
+                              name="Budget",
+                              resource_type="gsheets/sheet",
+                              remote_time="2026-04-01T00:00:00Z",
+                              vfs_name="Budget__sheet1.gsheet.json",
+                          ))])
     result = await stat(accessor,
                         _scope("/gsheets/owned/Budget__sheet1.gsheet.json"),
                         index=index)

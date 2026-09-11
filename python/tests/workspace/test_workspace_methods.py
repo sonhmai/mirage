@@ -199,19 +199,19 @@ def test_finished_jobs_survive(tmp_path):
                    created_at=time.time(),
                    agent="test",
                    session_id="default")
-    src.job_table._jobs[1] = finished
+    src.job_table.load(finished)
 
     snap = tmp_path / "ws.tar"
     asyncio.run(src.snapshot(snap))
     dst = _load(snap)
 
-    job_ids = {j.id for j in dst.job_table.list_jobs()}
+    job_ids = {j.id for j in dst.job_table.list_jobs("default")}
     assert 1 in job_ids
-    restored = dst.job_table.get(1)
+    restored = dst.job_table.get(1, "default")
     assert asyncio.run(restored.console.snapshot(Channel.STDOUT)) == b"done\n"
     assert restored.console.finished
     # Next job id continues from max(finished)+1 (= 2)
-    assert dst.job_table._next_id == 2
+    assert dst.job_table._next_ids["default"] == 2
 
 
 # ── copy() shares Redis backend (documented divergence) ──────────

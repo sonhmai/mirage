@@ -107,7 +107,7 @@ describe('warm reads serve cache uniformly across shared consumers', () => {
     const reader = new CountingStream()
     const manager = await warmManager()
     const result = await runWithCacheManager(manager, () =>
-      tailGeneric([spec()], [], opts({ n: '1' }), reader.stream),
+      tailGeneric([spec()], [], opts({ n: '1' }), reader.stream, statOf),
     )
     expect(await out(result)).toBe('beta\n')
     expect(reader.calls).toBe(0)

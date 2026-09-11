@@ -173,11 +173,34 @@ model Doc {
   tenant String
   id     String
   title  String
-  text   String @default("")
 
   file DriveFile @relation(fields: [tenant, id], references: [tenant, id])
+  tabs DocTab[]
 
   @@id([tenant, id])
+}
+
+// A document's text lives on its tabs, never on the document: the Docs API
+// stopped reporting a single body the moment tabs shipped, and a `Doc.text`
+// beside these rows would be a second place to look for the same string.
+//
+// Stored FLAT with a parent pointer, which is how the API itself reports
+// nesting (TabProperties.parentTabId), and reassembled into the childTabs
+// tree on load. A Prisma self-relation would say the same thing with more
+// machinery and no more truth.
+model DocTab {
+  tenant      String
+  documentId  String
+  tabId       String
+  title       String
+  text        String  @default("")
+  parentTabId String?
+  seq         Int     @default(0)
+
+  doc Doc @relation(fields: [tenant, documentId], references: [tenant, id])
+
+  @@id([tenant, documentId, tabId])
+  @@index([tenant, documentId])
 }
 
 model Spreadsheet {

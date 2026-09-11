@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { rmSync } from 'node:fs'
-import { readFile, stat, unlink } from 'node:fs/promises'
+import { readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -220,6 +220,13 @@ async function main(): Promise<void> {
     result.data_cat_a = (await readFile(`${dataMp}/a.txt`, 'utf8')).trim()
     result.logs_cat_b = (await readFile(`${logsMp}/b.txt`, 'utf8')).trim()
     result.logs_size_b = (await stat(`${logsMp}/b.txt`)).size
+    // A shorter overwrite must truncate. Under libfuse 3 the kernel hands
+    // O_TRUNC to open instead of sending a truncate first, and a mount
+    // that ignored the flag kept the old tail (#1032).
+    await writeFile(`${dataMp}/t.txt`, 'AAAAAAAAAAAAAAAAAAAA\n')
+    await writeFile(`${dataMp}/t.txt`, 'BB\n')
+    result.overwrite_short_size = (await stat(`${dataMp}/t.txt`)).size
+    result.overwrite_short_body = (await readFile(`${dataMp}/t.txt`, 'utf8')).trim()
     result.data_pinned = dataMp === pinned
     result.distinct_mounts = dataMp !== logsMp
 

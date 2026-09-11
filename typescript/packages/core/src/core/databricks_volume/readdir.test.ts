@@ -115,7 +115,7 @@ describe('readdir', () => {
     const file = await index.get('/volume/a.txt')
     expect(file.entry?.resourceType).toBe('file')
     expect(file.entry?.size).toBe(6)
-    expect(file.entry?.remoteTime).toBe('2023-11-14T22:13:20.000Z')
+    expect(file.entry?.remoteTime).toBe('2023-11-14T22:13:20Z')
     const dir = await index.get('/volume/d')
     expect(dir.entry?.resourceType).toBe('folder')
   })

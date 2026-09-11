@@ -15,12 +15,15 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fakeredis.aioredis import FakeRedis
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.core.gdrive.readdir import readdir
+from mirage.core.gdrive.stat import stat
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.types import PathSpec
@@ -51,6 +54,72 @@ def accessor(config, token_manager):
 @pytest.fixture
 def index():
     return RAMIndexCacheStore()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["ram", "redis"])
+@pytest.mark.parametrize("change", ["updated", "deleted", "renamed-folder"])
+async def test_direct_stat_after_invalidation_refreshes_ids(
+        accessor, backend, change, monkeypatch):
+    client = FakeRedis()
+    index = RAMIndexCacheStore() if backend == "ram" else RedisIndexCacheStore(
+        client=client)
+    refreshed = False
+    calls = []
+
+    async def list_files(_tm, folder_id="root", **kwargs):
+        calls.append(folder_id)
+        if folder_id == "root":
+            if refreshed and change == "renamed-folder" and kwargs.get(
+                    "name") == "docs":
+                return []
+            return [{
+                "id": "new-folder",
+                "name": "renamed" if change == "renamed-folder" else "docs",
+                "mimeType": "application/vnd.google-apps.folder"
+            }] if refreshed else [
+                {
+                    "id": "old-folder",
+                    "name": "docs",
+                    "mimeType": "application/vnd.google-apps.folder"
+                }
+            ]
+        assert folder_id == ("new-folder" if refreshed else "old-folder")
+        if refreshed and change == "deleted":
+            return []
+        return [{
+            "id": "new-file" if refreshed else "old-file",
+            "name": "report.pdf",
+            "mimeType": "application/pdf",
+            "size": "42" if refreshed else "3"
+        }]
+
+    monkeypatch.setattr("mirage.core.gdrive.readdir.list_files", list_files)
+    monkeypatch.setattr("mirage.core.gdrive.resolve.list_files", list_files)
+    monkeypatch.setattr("mirage.core.gdrive.readdir.list_shared_drives",
+                        AsyncMock(return_value=[]))
+    monkeypatch.setattr("mirage.core.gdrive.resolve.list_shared_drives",
+                        AsyncMock(return_value=[]))
+    try:
+        await readdir(accessor, PathSpec.from_str_path("/drive/docs", "docs"),
+                      index)
+        await index.invalidate()
+        refreshed = True
+        calls.clear()
+        path = PathSpec.from_str_path("/drive/docs/report.pdf",
+                                      "docs/report.pdf")
+        if change == "updated":
+            result = await stat(accessor, path, index)
+            assert result.extra["file_id"] == "new-file"
+            assert result.size == 42
+        else:
+            with pytest.raises(FileNotFoundError):
+                await stat(accessor, path, index)
+        assert calls[0] == "root"
+        assert "old-folder" not in calls
+    finally:
+        await index.close()
+        await client.aclose()
 
 
 @pytest.mark.asyncio
@@ -99,15 +168,14 @@ async def test_readdir_cached(accessor, index):
 
 @pytest.mark.asyncio
 async def test_readdir_subfolder(accessor, index):
-    await index.put(
-        "/docs",
-        IndexEntry(
-            id="folder1",
-            name="docs",
-            resource_type="gdrive/folder",
-            remote_time="2026-04-01T00:00:00.000Z",
-            vfs_name="docs",
-        ))
+    await index.set_dir('/', [('docs',
+                               IndexEntry(
+                                   id="folder1",
+                                   name="docs",
+                                   resource_type="gdrive/folder",
+                                   remote_time="2026-04-01T00:00:00.000Z",
+                                   vfs_name="docs",
+                               ))])
 
     files = [
         {

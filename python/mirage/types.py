@@ -57,10 +57,24 @@ class FindType(str, Enum):
 
 
 class LsSortBy(str, Enum):
-    """`ls` sort keys. NAME is default, TIME is `-t`, SIZE is `-S`."""
+    """`ls` sort keys: NAME is the default, TIME `-t`, SIZE `-S`, VERSION
+    `-v`, EXTENSION `-X`, WIDTH `--sort=width`, and NONE `-U`."""
     NAME = "name"
     TIME = "time"
     SIZE = "size"
+    VERSION = "version"
+    EXTENSION = "extension"
+    WIDTH = "width"
+    NONE = "none"
+
+
+class LsTimeKind(str, Enum):
+    """Which timestamp `ls` shows and sorts by: `-u`/`--time=atime`,
+    `-c`/`--time=ctime`, `--time=birth`, else the modification time."""
+    MTIME = "mtime"
+    ATIME = "atime"
+    CTIME = "ctime"
+    BIRTH = "birth"
 
 
 class FileType(str, Enum):

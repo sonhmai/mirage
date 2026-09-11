@@ -57,7 +57,7 @@ describe('a browser resource honors the mount index config', () => {
   it('close closes the index exactly once', async () => {
     const r = new TrelloResource({ apiKey: 'k', apiToken: 't' })
     let closes = 0
-    const index = r.index as RAMIndexCacheStore & { close: () => Promise<void> }
+    const index = r.index
     index.close = () => {
       closes++
       return Promise.resolve()

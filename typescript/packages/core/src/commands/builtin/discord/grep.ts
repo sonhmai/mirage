@@ -30,7 +30,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { grepGeneric } from '../generic/grep.ts'
 import { patternArg } from '../grep_pattern.ts'
-import { pushdownOperand } from '../grep_pushdown.ts'
+import { pushdownOperand, textSearchResults } from '../grep_pushdown.ts'
 import { prependStderr } from '../utils/output.ts'
 import { fileReadProvision } from './_provision.ts'
 import { FlagView } from '../../spec/types.ts'
@@ -101,7 +101,7 @@ async function grepCommand(
           channelMap,
         )
         if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-        return [ENC.encode(lines.join('\n') + '\n'), new IOResult()]
+        if (textSearchResults(lines)) return [ENC.encode(lines.join('\n') + '\n'), new IOResult()]
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         pushdownWarnings.push(

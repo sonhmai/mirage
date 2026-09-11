@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.stat import stat
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
@@ -54,25 +55,25 @@ def index():
 
 
 async def _populate_index(index):
-    await index.put(
-        "/report.pdf",
-        IndexEntry(
-            id="f1",
-            name="report",
-            resource_type="gdrive/file",
-            remote_time="2026-04-01T00:00:00.000Z",
-            vfs_name="report.pdf",
-            size=1024,
-        ))
-    await index.put(
-        "/docs",
-        IndexEntry(
-            id="folder1",
-            name="docs",
-            resource_type="gdrive/folder",
-            remote_time="2026-04-01T00:00:00.000Z",
-            vfs_name="docs",
-        ))
+    await index.set_dir("/", [
+        ("report.pdf",
+         IndexEntry(
+             id="f1",
+             name="report",
+             resource_type="gdrive/file",
+             remote_time="2026-04-01T00:00:00.000Z",
+             vfs_name="report.pdf",
+             size=1024,
+         )),
+        ("docs",
+         IndexEntry(
+             id="folder1",
+             name="docs",
+             resource_type="gdrive/folder",
+             remote_time="2026-04-01T00:00:00.000Z",
+             vfs_name="docs",
+         )),
+    ])
     return index
 
 
@@ -113,15 +114,16 @@ async def test_stat_folder(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_shared_drive_is_directory(accessor, index):
-    await index.put(
-        "/Team Drive",
-        IndexEntry(
-            id="drive1",
-            name="Team Drive",
-            resource_type="gdrive/shared_drive",
-            vfs_name="Team Drive",
-            extra={"drive_id": "drive1"},
-        ))
+    await index.set_dir("/", [
+        ("Team Drive",
+         IndexEntry(
+             id="drive1",
+             name="Team Drive",
+             resource_type="gdrive/shared_drive",
+             vfs_name="Team Drive",
+             extra={"drive_id": "drive1"},
+         )),
+    ])
     result = await stat(
         accessor,
         PathSpec(resource_path="Team Drive",
@@ -191,3 +193,64 @@ async def test_stat_propagates_parent_refresh_failure(accessor, index):
                side_effect=failure):
         with pytest.raises(RuntimeError, match="drive unavailable"):
             await stat(accessor, PathSpec.from_str_path("/missing.txt"), index)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["updated", "deleted"])
+async def test_stat_revalidates_orphan_from_incomplete_root(
+        accessor, index, change, monkeypatch):
+    """A best-effort root listing must not make a child a permanent hit."""
+    phase = "initial"
+
+    async def list_files(_tm, folder_id="root", **_kwargs):
+        assert folder_id == "root"
+        if phase == "initial":
+            return [{
+                "id": "old-file",
+                "name": "readme.txt",
+                "mimeType": "text/plain",
+                "size": "3",
+            }]
+        if change == "deleted":
+            return []
+        return [{
+            "id": "new-file",
+            "name": "readme.txt",
+            "mimeType": "text/plain",
+            "size": "42",
+        }]
+
+    async def list_shared_drives(_tm):
+        if phase == "initial":
+            raise RuntimeError("missing scope")
+        return []
+
+    monkeypatch.setattr("mirage.core.gdrive.readdir.list_files", list_files)
+    monkeypatch.setattr("mirage.core.gdrive.readdir.list_shared_drives",
+                        list_shared_drives)
+    monkeypatch.setattr("mirage.core.gdrive.resolve.list_files", list_files)
+    monkeypatch.setattr("mirage.core.gdrive.resolve.list_shared_drives",
+                        list_shared_drives)
+    try:
+        root = PathSpec.from_str_path("/")
+        await readdir(accessor, root, index)
+        assert (await index.list_dir("/")).entries is None
+        assert (await index.get("/readme.txt")).entry.id == "old-file"
+        await index.invalidate()
+        phase = "refresh"
+        path = PathSpec.from_str_path("/readme.txt")
+        if change == "updated":
+            result = await stat(accessor, path, index)
+            assert result.extra["file_id"] == "new-file"
+            assert result.size == 42
+        else:
+            with pytest.raises(FileNotFoundError):
+                await stat(accessor, path, index)
+        cached = (await index.get("/readme.txt")).entry
+        if change == "updated":
+            assert cached is not None
+            assert cached.id == "new-file"
+        else:
+            assert cached is None
+    finally:
+        await index.clear()

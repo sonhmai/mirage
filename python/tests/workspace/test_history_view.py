@@ -21,6 +21,8 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.resource.ram import RAMResource
+from mirage.shell.console import Channel
+from mirage.shell.job_table import JobStatus
 from mirage.types import MountMode, PathSpec
 from mirage.workspace.snapshot import apply_state_dict, read_tar
 from mirage.workspace.workspace import Workspace
@@ -103,6 +105,29 @@ def test_grep_and_tail_bash_history():
     tail_io = _exec(ws, "tail -n 2 /.bash_history")
     assert tail_io.exit_code == 0
     assert "pwd" in _stdout(tail_io)
+
+
+@pytest.mark.asyncio
+async def test_a_followed_history_streams_each_new_command():
+    # The history registration hands tail_generic a stat, so -f polls
+    # the view; without one the follow would print one snapshot and
+    # exit.
+    ws = _ws()
+    try:
+        await ws.execute("pwd")
+        await ws.execute("tail -f -s 0.05 /.bash_history &")
+        await asyncio.sleep(0.15)
+        await ws.execute("echo marker")
+        await asyncio.sleep(0.25)
+        job = ws.job_table.get(1, ws.default_session_id)
+        assert job is not None
+        assert job.status is JobStatus.RUNNING
+        shown = await job.console.snapshot(Channel.STDOUT)
+        assert b"pwd" in shown
+        assert b"echo marker" in shown
+        assert (await ws.execute("kill %1")).exit_code == 0
+    finally:
+        await ws.close()
 
 
 def test_ls_root_hides_dotfile_ls_a_shows():
@@ -397,3 +422,22 @@ def test_failed_line_ops_still_in_audit(monkeypatch):
     last_cmd = [e for e in events if e["type"] == "command"][-1]
     assert last_cmd["command"] == "cat /data/f.txt"
     assert last_cmd["exit_code"] == 1
+
+
+# bash 5.2 adds a line to history only when it is non-empty
+# (`shell_input_line[0]`): a blank line is never recorded, while a
+# whitespace-only or comment-only line is. Pinned in debian:stable-slim
+# with `printf 'echo one\n\n   \n# comment\n' | bash -i; history -w`.
+def test_a_blank_line_is_not_recorded_but_whitespace_and_comments_are():
+    ws = _ws()
+    _exec(ws, "echo one")
+    _exec(ws, "")
+    _exec(ws, "\n")
+    _exec(ws, "   ")
+    _exec(ws, "# comment")
+    events = asyncio.run(ws.history())
+    assert [e["command"] for e in events] == ["echo one", "   ", "# comment"]
+    file_out = _stdout(_exec(ws, "cat /.bash_history"))
+    assert "\n\n" not in file_out
+    assert "\n   \n" in file_out
+    assert "\n# comment\n" in file_out

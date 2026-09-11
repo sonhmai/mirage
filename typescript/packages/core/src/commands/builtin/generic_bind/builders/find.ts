@@ -54,7 +54,7 @@ export const FIND_BUILDER: Builder = {
         resolved,
         texts,
         opts,
-        (root, options) => find(accessor, root, options),
+        (root, options) => find(accessor, root, options, idx),
         stat,
         dirEmpty,
       )

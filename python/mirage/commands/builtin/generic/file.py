@@ -89,7 +89,8 @@ async def file_cmd(
         s = await operand_stat(p,
                                stat_fn=stat_fn,
                                stat_path=stat_path,
-                               mounts=mounts)
+                               mounts=mounts,
+                               links=links)
         if s.type == FileType.DIRECTORY:
             lines.append(
                 format_file_result(p.raw_path, FileType.DIRECTORY, b, i))

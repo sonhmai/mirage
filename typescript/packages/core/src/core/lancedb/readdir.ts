@@ -16,15 +16,17 @@ import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { LanceDBConfigResolved } from '../../resource/lancedb/config.ts'
-import type { LanceRow } from './_driver.ts'
+import type { LanceRow, ValueTest } from './_driver.ts'
 import { PathSpec } from '../../types.ts'
 import { perAccessor } from '../hierarchy/bind.ts'
+import { PATH_SAFE } from '../hierarchy/codec.ts'
 import type { ReaddirFn } from '../hierarchy/probe.ts'
 import { makeReaddir, type DirListing, type Listed, type Lister } from '../hierarchy/readdir.ts'
 import { ROOT, type ScopeMatch } from '../hierarchy/scope.ts'
 import { renderCard } from './render.ts'
 import { detectFor, filtersOf, tableOf } from './scope.ts'
 import { globPrefix, globStemPrefix, hasGlobPrefix } from '../../utils/glob_walk.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 const GROUP_TYPE = 'lancedb/group'
 
@@ -65,6 +67,11 @@ function rowEntries(rows: LanceRow[], config: LanceDBConfigResolved): [string, I
   return entries
 }
 
+/** Keep values whose rendered name starts with a glob's literal head. */
+function renderedPrefixTest(prefix: string): ValueTest {
+  return (value) => PATH_SAFE.encode(value).startsWith(prefix)
+}
+
 /**
  * The row-id prefix a leaf glob narrows the row query to.
  *
@@ -86,18 +93,25 @@ async function children(accessor: LanceDBAccessor, match: ScopeMatch): Promise<L
   if (!tables.includes(table)) return null
   const depth = Object.keys(filters).length
   if (depth < config.groupBy.length) {
-    const groupPrefix = globPrefix(pattern)
-    const names = await accessor.driver.distinct(
+    const displayPrefix = globPrefix(pattern)
+    // Values render path-safe, so a glob's head is spelled in rendered names:
+    // the query takes the value prefix the head stands for, which loses
+    // nothing, and the cap counts the renderings that really start with the
+    // head, so a head no value prefix spells (the escape lead alone) still
+    // reaches past the rows at the head of the table.
+    const values = await accessor.driver.distinct(
       table,
       config.groupBy[depth] ?? '',
       filters,
       config.maxRows,
-      groupPrefix,
+      PATH_SAFE.prefixValue(displayPrefix),
+      displayPrefix === '' ? undefined : renderedPrefixTest(displayPrefix),
     )
+    const names = values.map((value) => PATH_SAFE.encode(value)).sort(compareCodePoints)
     const listing: DirListing = {
       entries: names.map((name): [string, IndexEntry] => [name, dirEntry(name)]),
       seeds: {},
-      partial: groupPrefix !== '',
+      partial: displayPrefix !== '',
     }
     return listing
   }

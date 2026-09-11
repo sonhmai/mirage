@@ -21,7 +21,9 @@ import { RAMResource, type RAMResourceState } from '../../resource/ram/ram.ts'
 import { type ResourceStateBase, resourceRefOf } from '../../resource/base.ts'
 import { z } from 'zod'
 
+import { narrow } from '../session/resolve.ts'
 import { setCwd } from '../session/shell_dirs.ts'
+import { gateRestoredVars } from '../session/state.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import { CLISpec } from '../../commands/cli/types.ts'
 import { ScriptSource } from '../../runtime/routing/types.ts'
@@ -43,6 +45,7 @@ import {
   resourceStateRequiresOverride,
 } from '../../resource/secrets.ts'
 import { Job, JobStatus } from '../../shell/job_table/index.ts'
+import type { ShellVar } from '../../shell/variable.ts'
 import {
   Channel,
   type ConsoleChunk,
@@ -119,7 +122,7 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
   // that have already ended.
   const jobs: JobSnapshot[] = await Promise.all(
     ws.jobTable
-      .listJobs()
+      .allJobs()
       .filter((j) => j.status !== JobStatus.RUNNING)
       .map(async (j) => ({
         id: j.id,
@@ -396,24 +399,54 @@ export async function withRebuiltResources(
   return merged
 }
 
-export async function applyStateDict(ws: Workspace, state: WorkspaceStateDict): Promise<void> {
+/**
+ * Restore post-construction state into an already-built Workspace.
+ *
+ * Every session table and the env template clear the target's
+ * `preSession` gate first (`gateRestoredState`), before any mount,
+ * session or template lands, so a refusal aborts the load with the
+ * workspace as it was. A snapshot mount with no mount at that exact
+ * prefix here is not restored and is reported. `replaceCache` drops
+ * the live cache once the gate has passed, ahead of the mounts'
+ * loadState, so the snapshot's entries are all that is left: a
+ * checkout onto a running workspace asks for it, a workspace built for
+ * the state has nothing to drop. It sits behind the gate because the
+ * callers used to clear before calling, and a refused checkout then
+ * still sent every cached read back to an origin that may have moved.
+ * Mirrors Python `apply_state_dict`.
+ */
+export async function applyStateDict(
+  ws: Workspace,
+  state: WorkspaceStateDict,
+  options: { replaceCache?: boolean } = {},
+): Promise<void> {
+  const [sessions, seed] = await gateRestoredState(ws, state)
+  if (options.replaceCache === true) await ws.cache.clear()
   for (const m of state.mounts) {
-    if (resourceStateRequiresOverride(m.resource_state)) continue
     // Exact-prefix lookup, mirroring Python: a snapshot prefix the new
     // workspace does not mount is skipped, never resolved to an
     // ancestor mount (which would load state into the wrong resource).
+    // It runs before the override skip below so a mount that asks to be
+    // handed back live is reported too: those are the remote and
+    // config-backed mounts, exactly the ones a renamed prefix matters for.
     const mount = ws.registry.tryMountForPrefix(m.prefix)
-    if (mount === null) continue
+    if (mount === null) {
+      // Said out loud: a renamed or missing mount otherwise left no trace.
+      console.warn(
+        `Workspace.load: snapshot mount ${m.prefix} has no mount at that prefix in this ` +
+          `workspace; its state was not restored`,
+      )
+      continue
+    }
+    if (resourceStateRequiresOverride(m.resource_state)) continue
     // No cast, for the same reason as toStateDict above.
     await Promise.resolve(mount.resource.loadState(m.resource_state as RAMResourceState))
   }
-  await restoreSessions(ws, state)
+  await restoreSessions(ws, state, sessions)
   // The env template is constructor state the rebuilt workspace was
   // never given: without it a session created after the load starts
   // bare while restored ones carry every workspace env entry.
-  if (state.env !== undefined && Object.keys(state.env).length > 0) {
-    ws.sessionManager.restoreSeed(varsFromFields(state.env))
-  }
+  if (seed !== null) ws.sessionManager.restoreSeed(seed)
   // current_agent_id is not restored separately: TS models a single
   // readonly agentId, set to default_agent_id at construction (== current).
   restoreCache(ws, state)
@@ -437,7 +470,48 @@ async function restoreNodes(ws: Workspace, state: WorkspaceStateDict): Promise<v
   await ws.namespace.replaceNodes(entries)
 }
 
-async function restoreSessions(ws: Workspace, state: WorkspaceStateDict): Promise<void> {
+/**
+ * Vet every env input the snapshot carries before any of it lands.
+ *
+ * Each session table and the env template fire the `preSession` gate
+ * (`gateRestoredVars`) here, ahead of the mounts' loadState and the
+ * session writes: a refusal that arrived once an earlier session had
+ * already been overwritten left the workspace in a state no snapshot
+ * describes, and one its close then persisted. The template is gated
+ * under the id the restore makes the default session, which is the
+ * session a live write of it would land in. Each table is judged under
+ * the policy the target gives its session, never the one the snapshot's
+ * own profile compiled, which was the source deployment's and does not
+ * land: the live session's for an id the target already has, and the
+ * default profile's for one the restore will create, which is what
+ * `scriptOf` answers for an id the manager does not know and the
+ * profile `restoreSessions` then puts the created session under.
+ * Returns the parsed session tables and the template, null when the
+ * snapshot carries none. Mirrors Python `_gate_restored_state`.
+ */
+async function gateRestoredState(
+  ws: Workspace,
+  state: WorkspaceStateDict,
+): Promise<[Session[], Record<string, ShellVar> | null]> {
+  const sessions = state.sessions.map((s) => Session.fromJSON(s))
+  for (const fields of sessions) {
+    await gateRestoredVars(ws.registry.policies, fields.sessionId, fields.vars)
+  }
+  if (state.env === undefined || Object.keys(state.env).length === 0) return [sessions, null]
+  const seed = varsFromFields(state.env)
+  await gateRestoredVars(
+    ws.registry.policies,
+    state.default_session_id ?? ws.defaultSessionId,
+    seed,
+  )
+  return [sessions, seed]
+}
+
+async function restoreSessions(
+  ws: Workspace,
+  state: WorkspaceStateDict,
+  tables: readonly Session[],
+): Promise<void> {
   // The snapshot's default session identity wins over the live one,
   // and the discovery record's pointer follows it. A state without the
   // pointer (older commit metas) keeps the live default, mirroring the
@@ -446,12 +520,20 @@ async function restoreSessions(ws: Workspace, state: WorkspaceStateDict): Promis
     await ws.adoptDefaultSession(state.default_session_id)
   }
   const restored: Session[] = []
-  for (const s of state.sessions) {
-    const exists = ws.sessionManager.list().some((x) => x.sessionId === s.session_id)
+  for (const fields of tables) {
+    const exists = ws.sessionManager.list().some((x) => x.sessionId === fields.sessionId)
     const session = exists
-      ? ws.sessionManager.get(s.session_id)
-      : ws.sessionManager.create(s.session_id)
-    const fields = Session.fromJSON(s)
+      ? ws.sessionManager.get(fields.sessionId)
+      : ws.sessionManager.create(fields.sessionId)
+    if (!exists) {
+      // A session the restore creates is one created without a profile
+      // name, so it runs under the document's default: the policy
+      // `gateRestoredState` judged its table under, where a bare session
+      // ran under none. Stamped ahead of the table so the grants below
+      // stay the snapshot's, as they do for a session that exists.
+      const compiled = ws.sessionManager.defaultProfile
+      if (compiled !== null) narrow(session, compiled)
+    }
     setCwd(session, fields.cwd)
     session.vars = fields.vars
     session.mountModes = fields.mountModes

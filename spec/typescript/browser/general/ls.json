@@ -239,14 +239,17 @@
       "type": "bool"
     },
     {
+      "long": "--all",
       "short": "-a",
       "type": "bool"
     },
     {
+      "long": "--almost-all",
       "short": "-A",
       "type": "bool"
     },
     {
+      "long": "--human-readable",
       "short": "-h",
       "type": "bool"
     },
@@ -259,6 +262,39 @@
       "type": "bool"
     },
     {
+      "short": "-X",
+      "type": "bool"
+    },
+    {
+      "short": "-v",
+      "type": "bool"
+    },
+    {
+      "short": "-U",
+      "type": "bool"
+    },
+    {
+      "long": "--sort",
+      "type": "str"
+    },
+    {
+      "short": "-c",
+      "type": "bool"
+    },
+    {
+      "short": "-u",
+      "type": "bool"
+    },
+    {
+      "long": "--time",
+      "type": "str"
+    },
+    {
+      "long": "--time-style",
+      "type": "str"
+    },
+    {
+      "long": "--reverse",
       "short": "-r",
       "type": "bool"
     },
@@ -267,20 +303,60 @@
       "type": "bool"
     },
     {
+      "long": "--recursive",
       "short": "-R",
       "type": "bool"
     },
     {
+      "long": "--directory",
       "short": "-d",
       "type": "bool"
     },
     {
+      "long": "--classify",
       "short": "-F",
       "type": "bool"
     },
     {
+      "long": "--dereference",
       "short": "-L",
       "type": "bool"
+    },
+    {
+      "short": "-g",
+      "type": "bool"
+    },
+    {
+      "short": "-o",
+      "type": "bool"
+    },
+    {
+      "long": "--numeric-uid-gid",
+      "short": "-n",
+      "type": "bool"
+    },
+    {
+      "long": "--inode",
+      "short": "-i",
+      "type": "bool"
+    },
+    {
+      "long": "--context",
+      "short": "-Z",
+      "type": "bool"
+    },
+    {
+      "long": "--group-directories-first",
+      "type": "bool"
+    },
+    {
+      "long": "--block-size",
+      "type": "str"
+    },
+    {
+      "long": "--hyperlink",
+      "type": "str",
+      "value_optional": true
     },
     {
       "long": "--color",

@@ -30,6 +30,7 @@ try {
     configFile: false,
     root,
     logLevel: 'warn',
+    worker: { format: 'es' },
     build: {
       outDir: output,
       emptyOutDir: true,

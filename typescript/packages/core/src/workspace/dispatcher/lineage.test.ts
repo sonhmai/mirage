@@ -66,7 +66,7 @@ describe('requireTurfWritable', () => {
     await runWithSession(sess, () => {
       expect(() => {
         requireTurfWritable(owner, path('/extra/lk'))
-      }).toThrowError(/read-only/)
+      }).toThrow(/read-only/)
       return Promise.resolve()
     })
     requireTurfWritable(owner, path('/extra/lk'))

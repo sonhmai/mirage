@@ -322,7 +322,7 @@ describe('the path axis modes', () => {
         // names no path, so only the mount-wide grant counts.
         expect(() => {
           requireMountWritable('/trello')
-        }).toThrowError(/read-only/)
+        }).toThrow(/read-only/)
         return Promise.resolve()
       }),
     )

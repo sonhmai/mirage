@@ -1,0 +1,22 @@
+[
+  {
+    "name": "Weekly Log",
+    "tabs": [
+      {
+        "title": "Tab 1",
+        "text": "sep 6 entry",
+        "tabId": "t.0"
+      },
+      {
+        "title": "Notes",
+        "text": "loose notes",
+        "childTabs": [
+          {
+            "title": "Archive",
+            "text": "older material"
+          }
+        ]
+      }
+    ]
+  }
+]

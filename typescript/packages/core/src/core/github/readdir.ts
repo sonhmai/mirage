@@ -17,8 +17,9 @@ import type { GitHubAccessor } from '../../accessor/github.ts'
 import { LookupStatus } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
-import { fetchDirTree } from './client.ts'
+import { fetchDirTree, type GitHubTreeItem } from './client.ts'
 import { ensureLiveIndex, refillIndex } from './tree.ts'
+import { withIndexLock } from '../../cache/index/lock.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -34,6 +35,19 @@ function stripPrefix(path: PathSpec): string {
 }
 
 export async function readdir(
+  accessor: GitHubAccessor,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): Promise<string[]> {
+  if (index === undefined) return readdirUnlocked(accessor, path, index)
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  return withIndexLock(index, rstripSlash(prefix) || '/', () =>
+    readdirUnlocked(accessor, path, index),
+  )
+}
+
+/** Caller holds the mount's index lock through its final lookup. */
+export async function readdirUnlocked(
   accessor: GitHubAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
@@ -59,12 +73,13 @@ export async function readdir(
   if (listing.entries !== undefined && listing.entries !== null) {
     return listing.entries
   }
-  if (listing.status === LookupStatus.NOT_FOUND) {
-    if (accessor.truncated) {
-      return fallbackReaddir(accessor, key, index, prefix)
-    }
-    throw enoent(path)
+  if (
+    accessor.truncated &&
+    (listing.status === LookupStatus.NOT_FOUND || listing.status === LookupStatus.EXPIRED)
+  ) {
+    return fallbackReaddir(accessor, key, index, prefix)
   }
+  if (listing.status === LookupStatus.NOT_FOUND) throw enoent(path)
   return []
 }
 
@@ -75,8 +90,17 @@ async function fallbackReaddir(
   prefix: string,
 ): Promise<string[]> {
   const parentSha = await resolveDirSha(accessor, key, index, prefix)
-  if (parentSha === null) throw enoent(`${prefix}/${key}`)
+  if (parentSha === null) throw enoent(key)
   const entries = await fetchDirTree(accessor.transport, accessor.owner, accessor.repo, parentSha)
+  return cacheDir(index, key, entries)
+}
+
+// Cache one complete tree listing, including each traversed parent.
+async function cacheDir(
+  index: IndexCacheStore,
+  key: string,
+  entries: GitHubTreeItem[],
+): Promise<string[]> {
   const childKeys: string[] = []
   const childEntries: [string, IndexEntry][] = []
   for (const e of entries) {
@@ -106,17 +130,15 @@ async function resolveDirSha(
   index: IndexCacheStore,
   prefix: string,
 ): Promise<string | null> {
-  const result = await index.get(key)
-  if (result.entry !== undefined && result.entry !== null) {
-    return result.entry.id
-  }
+  // Cached directory SHAs may belong to an older branch head, even when
+  // their parent listing is still fresh. Resolve the path from the ref.
   const stem = rstripSlash(prefix)
   const rest = stem !== '' && key.startsWith(stem) ? key.slice(stem.length) : key
   const parts = stripSlash(rest)
     .split('/')
     .filter((p) => p !== '')
   let currentSha = accessor.ref
-  let currentPath = stem
+  let currentPath = stem || '/'
   for (const part of parts) {
     const entries = await fetchDirTree(
       accessor.transport,
@@ -124,20 +146,16 @@ async function resolveDirSha(
       accessor.repo,
       currentSha,
     )
+    const childPath = `${currentPath === '/' ? '' : currentPath}/${part}`
     const found = entries.find((e) => e.path === part)
-    if (found === undefined) return null
+    if (found?.type !== 'tree') {
+      // Remove the former directory before caching a replacement blob.
+      await index.invalidatePrefix(childPath)
+    }
+    await cacheDir(index, currentPath, entries)
+    if (found?.type !== 'tree') return null
     currentSha = found.sha
-    currentPath += `/${part}`
-    await index.put(
-      currentPath,
-      new IndexEntry({
-        id: found.sha,
-        name: part,
-        vfsName: part,
-        resourceType: found.type === 'tree' ? 'folder' : 'file',
-        size: found.size ?? null,
-      }),
-    )
+    currentPath = childPath
   }
   return currentSha
 }

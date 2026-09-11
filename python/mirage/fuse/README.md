@@ -67,16 +67,16 @@ mount(ws, "/tmp/ws/", foreground=True)
 
 ## Supported FUSE Operations
 
-| Operation  | Description             |
-| ---------- | ----------------------- |
-| `getattr`  | File/directory metadata |
-| `readdir`  | List directory contents |
-| `read`     | Read file contents      |
-| `write`    | Write file contents     |
-| `create`   | Create new files        |
-| `mkdir`    | Create directories      |
-| `unlink`   | Delete files            |
-| `rename`   | Move/rename files       |
-| `truncate` | Resize files            |
-| `open`     | Open existing files     |
-| `release`  | Close file handles      |
+| Operation  | Description                               |
+| ---------- | ----------------------------------------- |
+| `getattr`  | File/directory metadata                   |
+| `readdir`  | List directory contents                   |
+| `read`     | Read file contents                        |
+| `write`    | Write file contents                       |
+| `create`   | Create new files                          |
+| `mkdir`    | Create directories                        |
+| `unlink`   | Delete files                              |
+| `rename`   | Move/rename files                         |
+| `truncate` | Resize files                              |
+| `open`     | Open existing files (`O_TRUNC` truncates) |
+| `release`  | Close file handles                        |

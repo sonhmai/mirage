@@ -42,6 +42,2338 @@
         "stdout_text": "",
         "stderr_text": ""
       }
+    },
+    {
+      "id": "grep_binary_nul_0",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep  needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_nul_1",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -I needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_2",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -a needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle\u0000tail\nneedle next\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_3",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep --binary-files=without-match needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_4",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep --binary-files=text needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle\u0000tail\nneedle next\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_5",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep --binary-files=binary needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_nul_6",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -n needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_nul_7",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -c needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_8",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -l needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/binary.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_9",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -q needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_10",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -qc needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_11",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -lc needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/binary.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_12",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -Ic needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_13",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -Il needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_14",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -Iq needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_15",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -v needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_nul_16",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -o needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_nul_17",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -on needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_nul_18",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -aon needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2:needle\n3:needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_19",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -In needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_20",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -m 0 needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_21",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -m 1 needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_nul_22",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -A 1 needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_nul_23",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -B 1 needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_nul_24",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -C 1 needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_nul_25",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -I -a needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle\u0000tail\nneedle next\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_nul_26",
+      "cmd": "printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/binary.txt; grep -a -I needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_0",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep  needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle next\n",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_invalid_1",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -I needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle next\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_2",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -a needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_base64": "bmVlZGxl/3RhaWwKbmVlZGxlIG5leHQK",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_3",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep --binary-files=without-match needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle next\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_4",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep --binary-files=text needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_base64": "bmVlZGxl/3RhaWwKbmVlZGxlIG5leHQK",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_5",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep --binary-files=binary needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle next\n",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_invalid_6",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -n needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3:needle next\n",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_invalid_7",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -c needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_8",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -l needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/binary.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_9",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -q needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_10",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -qc needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_11",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -lc needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/binary.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_12",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -Ic needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_13",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -Il needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/binary.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_14",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -Iq needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_15",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -v needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "before\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_16",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -o needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle\nneedle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_17",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -on needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2:needle\n3:needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_18",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -aon needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2:needle\n3:needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_19",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -In needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3:needle next\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_20",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -m 0 needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_21",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -m 1 needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_invalid_22",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -A 1 needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle next\n",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      },
+      "divergence": "GNU grep 3.11 with -A and a selected malformed UTF-8 line emits unrelated preceding text and a group separator. Mirage retains only requested context and suppresses the malformed line."
+    },
+    {
+      "id": "grep_binary_invalid_23",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -B 1 needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "before\nneedle next\n",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_invalid_24",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -C 1 needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "before\nneedle next\n",
+        "stderr_text": "grep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_invalid_25",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -I -a needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_base64": "bmVlZGxl/3RhaWwKbmVlZGxlIG5leHQK",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_invalid_26",
+      "cmd": "printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/binary.txt; grep -a -I needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle next\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_extra_0",
+      "cmd": "printf 'needle\\000tail\\n' | grep needle",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: (standard input): binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_extra_1",
+      "cmd": "printf 'needle\\000tail\\n' | grep -I needle",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_extra_2",
+      "cmd": "printf 'needle\\000tail\\n' | grep -an needle",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1:needle\u0000tail\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_extra_3",
+      "cmd": "printf 'needle\\000tail\\n' | grep -l needle",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "(standard input)\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_extra_4",
+      "cmd": "printf 'needle\\000tail\\n' | grep -H needle",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: (standard input): binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_extra_5",
+      "cmd": "printf 'needle\\000tail\\n' > /data/binary.txt; grep absent /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_extra_6",
+      "cmd": "printf 'needle\\000tail\\n' > /data/binary.txt; grep needle /data/missing /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/missing: No such file or directory\ngrep: /data/binary.txt: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_extra_7",
+      "cmd": "printf 'needle\\000tail\\n' > /data/binary.txt; grep -q needle /data/missing /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/missing: No such file or directory\n"
+      }
+    },
+    {
+      "id": "grep_binary_extra_8",
+      "cmd": "printf 'needle\\000tail\\n' > /data/binary.txt; grep --binary-files=bad needle /data/binary.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: unknown binary-files type\n"
+      }
+    },
+    {
+      "id": "grep_binary_extra_9",
+      "cmd": "printf 'needle\\n' > /data/text.bin; grep -rn needle /data/text.bin",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1:needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_extra_10",
+      "cmd": "mkdir /data/grepdir; printf 'needle\\n' > /data/grepdir/text.bin; grep --binary-files=text -rn needle /data/grepdir",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/grepdir/text.bin:1:needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_extra_11",
+      "cmd": "mkdir /data/grepdir; printf 'needle\\000tail\\n' > /data/grepdir/data.pdf; grep -rn needle /data/grepdir",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/grepdir/data.pdf: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_extra_12",
+      "cmd": "mkdir /data/grepdir; printf 'needle\\000tail\\n' > /data/grepdir/data.pdf; grep -Irn needle /data/grepdir",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_extra_13",
+      "cmd": "mkdir /data/grepdir; printf 'needle\\000tail\\n' > /data/grepdir/data.pdf; grep -arn needle /data/grepdir",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/grepdir/data.pdf:1:needle\u0000tail\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_extra_14",
+      "cmd": "printf 'é needle 😀\\n' | grep -n needle",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1:é needle 😀\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_extra_15",
+      "cmd": "printf 'needle\\377tail\\n' | grep -ao 'needle.*'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_extra_16",
+      "cmd": "printf 'needle\\000needle\\n' | grep -c needle",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_extra_17",
+      "cmd": "printf 'needle\\000tail\\n' | grep 'needle$'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: (standard input): binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_extra_18",
+      "cmd": "printf 'needle\\000tail\\n' | grep -aIa needle",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle\u0000tail\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_late_nul_partial_count",
+      "cmd": "printf 'needle\\n%32761s\\000tail\\n' x > /data/late.txt; grep -Ic needle /data/late.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_late_nul_partial_named_count",
+      "cmd": "printf 'needle\\n%32761s\\000tail\\n' x > /data/late.txt; grep --binary-files=without-match -cH needle /data/late.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "/data/late.txt:0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_late_nul_newline_count",
+      "cmd": "printf 'needle\\n%32760s\\n\\000tail\\n' x > /data/late.txt; grep -Ic needle /data/late.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_late_nul_newline_named_count",
+      "cmd": "printf 'needle\\n%32760s\\n\\000tail\\n' x > /data/late.txt; grep --binary-files=without-match -cH needle /data/late.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "/data/late.txt:0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_late_nul_lines",
+      "cmd": "printf 'needle\\n%262137s\\000tail\\n' x > /data/late.txt; grep -I needle /data/late.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_late_nul_max_count",
+      "cmd": "printf 'needle\\n%262137s\\000tail\\n' x > /data/late.txt; grep -Ic -m1 needle /data/late.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_late_nul_quiet",
+      "cmd": "printf 'needle\\n%262137s\\000tail\\n' x > /data/late.txt; grep -Iq needle /data/late.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_late_nul_files",
+      "cmd": "printf 'needle\\n%262137s\\000tail\\n' x > /data/late.txt; grep -Il needle /data/late.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/late.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_late_nul_multi_late",
+      "cmd": "printf 'needle\\n%262137s\\000tail\\n' x > /data/late.txt; printf 'needle\\n' > /data/plain.txt; grep -Ic needle /data/late.txt /data/plain.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/late.txt:0\n/data/plain.txt:1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_late_nul_multi_plain",
+      "cmd": "printf 'needle\\n%262137s\\000tail\\n' x > /data/late.txt; printf 'needle\\n' > /data/plain.txt; grep -Ic needle /data/plain.txt /data/late.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/plain.txt:1\n/data/late.txt:0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_bracket_0",
+      "cmd": "printf ']\\na\\n.\\nx\\n]x\\nax\\n.x\\nxx\\n' > /data/brackets.txt; grep  '[]a.]' /data/brackets.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "]\na\n.\n]x\nax\n.x\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_bracket_1",
+      "cmd": "printf ']\\na\\n.\\nx\\n]x\\nax\\n.x\\nxx\\n' > /data/brackets.txt; grep  '[^]a.]' /data/brackets.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "x\n]x\nax\n.x\nxx\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_bracket_2",
+      "cmd": "printf ']\\na\\n.\\nx\\n]x\\nax\\n.x\\nxx\\n' > /data/brackets.txt; grep  '[]a.].' /data/brackets.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "]x\nax\n.x\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_bracket_4",
+      "cmd": "printf ']\\na\\n.\\nx\\n]x\\nax\\n.x\\nxx\\n' > /data/brackets.txt; grep -a '[]a.]' /data/brackets.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "]\na\n.\n]x\nax\n.x\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_filename_0",
+      "cmd": "printf 'needle\\n' > /data/name.txt; grep -hH needle /data/name.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/name.txt:needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_filename_1",
+      "cmd": "printf 'needle\\n' > /data/name.txt; grep -Hh needle /data/name.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_filename_2",
+      "cmd": "printf 'needle\\n' > /data/name.txt; grep -hHhH needle /data/name.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/name.txt:needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_filename_3",
+      "cmd": "printf 'needle\\n' > /data/name.txt; grep -h -H needle /data/name.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/name.txt:needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_filename_4",
+      "cmd": "printf 'needle\\n' > /data/name.txt; grep -H -h needle /data/name.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_filename_5",
+      "cmd": "printf 'needle\\n' > /data/name.txt; grep -chH needle /data/name.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/name.txt:1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_filename_6",
+      "cmd": "printf 'needle\\n' > /data/name.txt; grep -chHh needle /data/name.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_filename_stdin",
+      "cmd": "printf 'needle\\n' | grep -hH needle",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "(standard input):needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_filename_multi",
+      "cmd": "printf 'needle\\n' > /data/name.txt; grep -Hh needle /data/name.txt /data/name.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle\nneedle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_review_filename_recursive",
+      "cmd": "mkdir -p /data/prefix; printf 'needle\\n' > /data/prefix/name.txt; grep -rHh needle /data/prefix",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "needle\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_context_negative_before",
+      "cmd": "grep -B -1 world /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: -1: invalid context length argument\n"
+      }
+    },
+    {
+      "id": "grep_context_negative_after",
+      "cmd": "grep -A -1 world /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: -1: invalid context length argument\n"
+      }
+    },
+    {
+      "id": "grep_context_negative_both",
+      "cmd": "grep -C -1 world /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: -1: invalid context length argument\n"
+      }
+    },
+    {
+      "id": "grep_context_not_a_number",
+      "cmd": "grep -A x world /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: x: invalid context length argument\n"
+      }
+    },
+    {
+      "id": "grep_context_first_bad_value_wins",
+      "cmd": "grep -B -1 -A x world /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: -1: invalid context length argument\n"
+      }
+    },
+    {
+      "id": "grep_context_negative_zero",
+      "cmd": "grep -B -0 world /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "world\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_context_separator_between_files_after",
+      "cmd": "printf 'a\\nb\\nc\\n' > /data/g1; printf 'x\\na\\ny\\n' > /data/g2; grep -A1 a /data/g1 /data/g2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/g1:a\n/data/g1-b\n--\n/data/g2:a\n/data/g2-y\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_context_separator_between_files_before",
+      "cmd": "printf 'a\\nb\\nc\\n' > /data/g1; printf 'x\\na\\ny\\n' > /data/g2; grep -B1 a /data/g1 /data/g2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/g1:a\n--\n/data/g2-x\n/data/g2:a\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_context_separator_between_files_numbered",
+      "cmd": "printf 'a\\nb\\nc\\n' > /data/g1; printf 'x\\na\\ny\\n' > /data/g2; grep -n -A1 a /data/g1 /data/g2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/g1:1:a\n/data/g1-2-b\n--\n/data/g2:2:a\n/data/g2-3-y\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_context_separator_between_files_no_filename",
+      "cmd": "printf 'a\\nb\\nc\\n' > /data/g1; printf 'x\\na\\ny\\n' > /data/g2; grep -h -A1 a /data/g1 /data/g2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a\nb\n--\na\ny\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_context_separator_not_for_counts",
+      "cmd": "printf 'a\\nb\\nc\\n' > /data/g1; printf 'x\\na\\ny\\n' > /data/g2; grep -c -A1 a /data/g1 /data/g2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/g1:1\n/data/g2:1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_context_separator_needs_earlier_output",
+      "cmd": "printf 'a\\nb\\nc\\n' > /data/g1; printf 'x\\na\\ny\\n' > /data/g2; printf 'zzz\\n' > /data/g0; grep -A1 a /data/g0 /data/g2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/g2:a\n/data/g2-y\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_binary_zero_width_only_matching_notices",
+      "cmd": "printf 'a\\000b\\n' > /data/z.bin; grep -o '^' /data/z.bin",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "grep: /data/z.bin: binary file matches\n"
+      }
+    },
+    {
+      "id": "grep_binary_zero_width_only_matching_invalid_utf8_is_silent",
+      "cmd": "printf 'a\\377b\\n' > /data/z.txt; grep -o '^' /data/z.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
     }
   ]
 }

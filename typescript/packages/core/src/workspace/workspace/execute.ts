@@ -324,7 +324,10 @@ async function runLine(
       record: false,
       sessionId: opts.sessionId,
     }
-    if (options.signal !== undefined) innerOpts.signal = options.signal
+    // A builtin that bounds its inner line (`timeout`) hands a signal
+    // of its own, merged with the line's so either can end the run.
+    const innerSignal = mergeSignals(options.signal, opts.signal)
+    if (innerSignal !== undefined) innerOpts.signal = innerSignal
     // The agent rides with the execution: an approval a nested line
     // raises is the typed line's agent's, not the workspace default's.
     if (options.agentId !== undefined) innerOpts.agentId = options.agentId
@@ -462,7 +465,7 @@ async function runParsedLine(
   // for the tree: a question put to a host has to answer to both, and
   // both admission passes below can put one.
   const killed = mergeSignals(deps.signal, effectiveSession.abortSignal)
-  const lineRuntime = env.runtimes.wholeLineFor(rootNode, deps.routingDecision ?? null)
+  const lineRuntime = env.runtimes.wholeLineFor(deps.routingDecision ?? null)
   // Filled only after the applicable line-tier admission (a refused
   // line must never reach a secret store) and before expansion or the
   // runtime's env snapshot reads the vars. The prejudge pass leaves
@@ -780,7 +783,10 @@ async function runParsedLine(
   // line that emitted them succeeded. Internal evals (record:false) have
   // an empty opRecords here: their ops were accounted by the line above.
   env.records.push(...opRecords)
-  if (isLine) {
+  // bash adds a line to history only when it is non-empty
+  // (`shell_input_line[0]`): a blank line is skipped, while a
+  // whitespace-only or comment-only line is kept.
+  if (isLine && command.replaceAll('\n', '') !== '') {
     io.stdout = stdoutBytes
     // Joined, not raced: a fast store still records the line before the
     // caller reads history, and a stalled one releases the caller.

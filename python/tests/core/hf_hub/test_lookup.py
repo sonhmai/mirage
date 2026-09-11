@@ -12,13 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
+from unittest.mock import AsyncMock
 
-from mirage.cache.index import NULL_INDEX
+import pytest
+from fakeredis.aioredis import FakeRedis
+
+from mirage.cache.index import NULL_INDEX, IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.core.hf_hub.lookup import (dir_stat_entry, key_of, lookup,
                                        probe_dir, probe_file)
-from mirage.core.hf_hub.tree import seed_index
+from mirage.core.hf_hub.read import read_bytes
+from mirage.core.hf_hub.stat import stat
+from mirage.core.hf_hub.tree import parse_entry, seed_index
+from tests.core.hf_hub.conftest import file_row, ps
 
 
 @pytest.mark.parametrize("prefix,local,expected", [
@@ -80,3 +87,77 @@ def test_dir_stat_entry_names_the_last_segment():
     entry = dir_stat_entry("/m/deep/dir")
     assert entry.name == "dir"
     assert entry.resource_type == "folder"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["ram", "redis"])
+@pytest.mark.parametrize("changed", ["a.txt", "d/b.txt", "d"])
+@pytest.mark.parametrize("deleted", [True, False])
+async def test_direct_lookup_refreshes_invalidated_snapshot(
+        loaded, backend, changed, deleted, monkeypatch):
+    client = FakeRedis()
+    index = RAMIndexCacheStore() if backend == "ram" else RedisIndexCacheStore(
+        client=client)
+    tree = dict(loaded.tree)
+    for key in list(tree):
+        if key == changed or key.startswith(changed + "/"):
+            tree.pop(key)
+    if not deleted:
+        tree[changed] = parse_entry(file_row(changed, 42, oid="new-oid"))
+    fetch = AsyncMock(return_value=tree)
+    monkeypatch.setattr("mirage.core.hf_hub.tree.fetch_tree", fetch)
+    try:
+        seed_index(loaded, index, "/m")
+        await index.set_dir("/other", [
+            ("keep", IndexEntry(id="keep", name="keep", resource_type="file"))
+        ])
+        await index.invalidate()
+        path = ps(changed, "/m")
+        for _ in range(2):
+            if deleted:
+                for reader in (stat, read_bytes):
+                    with pytest.raises(FileNotFoundError):
+                        await reader(loaded, path, index)
+            else:
+                result = await stat(loaded, path, index)
+                assert result.size == 42
+                assert result.fingerprint == "new-oid"
+        if changed == "d":
+            assert not (await lookup(loaded, index, "/m", "/m/d/b.txt")).exists
+        fetch.assert_awaited_once()
+        assert (await index.get("/other/keep")).entry.id == "keep"
+    finally:
+        await index.close()
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["ram", "redis"])
+async def test_parallel_snapshot_readers_share_one_replacement(
+        loaded, backend, monkeypatch):
+    import asyncio
+
+    client = FakeRedis()
+    index = RAMIndexCacheStore() if backend == "ram" else RedisIndexCacheStore(
+        client=client)
+    fresh = {"a.txt": parse_entry(file_row("a.txt", 42, oid="new"))}
+
+    async def fetch(*args):
+        await asyncio.sleep(0)
+        return fresh
+
+    fetch_mock = AsyncMock(side_effect=fetch)
+    monkeypatch.setattr("mirage.core.hf_hub.tree.fetch_tree", fetch_mock)
+    try:
+        seed_index(loaded, index, "/m")
+        await index.invalidate()
+        keys = ["/m/a.txt", "/m"] * 4
+        results = await asyncio.gather(*(lookup(loaded, index, "/m", key)
+                                         for key in keys))
+        assert all(row.exists for row in results)
+        assert [row.entry.id for row in results[::2]] == ["new"] * 4
+        assert [row.children for row in results[1::2]] == [["/m/a.txt"]] * 4
+        fetch_mock.assert_awaited_once()
+    finally:
+        await index.close()
+        await client.aclose()

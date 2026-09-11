@@ -37,6 +37,7 @@
     "@aws-sdk/s3-request-presigner": "^3.0.0",
     "@daytona/sdk": "^0.207.0",
     "@lancedb/lancedb": "^0.30.0",
+    "@qdrant/js-client-rest": "^1.18.0",
     "@types/node": "^22.0.0",
     "@zkochan/fuse-native": "^0.1.0",
     "apache-arrow": "^21.0.0",

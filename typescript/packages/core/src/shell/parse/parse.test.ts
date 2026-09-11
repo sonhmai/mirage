@@ -16,7 +16,7 @@ import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { getParts, getRedirects, getText } from '../helpers.ts'
 import { createShellParser, type ShellParser, stripLineContinuation } from './index.ts'
-import type { TSNodeLike } from '../types.ts'
+import { NodeType as NT, type TSNodeLike } from '../types.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -227,5 +227,78 @@ describe('stripLineContinuation', () => {
     ['echo a\\ b', 'echo a\\ b'],
   ])('%j -> %j', (command, expected) => {
     expect(stripLineContinuation(command)).toBe(expected)
+  })
+})
+
+// tree-sitter-bash lexes a heredoc body line that opens with a backslash
+// as more words of the operator line, and skips the first line's leading
+// whitespace. parse() shields such a body while the tree is built, so
+// the body node spans exactly what bash reads (see heredoc/shield.ts).
+describe('heredoc reparse: body lines the lexer would swallow', () => {
+  function heredocRedirect(command: string): TSNodeLike {
+    const statement = parser.parse(command).children[0] as TSNodeLike
+    const redirect = statement.children.find((c) => c.type === NT.HEREDOC_REDIRECT)
+    if (redirect === undefined) throw new Error('no heredoc_redirect')
+    return redirect
+  }
+
+  function heredocBody(command: string): TSNodeLike {
+    const body = heredocRedirect(command).children.find((c) => c.type === NT.HEREDOC_BODY)
+    if (body === undefined) throw new Error('no heredoc_body')
+    return body
+  }
+
+  it('keeps a leading backslash line', () => {
+    expect(getText(heredocBody("cat <<'EOF'\n\\first\nsecond\nEOF"))).toBe('\\first\nsecond\n')
+  })
+
+  it('keeps every leading backslash line', () => {
+    expect(getText(heredocBody("cat <<'EOF'\n\\first\n\\second\nthird\nEOF"))).toBe(
+      '\\first\n\\second\nthird\n',
+    )
+  })
+
+  it('keeps leading indentation', () => {
+    expect(getText(heredocBody("cat <<'EOF'\n  first\nsecond\nEOF"))).toBe('  first\nsecond\n')
+  })
+
+  it('keeps indentation after a backslash line', () => {
+    expect(getText(heredocBody("cat <<'EOF'\n\\begin{table}\n  \\begin{center}\nEOF"))).toBe(
+      '\\begin{table}\n  \\begin{center}\n',
+    )
+  })
+
+  it('does not feed the first body line to the pipeline', () => {
+    const redirect = heredocRedirect("cat <<'EOF' | tr a-z A-Z\n\\first\nsecond\nEOF")
+    const pipeline = redirect.children.find((c) => c.type === NT.PIPELINE)
+    if (pipeline === undefined) throw new Error('no pipeline')
+    expect(getText(pipeline)).toBe('| tr a-z A-Z')
+  })
+
+  it('does not read an apostrophe on a backslash line as a syntax error', () => {
+    const command = "cat <<'EOF'\n\\item Don't\nsecond\nEOF"
+    expect(parser.parse(command).hasError).toBe(false)
+    expect(getText(heredocBody(command))).toBe("\\item Don't\nsecond\n")
+  })
+
+  it('keeps the expansion on an unquoted backslash line', () => {
+    const body = heredocBody('cat <<EOF\n\\a $v\nsecond\nEOF')
+    expect(body.namedChildren.map((c) => c.type)).toEqual([NT.SIMPLE_EXPANSION, NT.HEREDOC_CONTENT])
+    expect(getText(body)).toBe('\\a $v\nsecond\n')
+  })
+
+  it('keeps an escaped dollar on a backslash line literal', () => {
+    const body = heredocBody('cat <<EOF\n\\$v\nsecond\nEOF')
+    expect(body.namedChildren.map((c) => c.type)).not.toContain(NT.SIMPLE_EXPANSION)
+    expect(getText(body)).toBe('\\$v\nsecond\n')
+  })
+
+  it('keeps a backslash line under an escaped quoted delimiter', () => {
+    expect(getText(heredocBody('cat <<"E\\$F"\n\\first\nE$F'))).toBe('\\first\n')
+  })
+
+  it('hands out the typed source as node text', () => {
+    const command = "cat <<'EOF'\n\\first\nEOF"
+    expect(getText(parser.parse(command) as TSNodeLike)).toBe(command)
   })
 })

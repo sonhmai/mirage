@@ -20,7 +20,9 @@ from mirage.core.github.readdir import readdir
 from mirage.core.github.tree import ensure_tree
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.resource.github.github import GitHubResource
-from mirage.types import PathSpec
+from mirage.types import ConsistencyPolicy, PathSpec
+from mirage.workspace import Workspace
+from mirage.workspace.reconcile import Reconciler
 
 CONFIG = GitHubConfig(token="ghp_test")
 TREE = {
@@ -119,3 +121,53 @@ async def test_an_unpinned_mount_is_on_the_default_branch_before_any_fetch(
         GitHubConfig(token="ghp_test", owner="o", repo="r"))
     assert resource.is_default_branch is True
     assert GitHubResource(CONFIG, "o", "r", "dev").is_default_branch is None
+
+
+@pytest.mark.asyncio
+async def test_reconcile_private_index_can_resolve_github_ids(tree_calls):
+    resource = GitHubResource(CONFIG, "o", "r", "main")
+    ws = Workspace({"/gh": resource})
+    try:
+        path = "/gh/src/main.py"
+        await ws.namespace.ensure_loaded()
+        mount = ws.namespace.mount_for(path)
+        await mount.execute_op("stat", path)
+        await ws.cache.set(path, b"cached", fingerprint="b")
+        await ws.namespace.set_attrs(path, mode=0o600)
+        rec = Reconciler(ws.cache, ws.namespace, ConsistencyPolicy.ALWAYS)
+        await rec.reconcile_read(mount, path)
+        assert await ws.cache.exists(path)
+        assert ws.namespace.meta_for(path) is not None
+        assert len(tree_calls) == 2
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["shell", "fs"])
+async def test_always_reads_current_github_blob_after_probe(
+        monkeypatch, surface):
+    sha = "v1"
+
+    async def fetch_tree(*args, **kwargs):
+        return {
+            "f.txt": TreeEntry(path="f.txt", type="blob", sha=sha, size=2)
+        }, False
+
+    async def read_bytes(config, owner, repo, blob_sha, session=None):
+        return blob_sha.encode()
+
+    monkeypatch.setattr("mirage.core.github.tree.fetch_tree", fetch_tree)
+    monkeypatch.setattr("mirage.core.github.read.read_bytes", read_bytes)
+    resource = GitHubResource(CONFIG, "o", "r", "main")
+    ws = Workspace({"/gh": resource}, consistency=ConsistencyPolicy.ALWAYS)
+    try:
+        assert (await ws.execute("cat /gh/f.txt")).stdout == b"v1"
+        assert (await resource.index.get("/gh/f.txt")).entry.id == "v1"
+        sha = "v2"
+        if surface == "shell":
+            assert (await ws.execute("cat /gh/f.txt")).stdout == b"v2"
+        else:
+            assert await ws.fs.read("/gh/f.txt") == b"v2"
+    finally:
+        await ws.close()

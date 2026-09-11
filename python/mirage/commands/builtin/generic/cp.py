@@ -897,7 +897,10 @@ async def cp(
             errors.append("cp: -r not specified; omitting directory "
                           f"'{src.virtual}'")
             continue
-        target_exists, target_is_dir = await entry_kind(stat, target)
+        if not flags.no_target_dir and target.virtual == dst.virtual:
+            target_exists, target_is_dir = dst_exists, dst_is_dir
+        else:
+            target_exists, target_is_dir = await entry_kind(stat, target)
         if not target_exists:
             parent_err = await dest_parent_error("cp", stat, target,
                                                  src_is_dir)

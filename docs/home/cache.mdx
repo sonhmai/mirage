@@ -11,6 +11,10 @@ Every `Workspace` ships with a **two-layer cache** so repeated work against remo
 - **Index cache.** Listings and metadata. The first directory walk hits the API; subsequent ones serve from the index until the TTL expires.
 - **File cache.** Object bytes. The first read streams from origin; later pipelines read from cache.
 
+Under `ConsistencyPolicy.ALWAYS`, cached file bytes are checked against live backend metadata, bypassing the index. A changed fingerprint triggers a fresh read; a deleted file is evicted. If the backend cannot supply a fingerprint or its probe fails, the read must fetch current bytes or report an error. `LAZY` continues to trust cached bytes.
+
+A fresh directory listing proves a child absent only when that child is not listed. If a listed child's metadata has been evicted independently, object-store stat fetches it from the backend.
+
 ## Stores
 
 Each layer is a pluggable store with two built-ins:
@@ -100,6 +104,65 @@ await ws.execute('grep alert /s3/data/log.jsonl')
 ```
 
 </CodeGroup>
+
+## Metadata Index Contract
+
+The RAM and Redis metadata indexes share the same lookup states: a directory
+never listed is `NOT_FOUND`, a cached empty directory is a successful empty
+listing, and a listing at or past its deadline is `EXPIRED`. Entry metadata
+remains readable after a directory expires. `invalidate()` expires listings
+without deleting their metadata; `invalidate_dir` / `invalidateDir` removes a
+listing and its direct children's entries, and prefix invalidation removes a
+whole subtree. `clear()` removes all index data.
+
+Direct backend lookups trust cached metadata only when a fresh parent listing
+includes the path. Partial or filtered listings may store individual entries
+without a complete parent; these entries require another parent refresh on
+each direct lookup. The old target is removed before refreshing so an omitted
+or renamed item cannot survive as an orphaned cache hit.
+
+Concurrent lookups sharing an index serialize each parent's refresh through
+the final entry lookup. GitHub and Hugging Face snapshot readers hold the same
+guard for the whole mount, so one reader cannot remove a snapshot another is
+still reading. These guards coordinate tasks within one process; unrelated
+parent directories and mounts can refresh concurrently.
+
+`seed()` merges snapshots by path and copies their child lists. Redis queues
+these synchronous calls and flushes them before the next index operation or
+`close()`; `clear()` discards queued snapshots. Multiple seeds accumulate, and
+failed flushes remain queued for retry. `entries()` returns all stored metadata,
+including entries whose directory listing has expired.
+
+Redis stores each entry as the `IndexEntry` JSON under `mirage:idx:entry:`
+and each directory's children and deadline as the `IndexDirectory` JSON under
+`mirage:idx:directory:`. Both are the documents pydantic writes, snake_case
+and every field, and TypeScript writes and reads the same bytes
+(`IndexEntry.toJSON` / `IndexEntry.fromJSON`), so one Redis serves both
+languages and a row that does not parse is an error rather than a miss.
+Invalidation uses permanent keys beside the payload:
+`mirage:idx:generation` for the whole store and
+`mirage:idx:generation:<absolute-directory>` for each directory.
+Each listing records both tokens, and one `MGET` reads the listing and its two
+current tokens. A missing or changed token makes the listing `EXPIRED`.
+New tokens are unique so eviction or a refill cannot revive an old listing.
+Competing initializers retain their attempted tokens; a worker that loses
+initialization incurs a cache refill instead of adopting a later generation.
+Global invalidation rotates the global token atomically. Directory invalidation
+removes that directory's token; subtree invalidation removes tokens under that
+path, preserving fresh listings outside a scoped invalidation.
+Like RAM, these records retain expired listings until explicit removal; they do
+not use Redis TTL deletion. Redis server eviction can still turn any cached
+record into a miss. Configure Redis `maxmemory` for server-side size limits.
+
+The layout is not versioned and earlier layouts are not read. Upgrade every
+worker that shares an index together, and flush the key prefix first
+(`clear()`, or delete the keys under it), so no worker opens a row another
+release wrote.
+
+The Redis **file cache** likewise uses server-side limits instead of RAM's
+`cache_size`, `cache_entries`, or LRU. File bytes and metadata occupy separate
+keys, so server eviction can remove either independently: a freshness check
+alone does not guarantee the bytes remain cached.
 
 ## Relationship To Snapshots
 

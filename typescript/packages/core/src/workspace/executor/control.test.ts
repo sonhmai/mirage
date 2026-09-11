@@ -106,7 +106,8 @@ describe('handleFor', () => {
     const [stdout] = await handleFor(execute, 'X', ['a', 'b', 'c'], [node('body')], s)
     expect(seen).toEqual(['a', 'b', 'c'])
     expect(decode(await materialize(stdout))).toBe('iter-a\niter-b\niter-c\n')
-    expect(s.env.X).toBeUndefined()
+    // bash leaves the loop variable holding its last value.
+    expect(s.env.X).toBe('c')
   })
 
   it('BreakSignal stops the loop early', async () => {
@@ -143,12 +144,25 @@ describe('handleFor', () => {
     expect(seen).toEqual(['a', 'b', 'c'])
   })
 
-  it('restores previous value of the loop variable', async () => {
+  // bash 5.2: `Z=before; for Z in a b; do :; done; echo $Z` prints b. The
+  // loop variable is an ordinary variable and keeps its last value; the
+  // shadowed value is not put back.
+  it('keeps the loop variable at its last value', async () => {
     const s = new Session({ sessionId: 'test', vars: varsFromEnv({ X: 'saved' }) })
     const execute: ExecuteNodeFn = () =>
       Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    await handleFor(execute, 'X', ['a'], [node('body')], s)
-    expect(s.env.X).toBe('saved')
+    await handleFor(execute, 'X', ['a', 'b'], [node('body')], s)
+    expect(s.env.X).toBe('b')
+  })
+
+  // bash 5.2: `unset Y; for Y in ; do :; done` leaves Y unset, since no
+  // iteration ever assigned it.
+  it('leaves the variable untouched when there are no words', async () => {
+    const s = new Session({ sessionId: 'test' })
+    const execute: ExecuteNodeFn = () =>
+      Promise.resolve([null, new IOResult(), new ExecutionNode()])
+    await handleFor(execute, 'Y', [], [node('body')], s)
+    expect('Y' in s.env).toBe(false)
   })
 })
 
@@ -307,11 +321,11 @@ describe('& inside a body', () => {
     expect(ran).toEqual(['c'])
     expect(io.exitCode).toBe(0)
     expect(s.lastExitCode).toBe(0)
-    const job = table.get(1)
+    const job = table.get(1, 'test')
     expect(job?.command).toBe('slow')
     expect(job?.status).toBe(JobStatus.RUNNING)
     release()
-    await table.wait(1)
+    await table.wait(1, 'test')
     expect(ran).toEqual(['c', 'slow'])
     expect(job?.exitCode).toBe(3)
   }, 2000)
@@ -333,10 +347,10 @@ describe('& inside a body', () => {
     )
     expect(ran).toEqual([])
     expect(io.exitCode).toBe(0)
-    expect(table.get(1)?.command).toBe('slow')
+    expect(table.get(1, 'test')?.command).toBe('slow')
     release()
-    await table.wait(1)
-    expect(table.get(1)?.exitCode).toBe(3)
+    await table.wait(1, 'test')
+    expect(table.get(1, 'test')?.exitCode).toBe(3)
   }, 2000)
 
   it('for body: launches one job per iteration', async () => {
@@ -357,9 +371,9 @@ describe('& inside a body', () => {
     )
     expect(ran).toEqual([])
     expect(io.exitCode).toBe(0)
-    expect(table.listJobs().map((j) => j.command)).toEqual(['slow', 'slow'])
+    expect(table.listJobs('test').map((j) => j.command)).toEqual(['slow', 'slow'])
     release()
-    await table.waitAll()
+    await table.waitAll('test')
     expect(ran).toEqual(['slow', 'slow'])
   }, 2000)
 

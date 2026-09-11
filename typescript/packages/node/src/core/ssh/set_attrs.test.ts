@@ -45,7 +45,7 @@ describe('ssh setAttrs', () => {
     })
     expect(residual).toEqual({})
     const st = await stat(accessor, spec('/a.txt'))
-    expect(st.modified).toBe('2020-01-01T00:00:00.000Z')
+    expect(st.modified).toBe('2020-01-01T00:00:00Z')
   })
 
   it('keeps the untouched atime when only mtime is set', async () => {

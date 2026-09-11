@@ -29,12 +29,14 @@ from mirage.config import load_config
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import classify
 from mirage.policy import Policy
-from mirage.policy.types import CommandContext, Deny, OpsContext
+from mirage.policy.types import (CommandContext, Deny, OpsContext,
+                                 SessionContext)
 from mirage.resource.ram import RAMResource
 from mirage.resource.registry import build_resource, register_resource
 from mirage.runtime.types import ScriptSource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
+from mirage.workspace.snapshot import apply_state_dict, to_state_dict
 
 SUITE = Path(__file__).with_name("cases.json")
 
@@ -73,6 +75,11 @@ class RulePolicy(Policy):
             return Deny(self.rule["reason"])
         return None
 
+    async def pre_session(self, ctx: SessionContext) -> Deny | None:
+        if ctx.key in self.rule.get("vars", []):
+            return Deny(self.rule["reason"])
+        return None
+
 
 def profile_document(raw: dict[str, Any]) -> dict[str, Any]:
     """Embed a JSON policy program as the ordinary config loader does."""
@@ -85,8 +92,17 @@ def profile_document(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 async def action(ws: Workspace, step: dict[str, Any],
-                 policies: dict[str, RulePolicy]) -> Any:
-    """Run one host API action; no shell command mutates the mount table."""
+                 policies: dict[str, RulePolicy], held: dict[str, Any]) -> Any:
+    """Run one host API action; no shell command mutates the mount table.
+
+    Args:
+        ws (Workspace): the scenario's workspace.
+        step (dict[str, Any]): the action document.
+        policies (dict[str, RulePolicy]): the coded policies registered
+            so far, by id.
+        held (dict[str, Any]): what earlier steps put aside for later
+            ones; ``snapshot`` stores the state dict ``checkout`` applies.
+    """
     op = step["op"]
     if op == "cached":
         value = await ws.cache.get(step["path"])
@@ -97,7 +113,7 @@ async def action(ws: Workspace, step: dict[str, Any],
             return await action(ws, {
                 k: v
                 for k, v in step.items() if k != "session"
-            }, policies)
+            }, policies, held)
         finally:
             reset_current_session(token)
     if op == "mount":
@@ -115,6 +131,8 @@ async def action(ws: Workspace, step: dict[str, Any],
     elif op == "session":
         ws.create_session(step["id"],
                           profile=profile_document(step.get("profile", {})))
+    elif op == "close_session":
+        await ws.close_session(step["id"])
     elif op == "set_profile":
         raw = step["profile"]
         profile = profile_document(raw) if isinstance(raw, dict) else raw
@@ -159,6 +177,12 @@ async def action(ws: Workspace, step: dict[str, Any],
             "stderr": await result.stderr_str(),
             "refusal": result.refusal.reason if result.refusal else None,
         }
+    elif op == "snapshot":
+        held["state"] = await to_state_dict(ws)
+    elif op == "checkout":
+        # A checkout onto the running workspace: the restored state wins,
+        # and every restored variable clears the session gate first.
+        await apply_state_dict(ws, held["state"])
     elif op == "mounts":
         return sorted(m.prefix for m in ws.mounts())
     elif op == "close":
@@ -172,10 +196,11 @@ async def run(case: dict[str, Any]) -> int:
     """Stop a failed scenario at its first mismatch and always close it."""
     ws = Workspace(**load_config(case["settings"]).to_workspace_kwargs())
     policies: dict[str, RulePolicy] = {}
+    held: dict[str, Any] = {}
     try:
         for index, step in enumerate(case["steps"]):
             try:
-                actual = {"value": await action(ws, step, policies)}
+                actual = {"value": await action(ws, step, policies, held)}
             except Exception as exc:
                 actual = {"error": str(exc)}
                 condition = classify(exc)

@@ -1595,6 +1595,59 @@ describe('handleTimeout', () => {
     expect(io.exitCode).toBe(124)
   })
 
+  it('keeps the stderr the command had produced before the deadline', async () => {
+    // `tail -F missing` has said it cannot open the file by the time the
+    // deadline kills it; that line is the command's output too.
+    const complaining = (
+      _cmd: string,
+      opts: { sessionId: string; signal?: AbortSignal },
+    ): Promise<IOResult> =>
+      Promise.resolve(
+        new IOResult({
+          stdout: (async function* () {
+            await new Promise<void>((resolve) => {
+              opts.signal?.addEventListener(
+                'abort',
+                () => {
+                  resolve()
+                },
+                { once: true },
+              )
+            })
+            yield new Uint8Array()
+          })(),
+          stderr: new TextEncoder().encode('tail: nope: No such file or directory\n'),
+        }),
+      )
+    const [stdout, io] = await handleTimeout(complaining, ['0.05', 'tail', '-F', 'nope'], session)
+    expect(io.exitCode).toBe(124)
+    expect(stdout).toBeNull()
+    expect(decode(await materialize(io.stderr))).toBe('tail: nope: No such file or directory\n')
+  })
+
+  it('aborts the inner run at the deadline', async () => {
+    // A followed tail polls until told to stop; the deadline has to tell
+    // it, or 124 comes back while the run keeps reading in the background.
+    let seen: AbortSignal | undefined
+    const follow = (
+      _cmd: string,
+      opts: { sessionId: string; signal?: AbortSignal },
+    ): Promise<IOResult> =>
+      new Promise((resolve) => {
+        seen = opts.signal
+        opts.signal?.addEventListener(
+          'abort',
+          () => {
+            resolve(new IOResult())
+          },
+          { once: true },
+        )
+      })
+    const [, io] = await handleTimeout(follow, ['0.05', 'tail', '-f', 'x'], session)
+    expect(io.exitCode).toBe(124)
+    expect(seen?.aborted).toBe(true)
+  })
+
   it('invalid duration exits 125', async () => {
     const shell = fakeShell()
     const [, io] = await handleTimeout(shell.fn, ['xx', 'sleep', '1'], session)

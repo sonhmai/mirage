@@ -29,6 +29,31 @@ export class IndexView extends IndexCacheStore {
     super()
   }
 
+  seed(
+    entries: ReadonlyMap<string, IndexEntry>,
+    children: ReadonlyMap<string, readonly string[]>,
+    expiresAt: Date,
+  ): void {
+    if (!this.owns(this.prefix)) return
+    this.store.seed(
+      new Map([...entries].filter(([path]) => this.owns(path))),
+      new Map(
+        [...children]
+          .filter(([path]) => this.owns(path))
+          .map(([path, keys]) => [path, keys.filter((key) => this.owns(key))]),
+      ),
+      expiresAt,
+    )
+  }
+
+  entries(): Promise<Map<string, IndexEntry>> {
+    return withCacheMutation(this.cache, async () => {
+      if (!this.owns(this.prefix)) return new Map<string, IndexEntry>()
+      const entries = await this.store.entries()
+      return new Map([...entries].filter(([path]) => this.owns(path)))
+    })
+  }
+
   async get(path: string): Promise<LookupResult> {
     // Index lookups may flush queued state; keep them inside the write fence too.
     return withCacheMutation(this.cache, async () => {

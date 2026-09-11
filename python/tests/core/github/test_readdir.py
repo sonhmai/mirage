@@ -14,16 +14,20 @@
 
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fakeredis.aioredis import FakeRedis
 
 import mirage.core.github.tree
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index.redis import RedisIndexCacheStore
+from mirage.core.github.read import read
 from mirage.core.github.readdir import readdir
+from mirage.core.github.stat import stat
 from mirage.core.github.tree_entry import TreeEntry
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
 
 
 def _index_from_tree(tree: dict[str, TreeEntry]) -> RAMIndexCacheStore:
@@ -163,3 +167,155 @@ async def test_readdir_does_not_refill_on_a_real_miss(tree, monkeypatch):
                      virtual="/nonexistent",
                      directory="/nonexistent"), index)
     assert calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["ram", "redis"])
+@pytest.mark.parametrize("replacement", ["tree", "blob", "missing"])
+async def test_truncated_tree_refills_expired_directory(
+        backend, replacement, monkeypatch):
+    client = FakeRedis()
+    index = RAMIndexCacheStore() if backend == "ram" else RedisIndexCacheStore(
+        client=client)
+    await index.set_dir("/repo", [
+        ("src", IndexEntry(id="old-src", name="src", resource_type="folder"))
+    ])
+    await index.set_dir(
+        "/repo/src",
+        [("nested",
+          IndexEntry(id="old-nested", name="nested", resource_type="folder"))])
+    await index.set_dir("/repo/src/nested", [],
+                        datetime.now(timezone.utc) - timedelta(seconds=1))
+    parent = [] if replacement == "missing" else [
+        TreeEntry(path="nested", type=replacement, sha="new-nested", size=None)
+    ]
+    fetch = AsyncMock(side_effect=[
+        [TreeEntry(path="src", type="tree", sha="new-src", size=None)],
+        parent,
+        [TreeEntry(path="new.py", type="blob", sha="new", size=2)],
+    ])
+    monkeypatch.setitem(readdir.__globals__, "fetch_dir_tree", fetch)
+    blob_fetch = AsyncMock(return_value=b"replacement")
+    monkeypatch.setitem(read.__globals__, "read_bytes", blob_fetch)
+    accessor = MagicMock()
+    accessor.ref = "main"
+    accessor.truncated = True
+    path = PathSpec(resource_path="src/nested",
+                    virtual="/repo/src/nested",
+                    directory="/repo/src/nested")
+    try:
+        if replacement == "tree":
+            for _ in range(2):
+                assert await readdir(accessor, path,
+                                     index) == ["/repo/src/nested/new.py"]
+            assert [call.args[3] for call in fetch.await_args_list
+                    ] == ["main", "new-src", "new-nested"]
+        else:
+            with pytest.raises(FileNotFoundError):
+                await readdir(accessor, path, index)
+            if replacement == "blob":
+                assert (await stat(accessor, path,
+                                   index)).type == FileType.FILE
+                assert await read(accessor, path, index) == b"replacement"
+                assert blob_fetch.await_args.args[3] == "new-nested"
+            else:
+                for reader in (stat, read):
+                    with pytest.raises(FileNotFoundError):
+                        await reader(accessor, path, index)
+            assert [call.args[3]
+                    for call in fetch.await_args_list] == ["main", "new-src"]
+    finally:
+        await index.close()
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["ram", "redis"])
+@pytest.mark.parametrize("replacement", ["missing", "blob"])
+async def test_complete_refill_removes_obsolete_directories(
+        backend, replacement, monkeypatch):
+    client = FakeRedis()
+    index = RAMIndexCacheStore() if backend == "ram" else RedisIndexCacheStore(
+        client=client)
+    accessor = MagicMock()
+    accessor.truncated = False
+    tree = {} if replacement == "missing" else {
+        "src": TreeEntry(path="src", type="blob", sha="new", size=3)
+    }
+    fetch = AsyncMock(return_value=(tree, False))
+    monkeypatch.setattr(mirage.core.github.tree, "fetch_tree", fetch)
+    path = PathSpec(resource_path="src",
+                    virtual="/repo/src",
+                    directory="/repo/src")
+    try:
+        await index.set_dir("/other", [
+            ("keep", IndexEntry(id="keep", name="keep", resource_type="file"))
+        ])
+        await index.set_dir("/repo", [
+            ("src", IndexEntry(id="old", name="src", resource_type="folder"))
+        ])
+        await index.set_dir(
+            "/repo/src",
+            [("old.py",
+              IndexEntry(id="old-file", name="old.py", resource_type="file"))])
+        await index.invalidate()
+        for _ in range(2):
+            with pytest.raises(FileNotFoundError):
+                await readdir(accessor, path, index)
+        fetch.assert_awaited_once()
+        assert (await index.get("/repo/src/old.py")).entry is None
+        assert (await index.get("/other/keep")).entry.id == "keep"
+    finally:
+        await index.close()
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["ram", "redis"])
+@pytest.mark.parametrize("prefix", ["", "/repo"])
+@pytest.mark.parametrize("partial_children", [False, True])
+@pytest.mark.parametrize("refresh", [False, True])
+async def test_truncated_refill_does_not_cache_partial_listings(
+        backend, prefix, partial_children, refresh, monkeypatch):
+    client = FakeRedis()
+    index = RAMIndexCacheStore() if backend == "ram" else RedisIndexCacheStore(
+        client=client)
+    root = prefix or "/"
+    folder = TreeEntry(path="docs", type="tree", sha="docs-sha", size=None)
+    partial_tree = {"docs": folder}
+    if partial_children:
+        partial_tree["docs/first.md"] = TreeEntry(path="docs/first.md",
+                                                  type="blob",
+                                                  sha="first",
+                                                  size=1)
+    tree_fetch = AsyncMock(return_value=(partial_tree, True))
+    dir_fetch = AsyncMock(side_effect=[
+        [folder], [folder],
+        [
+            TreeEntry(path="first.md", type="blob", sha="first", size=1),
+            TreeEntry(path="second.md", type="blob", sha="second", size=2),
+        ]
+    ])
+    monkeypatch.setattr(mirage.core.github.tree, "fetch_tree", tree_fetch)
+    monkeypatch.setitem(readdir.__globals__, "fetch_dir_tree", dir_fetch)
+    accessor = MagicMock()
+    accessor.ref = "main"
+    accessor.truncated = False
+    root_path = PathSpec(resource_path="", virtual=root, directory=root)
+    docs = prefix + "/docs"
+    docs_path = PathSpec(resource_path="docs", virtual=docs, directory=docs)
+    try:
+        if refresh:
+            await index.set_dir(root, [])
+            await index.invalidate()
+        for _ in range(2):
+            assert await readdir(accessor, root_path, index) == [docs]
+            assert await readdir(accessor, docs_path, index) == [
+                docs + "/first.md", docs + "/second.md"
+            ]
+        tree_fetch.assert_awaited_once()
+        assert [call.args[3] for call in dir_fetch.await_args_list
+                ] == ["main", "main", "docs-sha"]
+    finally:
+        await index.close()
+        await client.aclose()

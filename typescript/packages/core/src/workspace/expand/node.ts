@@ -47,6 +47,7 @@ export type ExecuteFn = (
   opts: {
     sessionId: string
     stdin?: ByteSource | null
+    signal?: AbortSignal
     node?: TSNodeLike
     span?: readonly [number, number]
     handed?: HandOff

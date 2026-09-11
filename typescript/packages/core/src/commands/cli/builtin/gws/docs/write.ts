@@ -28,6 +28,7 @@ export async function write(inv: CLIInvocation): Promise<CommandFnResult> {
     new TokenManager(inv.config as GoogleConfig),
     fl.asStr('document') ?? '',
     fl.asStr('text') ?? '',
+    fl.asStr('tab') ?? undefined,
   )
   const out: ByteSource = ENC.encode(JSON.stringify(result))
   return [out, new IOResult()]

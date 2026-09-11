@@ -156,6 +156,25 @@ async def test_agrep(backend):
 
 
 @pytest.mark.asyncio
+async def test_agrep_single_file_keeps_path_and_line_numbers(backend):
+    await backend.awrite("/log.txt", "one\nerror here\ntwo\nerror again\n")
+    result = await backend.agrep("error", path="/log.txt")
+    assert result.error is None
+    assert result.matches == [
+        {
+            "path": "/log.txt",
+            "line": 2,
+            "text": "error here"
+        },
+        {
+            "path": "/log.txt",
+            "line": 4,
+            "text": "error again"
+        },
+    ]
+
+
+@pytest.mark.asyncio
 async def test_agrep_max_count_truncates(backend):
     await backend.awrite("/search.txt", "hit\nhit\nhit")
     result = await backend.agrep("hit", path="/", max_count=2)

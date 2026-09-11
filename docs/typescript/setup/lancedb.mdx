@@ -45,6 +45,10 @@ await ws.execute('search "red running shoes" /fashion') // ranked paths + score 
 /fashion/<gender>/<articleType>/<baseColour>/<id>.jpg  # raw blob bytes
 ```
 
+A `groupBy` value holding `/` renders as `∕`, and a blank or dot-led value is
+led by `⁄`, so every value keeps its own directory that lists and opens, and
+descending into it filters for exactly that value.
+
 Semantic search is the `search` command, not a path: it returns ranked rows as
 the canonical `<id>.md` paths above, annotated with the vector distance.
 

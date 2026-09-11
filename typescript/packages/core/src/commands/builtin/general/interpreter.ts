@@ -14,9 +14,9 @@
 
 import { IOResult } from '../../../io/types.ts'
 import type { LanguageRuntime } from '../../../runtime/language.ts'
-import { QuickJsUnavailableError } from '../../../runtime/js/types.ts'
+import { QuickJsUnavailableError } from '../../../runtime/js/quickjs/errors.ts'
 import { MontyUnavailableError } from '../../../runtime/python/monty/binding.ts'
-import { PyodideUnavailableError } from '../../../runtime/python/types.ts'
+import { PyodideUnavailableError } from '../../../runtime/python/pyodide/errors.ts'
 import type { RunResult } from '../../../runtime/types.ts'
 import { CommandTimeoutError } from '../../errors.ts'
 

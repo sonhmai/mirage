@@ -288,14 +288,22 @@ function jobResult(cmdStr: string, msg: string, code: number): JobHandlerResult 
  * N is not a child of this shell`. Anything else is `not a pid or valid
  * job spec`.
  */
-function resolveSpec(jobTable: JobTable, spec: string): [Job | null, string] {
+/**
+ * The job list a builtin reads: the calling session's, or the shared
+ * empty id when it runs with no session (a bare table in a test).
+ */
+function sessionOf(session: Session | null): string {
+  return session?.sessionId ?? ''
+}
+
+function resolveSpec(jobTable: JobTable, spec: string, sessionId: string): [Job | null, string] {
   if (spec.startsWith('%')) {
     const raw = spec.slice(1)
-    const job = /^[0-9]+$/.test(raw) ? jobTable.get(Number(raw)) : null
+    const job = /^[0-9]+$/.test(raw) ? jobTable.get(Number(raw), sessionId) : null
     return [job, job !== null ? '' : `${spec}: no such job`]
   }
   if (/^[0-9]+$/.test(spec)) {
-    const job = jobTable.get(Number(spec))
+    const job = jobTable.get(Number(spec), sessionId)
     return [job, job !== null ? '' : `pid ${spec} is not a child of this shell`]
   }
   return [null, `\`${spec}': not a pid or valid job spec`]
@@ -304,9 +312,9 @@ function resolveSpec(jobTable: JobTable, spec: string): [Job | null, string] {
 /** Block until the first of several jobs ends, and return it. */
 async function waitFirst(jobTable: JobTable, jobs: Job[]): Promise<Job> {
   for (const job of jobs) {
-    if (job.status !== JobStatus.RUNNING) return await jobTable.wait(job.id)
+    if (job.status !== JobStatus.RUNNING) return await jobTable.wait(job.id, job.sessionId)
   }
-  const races = jobs.map(async (job) => await jobTable.wait(job.id))
+  const races = jobs.map(async (job) => await jobTable.wait(job.id, job.sessionId))
   return await Promise.race(races)
 }
 
@@ -316,7 +324,7 @@ async function adopt(jobTable: JobTable, job: Job, cmdStr: string): Promise<JobH
   const stderr = await job.console.snapshot(Channel.STDERR)
   // Reaped like GNU bash reaps a job waited on by id, so a later bare
   // `wait` does not adopt this console a second time.
-  jobTable.reap(job.id)
+  jobTable.reap(job.id, job.sessionId)
   const io = new IOResult({
     exitCode: job.exitCode,
     stderr: stderr.byteLength > 0 ? stderr : null,
@@ -342,11 +350,12 @@ async function adopt(jobTable: JobTable, job: Job, cmdStr: string): Promise<JobH
 export async function handleWait(
   jobTable: JobTable,
   parts: string[],
-  _session: Session | null = null,
+  session: Session | null = null,
   view: SessionView | null = null,
   signal?: AbortSignal,
 ): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
+  const sid = sessionOf(session)
   let nextJob = false
   let varName: string | null = null
   const specs: string[] = []
@@ -406,7 +415,7 @@ export async function handleWait(
   const errors: string[] = []
   const picked: Job[] = []
   for (const spec of specs) {
-    const [job, refusal] = resolveSpec(jobTable, spec)
+    const [job, refusal] = resolveSpec(jobTable, spec, sid)
     if (job === null) {
       errors.push(`bash: wait: ${refusal}`)
       continue
@@ -416,7 +425,7 @@ export async function handleWait(
   const errText = errors.length > 0 ? errors.join('\n') + '\n' : ''
   const errBytes = errText !== '' ? new TextEncoder().encode(errText) : null
   if (nextJob) {
-    const candidates = specs.length > 0 ? picked : jobTable.listJobs()
+    const candidates = specs.length > 0 ? picked : jobTable.listJobs(sid)
     if (candidates.length === 0) {
       return [
         null,
@@ -440,15 +449,15 @@ export async function handleWait(
     // by job id, because jobs finish concurrently and completion order
     // is not reproducible. Reaped afterwards so a second `wait` does not
     // print the same output twice.
-    await abortable(jobTable.waitAll(), signal)
-    const finished = jobTable.listJobs().sort((a, b) => a.id - b.id)
+    await abortable(jobTable.waitAll(sid), signal)
+    const finished = jobTable.listJobs(sid).sort((a, b) => a.id - b.id)
     const outs: Uint8Array[] = []
     const errs: Uint8Array[] = []
     for (const job of finished) {
       outs.push(await job.console.snapshot(Channel.STDOUT))
       errs.push(await job.console.snapshot(Channel.STDERR))
     }
-    jobTable.popCompleted()
+    jobTable.popCompleted(sid)
     const out = concat(outs)
     const err = concat(errs)
     return [
@@ -469,7 +478,7 @@ export async function handleWait(
   let lastCode = 0
   let lastJob: Job | null = null
   for (const job of picked) {
-    const finished = await abortable(jobTable.wait(job.id), signal)
+    const finished = await abortable(jobTable.wait(job.id, sid), signal)
     const [stdout, io] = await adopt(jobTable, finished, cmdStr)
     if (stdout instanceof Uint8Array && stdout.byteLength > 0) outs.push(stdout)
     if (io.stderr instanceof Uint8Array && io.stderr.byteLength > 0) errs.push(io.stderr)
@@ -501,10 +510,11 @@ export async function handleWait(
 export function handleDisown(
   jobTable: JobTable,
   parts: string[],
-  _session: Session | null = null,
+  session: Session | null = null,
   _view: SessionView | null = null,
 ): JobHandlerResult {
   const cmdStr = parts.join(' ')
+  const sid = sessionOf(session)
   const scan = scanOptions(parts.slice(1), 'arh')
   if (scan.bad !== null) {
     return jobResult(cmdStr, `bash: disown: ${scan.bad}: invalid option\n${DISOWN_USAGE}\n`, 2)
@@ -517,7 +527,7 @@ export function handleDisown(
   const errors: string[] = []
   if (specs.length > 0) {
     for (const spec of specs) {
-      const [job] = resolveSpec(jobTable, spec)
+      const [job] = resolveSpec(jobTable, spec, sid)
       if (job === null) {
         errors.push(`bash: disown: ${spec}: no such job`)
         continue
@@ -525,9 +535,9 @@ export function handleDisown(
       targets.push(job)
     }
   } else if (allJobs || runningOnly) {
-    targets = runningOnly ? jobTable.runningJobs() : jobTable.listJobs()
+    targets = runningOnly ? jobTable.runningJobs(sid) : jobTable.listJobs(sid)
   } else {
-    const jobs = jobTable.listJobs()
+    const jobs = jobTable.listJobs(sid)
     const current = jobs[jobs.length - 1]
     if (current === undefined) {
       return jobResult(cmdStr, 'bash: disown: current: no such job\n', 1)
@@ -535,7 +545,7 @@ export function handleDisown(
     targets = [current]
   }
   if (!keep) {
-    for (const job of targets) jobTable.disown(job.id)
+    for (const job of targets) jobTable.disown(job.id, sid)
   }
   const err = errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : null
   const code = errors.length > 0 ? 1 : 0
@@ -557,14 +567,15 @@ export function handleDisown(
 export async function handleFg(
   jobTable: JobTable,
   parts: string[],
-  _session: Session | null = null,
+  session: Session | null = null,
   _view: SessionView | null = null,
   signal?: AbortSignal,
 ): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
+  const sid = sessionOf(session)
   let jobId: number
   if (parts.length <= 1) {
-    const running = jobTable.runningJobs()
+    const running = jobTable.runningJobs(sid)
     const current = running[running.length - 1]
     if (current === undefined) {
       const err = new TextEncoder().encode('fg: current: no such job\n')
@@ -578,7 +589,7 @@ export async function handleFg(
   } else {
     const raw = (parts[1] ?? '').replace(/^%+/, '')
     jobId = Number(raw)
-    if (!Number.isInteger(jobId) || jobTable.get(jobId) === null) {
+    if (!Number.isInteger(jobId) || jobTable.get(jobId, sid) === null) {
       const err = new TextEncoder().encode(`fg: ${parts[1] ?? ''}: no such job\n`)
       return [
         null,
@@ -587,11 +598,11 @@ export async function handleFg(
       ]
     }
   }
-  const job = await abortable(jobTable.wait(jobId), signal)
+  const job = await abortable(jobTable.wait(jobId, sid), signal)
   const header = new TextEncoder().encode(job.command + '\n')
   const body = await job.console.snapshot(Channel.STDOUT)
   const stderr = await job.console.snapshot(Channel.STDERR)
-  jobTable.reap(jobId)
+  jobTable.reap(jobId, sid)
   const stdout = new Uint8Array(header.byteLength + body.byteLength)
   stdout.set(header, 0)
   stdout.set(body, header.byteLength)
@@ -605,10 +616,11 @@ export async function handleFg(
 export async function handleKill(
   jobTable: JobTable,
   parts: string[],
-  _session: Session | null = null,
+  session: Session | null = null,
   _view: SessionView | null = null,
 ): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
+  const sid = sessionOf(session)
   if (parts.length < 2) {
     const err = new TextEncoder().encode('kill: usage: kill <job_id>\n')
     return [
@@ -627,7 +639,7 @@ export async function handleKill(
       new ExecutionNode({ command: cmdStr, exitCode: 1, stderr: err }),
     ]
   }
-  const killed = await jobTable.kill(jobId)
+  const killed = await jobTable.kill(jobId, sid)
   if (!killed) {
     const err = new TextEncoder().encode(`kill: no such job: ${jobId.toString()}\n`)
     return [
@@ -670,10 +682,11 @@ function jobRow(job: Job, long: boolean): string {
 export function handleJobs(
   jobTable: JobTable,
   parts: string[],
-  _session: Session | null = null,
+  session: Session | null = null,
   _view: SessionView | null = null,
 ): JobHandlerResult {
   const cmdStr = parts.join(' ')
+  const sid = sessionOf(session)
   const flags = new Set<string>()
   const specs: string[] = []
   for (const word of parts.slice(1)) {
@@ -693,12 +706,12 @@ export function handleJobs(
       specs.push(word)
     }
   }
-  let jobs = jobTable.listJobs()
+  let jobs = jobTable.listJobs(sid)
   if (specs.length > 0) {
     const picked: Job[] = []
     for (const spec of specs) {
       const raw = spec.replace(/^%+/, '')
-      const job = /^\d+$/.test(raw) ? jobTable.get(Number(raw)) : null
+      const job = /^\d+$/.test(raw) ? jobTable.get(Number(raw), sid) : null
       if (job === null) {
         const err = new TextEncoder().encode(`bash: jobs: ${spec}: no such job\n`)
         return [
@@ -717,7 +730,7 @@ export function handleJobs(
   const lines = flags.has('p')
     ? jobs.map((j) => j.id.toString())
     : jobs.map((j) => jobRow(j, flags.has('l')))
-  jobTable.popCompleted()
+  jobTable.popCompleted(sid)
   const out =
     lines.length > 0 ? new TextEncoder().encode(`${lines.join('\n')}\n`) : new Uint8Array()
   return [out, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
@@ -726,12 +739,13 @@ export function handleJobs(
 export function handlePs(
   jobTable: JobTable,
   parts: string[],
-  _session: Session | null = null,
+  session: Session | null = null,
   _view: SessionView | null = null,
 ): JobHandlerResult {
   const cmdStr = parts.join(' ')
+  const sid = sessionOf(session)
   const lines: string[] = []
-  for (const job of jobTable.runningJobs()) {
+  for (const job of jobTable.runningJobs(sid)) {
     lines.push(`${job.id.toString()}\t${job.command}`)
   }
   const out =

@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '@struktoai/mirage-core/types'
+import { IndexEntry } from '@struktoai/mirage-core/cache/index/config'
+import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
+import { RedisIndexCacheStore } from '@struktoai/mirage-core/cache/index/redis'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import * as client from './client.ts'
@@ -21,7 +24,7 @@ import { dirStatEntry, keyOf, lookup, probeDir, probeFile } from './lookup.ts'
 import { read } from './read.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
-import { parseEntry } from './tree.ts'
+import { parseEntry, seedIndex } from './tree.ts'
 
 function ps(path: string, prefix = ''): PathSpec {
   const rel = path.replace(/^\/+|\/+$/g, '')
@@ -201,3 +204,191 @@ describe('exists', () => {
     expect(await pathExists(accessor, ps('nope'))).toBe(false)
   })
 })
+
+for (const backend of ['ram', 'redis']) {
+  describe.skipIf(backend === 'redis' && process.env.REDIS_URL === undefined)(
+    `HF snapshot freshness with ${backend}`,
+    () => {
+      beforeEach(() => {
+        vi.restoreAllMocks()
+      })
+
+      function indexForTest(): RAMIndexCacheStore | RedisIndexCacheStore {
+        const url = process.env.REDIS_URL
+        return backend === 'ram'
+          ? new RAMIndexCacheStore()
+          : new RedisIndexCacheStore({
+              ...(url === undefined ? {} : { url }),
+              keyPrefix: `hf-refresh:${crypto.randomUUID()}:`,
+            })
+      }
+
+      for (const changed of ['a.txt', 'd/b.txt', 'd']) {
+        for (const deleted of [true, false]) {
+          it.each(['stat', 'read'])(
+            `%s refreshes ${changed} after invalidation (deleted=${String(deleted)})`,
+            async (reader) => {
+              const accessor = loaded()
+              const index = indexForTest()
+              const rows = [...accessor.tree.values()]
+                .filter((row) => row.path !== changed && !row.path.startsWith(`${changed}/`))
+                .map((row) => ({ path: row.path, type: row.type, oid: row.oid, size: row.size }))
+              if (!deleted) rows.push({ path: changed, type: 'file', oid: 'new-oid', size: 42 })
+              const fetch = vi.spyOn(client, 'hubGetResponse').mockResolvedValue({
+                data: rows,
+                status: 200,
+                headers: {},
+              })
+              const bytes = vi
+                .spyOn(client, 'hubBytes')
+                .mockResolvedValue(new TextEncoder().encode('new bytes'))
+              try {
+                await seedIndex(accessor, index, '/m')
+                await index.setDir('/other', [
+                  ['keep', new IndexEntry({ id: 'keep', name: 'keep', resourceType: 'file' })],
+                ])
+                await index.invalidate()
+                expect((await index.get(`/m/${changed}`)).entry).toBeDefined()
+                const path = ps(changed, '/m')
+                for (let i = 0; i < 2; i++) {
+                  if (deleted) {
+                    await expect(
+                      reader === 'stat' ? stat(accessor, path, index) : read(accessor, path, index),
+                    ).rejects.toMatchObject({ code: 'ENOENT' })
+                  } else {
+                    if (reader === 'read')
+                      expect(new TextDecoder().decode(await read(accessor, path, index))).toBe(
+                        'new bytes',
+                      )
+                    const result = await stat(accessor, path, index)
+                    expect(result.size).toBe(42)
+                    expect(result.fingerprint).toBe('new-oid')
+                  }
+                }
+                if (deleted || reader === 'stat') expect(bytes).not.toHaveBeenCalled()
+                if (changed === 'd')
+                  expect(await lookup(accessor, index, '/m', '/m/d/b.txt')).toEqual({
+                    entry: null,
+                    children: null,
+                  })
+                await lookup(accessor, index, '/m', '/m/missing')
+                expect(fetch).toHaveBeenCalledTimes(1)
+                expect((await index.get('/other/keep')).entry?.id).toBe('keep')
+              } finally {
+                await index.clear()
+                await index.close()
+              }
+            },
+          )
+        }
+      }
+
+      it('refreshes an expired parent while the repository root is fresh', async () => {
+        const accessor = loaded()
+        const index = indexForTest()
+        const fetch = vi
+          .spyOn(client, 'hubGetResponse')
+          .mockResolvedValue({ data: [], status: 200, headers: {} })
+        try {
+          await seedIndex(accessor, index, '')
+          await index.setDir(
+            '/d',
+            [['b.txt', new IndexEntry({ id: 'old', name: 'b.txt', resourceType: 'file' })]],
+            new Date(0),
+          )
+          await expect(stat(accessor, ps('d/b.txt'), index)).rejects.toMatchObject({
+            code: 'ENOENT',
+          })
+          expect(fetch).toHaveBeenCalledTimes(1)
+        } finally {
+          await index.clear()
+          await index.close()
+        }
+      })
+
+      it('keeps the old snapshot on a failed fetch and retries the refresh', async () => {
+        const accessor = loaded()
+        const index = indexForTest()
+        const fetch = vi
+          .spyOn(client, 'hubGetResponse')
+          .mockRejectedValueOnce(new Error('offline'))
+          .mockResolvedValueOnce({ data: [], status: 200, headers: {} })
+        try {
+          await seedIndex(accessor, index, '')
+          await index.invalidate()
+          await expect(stat(accessor, ps('a.txt'), index)).rejects.toThrow('offline')
+          expect((await index.get('/a.txt')).entry?.id).toBe('oid-a')
+          await expect(stat(accessor, ps('a.txt'), index)).rejects.toMatchObject({ code: 'ENOENT' })
+          expect(fetch).toHaveBeenCalledTimes(2)
+          expect(await readdir(accessor, ps(''), index)).toEqual([])
+          expect(fetch).toHaveBeenCalledTimes(2)
+        } finally {
+          await index.clear()
+          await index.close()
+        }
+      })
+
+      it('does not consult an expired listing outside the mount', async () => {
+        const accessor = loaded()
+        const index = indexForTest()
+        const fetch = vi
+          .spyOn(client, 'hubGetResponse')
+          .mockRejectedValue(new Error('unexpected fetch'))
+        try {
+          await seedIndex(accessor, index, '/m')
+          await index.setDir('/', [], new Date(0))
+          expect((await lookup(accessor, index, '/m', '/m')).children).toEqual(['/m/a.txt', '/m/d'])
+          expect(fetch).not.toHaveBeenCalled()
+        } finally {
+          await index.clear()
+          await index.close()
+        }
+      })
+    },
+  )
+}
+
+for (const backend of ['ram', 'redis']) {
+  it.skipIf(backend === 'redis' && process.env.REDIS_URL === undefined)(
+    `parallel snapshot readers share one replacement with ${backend}`,
+    async () => {
+      const url = process.env.REDIS_URL
+      const index =
+        backend === 'ram'
+          ? new RAMIndexCacheStore()
+          : new RedisIndexCacheStore({
+              ...(url === undefined ? {} : { url }),
+              keyPrefix: `parallel-hf:${crypto.randomUUID()}:`,
+            })
+      const accessor = loaded()
+      const fetch = vi.spyOn(client, 'hubGetResponse').mockImplementation(async () => {
+        await Promise.resolve()
+        return {
+          data: [{ path: 'a.txt', type: 'file', oid: 'new', size: 42 }],
+          status: 200,
+          headers: {},
+        }
+      })
+      try {
+        await seedIndex(accessor, index, '/m')
+        await index.invalidate()
+        const keys = Array.from({ length: 8 }, (_, i) => (i % 2 === 0 ? '/m/a.txt' : '/m'))
+        const results = await Promise.all(keys.map((key) => lookup(accessor, index, '/m', key)))
+        expect(results.filter((_, i) => i % 2 === 0).map((row) => row.entry?.id)).toEqual([
+          'new',
+          'new',
+          'new',
+          'new',
+        ])
+        expect(results.filter((_, i) => i % 2 === 1).map((row) => row.children)).toEqual(
+          Array.from({ length: 4 }, () => ['/m/a.txt']),
+        )
+        expect(fetch).toHaveBeenCalledTimes(1)
+      } finally {
+        fetch.mockRestore()
+        await index.clear()
+        await index.close()
+      }
+    },
+  )
+}

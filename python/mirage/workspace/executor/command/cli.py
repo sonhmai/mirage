@@ -39,7 +39,7 @@ from mirage.policy import resolve_limit
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import runtime_for_language
-from mirage.runtime.types import DispatchFn, RunArgs, ScriptSource
+from mirage.runtime.types import CodeExecution, DispatchFn, ScriptSource
 from mirage.types import PathSpec, Producer, word_text
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
@@ -143,8 +143,9 @@ def _select_runtime(
 
 
 async def _script_output(inv: CLIInvocation[Any], script: ScriptSource,
-                         runtime: LanguageRuntime, prog: str) -> CommandOutput:
-    """Render the invocation onto the selected runtime as one RunArgs.
+                         runtime: LanguageRuntime, prog: str,
+                         cwd: PathSpec) -> CommandOutput:
+    """Render the invocation onto the selected runtime as one CodeExecution.
 
     The script tier's whole contract, the one a native binary could
     also honor: the program is named (argv slot 0, so its own messages
@@ -159,6 +160,7 @@ async def _script_output(inv: CLIInvocation[Any], script: ScriptSource,
         script (ScriptSource): the install's embedded program.
         runtime (Runtime): the selected interpreter entry.
         prog (str): the installed head word, the program's own name.
+        cwd (PathSpec): the session's virtual working directory.
     """
     env = dict(inv.env)
     if inv.config is not None:
@@ -167,13 +169,16 @@ async def _script_output(inv: CLIInvocation[Any], script: ScriptSource,
     # A .mjs source needs the engine's module mode, the same bit the
     # js command derives from the operand's extension.
     flags = {"module": True} if script.module else {}
-    result = await runtime.run(
-        RunArgs(code=script.source,
-                args=list(inv.argv),
-                prog=prog,
-                env=env,
-                stdin=stdin,
-                flags=flags))
+    result = await runtime.execute(
+        CodeExecution(language=runtime.language,
+                      code=script.source,
+                      args=list(inv.argv),
+                      prog=prog,
+                      script_cli=True,
+                      cwd=cwd,
+                      env=env,
+                      stdin=stdin,
+                      flags=flags))
     return run_output(result)
 
 
@@ -354,6 +359,10 @@ async def handle_cli(
                         env=env_snapshot(session),
                         doors=doors)
 
+    # asyncio's timeout cancels the runtime task as well as the caller;
+    # TypeScript forwards an explicit deadline and abort signal instead.
+    limit = resolve_limit(prog, command_default=leaf.limit)
+    timeout = limit.timeout_seconds if limit is not None else None
     if leaf.script is not None:
         runtime, refused = _select_runtime(prog, leaf, entries or [])
         if runtime is None:
@@ -364,7 +373,8 @@ async def handle_cli(
             return None, sel_io, ExecutionNode(command=cmd_str,
                                                exit_code=127,
                                                stderr=sel_stderr)
-        body = _script_output(inv, leaf.script, runtime, prog)
+        body = _script_output(inv, leaf.script, runtime, prog,
+                              PathSpec.from_str_path(session.cwd))
     else:
         fn = leaf.fn
         if fn is None:
@@ -378,8 +388,6 @@ async def handle_cli(
     # streams, exactly like mount dispatch: without the wrap a blocking
     # leaf hangs forever and an unbounded-output leaf ignores its own
     # limits.
-    limit = resolve_limit(prog, command_default=leaf.limit)
-    timeout = limit.timeout_seconds if limit is not None else None
     try:
         out = await run_with_timeout(body, timeout, prog)
     except UsageError as exc:

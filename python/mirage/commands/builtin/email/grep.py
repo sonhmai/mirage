@@ -21,7 +21,8 @@ from mirage.commands.builtin.email.io import resolve_glob
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_pattern import compile_pattern, pattern_arg
-from mirage.commands.builtin.grep_pushdown import pushdown_operand
+from mirage.commands.builtin.grep_pushdown import (pushdown_operand,
+                                                   text_search_results)
 from mirage.commands.builtin.grep_scan import grep_lines
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
@@ -80,17 +81,20 @@ async def grep(accessor: EmailAccessor, paths: list[PathSpec],
             and (fl.as_bool("r") or fl.as_bool("R"))):
         match = detect_scope(operand)
         if match.kind in NATIVE_KINDS:
-            return await _grep_server_side(accessor,
-                                           match.slots["folder"],
-                                           pattern,
-                                           operand,
-                                           i=fl.as_bool("i"),
-                                           n=fl.as_bool("n"),
-                                           args_l=fl.as_bool("args_l"),
-                                           w=fl.as_bool("w"),
-                                           F=fl.as_bool("F"),
-                                           o=fl.as_bool("o"),
-                                           max_count=fl.as_int("m"))
+            result = await _grep_server_side(accessor,
+                                             match.slots["folder"],
+                                             pattern,
+                                             operand,
+                                             i=fl.as_bool("i"),
+                                             n=fl.as_bool("n"),
+                                             args_l=fl.as_bool("args_l"),
+                                             w=fl.as_bool("w"),
+                                             F=fl.as_bool("F"),
+                                             o=fl.as_bool("o"),
+                                             max_count=fl.as_int("m"))
+
+            if result is not None:
+                return result
 
     resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
     return await generic_grep(
@@ -117,7 +121,7 @@ async def _grep_server_side(
     F: bool = False,
     o: bool = False,
     max_count: int | None = None,
-) -> tuple[ByteSource | None, IOResult]:
+) -> tuple[ByteSource | None, IOResult] | None:
     file_prefix = mount_prefix_of(operand.virtual, operand.resource_path)
     pairs = await search_and_format(
         accessor,
@@ -126,6 +130,8 @@ async def _grep_server_side(
         file_prefix,
         max_results=accessor.config.max_messages,
     )
+    if not text_search_results([text for _, text in pairs]):
+        return None
     if not pairs:
         return b"", IOResult(exit_code=1)
 

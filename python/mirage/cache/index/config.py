@@ -54,6 +54,12 @@ class ListResult(BaseModel):
     status: LookupStatus | None = None
 
 
+class IndexDirectory(BaseModel):
+    entries: list[str]
+    expires_at: float
+    generation: str
+
+
 class IndexConfig(BaseModel):
     type: IndexType = IndexType.RAM
     ttl: float = 600

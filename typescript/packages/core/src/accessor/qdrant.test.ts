@@ -14,11 +14,36 @@
 
 import { describe, expect, it } from 'vitest'
 
+import type { QdrantPoint } from '../core/qdrant/client.ts'
+import { groupName } from '../core/qdrant/naming.ts'
 import { resolveQdrantConfig } from '../resource/qdrant/config.ts'
+import { NAME_MAX_BYTES, byteLength } from '../utils/sanitize.ts'
 import { QdrantAccessor } from './qdrant.ts'
 
 interface ScrollOpts {
   filter?: unknown
+}
+
+interface Condition {
+  key?: string
+  match?: { value: unknown }
+  range?: { gte: number; lte: number }
+  must?: Condition[]
+  should?: Condition[]
+}
+
+/** The server's reading of a filter: typed matches, numeric ranges. */
+function holds(point: { payload: Record<string, unknown> }, condition: unknown): boolean {
+  if (condition === undefined) return true
+  const c = condition as Condition
+  if (c.must !== undefined && !c.must.every((child) => holds(point, child))) return false
+  if (c.should !== undefined && !c.should.some((child) => holds(point, child))) return false
+  if (c.key === undefined) return true
+  const value = point.payload[c.key]
+  if (c.range !== undefined) {
+    return typeof value === 'number' && c.range.gte <= value && value <= c.range.lte
+  }
+  return c.match !== undefined && value === c.match.value
 }
 
 function indexRequiredError(): Error {
@@ -41,15 +66,7 @@ function fakeClient(counts: { filtered: number; indexed: number }) {
         counts.filtered += 1
         throw indexRequiredError()
       }
-      const filter = opts.filter as
-        | { must?: { key: string; match: { value: unknown } }[] }
-        | undefined
-      const must = filter?.must
-      const pts = must
-        ? ALL_POINTS.filter((p) =>
-            must.every((c) => p.payload[c.key as keyof typeof p.payload] === String(c.match.value)),
-          )
-        : ALL_POINTS
+      const pts = ALL_POINTS.filter((p) => holds(p, opts.filter))
       return Promise.resolve({ points: pts, next_page_offset: null })
     },
     createPayloadIndex(_collection: string, _opts: object) {
@@ -120,8 +137,7 @@ function widePoints(): { id: number; payload: { code: string; name: string } }[]
   return points
 }
 
-function pagingClient(state: { pages: number }) {
-  const points = widePoints()
+function pagingClient(state: { pages: number }, points: QdrantPoint[] = widePoints()) {
   return {
     scroll(_collection: string, opts: { limit: number; offset: number | null }) {
       state.pages += 1
@@ -162,5 +178,106 @@ describe('QdrantAccessor prefix scroll', () => {
 
     expect(rows.map((r) => r.id)).toEqual([1, 2, 3, 4, 5])
     expect(state.pages).toBe(1)
+  })
+})
+
+function sharedBasename(secondAt: number): QdrantPoint[] {
+  const points: QdrantPoint[] = []
+  for (let i = 1; i <= WIDE; i += 1) {
+    const source = i === secondAt ? 's3://two/report.pdf' : 's3://one/report.pdf'
+    points.push({ id: i, payload: { source } })
+  }
+  return points
+}
+
+describe('QdrantAccessor group resolution', () => {
+  it('scans past the row cap for a second source behind one basename', async () => {
+    // The first source alone fills the cap many times over, so a scroll bounded
+    // by matching points would never see the second one.
+    const state = { pages: 0 }
+    const acc = wideAccessor(pagingClient(state, sharedBasename(WIDE)))
+
+    const sources = await acc.resolveGroup('c', 'source', {}, 'report.pdf', true)
+
+    expect(sources).toEqual(['s3://one/report.pdf', 's3://two/report.pdf'])
+    expect(state.pages).toBeGreaterThan(1)
+  })
+
+  it('stops at the second distinct source', async () => {
+    const state = { pages: 0 }
+    const acc = wideAccessor(pagingClient(state, sharedBasename(2)))
+
+    const sources = await acc.resolveGroup('c', 'source', {}, 'report.pdf', true)
+
+    expect(sources).toEqual(['s3://one/report.pdf', 's3://two/report.pdf'])
+    expect(state.pages).toBe(1)
+  })
+
+  it('resolves a basename cut to NAME_MAX to the one leaf it stands for', async () => {
+    // Two leaves that agree past NAME_MAX render as two directories that
+    // fit the filesystem; the scan compares each candidate through the same
+    // bounded rendering, so the cut name still opens exactly its own leaf.
+    const state = { pages: 0 }
+    const sourceA = `s3://docs/${'r'.repeat(300)}a.pdf`
+    const sourceB = `s3://docs/${'r'.repeat(300)}b.pdf`
+    const acc = wideAccessor(
+      pagingClient(state, [
+        { id: 1, payload: { source: sourceA } },
+        { id: 2, payload: { source: sourceB } },
+      ]),
+    )
+    const name = groupName(sourceA, true)
+    expect(byteLength(name)).toBeLessThanOrEqual(NAME_MAX_BYTES)
+
+    await expect(acc.resolveGroup('c', 'source', {}, name, true)).resolves.toEqual([sourceA])
+  })
+
+  it('answers nothing for a basename no source renders as', async () => {
+    const state = { pages: 0 }
+    const acc = wideAccessor(pagingClient(state, sharedBasename(WIDE)))
+
+    await expect(acc.resolveGroup('c', 'source', {}, 'notes.pdf', true)).resolves.toEqual([])
+  })
+})
+
+interface QueryOpts {
+  query: unknown
+  limit: number
+  with_payload: boolean
+}
+
+function queryClient(seen: QueryOpts[]) {
+  return {
+    query(_collection: string, opts: QueryOpts) {
+      seen.push(opts)
+      return Promise.resolve({ points: [{ id: 1, payload: { name: 'alpha' }, score: 0.9 }] })
+    },
+  }
+}
+
+describe('QdrantAccessor search', () => {
+  it('sends the caller-supplied vector when embed is configured', async () => {
+    const seen: QueryOpts[] = []
+    const embed = (text: string): Promise<number[]> => Promise.resolve([text.length, 0.5])
+    const acc = new QdrantAccessor(
+      resolveQdrantConfig({ url: 'http://x', collection: 'c', idField: 'id', embed }),
+    )
+    ;(acc as unknown as { client: unknown }).client = queryClient(seen)
+    const rows = await acc.searchRows('c', 'dog', 3)
+    expect(seen).toEqual([{ query: [3, 0.5], limit: 3, with_payload: true }])
+    expect(rows).toEqual([{ id: 1, name: 'alpha', _score: 0.9 }])
+  })
+
+  it('asks the server to embed the text otherwise', async () => {
+    const seen: QueryOpts[] = []
+    const acc = accessorWith(queryClient(seen))
+    await acc.searchRows('c', 'dog', 3)
+    expect(seen).toEqual([
+      {
+        query: { text: 'dog', model: 'sentence-transformers/all-MiniLM-L6-v2' },
+        limit: 3,
+        with_payload: true,
+      },
+    ])
   })
 })

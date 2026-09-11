@@ -103,6 +103,14 @@ describe('qdrant scope', () => {
     expect(filtersOf(pinned, match)).toEqual({ label: 'cat', kind: 'big' })
   })
 
+  it('decodes escaped group segments back to payload values', () => {
+    const pinned = cfg({ collection: 'animals', groupBy: ['label'] })
+    expect(filtersOf(pinned, detect(pinned)(ps('/a∕b')))).toEqual({ label: 'a/b' })
+    expect(filtersOf(pinned, detect(pinned)(ps('/a⁄∕b')))).toEqual({ label: 'a∕b' })
+    expect(filtersOf(pinned, detect(pinned)(ps('/⁄')))).toEqual({ label: '' })
+    expect(filtersOf(pinned, detect(pinned)(ps('/⁄.env')))).toEqual({ label: '.env' })
+  })
+
   it('detectFor caches per accessor', () => {
     const accessor = new QdrantAccessor(config)
     expect(detectFor(accessor)).toBe(detectFor(accessor))

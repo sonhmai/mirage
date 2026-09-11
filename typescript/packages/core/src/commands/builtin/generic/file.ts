@@ -73,7 +73,7 @@ export async function fileGeneric(
         continue
       }
     }
-    const s = await operandStat(p, stat, opts.statPath, opts.ns?.mounts)
+    const s = await operandStat(p, stat, opts.statPath, opts.ns?.mounts, opts.ns?.links)
     if (s.type === FileType.DIRECTORY) {
       lines.push(formatFileResult(p.rawPath, FileType.DIRECTORY, brief, mime))
       continue

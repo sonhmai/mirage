@@ -191,7 +191,12 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/minimal"
           node --input-type=module - <<'JS'
+          import assert from 'node:assert/strict'
+          import { QuickJsRuntime } from '@struktoai/mirage-core/runtime/js/quickjs'
+          import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide'
           import { Workspace, RAMResource, MountMode } from '@struktoai/mirage-node'
+          assert.equal(new QuickJsRuntime().name, 'quickjs')
+          assert.equal(new PyodideRuntime().name, 'pyodide')
           const dec = new TextDecoder()
           const ws = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.WRITE })
           let out = await ws.execute('echo hello | wc -c')

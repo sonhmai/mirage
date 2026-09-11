@@ -25,6 +25,10 @@ export default tseslint.config(
     languageOptions: { globals: { TextEncoder: 'readonly', TextDecoder: 'readonly' } },
   },
   {
+    files: ['fixtures/runtime/fs/js/*.js'],
+    languageOptions: { globals: { console: 'readonly', std: 'readonly', os: 'readonly' } },
+  },
+  {
     // The adapters package is loaded once per battery run whatever the target
     // is, and a kit fake's module reaches its generated Prisma client at
     // import time. A static import here therefore makes `--target nextcloud`

@@ -131,13 +131,13 @@ def test_a_missing_namespace_lists_the_same_names():
 
 
 def test_recursive_interleaves_each_operands_subtree():
-    out, _, _ = run(["/a", "/b"], flags={"R": True})
+    out, _, _ = run(["/a", "/b"], flags={"recursive": True})
     assert out == ("/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n"
                    "/b:\ntwo\n\n/b/two:\ny.txt\n")
 
 
 def test_list_dir_prints_bare_rows_with_no_headers():
-    assert run(["/a", "/b"], flags={"d": True})[0] == "/a\n/b\n"
+    assert run(["/a", "/b"], flags={"directory": True})[0] == "/a\n/b\n"
 
 
 def test_a_lone_operand_still_reaches_the_generic_unheaded():
@@ -153,7 +153,7 @@ def test_a_nested_mount_root_keeps_the_name_its_parent_lists_it_by():
     # then descends into "/a" + "/" -- which is /a again, unbounded.
     nested = frozenset({"/a/one"})
     assert run(["/a", "/b"], roots=nested)[0] == run(["/a", "/b"])[0]
-    out, _, _ = run(["/a", "/b"], flags={"R": True}, roots=nested)
+    out, _, _ = run(["/a", "/b"], flags={"recursive": True}, roots=nested)
     assert out == ("/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n"
                    "/b:\ntwo\n\n/b/two:\ny.txt\n")
 
@@ -173,7 +173,10 @@ def test_a_full_namespace_does_not_stop_the_relay_at_a_mount_root():
         is_root=lambda p: p.rstrip("/") in nested,
         root_of=lambda p: "/"),
                        child_mounts=lambda p: ["one"] if p == "/a" else [])
-    out, io, _ = run(["/a", "/b"], flags={"R": True}, ns=ns, roots=nested)
+    out, io, _ = run(["/a", "/b"],
+                     flags={"recursive": True},
+                     ns=ns,
+                     roots=nested)
     assert io.exit_code == 0
     assert out == ("/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n"
                    "/b:\ntwo\n\n/b/two:\ny.txt\n")

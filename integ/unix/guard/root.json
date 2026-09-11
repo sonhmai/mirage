@@ -91,7 +91,7 @@
         "ram",
         "disk"
       ],
-      "command": "ln -s /data/guardroot/k.txt /data",
+      "command": "ln -sT /data/guardroot/k.txt /data",
       "expect": {
         "exit": 1,
         "stdout": "",

@@ -395,6 +395,8 @@ export interface TSNodeLike {
   parent?: TSNodeLike | null
   /** The token after this node in its parent, as web-tree-sitter spells it. */
   nextSibling?: TSNodeLike | null
+  /** The token before this node in its parent, as web-tree-sitter spells it. */
+  previousSibling?: TSNodeLike | null
   isNamed?: boolean
   isMissing?: boolean
   startIndex?: number

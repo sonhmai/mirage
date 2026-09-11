@@ -177,3 +177,14 @@ async def test_skip_line_leaves_a_payload_alone():
                                        Argv0Rules(), True)
     assert prepared is not None
     assert prepared.code == "print(1)"
+
+
+@pytest.mark.asyncio
+async def test_run_source_passes_virtual_cwd():
+    runtime = EchoRuntime()
+    await run_code("python3",
+                   Source(code="pass"), {}, {},
+                   runtime,
+                   None,
+                   cwd=spec("/data"))
+    assert runtime.seen[0].cwd == spec("/data")

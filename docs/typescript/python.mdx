@@ -62,7 +62,7 @@ If `pyodide` isn't installed, `python3` returns `exit=127` with a helpful stderr
 
 ## Limitations
 
-Pyodide runs CPython in WebAssembly on the same JS thread. That creates these divergences from Python Mirage's subprocess model:
+Pyodide runs CPython in WebAssembly, using a worker when workers and `SharedArrayBuffer` are available. That creates these divergences from Python Mirage's subprocess model:
 
 ### 1. Shared module cache (`sys.modules`)
 
@@ -78,7 +78,7 @@ This is a perf win (`import numpy` is paid once) with no correctness impact, sin
 
 ### 2. No true CPU parallelism within a workspace
 
-Pyodide is single-interpreter-per-JS-thread, so concurrent `python3` calls in one workspace serialize via a JS queue.
+Mirage keeps one Pyodide interpreter per workspace, so concurrent `python3` calls in one workspace serialize via a JS queue.
 
 ```ts
 // Runs in ~2s total, not ~1s:
@@ -135,22 +135,8 @@ const png = await ws.fs.readFile('/ram/icon.png')
 // PNG bytes, ws.fs sees what Python wrote
 ```
 
-### How it works
-
-- **Its own filesystem**: Mirage registers an Emscripten filesystem at each mount prefix, below the interpreter's syscall boundary. Every spelling of an operation arrives as the same callback, so nothing inside Python is patched.
-- **Collected before the run**: each prefix is walked into the filesystem's node table before the script starts, so reads are sync and cost no round trip.
-- **Replayed after it**: writes are recorded in guest order and applied to the mounts once the script returns. A handle that only extended a file replays as an `append`.
-- **Every spelling**: `open()`, `os.open`, `pathlib`, `shutil`, `numpy.save`, `PIL.Image.save`, `pandas.to_csv`, and C extensions calling `fopen` (sqlite3, h5py) all reach the mount.
-
-### Runtime requirements
-
-None. No V8 flag, no [JSPI](https://github.com/WebAssembly/js-promise-integration), no stack switching: a filesystem callback never suspends, because the reads it serves were collected before the run and the writes it takes are replayed after.
-
-### What doesn't work
-
-- Live external edits: a change made to the resource from outside mid-run is not seen until the next run re-collects the prefix.
-- Concurrent writers: last write wins; no conflict detection.
-- Directory links are not walked into: `os.symlink` and `os.readlink` are served, and a link the shell made is collected as a link rather than as a copy of its target, so nothing under a directory link is in the tree the run reads.
+See [Pyodide workspace file access](/typescript/runtime/python#workspace-file-access)
+for worker requirements, caching, write behavior, and mount limitations.
 
 ## What you cannot do
 

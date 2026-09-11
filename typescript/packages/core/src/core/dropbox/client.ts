@@ -23,6 +23,17 @@ import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
 
+// The Dropbox-API-Arg header carries JSON, and a header is a ByteString:
+// a path with a character past U+00FF makes fetch refuse the request.
+// Dropbox reads JSON escapes there, so every non-ASCII character goes as
+// \uXXXX, which is what python's json.dumps sends by default.
+function headerJson(arg: Record<string, string | boolean>): string {
+  return JSON.stringify(arg).replace(
+    /[\u007f-\uffff]/g,
+    (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  )
+}
+
 export interface DropboxConfig {
   clientId: string
   clientSecret?: string
@@ -144,7 +155,7 @@ export async function dropboxUpload(
       ),
     headers: {
       ...headers,
-      'Dropbox-API-Arg': JSON.stringify({ path, mode: 'overwrite', mute: true }),
+      'Dropbox-API-Arg': headerJson({ path, mode: 'overwrite', mute: true }),
       'Content-Type': 'application/octet-stream',
     },
     body: data as unknown as BodyInit,
@@ -161,7 +172,7 @@ export async function dropboxDownload(
   const data = await apiRequest('POST', `${tm.contentBase}/files/download`, {
     errorOf: (r, text) =>
       new DropboxApiError(`Dropbox download ${path} → ${String(r.status)} ${text}`, r.status),
-    headers: { ...headers, 'Dropbox-API-Arg': JSON.stringify({ path }) },
+    headers: { ...headers, 'Dropbox-API-Arg': headerJson({ path }) },
     read: 'bytes',
     window,
   })
@@ -176,7 +187,7 @@ export async function* dropboxDownloadStream(
   const url = `${tm.contentBase}/files/download`
   const r = await fetch(url, {
     method: 'POST',
-    headers: { ...headers, 'Dropbox-API-Arg': JSON.stringify({ path }) },
+    headers: { ...headers, 'Dropbox-API-Arg': headerJson({ path }) },
   })
   if (!r.ok) {
     const text = await r.text().catch(() => '')

@@ -123,6 +123,59 @@ def test_scoped_shell_ln_onto_hidden_turf_is_refused():
     assert not ws.namespace.is_link("/b/lk")
 
 
+def test_scoped_shell_ln_does_not_follow_a_hidden_link_into_its_directory():
+    # A hidden link to a visible directory is not a directory the session
+    # can link into: the door checks the typed path before it follows,
+    # and ln's own directory probe has to agree, or the link lands in
+    # the directory the hidden link points at.
+    ws = _two_mounts()
+
+    async def run():
+        for line in ("mkdir -p /a/d", "ln -s /a/d /a/hl"):
+            assert (await ws.execute(line)).exit_code == 0
+        ws.create_session("agent", profile={"paths": {"hide": ["/a/hl"]}})
+        return await ws.execute("ln -s /a/x.txt /a/hl", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code == 1
+    assert io.stderr == (
+        b"ln: failed to create symbolic link '/a/hl': Permission denied\n")
+    assert not ws.namespace.is_link("/a/d/x.txt")
+
+
+def test_scoped_shell_hard_ln_of_a_hidden_link_has_nothing_to_copy():
+    # A hard link of a link copies the link, and -L copies its target's
+    # bytes; a hidden link has neither to give.
+    ws = _two_mounts()
+
+    async def run():
+        assert (await ws.execute("ln -s /a/x.txt /a/hl")).exit_code == 0
+        ws.create_session("agent", profile={"paths": {"hide": ["/a/hl"]}})
+        return [
+            await ws.execute(line, session_id="agent")
+            for line in ("ln /a/hl /a/copy", "ln -L /a/hl /a/copy2")
+        ]
+
+    for io in asyncio.run(run()):
+        assert io.exit_code == 1
+        assert io.stderr == (
+            b"ln: failed to access '/a/hl': No such file or directory\n")
+    assert not ws.namespace.is_link("/a/copy")
+
+
+def test_scoped_shell_ln_onto_a_hidden_mount_root_does_not_say_it_exists():
+    ws = _two_mounts()
+    ws.create_session("agent", profile={"paths": {"hide": ["/b"]}})
+
+    async def run():
+        return await ws.execute("ln -sT /a/x.txt /b", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code == 1
+    assert io.stderr == (
+        b"ln: failed to create symbolic link '/b': Permission denied\n")
+
+
 def test_symlink_and_readlink_answer_on_the_ops_facade():
     # readlink is the read twin: guests and CLIs ask through the same
     # door instead of a bespoke channel.

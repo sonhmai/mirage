@@ -14,6 +14,7 @@
 
 import type { JsonValue } from '../../kit/typescript/index.ts'
 import type { GwsState } from '../store/state.ts'
+import type { DocBody, DocTab } from '../store/types.ts'
 import type { JsonObj } from '../wire/json.ts'
 
 // The flat text string is authoritative; the Document body JSON is rebuilt
@@ -54,14 +55,99 @@ export function buildDocBody(text: string): { content: JsonValue[] } {
   return { content }
 }
 
-export function fmtDocument(st: GwsState, id: string): JsonObj {
-  const doc = st.docs.get(id) as { title: string; text: string }
+// A fresh document's only tab. Google names it "Tab 1" and mints an opaque
+// id; the fake's is positional so truth files stay stable across runs.
+export function initialDocTab(text = ''): DocTab {
+  return { tabId: 't.0', title: 'Tab 1', text, childTabs: [] }
+}
+
+// Pre-order, which is the order the API reports tabs in and therefore the
+// order `replaceAllText` visits them in when no tabsCriteria narrows it.
+export function allDocTabs(doc: DocBody): DocTab[] {
+  const out: DocTab[] = []
+  const walk = (tabs: DocTab[]): void => {
+    for (const tab of tabs) {
+      out.push(tab)
+      walk(tab.childTabs)
+    }
+  }
+  walk(doc.tabs)
+  return out
+}
+
+// The tab a request with no tabId lands on, which the API documents as the
+// first tab. A document always has one, so a caller never has to branch.
+export function firstTabOf(doc: DocBody): DocTab {
+  const first = doc.tabs[0]
+  if (first === undefined) throw new Error('a document always has one tab')
+  return first
+}
+
+export function findDocTab(doc: DocBody, tabId: string): DocTab | undefined {
+  return allDocTabs(doc).find((t) => t.tabId === tabId)
+}
+
+// Every tab's text, in reporting order. This is what an export or a
+// fullText search sees, because both are about the document rather than
+// about one of its tabs.
+export function docPlainText(doc: DocBody): string {
+  return allDocTabs(doc)
+    .map((t) => t.text)
+    .join('\n')
+}
+
+export function copyDocTabs(tabs: DocTab[]): DocTab[] {
+  return tabs.map((t) => ({ ...t, childTabs: copyDocTabs(t.childTabs) }))
+}
+
+function fmtTab(tab: DocTab, index: number, parentTabId: string | null, nesting: number): JsonObj {
+  const tabProperties: JsonObj = { tabId: tab.tabId, title: tab.title, index }
+  // Both are ABSENT on a root tab, probed against the live API on
+  // 2026-09-10: a real root tab answers with exactly
+  // {index, tabId, title}. `nestingLevel` is documented output-only and
+  // Google does not send it at depth 0 even though it sends `index: 0`,
+  // so emitting a 0 here would invent a field a caller could come to
+  // depend on and then find missing in production, which is the same
+  // trap includeTabsContent itself set.
+  if (parentTabId !== null) {
+    tabProperties.parentTabId = parentTabId
+    tabProperties.nestingLevel = nesting
+  }
+  const out: JsonObj = { tabProperties, documentTab: { body: buildDocBody(tab.text) } }
+  if (tab.childTabs.length > 0) {
+    out.childTabs = tab.childTabs.map((child, i) => fmtTab(child, i, tab.tabId, nesting + 1))
+  }
+  return out
+}
+
+/**
+ * The documents.get response, in one of its two exclusive shapes.
+ *
+ * `includeTabsContent` is not a verbosity knob, it is a shape switch: with
+ * it the content lives under `tabs[]` and the singleton fields are left
+ * empty, and without it the singleton fields carry the FIRST tab while
+ * `tabs` stays empty. Filling both would be the one thing a fake must not
+ * do here, because it would let a caller that still reads `.body` pass
+ * against a multi-tab document that the real API answers with an empty
+ * `.body`.
+ */
+export function fmtDocument(st: GwsState, id: string, includeTabsContent: boolean): JsonObj {
+  const doc = st.docs.get(id) as DocBody
   const file = st.files.get(id)
+  const revisionId = `rev-${String(file?.revisions.length ?? 0)}`
+  if (includeTabsContent) {
+    return {
+      documentId: id,
+      title: doc.title,
+      tabs: doc.tabs.map((tab, i) => fmtTab(tab, i, null, 0)),
+      revisionId,
+    }
+  }
   return {
     documentId: id,
     title: doc.title,
-    body: buildDocBody(doc.text),
-    revisionId: `rev-${String(file?.revisions.length ?? 0)}`,
+    body: buildDocBody(firstTabOf(doc).text),
+    revisionId,
   }
 }
 

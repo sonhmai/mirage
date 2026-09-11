@@ -24,9 +24,20 @@ import { compactJsonBytes } from '../render/json.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
+const TABS_CONTENT_PARAM = 'true'
+
+/**
+ * Fetch full document JSON, every tab included.
+ *
+ * `documents.get` fills the singleton fields from the first tab and leaves
+ * `tabs` empty unless asked otherwise, so without `includeTabsContent` a
+ * multi-tab document renders as tab 1 and the rest are absent rather than
+ * truncated. Asking for it moves the content under `tabs[]` and leaves
+ * `body` empty, which is the shape the resource prompt documents.
+ */
 export async function readDoc(tm: TokenManager, docId: string): Promise<Uint8Array> {
   const url = `${docsBase(tm)}/documents/${docId}`
-  const data = await googleGet(tm, url)
+  const data = await googleGet(tm, url, { includeTabsContent: TABS_CONTENT_PARAM })
   return compactJsonBytes(data)
 }
 

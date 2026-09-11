@@ -190,7 +190,7 @@ class MirageFS:
         self.flush(path, fh)
 
     def open(self, path: str, flags: int) -> int:
-        return self._call(self.core.open, path)
+        return self._call(self.core.open, path, flags)
 
     def release(self, path: str, fh: int) -> int:
         self._call(self.core.release, fh)

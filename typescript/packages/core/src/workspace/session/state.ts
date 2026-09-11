@@ -689,20 +689,11 @@ async function setVar(
       throw err
     }
   }
-  const rendered =
-    typeof shaped === 'string'
-      ? shaped
-      : Array.isArray(shaped)
-        ? arrayValues(shaped).join(' ')
-        : Object.keys(shaped)
-            .sort(compareCodePoints)
-            .map((k) => shaped[k])
-            .join(' ')
   await preSessionGate(policies, {
     plane: 'env',
     verb: 'set',
     key: name,
-    value: rendered,
+    value: gateRendering(shaped),
     sessionId: session.sessionId,
   })
   if (name === RANDOM && session.randomSeed !== RANDOM_UNSET && typeof shaped === 'string') {
@@ -906,5 +897,59 @@ export function sessionView(session: Session, policies: Policies | null = null):
     mark: (name, attr, on) => markVar(session, policies, name, attr, on),
     isReadonly: (name) => envIsReadonly(session, name),
     profile: () => session.profile,
+  }
+}
+
+// The names the shell maintains itself (`seedVar`'s second caller): a `cd`
+// writes the first two and `[[ =~ ]]` the third, ungated, because they are
+// the shell's to keep current rather than the session's to admit. Mirrors
+// Python `SHELL_BOOKKEEPING`.
+export const SHELL_BOOKKEEPING: ReadonlySet<string> = new Set(['PWD', 'OLDPWD', 'BASH_REMATCH'])
+
+/**
+ * The value a `preSession` hook is shown for one variable: a scalar as
+ * itself, an indexed array as its present elements joined by spaces, an
+ * associative one in sorted-key order, and null for a variable that is
+ * declared but unset. One rendering, so a rule reads the same text whether
+ * the write came from a typed line or a restore. Mirrors Python
+ * `gate_rendering`.
+ */
+export function gateRendering(value: ShellValue | null): string | null {
+  if (value === null) return null
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return arrayValues(value).join(' ')
+  return Object.keys(value)
+    .sort(compareCodePoints)
+    .map((k) => value[k])
+    .join(' ')
+}
+
+/**
+ * Vet a variable table a snapshot restores through the session gate.
+ *
+ * A snapshot is the one env input the deployment did not author, so the
+ * `preSession` rule that refuses a name on a typed line has to see the
+ * restore too. Every restored variable fires the gate as a `set` of its
+ * rendered value before any of them lands, and a refusal aborts the load
+ * with the `PolicyDenied` a live `export` of that name reports, rather
+ * than dropping the one variable: a partial restore is a workspace whose
+ * state matches no snapshot. The shell's own bookkeeping
+ * (`SHELL_BOOKKEEPING`) is exempt here as it is live. Null policies gate
+ * nothing. Mirrors Python `gate_restored_vars`.
+ */
+export async function gateRestoredVars(
+  policies: Policies | null,
+  sessionId: string,
+  table: Record<string, ShellVar>,
+): Promise<void> {
+  for (const [name, variable] of Object.entries(table)) {
+    if (SHELL_BOOKKEEPING.has(name)) continue
+    await preSessionGate(policies, {
+      plane: 'env',
+      verb: 'set',
+      key: name,
+      value: gateRendering(variable.value),
+      sessionId,
+    })
   }
 }

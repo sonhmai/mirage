@@ -23,6 +23,12 @@ from mirage.utils.bre import bre_to_python
 # untranslated pattern passed all of these to Python's engine and got
 # the opposite answer on most of them, which is why the bug survived.
 CASES = [
+    ('[]]', 'x]y', 'xyz'),
+    ('[^]]', 'x', ']'),
+    ('[]a.]', '.', 'x'),
+    ('[]a.]', 'a', 'x'),
+    ('[]a.]', ']', 'x'),
+    ('[^]a.]', 'x', ']a.'),
     ("a+b", "a+b", "aab"),
     (r"a\+b", "aab", "a+b"),
     ("a?b", "a?b", "ab"),

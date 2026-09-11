@@ -29,6 +29,18 @@ def _ws():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["stat -c %F", "stat -L -c %F", "file -b"])
+@pytest.mark.parametrize("path", ["/data/virtual", "/data/virtual/deep"])
+async def test_report_link_only_namespace_directory(command, path):
+    ws = _ws()
+    await ws.namespace.symlink("/data/virtual/deep/link", "/data/target", 0)
+    result = await ws.execute(f"{command} {path}")
+    assert result.exit_code == 0
+    assert result.stdout.decode() == "directory\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_ln_readlink_verbatim():
     ws = _ws()
     await ws.execute("echo hi > /data/a.txt")
@@ -1369,3 +1381,242 @@ async def test_mv_of_a_link_passes_the_admission_gate():
     assert r.stderr.decode() == ("mv: cannot move '/data/lk' to "
                                  "'/data/lk2': Permission denied\n")
     assert (await ws.execute("readlink /data/lk")).stdout == b"/data/a.txt\n"
+
+
+# ── ln: GNU operand grammar, backups, and the hard-link tier ──────
+
+
+async def _seed_ln(ws) -> None:
+    await ws.execute("mkdir -p /data/d /data/e")
+    await ws.execute("echo hi > /data/a.txt; echo yo > /data/b.txt")
+
+
+@pytest.mark.asyncio
+async def test_ln_s_links_into_a_directory_destination():
+    ws = _ws()
+    await _seed_ln(ws)
+    r = await ws.execute("ln -sv /data/a.txt /data/d")
+    assert r.exit_code == 0
+    assert r.stdout == b"'/data/d/a.txt' -> '/data/a.txt'\n"
+    assert (await ws.execute("readlink /data/d/a.txt")).stdout == \
+        b"/data/a.txt\n"
+    r = await ws.execute("ln -sr /data/b.txt /data/d/")
+    assert r.exit_code == 0
+    assert (await ws.execute("readlink /data/d/b.txt")).stdout == \
+        b"../b.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_ln_s_target_directory_flag_links_every_operand():
+    ws = _ws()
+    await _seed_ln(ws)
+    r = await ws.execute("ln -s -t /data/d /data/a.txt /data/b.txt")
+    assert r.exit_code == 0
+    assert (await ws.execute("readlink /data/d/a.txt")).stdout == \
+        b"/data/a.txt\n"
+    assert (await ws.execute("readlink /data/d/b.txt")).stdout == \
+        b"/data/b.txt\n"
+    r = await ws.execute("ln -s /data/a.txt /data/b.txt /data/e")
+    assert r.exit_code == 0
+    assert (await ws.execute("readlink /data/e/b.txt")).stdout == \
+        b"/data/b.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_ln_s_single_operand_links_into_the_cwd():
+    ws = _ws()
+    await _seed_ln(ws)
+    r = await ws.execute("cd /data/d && ln -s ../a.txt && readlink a.txt")
+    assert r.exit_code == 0
+    assert r.stdout == b"../a.txt\n"
+    r = await ws.execute("cd /data/d && ln -s ../a.txt")
+    assert r.exit_code == 1
+    assert (r.stderr or b"") == \
+        b"ln: failed to create symbolic link './a.txt': File exists\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,stderr",
+    [
+        ("ln -s -t /data/nodir /data/a.txt",
+         "ln: failed to access '/data/nodir': No such file or directory\n"),
+        ("ln -s -t /data/b.txt /data/a.txt",
+         "ln: target '/data/b.txt' is not a directory\n"),
+        ("ln -s -t /data/d -T /data/a.txt",
+         "ln: cannot combine --target-directory and "
+         "--no-target-directory\n"),
+        ("ln -s /data/a.txt /data/b.txt /data/nodir",
+         "ln: target '/data/nodir': No such file or directory\n"),
+        ("ln -s /data/a.txt /data/d/x /data/b.txt",
+         "ln: target '/data/b.txt': Not a directory\n"),
+        ("ln -sT /data/a.txt /data/d",
+         "ln: failed to create symbolic link '/data/d': File exists\n"),
+        ("ln -sT /data/a.txt /data/b.txt /data/c",
+         "ln: extra operand '/data/c'\n"
+         "Try 'ln --help' for more information.\n"),
+        ("ln -sT /data/a.txt",
+         "ln: missing destination file operand after '/data/a.txt'\n"
+         "Try 'ln --help' for more information.\n"),
+        ("ln", "ln: missing file operand\n"
+         "Try 'ln --help' for more information.\n"),
+        ("ln -x /data/a.txt /data/l", "ln: invalid option -- 'x'\n"
+         "Try 'ln --help' for more information.\n"),
+        ("ln --bogus /data/a.txt /data/l",
+         "ln: unrecognized option '--bogus'\n"
+         "Try 'ln --help' for more information.\n"),
+        ("ln -s --backup=bogus /data/a.txt /data/l",
+         "ln: invalid argument 'bogus' for 'backup type'\n"
+         "Valid arguments are:\n"
+         "  - 'none', 'off'\n"
+         "  - 'simple', 'never'\n"
+         "  - 'existing', 'nil'\n"
+         "  - 'numbered', 't'\n"
+         "Try 'ln --help' for more information.\n"),
+        ("ln /data/missing /data/h",
+         "ln: failed to access '/data/missing': No such file or directory\n"),
+        ("ln /data/d /data/hd",
+         "ln: /data/d: hard link not allowed for directory\n"),
+        ("ln -d /data/d /data/hd",
+         "ln: failed to create hard link '/data/hd' => '/data/d': "
+         "Operation not permitted\n"),
+        ("ln -F /data/d /data/hd",
+         "ln: failed to create hard link '/data/hd' => '/data/d': "
+         "Operation not permitted\n"),
+    ],
+)
+async def test_ln_refuses_in_gnu_words(line, stderr):
+    ws = _ws()
+    await _seed_ln(ws)
+    r = await ws.execute(line)
+    assert r.exit_code == 1
+    assert (r.stderr or b"").decode() == stderr
+
+
+@pytest.mark.asyncio
+async def test_ln_sb_moves_the_occupant_aside():
+    ws = _ws()
+    await _seed_ln(ws)
+    await ws.execute("ln -s /data/a.txt /data/l")
+    r = await ws.execute("ln -sbv /data/b.txt /data/l")
+    assert r.exit_code == 0
+    assert r.stdout == b"'/data/l~' ~ '/data/l' -> '/data/b.txt'\n"
+    assert (await ws.execute("readlink /data/l")).stdout == b"/data/b.txt\n"
+    assert (await ws.execute("readlink /data/l~")).stdout == b"/data/a.txt\n"
+    r = await ws.execute("ln -s -S .bak /data/a.txt /data/b.txt")
+    assert r.exit_code == 0
+    assert (await ws.execute("cat /data/b.txt.bak")).stdout == b"yo\n"
+    assert (await ws.execute("readlink /data/b.txt")).stdout == \
+        b"/data/a.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_ln_numbered_backups_and_backup_none():
+    ws = _ws()
+    await _seed_ln(ws)
+    await ws.execute("echo n > /data/l")
+    r = await ws.execute("ln -s --backup=numbered /data/a.txt /data/l")
+    assert r.exit_code == 0
+    assert (await ws.execute("cat '/data/l.~1~'")).stdout == b"n\n"
+    r = await ws.execute("ln -s --backup=none /data/b.txt /data/l")
+    assert r.exit_code == 1
+    assert (r.stderr or b"") == \
+        b"ln: failed to create symbolic link '/data/l': File exists\n"
+
+
+@pytest.mark.asyncio
+async def test_ln_s_dereferences_a_link_to_a_directory_unless_n():
+    ws = _ws()
+    await _seed_ln(ws)
+    await ws.execute("ln -s /data/d /data/dl")
+    assert (await ws.execute("ln -s /data/a.txt /data/dl")).exit_code == 0
+    assert (await ws.execute("readlink /data/d/a.txt")).stdout == \
+        b"/data/a.txt\n"
+    r = await ws.execute("ln -sn /data/b.txt /data/dl")
+    assert r.exit_code == 1
+    assert (r.stderr or b"") == \
+        b"ln: failed to create symbolic link '/data/dl': File exists\n"
+    assert (await ws.execute("ln -sfn /data/b.txt /data/dl")).exit_code == 0
+    assert (await ws.execute("readlink /data/dl")).stdout == b"/data/b.txt\n"
+    for line in ("ln -sL /data/a.txt /data/l1", "ln -sP /data/a.txt /data/l2",
+                 "ln -sd /data/a.txt /data/l3"):
+        assert (await ws.execute(line)).exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_ln_hard_copies_bytes_and_refuses_an_occupied_name():
+    ws = _ws()
+    await _seed_ln(ws)
+    r = await ws.execute("ln -v /data/a.txt /data/h")
+    assert r.exit_code == 0
+    assert r.stdout == b"'/data/h' => '/data/a.txt'\n"
+    assert (await ws.execute("cat /data/h")).stdout == b"hi\n"
+    r = await ws.execute("ln /data/b.txt /data/h")
+    assert r.exit_code == 1
+    assert (r.stderr or b"") == \
+        b"ln: failed to create hard link '/data/h': File exists\n"
+    assert (await ws.execute("ln -f /data/b.txt /data/h")).exit_code == 0
+    assert (await ws.execute("cat /data/h")).stdout == b"yo\n"
+    r = await ws.execute("ln -bv /data/a.txt /data/h")
+    assert r.stdout == b"'/data/h~' ~ '/data/h' => '/data/a.txt'\n"
+    assert (await ws.execute("cat /data/h~")).stdout == b"yo\n"
+    assert (await
+            ws.execute("ln -t /data/e /data/a.txt /data/b.txt")).exit_code == 0
+    assert (await ws.execute("cat /data/e/b.txt")).stdout == b"yo\n"
+    r = await ws.execute("ln /data/missing /data/a.txt /data/d")
+    assert r.exit_code == 1
+    assert (await ws.execute("cat /data/d/a.txt")).stdout == b"hi\n"
+
+
+@pytest.mark.asyncio
+async def test_ln_hard_of_a_link_keeps_the_link_unless_L():
+    ws = _ws()
+    await _seed_ln(ws)
+    await ws.execute("ln -s /data/a.txt /data/lnk")
+    assert (await ws.execute("ln /data/lnk /data/h1")).exit_code == 0
+    assert (await ws.execute("readlink /data/h1")).stdout == b"/data/a.txt\n"
+    assert (await ws.execute("ln -L /data/lnk /data/h2")).exit_code == 0
+    assert (await ws.execute("readlink /data/h2")).exit_code == 1
+    assert (await ws.execute("cat /data/h2")).stdout == b"hi\n"
+    await ws.execute("ln -s /data/nope /data/dang")
+    r = await ws.execute("ln -L /data/dang /data/h3")
+    assert r.exit_code == 1
+    assert (r.stderr or b"") == \
+        b"ln: failed to access '/data/dang': No such file or directory\n"
+    assert (await ws.execute("ln /data/dang /data/h4")).exit_code == 0
+    assert (await ws.execute("readlink /data/h4")).stdout == b"/data/nope\n"
+
+
+@pytest.mark.asyncio
+async def test_ln_last_of_logical_and_physical_wins():
+    ws = _ws()
+    await _seed_ln(ws)
+    await ws.execute("ln -s /data/a.txt /data/lnk")
+    assert (await ws.execute("ln -LP /data/lnk /data/hp")).exit_code == 0
+    assert (await ws.execute("readlink /data/hp")).stdout == b"/data/a.txt\n"
+    assert (await ws.execute("ln -PL /data/lnk /data/hl")).exit_code == 0
+    assert (await ws.execute("readlink /data/hl")).exit_code == 1
+    assert (await ws.execute("cat /data/hl")).stdout == b"hi\n"
+    r = await ws.execute("ln --logical --physical /data/lnk /data/hp2")
+    assert r.exit_code == 0
+    assert (await ws.execute("readlink /data/hp2")).stdout == b"/data/a.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_ln_relative_needs_symbolic_after_the_operand_count():
+    ws = _ws()
+    await _seed_ln(ws)
+    r = await ws.execute("ln -r /data/a.txt /data/rel")
+    assert r.exit_code == 1
+    assert r.stderr == b"ln: cannot do --relative without --symbolic\n"
+    assert (await ws.execute("test -e /data/rel")).exit_code == 1
+    r = await ws.execute("ln -r")
+    assert r.stderr == (b"ln: missing file operand\n"
+                        b"Try 'ln --help' for more information.\n")
+    r = await ws.execute("ln -r -T -t /data/d /data/a.txt /data/x")
+    assert r.stderr == b"ln: cannot do --relative without --symbolic\n"
+    r = await ws.execute("ln -T -t /data/d")
+    assert r.stderr == (b"ln: missing file operand\n"
+                        b"Try 'ln --help' for more information.\n")
+    assert (await ws.execute("ln -rs /data/a.txt /data/d/rel")).exit_code == 0
+    assert (await ws.execute("readlink /data/d/rel")).stdout == b"../a.txt\n"

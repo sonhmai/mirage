@@ -121,3 +121,52 @@ def lance_config(tmp_path) -> LanceDBConfig:
 @pytest.fixture
 def accessor(lance_config) -> LanceDBAccessor:
     return LanceDBAccessor(lance_config)
+
+
+_EDGED_ROWS = [
+    {
+        "id": 1,
+        "label": "a/b",
+        "name": "one"
+    },
+    {
+        "id": 2,
+        "label": "",
+        "name": "two"
+    },
+    {
+        "id": 3,
+        "label": ".env",
+        "name": "three"
+    },
+]
+
+
+@pytest.fixture
+def edged(tmp_path) -> LanceDBAccessor:
+    """Group values whose rendering differs from their text, in a table
+    that can answer a search.
+
+    Args:
+        tmp_path (Path): pytest tmp dir.
+    """
+    _ensure_registered()
+    func = get_registry().get(_STUB_NAME).create()
+
+    class Doc(LanceModel):
+        id: int
+        label: str
+        name: str = func.SourceField()
+        vector: Vector(func.ndims()) = func.VectorField()
+
+    uri = str(tmp_path / "edged")
+    db = lancedb.connect(uri)
+    table = db.create_table("docs", schema=Doc)
+    table.add(_EDGED_ROWS)
+    return LanceDBAccessor(
+        LanceDBConfig(uri=uri,
+                      group_by=["label"],
+                      id_column="id",
+                      title_column="name",
+                      text_column="name",
+                      vector_column="vector"))

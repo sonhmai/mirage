@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { checkCliVerbs } from '../session/validate.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
@@ -59,12 +60,19 @@ import { Ops } from '../../ops/ops.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { PrefixResolver } from '../../runtime/resolver.ts'
+import { WorkspaceBinding, captureBinding } from '../../runtime/binding.ts'
+import type { RuntimeContext } from '../../runtime/types.ts'
+import { ContextScope } from '../../utils/context_scope.ts'
+import { captureRecordingContext } from '../../observe/context.ts'
+import { captureSessionContext } from '../../context/session_context.ts'
+import { namespaceViewOf } from '../executor/command/run.ts'
+import { sessionView, envSnapshot } from '../session/state.ts'
 import type { BridgeDispatchFn } from '../../runtime/types.ts'
 import { MontyUnavailableError } from '../../runtime/python/monty/index.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import { isEvaluator } from '../../runtime/mixin.ts'
 import type { EvalResult } from '../../runtime/types.ts'
-import { PyodideUnavailableError } from '../../runtime/python/types.ts'
+import { PyodideUnavailableError } from '../../runtime/python/pyodide/errors.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { explainLine } from '../node/explain.ts'
@@ -105,6 +113,7 @@ export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, WorkspaceOptions } from './types.ts'
 
 export class Workspace {
+  private readonly runtimeBinding: WorkspaceBinding
   readonly registry: MountRegistry
   readonly sessionManager: SessionManager
   private readonly wsId: string
@@ -245,16 +254,9 @@ export class Workspace {
       () => this.sandboxVisibleMounts(),
       (directory) => this.namespace.linkNamesUnder(directory),
     )
-    this.runtimes = new Runtimes({
-      registry: this.registry,
-      entries: options.runtimes,
-      pythonConfig: options.python ?? {},
-      bridge: () => this.buildWorkspaceBridge(),
-      resolver: sandboxResolver,
-      registerCloser: (fn) => {
-        this.closers.push(fn)
-      },
-    })
+    this.runtimeBinding = new WorkspaceBinding(this.buildWorkspaceBridge(), sandboxResolver, () =>
+      this.runtimeContext(),
+    )
     rejectConfigScript('routePolicy', options.routePolicy)
     this.routePolicy = options.routePolicy ?? null
     // The permission profiles: one per name, and the one a session
@@ -312,13 +314,6 @@ export class Workspace {
       const cliSpec = typeof specOrKey === 'string' ? cliSpecFor(specOrKey) : specOrKey
       this.registry.clis.install(cliName, cliSpec, cliConfig)
     }
-    this.router = new Router(
-      this.registry,
-      this.runtimes,
-      this.routePolicy,
-      this.agentId,
-      sandboxResolver,
-    )
     this.observer = new Observer(stores.observe)
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
     this.cache = buildFileCache(options.cache, options.cacheLimit)
@@ -401,6 +396,22 @@ export class Workspace {
         return mount === null ? null : { prefix: mount.prefix, kind: mount.resource.kind }
       },
     )
+    this.runtimes = new Runtimes({
+      registry: this.registry,
+      entries: options.runtimes,
+      pythonConfig: options.python ?? {},
+      binding: this.runtimeBinding,
+      registerCloser: (fn) => {
+        this.closers.push(fn)
+      },
+    })
+    this.router = new Router(
+      this.registry,
+      this.runtimes,
+      this.routePolicy,
+      this.agentId,
+      sandboxResolver,
+    )
   }
 
   /**
@@ -470,6 +481,29 @@ export class Workspace {
    */
   history(): Promise<EventDict[]> {
     return this.observer.commandEvents()
+  }
+
+  /** Capture local adapter doors under this workspace's active or explicitly named session. */
+  runtimeContext(sessionId?: string): RuntimeContext {
+    const session =
+      sessionId === undefined
+        ? (getCurrentSessionFor(this.sessionManager) ??
+          this.sessionManager.get(this.sessionManager.defaultId))
+        : this.sessionManager.get(sessionId)
+    const scope = new ContextScope([
+      ...captureSessionContext(session, this.sessionManager),
+      ...captureRecordingContext(),
+    ])
+    return captureBinding(
+      this.runtimeBinding,
+      {
+        ns: namespaceViewOf(this.registry, this.namespace, this.dispatcher.dispatch),
+        sessionView: sessionView(session, this.policies),
+        cwd: PathSpec.fromStrPath(session.cwd),
+        env: envSnapshot(session),
+      },
+      scope,
+    )
   }
 
   // The sandboxed runtimes' sole data path (quickjs, pyodide, monty).
@@ -732,12 +766,20 @@ export class Workspace {
     return this.sessionManager.list()
   }
 
-  closeSession(sessionId: string): Promise<void> {
-    return this.sessionManager.close(sessionId)
+  async closeSession(sessionId: string): Promise<void> {
+    // The manager refuses the default and an unknown id first; a session
+    // that did close takes its jobs with it, so a later session reusing
+    // the id inherits nothing.
+    await this.sessionManager.close(sessionId)
+    await this.jobTable.closeSession(sessionId)
   }
 
-  closeAllSessions(): Promise<void> {
-    return this.sessionManager.closeAll()
+  async closeAllSessions(): Promise<void> {
+    const closed = this.listSessions()
+      .map((s) => s.sessionId)
+      .filter((id) => id !== this.defaultSessionId)
+    await this.sessionManager.closeAll()
+    for (const id of closed) await this.jobTable.closeSession(id)
   }
 
   /**
@@ -1031,11 +1073,7 @@ export class Workspace {
    * serving pre-line state.
    */
   private async invalidateAllAfterRemote(): Promise<void> {
-    await this.dispatcher.clearFileCache()
-    for (const m of this.registry.allMounts()) {
-      if (m.cacheManager !== null) await m.cacheManager.clearIndex(m.resource.index)
-      else await m.use(() => m.resource.index?.clear() ?? Promise.resolve())
-    }
+    await this.registry.invalidateAfterExternal()
   }
 
   async invalidateAfterWriteByPath(path: string): Promise<void> {
@@ -1132,7 +1170,7 @@ export class Workspace {
       parser: () => this.getShellParser(),
       meta: this.meta,
       drift: this.drift,
-      statFn: (p) => this.dispatchInternal('stat', p),
+      statFn: (p) => this.dispatchInternal('stat', p, [], { index: new RAMIndexCacheStore() }),
       namespace: this.namespace,
       sessions: this.sessionManager,
       registry: this.registry,

@@ -15,7 +15,8 @@
 import type { QdrantRow } from './client.ts'
 import type { QdrantConfigResolved } from '../../resource/qdrant/config.ts'
 import { decodeBase64 } from '../../utils/base64.ts'
-import { compactJsonText } from '../render/json.ts'
+import { compactJsonText, valueText } from '../render/json.ts'
+import { fieldValue, withoutField } from './payload.ts'
 
 const ENC = new TextEncoder()
 const SKIP_KEYS = new Set(['_score', '_rowid', '_distance'])
@@ -27,21 +28,19 @@ export function blobBytes(value: unknown): Uint8Array {
 }
 
 export function renderJson(row: QdrantRow, config: QdrantConfigResolved): Uint8Array {
-  const data: Record<string, unknown> = {}
+  let data: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(row)) {
     if (SKIP_KEYS.has(key)) continue
-    if (key === config.vectorField || key === config.blobField) continue
     data[key] = value
   }
+  data = withoutField(data, config.vectorField)
+  data = withoutField(data, config.blobField)
   return ENC.encode(compactJsonText(data) + '\n')
 }
 
 export function renderText(row: QdrantRow, config: QdrantConfigResolved): Uint8Array {
-  const value = config.textField !== null ? row[config.textField] : undefined
+  const value = fieldValue(row, config.textField)
   if (value === undefined || value === null) return new Uint8Array()
-  const text =
-    typeof value === 'object'
-      ? JSON.stringify(value)
-      : String(value as string | number | boolean | bigint)
+  const text = valueText(value)
   return ENC.encode(text + '\n')
 }

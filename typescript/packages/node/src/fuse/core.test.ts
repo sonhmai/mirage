@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { constants as fsConstants } from 'node:fs'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
 import { mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { MountCore } from './core.ts'
 
@@ -146,6 +147,205 @@ describe('MountCore', () => {
     const body = await core.read('/data/greeting.txt', after, 0, 100)
     await core.release(after)
     expect(new TextDecoder().decode(body)).toBe('rewritten, longer than before\n')
+  })
+
+  it('drops the old body when the open carries O_TRUNC', async () => {
+    // libfuse 3 negotiates atomic O_TRUNC, so the kernel never sends a
+    // separate truncate before an O_TRUNC open; the flag on the open has
+    // to do it. Ignoring it left `printf BB > f` holding BB plus the tail
+    // of the longer body it replaced (#1032).
+    const core = await mkCore()
+    const fh = await core.open('/data/greeting.txt', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    expect((await core.fgetattr('/data/greeting.txt', fh)).size).toBe(0)
+    await core.write('/data/greeting.txt', fh, new TextEncoder().encode('BB\n'), 0)
+    await core.release(fh)
+    const after = await core.open('/data/greeting.txt')
+    const body = await core.read('/data/greeting.txt', after, 0, 100)
+    await core.release(after)
+    expect(new TextDecoder().decode(body)).toBe('BB\n')
+  })
+
+  it('settles writes buffered on another handle before an O_TRUNC open truncates', async () => {
+    // A write the kernel already acknowledged on handle A precedes the
+    // O_TRUNC open on handle B, so it must land before the truncation,
+    // not stay queued to overwrite B's body when A is released.
+    const core = await mkCore()
+    const first = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
+    await core.write('/data/greeting.txt', first, new TextEncoder().encode('QUEUED'), 0)
+    const second = await core.open('/data/greeting.txt', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    await core.write('/data/greeting.txt', second, new TextEncoder().encode('BB\n'), 0)
+    await core.release(second)
+    await core.release(first)
+    const after = await core.open('/data/greeting.txt')
+    const body = await core.read('/data/greeting.txt', after, 0, 100)
+    await core.release(after)
+    expect(new TextDecoder().decode(body)).toBe('BB\n')
+  })
+
+  it('settles a handle opened on the target when the O_TRUNC open comes through a link', async () => {
+    // The dispatcher follows both paths to one file, so a handle opened on
+    // the target and an O_TRUNC open through a link to it are the same
+    // file: the queued write lands first and the truncation wins.
+    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
+    await ws.execute("echo 'hello world' | tee /data/greeting.txt")
+    await ws.execute('ln -s greeting.txt /data/lk')
+    const core = new MountCore(ws.fs)
+    const first = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
+    await core.write('/data/greeting.txt', first, new TextEncoder().encode('QUEUED'), 0)
+    const second = await core.open('/data/lk', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    await core.write('/data/lk', second, new TextEncoder().encode('BB\n'), 0)
+    await core.release(second)
+    await core.release(first)
+    const after = await core.open('/data/greeting.txt')
+    const body = await core.read('/data/greeting.txt', after, 0, 100)
+    await core.release(after)
+    expect(new TextDecoder().decode(body)).toBe('BB\n')
+  })
+
+  it('a prefetch in flight across a truncate re-reads rather than installing stale bytes', async () => {
+    // The first open's read was out when the O_TRUNC open landed; what it
+    // fetched is the old body, and installing it would let that handle
+    // and later stats serve pre-truncation content.
+    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
+    await ws.fs.writeFile('/data/api.json', new TextEncoder().encode('hydrated bytes'))
+    vi.spyOn(ws.fs, 'stat').mockResolvedValue(
+      new FileStat({ name: 'api.json', type: FileType.FILE, content: ContentType.JSON }),
+    )
+    const original = ws.fs.readFile.bind(ws.fs)
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let calls = 0
+    vi.spyOn(ws.fs, 'readFile').mockImplementation(async (...args: Parameters<typeof original>) => {
+      calls += 1
+      if (calls === 1) await gate
+      return original(...args)
+    })
+    // The O_TRUNC open hydrates through the same in-flight read, so the
+    // gate opens once its truncation has landed rather than after it
+    // returns.
+    const realTruncate = ws.fs.truncate.bind(ws.fs)
+    let truncated: () => void = () => undefined
+    const truncateDone = new Promise<void>((resolve) => {
+      truncated = resolve
+    })
+    vi.spyOn(ws.fs, 'truncate').mockImplementation(
+      async (...args: Parameters<typeof realTruncate>) => {
+        await realTruncate(...args)
+        truncated()
+      },
+    )
+    const core = new MountCore(ws.fs)
+    const pending = core.open('/data/api.json')
+    const opening = core.open('/data/api.json', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    await truncateDone
+    release()
+    const writer = await opening
+    const reader = await pending
+    expect((await core.fgetattr('/data/api.json', reader)).size).toBe(0)
+    await core.release(writer)
+    await core.release(reader)
+  })
+
+  it('queues an O_TRUNC open behind a flush that is still landing', async () => {
+    // The flush detached its buffer and is awaiting the backend write when
+    // the O_TRUNC open arrives. Truncating right away would let the flush
+    // finish afterwards and restore the old body over the truncation.
+    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
+    await ws.execute("echo 'hello world' | tee /data/greeting.txt")
+    const original = ws.fs.writeFile.bind(ws.fs)
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let calls = 0
+    vi.spyOn(ws.fs, 'writeFile').mockImplementation(
+      async (...args: Parameters<typeof original>) => {
+        calls += 1
+        if (calls === 1) await gate
+        return original(...args)
+      },
+    )
+    const core = new MountCore(ws.fs)
+    const first = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
+    await core.write('/data/greeting.txt', first, new TextEncoder().encode('QUEUED'), 0)
+    const flushing = core.flush('/data/greeting.txt', first)
+    const opening = core.open('/data/greeting.txt', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    release()
+    await flushing
+    const second = await opening
+    await core.write('/data/greeting.txt', second, new TextEncoder().encode('BB\n'), 0)
+    await core.release(second)
+    await core.release(first)
+    const body = await ws.fs.readFile('/data/greeting.txt')
+    expect(new TextDecoder().decode(body)).toBe('BB\n')
+  })
+
+  it('an O_TRUNC open through a link drops the cached bytes of its target', async () => {
+    // The target was opened and released as greeting.txt, leaving its
+    // bytes in the TTL cache; truncating through the link must drop that
+    // entry too, or the next stat of the target serves the old length.
+    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
+    await ws.execute("echo 'hello world' | tee /data/greeting.txt")
+    await ws.execute('ln -s greeting.txt /data/lk')
+    const realStat = ws.fs.stat.bind(ws.fs)
+    vi.spyOn(ws.fs, 'stat').mockImplementation(async (path) => {
+      const s = await realStat(path)
+      return s.type === FileType.FILE
+        ? new FileStat({ name: s.name, type: s.type, content: s.content })
+        : s
+    })
+    const core = new MountCore(ws.fs)
+    const fh = await core.open('/data/greeting.txt')
+    await core.release(fh)
+    expect((await core.getattr('/data/greeting.txt')).size).toBe(12)
+    const writer = await core.open('/data/lk', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    await core.release(writer)
+    expect((await core.getattr('/data/greeting.txt')).size).toBe(0)
+  })
+
+  it('keeps no prefetch generation once the prefetch has settled', async () => {
+    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
+    await ws.execute("echo 'hello world' | tee /data/greeting.txt")
+    const core = new MountCore(ws.fs)
+    const generations = (core as unknown as { prefetchGen: Map<string, number> }).prefetchGen
+    for (const name of ['a', 'b', 'c']) {
+      const fh = await core.create(`/data/${name}.txt`)
+      await core.write(`/data/${name}.txt`, fh, new TextEncoder().encode(name), 0)
+      await core.release(fh)
+      await core.truncate(`/data/${name}.txt`, 0)
+    }
+    expect(generations.size).toBe(0)
+  })
+
+  it("keeps the other handle's buffer when the settlement flush is refused", async () => {
+    // The acknowledged bytes must stay buffered so that handle's own
+    // flush reports the refusal rather than succeeding over an empty
+    // buffer.
+    const resource = new RAMResource()
+    const seed = new Workspace({ '/data/': resource }, { mode: MountMode.WRITE })
+    await seed.fs.writeFile('/data/existing.txt', 'seed')
+    const core = new MountCore(new Workspace({ '/data/': resource }, { mode: MountMode.READ }).fs)
+    const first = await core.open('/data/existing.txt', fsConstants.O_WRONLY)
+    await core.write('/data/existing.txt', first, new TextEncoder().encode('QUEUED'), 0)
+    await expect(
+      core.open('/data/existing.txt', fsConstants.O_WRONLY | fsConstants.O_TRUNC),
+    ).rejects.toThrow()
+    await expect(core.flush('/data/existing.txt', first)).rejects.toThrow()
+    const body = await seed.fs.readFile('/data/existing.txt')
+    expect(new TextDecoder().decode(body)).toBe('seed')
+  })
+
+  it('keeps the body when the open carries no O_TRUNC', async () => {
+    const core = await mkCore()
+    const fh = await core.open('/data/greeting.txt', fsConstants.O_RDWR)
+    await core.write('/data/greeting.txt', fh, new TextEncoder().encode('J'), 0)
+    await core.release(fh)
+    const after = await core.open('/data/greeting.txt')
+    const body = await core.read('/data/greeting.txt', after, 0, 100)
+    await core.release(after)
+    expect(new TextDecoder().decode(body)).toBe('Jello world\n')
   })
 
   it('reports a link with the node row its own stamps live on', async () => {

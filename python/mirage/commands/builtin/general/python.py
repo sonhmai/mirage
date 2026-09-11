@@ -74,8 +74,13 @@ async def _python3(
         "X": fl.as_list("X"),
         "check_hash_based_pycs": fl.as_str("check_hash_based_pycs"),
     }
-    return await run_code(label, prepared, opts.env, init_flags, opts.runtime,
-                          opts.runtime_unavailable)
+    return await run_code(label,
+                          prepared,
+                          opts.env,
+                          init_flags,
+                          opts.runtime,
+                          opts.runtime_unavailable,
+                          cwd=opts.cwd)
 
 
 python3 = command("python3", resource=None, spec=SPECS["python3"])(_python3)

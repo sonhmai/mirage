@@ -19,12 +19,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
 import { registerCliSpec, unregisterCliSpec } from '../commands/cli/specs.ts'
 import { CLISpec, type CLIInvocation } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
+import { PolicyDenied } from '../policy/errors.ts'
+import type { Policy } from '../policy/index.ts'
+import type { Action, SessionContext } from '../policy/types.ts'
 import { secretStr } from '../resource/secrets.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
@@ -289,7 +292,7 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     const w2 = ws2.sessionManager.get('worker')
     expect(w2.cwd).toBe('/data')
     expect(w2.env).toEqual({ ROLE: 'bg', PWD: '/data' })
-    const jobs2 = ws2.jobTable.listJobs()
+    const jobs2 = ws2.jobTable.listJobs('worker')
     expect(jobs2.length).toBe(1)
     expect(jobs2[0]?.command).toBe('sleep 0')
     expect(jobs2[0]?.status).toBe('completed')
@@ -580,5 +583,214 @@ describe('savedResourceBuild', () => {
     expect(() => buildMountArgs(state)).toThrow(/resources= must include overrides for: \/data/)
     // The same mount handed back live loads.
     expect(() => buildMountArgs(state, { [mount.prefix]: new RAMResource() })).not.toThrow()
+  })
+})
+
+/** Refuse env writes to GATE_* names, the deployment's rule. */
+class DenyGate implements Policy {
+  preSession(ctx: SessionContext): Action | null {
+    if (ctx.plane === 'env' && ctx.key.startsWith('GATE_')) {
+      return { kind: 'deny', reason: 'GATE_* refused by policy' }
+    }
+    return null
+  }
+}
+
+function gatedWorkspace(prefix = '/data', sessionId?: string): Workspace {
+  const ram = new RAMResource()
+  const ops = new OpsRegistry()
+  ops.registerResource(ram)
+  return new Workspace(
+    { [prefix]: ram },
+    {
+      mode: MountMode.WRITE,
+      ops,
+      shellParser: parser,
+      policies: [new DenyGate()],
+      ...(sessionId !== undefined ? { sessionId } : {}),
+    },
+  )
+}
+
+describe('applyStateDict and the deployment', () => {
+  // The restore used to seed `session.vars` directly, past the gate a live
+  // `export GATE_X=1` clears (#1017); a snapshot is the one env input the
+  // deployment did not author, so this is the door where the rule matters.
+  it('a restored variable clears the session gate', async () => {
+    const source = buildWorkspace()
+    await source.execute('export GATE_X=1')
+    const state = await toStateDict(source)
+    await source.close()
+    const target = gatedWorkspace()
+    await expect(applyStateDict(target, state)).rejects.toBeInstanceOf(PolicyDenied)
+    expect(Object.hasOwn(target.env, 'GATE_X')).toBe(false)
+    await target.close()
+  })
+
+  it('a restore the gate allows lands every variable', async () => {
+    const source = buildWorkspace()
+    await source.execute('export PUBLIC_X=1')
+    const state = await toStateDict(source)
+    await source.close()
+    const target = gatedWorkspace()
+    await applyStateDict(target, state)
+    expect(target.env.PUBLIC_X).toBe('1')
+    await target.close()
+  })
+
+  // A snapshot holding several sessions used to land each one as its
+  // table cleared the gate, so a refusal on a later session left the
+  // earlier ones overwritten, the default identity adopted and every
+  // mount's state loaded: a workspace matching no snapshot, and one a
+  // close would then persist. Every table is vetted before anything lands.
+  it('a refused session table leaves the workspace untouched', async () => {
+    const ram = new RAMResource()
+    const ops = new OpsRegistry()
+    ops.registerResource(ram)
+    const source = new Workspace(
+      { '/data': ram },
+      { mode: MountMode.WRITE, ops, shellParser: parser, sessionId: 'src' },
+    )
+    expect((await source.execute('echo restored > /data/f.txt')).exitCode).toBe(0)
+    expect((await source.execute('export PUBLIC_A=1')).exitCode).toBe(0)
+    source.createSession('s2')
+    expect((await source.execute('export GATE_X=1', { sessionId: 's2' })).exitCode).toBe(0)
+    const state = await toStateDict(source)
+    await source.close()
+    const target = gatedWorkspace('/data', 'tgt')
+    expect((await target.execute('export KEEP=1')).exitCode).toBe(0)
+    await expect(applyStateDict(target, state)).rejects.toBeInstanceOf(PolicyDenied)
+    expect(Object.hasOwn(target.env, 'PUBLIC_A')).toBe(false)
+    expect(target.env.KEEP).toBe('1')
+    expect(target.listSessions().map((s) => s.sessionId)).toEqual(['tgt'])
+    expect((await target.execute('test -e /data/f.txt')).exitCode).toBe(1)
+    await target.close()
+  })
+
+  // The env template is vetted with the tables, so a refused template
+  // lands no session either.
+  it('a refused env template lands no session', async () => {
+    const ram = new RAMResource()
+    const ops = new OpsRegistry()
+    ops.registerResource(ram)
+    const source = new Workspace(
+      { '/data': ram },
+      { mode: MountMode.WRITE, ops, shellParser: parser, env: { GATE_X: '1' } },
+    )
+    expect((await source.execute('unset GATE_X; export PUBLIC_A=1')).exitCode).toBe(0)
+    const state = await toStateDict(source)
+    await source.close()
+    const target = gatedWorkspace()
+    await expect(applyStateDict(target, state)).rejects.toBeInstanceOf(PolicyDenied)
+    expect(Object.hasOwn(target.env, 'PUBLIC_A')).toBe(false)
+    expect(Object.hasOwn(target.env, 'GATE_X')).toBe(false)
+    await target.close()
+  })
+
+  // A session the restore had to create was a bare one, under no
+  // profile, while its table had cleared the gate under the default
+  // profile's policy (`scriptOf` for an id the manager does not know);
+  // the created session now runs under that profile, so what the gate
+  // judged is what lands, and a restored session no longer wakes
+  // unrestricted.
+  it('a session the restore creates runs under the default profile', async () => {
+    const source = buildWorkspace()
+    expect((await source.execute('echo kept > /data/f.txt')).exitCode).toBe(0)
+    source.createSession('s2')
+    expect((await source.execute('export PUBLIC_A=1', { sessionId: 's2' })).exitCode).toBe(0)
+    const state = await toStateDict(source)
+    await source.close()
+    const ram = new RAMResource()
+    const ops = new OpsRegistry()
+    ops.registerResource(ram)
+    const target = new Workspace(
+      { '/data': ram },
+      {
+        mode: MountMode.WRITE,
+        ops,
+        shellParser: parser,
+        profiles: {
+          default: { commands: { deny: [{ reason: 'no removals', commands: ['rm'] }] } },
+        },
+      },
+    )
+    await applyStateDict(target, state)
+    const compiled = target.sessionManager.defaultProfile
+    expect(compiled).not.toBeNull()
+    const restored = target.getSession('s2')
+    expect(restored.profile).toBe('default')
+    expect(restored.commands).toBe(compiled?.commands)
+    expect(restored.script).toBe(compiled?.script)
+    expect(target.sessionManager.scriptOf('s2')).toBe(compiled?.script)
+    expect(restored.env.PUBLIC_A).toBe('1')
+    const refused = await target.execute('rm /data/f.txt', { sessionId: 's2' })
+    expect(refused.exitCode).toBe(126)
+    expect(new TextDecoder().decode(refused.stderr)).toContain('rm: Permission denied')
+    expect((await target.execute('test -e /data/f.txt')).exitCode).toBe(0)
+    await target.close()
+  })
+
+  // A snapshot prefix the workspace does not mount was skipped in silence
+  // (#1019); the state is still not restored (never into an ancestor
+  // mount), but the load now says so.
+  it('a snapshot mount with no matching prefix is reported', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const source = buildWorkspace()
+      const state = await toStateDict(source)
+      await source.close()
+      const other = new RAMResource()
+      const ops = new OpsRegistry()
+      ops.registerResource(other)
+      const target = new Workspace(
+        { '/elsewhere': other },
+        { mode: MountMode.WRITE, ops, shellParser: parser },
+      )
+      await applyStateDict(target, state)
+      await target.close()
+      const messages = warn.mock.calls.map((c) => String(c[0]))
+      expect(messages.some((m) => m.includes('/data') && m.includes('not restored'))).toBe(true)
+      expect(messages.some((m) => m.includes('/elsewhere'))).toBe(false)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  // A mount that asks to be handed back live (`needs_override`, a
+  // redacted credential) skipped the prefix check along with its
+  // loadState, so a renamed remote mount, the case the report exists
+  // for, stayed silent while Python reported it. The skip itself stays:
+  // a live mount at the prefix is not loaded from the saved state.
+  it('a live-only snapshot mount with no matching prefix is reported too', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const data = new RAMResource()
+      const keep = new RAMResource()
+      const ops = new OpsRegistry()
+      ops.registerResource(data)
+      const source = new Workspace(
+        { '/data': data, '/keep': keep },
+        { mode: MountMode.WRITE, ops, shellParser: parser },
+      )
+      const state = await toStateDict(source)
+      await source.close()
+      for (const m of state.mounts) m.resource_state = { ...m.resource_state, needs_override: true }
+      const live = new RAMResource()
+      const liveOps = new OpsRegistry()
+      liveOps.registerResource(live)
+      const loadState = vi.spyOn(live, 'loadState')
+      const target = new Workspace(
+        { '/keep': live },
+        { mode: MountMode.WRITE, ops: liveOps, shellParser: parser },
+      )
+      await applyStateDict(target, state)
+      await target.close()
+      const messages = warn.mock.calls.map((c) => String(c[0]))
+      expect(messages.some((m) => m.includes('/data') && m.includes('not restored'))).toBe(true)
+      expect(messages.some((m) => m.includes('/keep'))).toBe(false)
+      expect(loadState).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

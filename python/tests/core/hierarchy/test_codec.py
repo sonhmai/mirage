@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.hierarchy.codec import (DATE, INT_JSON, JSON_NAME, JSONL_NAME,
-                                         RAW, ascii_digits)
+                                         PATH_SAFE, RAW, ascii_digits)
 
 
 def test_raw_takes_any_nonempty_segment():
@@ -59,3 +59,66 @@ def test_date_is_shape_only():
     assert DATE.decode("2024-1-15") is None
     assert DATE.decode("notadate") is None
     assert DATE.decode("2024-01-15x") is None
+
+
+def test_path_safe_gives_every_value_its_own_segment():
+    # ``/`` renders as ``∕``; a value already holding ``∕`` or ``⁄`` has that
+    # character escaped, so ``a/b`` and ``a∕b`` cannot name one directory
+    # and the decode recovers exactly the value that was rendered.
+    assert PATH_SAFE.encode("a/b") == "a∕b"
+    assert PATH_SAFE.encode("a∕b") == "a⁄∕b"
+    assert PATH_SAFE.encode("a⁄b") == "a⁄⁄b"
+    for raw in ("plain", "a/b", "a∕b", "a⁄b", "/∕⁄/", "⁄∕"):
+        assert PATH_SAFE.decode(PATH_SAFE.encode(raw)) == raw
+    assert len({PATH_SAFE.encode(raw) for raw in ("a/b", "a∕b", "a⁄∕b")}) == 3
+
+
+def test_path_safe_keeps_blank_and_dot_led_values_addressable():
+    # A blank value would render as ``unknown`` and a dot-led one as a
+    # hidden segment, and neither could then be listed and opened as the
+    # value it stands for. Both carry the escape lead instead: an empty
+    # value is the lone lead, and the decode reads a lead with nothing
+    # after it as escaping nothing.
+    assert PATH_SAFE.encode("") == "⁄"
+    assert PATH_SAFE.encode(" ") == "⁄ "
+    assert PATH_SAFE.encode(".env") == "⁄.env"
+    assert PATH_SAFE.encode("..") == "⁄.."
+    assert PATH_SAFE.encode("unknown") == "unknown"
+    edges = ("", " ", "  ", ".", "..", ".env", "./x", ".⁄", "⁄.x", "unknown")
+    for raw in edges:
+        assert PATH_SAFE.decode(PATH_SAFE.encode(raw)) == raw
+        assert not PATH_SAFE.encode(raw).startswith(".")
+    assert len({PATH_SAFE.encode(raw) for raw in edges}) == len(edges)
+    assert PATH_SAFE.decode("⁄") == ""
+    assert PATH_SAFE.decode("a⁄") == "a"
+    assert PATH_SAFE.decode("") is None
+    assert RAW.encode("a/b") == "a/b"
+
+
+def test_path_safe_prefix_value_is_what_a_rendered_prefix_implies():
+    # A backend that pushes a glob's literal head into a query needs the
+    # VALUE prefix that rendered head stands for. A head cut inside an
+    # escape pair drops the dangling lead, so the pushdown stays a sound
+    # over-approximation the rendered-name filter then tightens.
+    assert PATH_SAFE.prefix_value("doc-03") == "doc-03"
+    assert PATH_SAFE.prefix_value("a∕") == "a/"
+    assert PATH_SAFE.prefix_value("a⁄∕") == "a∕"
+    assert PATH_SAFE.prefix_value("a⁄") == "a"
+    assert PATH_SAFE.prefix_value("a⁄⁄") == "a⁄"
+    assert PATH_SAFE.prefix_value("") == ""
+    assert PATH_SAFE.prefix_value("⁄") == ""
+    assert PATH_SAFE.prefix_value("⁄.e") == ".e"
+    assert RAW.prefix_value("a∕") == "a∕"
+
+
+def test_path_safe_blank_is_the_shared_white_space_set():
+    # ``str.strip`` and JavaScript's ``trim`` disagree at the edges (U+001C
+    # ..U+001F, U+0085, U+FEFF), so a value only one runtime called blank
+    # took the lead in one tree and not the other. Blank is the White_Space
+    # property in both, read from ``utils.sanitize``.
+    assert PATH_SAFE.encode("\x85") == "⁄\x85"
+    assert PATH_SAFE.encode("\u3000") == "⁄\u3000"
+    assert PATH_SAFE.encode("\x1c") == "\x1c"
+    assert PATH_SAFE.encode("\ufeff") == "\ufeff"
+    for raw in ("\x85", "\u3000", "\x1c", "\ufeff"):
+        assert PATH_SAFE.decode(PATH_SAFE.encode(raw)) == raw

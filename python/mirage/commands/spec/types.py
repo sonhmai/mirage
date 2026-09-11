@@ -299,11 +299,12 @@ class FlagView:
         return name
 
     def typed_order(self, *names: str) -> list[str]:
-        """The given flag names, ordered as the line first typed them.
+        """The given flag names, ordered by their recorded occurrences.
 
         The parser fills the bag in scan order and every hop between
         (kwargs, dict copies) preserves insertion order, so a key's
-        position is its first occurrence on the line; a flag supplied
+        position is its last occurrence for a scalar, or its first for an
+        accumulating option; a flag supplied
         by a default or the environment lands after every typed one.
         Names the line never carried are dropped. This is what an
         order-sensitive option family (grep's --include/--exclude,

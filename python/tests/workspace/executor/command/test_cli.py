@@ -253,9 +253,14 @@ class CrashingRuntime(FakePyRuntime):
 
 class SleepingRuntime(FakePyRuntime):
     name = "sleepy"
+    cancelled = False
 
     async def run(self, args: RunArgs) -> RunResult:
-        await asyncio.sleep(0.5)
+        try:
+            await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
         return self.result
 
 
@@ -538,6 +543,7 @@ async def test_script_limit_bounds_the_run():
         await handle_cli(install, ["pager"],
                          Session("t"),
                          context=CLIContext(entries=[sleepy]))
+    assert sleepy.cancelled
 
 
 def test_env_fills_an_option_the_line_omitted():

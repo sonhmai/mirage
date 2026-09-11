@@ -97,3 +97,21 @@ describe('@struktoai/mirage-browser Workspace', () => {
     await ws.close()
   })
 })
+
+it('handles binary grep through the browser workspace', async () => {
+  const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.WRITE })
+  try {
+    await ws.execute("printf 'needle\\000tail\\n' > /data/report.pdf")
+    const normal = await ws.execute('grep needle /data/report.pdf')
+    expect(normal.exitCode).toBe(0)
+    expect(normal.stdout.length).toBe(0)
+    expect(new TextDecoder().decode(normal.stderr)).toContain('binary file matches')
+    const skipped = await ws.execute('grep -I needle /data/report.pdf')
+    expect(skipped.exitCode).toBe(1)
+    expect(skipped.stdout.length).toBe(0)
+    const text = await ws.execute('grep -a needle /data/report.pdf')
+    expect(text.stdout).toEqual(new TextEncoder().encode('needle\0tail\n'))
+  } finally {
+    await ws.close()
+  }
+})

@@ -181,19 +181,28 @@ async def _list_children(conn: GridFSAccessor,
 async def _list_tree(conn: GridFSAccessor,
                      pfx: str) -> AsyncIterator[TreeEntry]:
     async for doc in iter_latest(conn, prefix_query(pfx)):
-        yield TreeEntry(key=doc["filename"], size=doc["length"])
+        upload = doc.get("uploadDate")
+        yield TreeEntry(key=doc["filename"],
+                        size=doc["length"],
+                        modified=to_iso_z(upload) if upload else "")
 
 
 async def _list_subtree(conn: GridFSAccessor,
                         stem: str) -> AsyncIterator[TreeEntry]:
     async for doc in iter_latest(conn, subtree_query(stem)):
-        yield TreeEntry(key=doc["filename"], size=doc["length"])
+        upload = doc.get("uploadDate")
+        yield TreeEntry(key=doc["filename"],
+                        size=doc["length"],
+                        modified=to_iso_z(upload) if upload else "")
 
 
 async def _iter_query(conn: GridFSAccessor,
                       query: dict[str, Any]) -> AsyncIterator[TreeEntry]:
     async for doc in iter_latest(conn, query):
-        yield TreeEntry(key=doc["filename"], size=doc["length"])
+        upload = doc.get("uploadDate")
+        yield TreeEntry(key=doc["filename"],
+                        size=doc["length"],
+                        modified=to_iso_z(upload) if upload else "")
 
 
 def _find_tree(conn: GridFSAccessor, pfx: str,

@@ -101,6 +101,77 @@ async def test_release_flushes_buffered_writes(seeded):
 
 
 @pytest.mark.asyncio
+async def test_open_with_o_trunc_drops_the_old_body(seeded):
+    # libfuse 3 negotiates atomic O_TRUNC, so the kernel never sends a
+    # separate truncate before an O_TRUNC open; the flag on the open has
+    # to do it. Ignoring it left `printf BB > f` holding BB plus the tail
+    # of the longer body it replaced (#1032).
+    fh = seeded.open("/a.txt", os.O_WRONLY | os.O_TRUNC)
+    assert seeded.getattr("/a.txt", fh)["st_size"] == 0
+    seeded.write("/a.txt", b"BB\n", 0, fh)
+    seeded.release(fh)
+    assert seeded.read("/a.txt", 100, 0, None) == b"BB\n"
+
+
+@pytest.mark.asyncio
+async def test_o_trunc_open_settles_writes_buffered_on_another_handle(seeded):
+    # A write the kernel already acknowledged on handle A precedes the
+    # O_TRUNC open on handle B, so it must land before the truncation,
+    # not stay queued to overwrite B's body when A is released.
+    first = seeded.open("/a.txt", os.O_WRONLY)
+    seeded.write("/a.txt", b"QUEUED", 0, first)
+    second = seeded.open("/a.txt", os.O_WRONLY | os.O_TRUNC)
+    seeded.write("/a.txt", b"BB\n", 0, second)
+    seeded.release(second)
+    seeded.release(first)
+    assert seeded.read("/a.txt", 100, 0, None) == b"BB\n"
+
+
+@pytest.mark.asyncio
+async def test_o_trunc_open_through_a_link_settles_the_targets_handle():
+    # The dispatcher follows both paths to one file, so a handle opened on
+    # the target and an O_TRUNC open through a link to it are the same
+    # file: the queued write lands first and the truncation wins.
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    await ws.execute("tee /a.txt", stdin=b"hello world")
+    await ws.execute("ln -s a.txt /lk")
+    core = MountCore(ws.fs)
+    first = core.open("/a.txt", os.O_WRONLY)
+    core.write("/a.txt", b"QUEUED", 0, first)
+    second = core.open("/lk", os.O_WRONLY | os.O_TRUNC)
+    core.write("/lk", b"BB\n", 0, second)
+    core.release(second)
+    core.release(first)
+    assert core.read("/a.txt", 100, 0, None) == b"BB\n"
+
+
+@pytest.mark.asyncio
+async def test_failed_settlement_keeps_the_other_handles_buffer():
+    # When the settling flush is refused, the acknowledged bytes must stay
+    # buffered on their handle so its own flush reports the refusal rather
+    # than silently succeeding over an empty buffer.
+    res = RAMResource()
+    seed = Workspace({"/": res}, mode=MountMode.WRITE)
+    await seed.execute("tee /a.txt", stdin=b"seed")
+    core = MountCore(Workspace({"/": res}, mode=MountMode.READ).fs)
+    first = core.open("/a.txt", os.O_WRONLY)
+    core.write("/a.txt", b"QUEUED", 0, first)
+    with pytest.raises(OSError):
+        core.open("/a.txt", os.O_WRONLY | os.O_TRUNC)
+    with pytest.raises(OSError):
+        core.flush("/a.txt", first)
+    assert await seed.fs.read("/a.txt") == b"seed"
+
+
+@pytest.mark.asyncio
+async def test_open_without_o_trunc_keeps_the_body(seeded):
+    fh = seeded.open("/a.txt", os.O_RDWR)
+    seeded.write("/a.txt", b"J", 0, fh)
+    seeded.release(fh)
+    assert seeded.read("/a.txt", 100, 0, None) == b"Jello world"
+
+
+@pytest.mark.asyncio
 async def test_write_then_read(seeded):
     seeded.write("/new.txt", b"written", 0, None)
     assert seeded.read("/new.txt", 100, 0, None) == b"written"
@@ -231,6 +302,36 @@ async def test_rename_across_mounts_reports_exdev():
 @op("read", resource="ram", filetype=".tally")
 async def _read_tally(accessor, path: PathSpec, **kwargs) -> bytes:
     return b"RENDERED-AND-MUCH-LONGER"
+
+
+class _Sizeless:
+
+    def __init__(self, ops):
+        self._inner = ops
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    async def stat(self, path):
+        s = await self._inner.stat(path)
+        return s.model_copy(update={"size": None})
+
+
+@pytest.mark.asyncio
+async def test_o_trunc_open_hydrates_through_the_renderer():
+    # An O_TRUNC open of a size-unknown file whose extension renders must
+    # serve the rendered body of the now-empty file, not raw emptiness.
+    resource = RAMResource()
+    resource.register_op(_read_tally)
+    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+    await ws.execute("tee /data/books.tally", stdin=b"0123456789")
+    core = MountCore(_Sizeless(ws.fs))
+    fh = core.open("/data/books.tally", os.O_WRONLY | os.O_TRUNC)
+    assert core._run(core._ops.read("/data/books.tally", raw=True)) == b""
+    rendered = b"RENDERED-AND-MUCH-LONGER"
+    assert core.getattr("/data/books.tally", fh)["st_size"] == len(rendered)
+    assert core.read("/data/books.tally", 100, 0, fh) == rendered
+    core.release(fh)
 
 
 def _tally_core() -> MountCore:

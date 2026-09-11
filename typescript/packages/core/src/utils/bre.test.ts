@@ -21,6 +21,12 @@ import { breToRegExp } from './bre.js'
 // pattern passed all of these to the RegExp engine and got the opposite answer
 // on most of them, which is why the bug survived.
 const CASES: [string, string, string][] = [
+  ['[]]', 'x]y', 'xyz'],
+  ['[^]]', 'x', ']'],
+  ['[]a.]', '.', 'x'],
+  ['[]a.]', 'a', 'x'],
+  ['[]a.]', ']', 'x'],
+  ['[^]a.]', 'x', ']a.'],
   ['a+b', 'a+b', 'aab'],
   ['a\\+b', 'aab', 'a+b'],
   ['a?b', 'a?b', 'ab'],
@@ -57,11 +63,11 @@ describe('breToRegExp', () => {
   })
 
   it('lets a bracket expression hold a literal close', () => {
-    expect(breToRegExp('[]]')).toBe('[]]')
+    expect(breToRegExp('[]]')).toBe('[\\]]')
   })
 
   it('lets a negated bracket hold a literal close', () => {
-    expect(breToRegExp('[^]]')).toBe('[^]]')
+    expect(breToRegExp('[^]]')).toBe('[^\\]]')
   })
 
   it('does not end a bracket early on a named class', () => {

@@ -34,11 +34,11 @@ describe('EnvVarSchema', () => {
   })
 
   it("refuses 'value' and 'from' together", () => {
-    expect(() => EnvVarSchema.parse({ value: 'v', from: 'env' })).toThrowError(/not both/)
+    expect(() => EnvVarSchema.parse({ value: 'v', from: 'env' })).toThrow(/not both/)
   })
 
   it("needs 'value' or 'from'", () => {
-    expect(() => EnvVarSchema.parse({})).toThrowError(/needs 'value' or 'from'/)
+    expect(() => EnvVarSchema.parse({})).toThrow(/needs 'value' or 'from'/)
   })
 
   it('allows readonly on a managed entry', () => {
@@ -48,16 +48,16 @@ describe('EnvVarSchema', () => {
   })
 
   it('refuses export:false on a managed entry', () => {
-    expect(() => EnvVarSchema.parse({ from: 'env', export: false })).toThrowError(/always exported/)
+    expect(() => EnvVarSchema.parse({ from: 'env', export: false })).toThrow(/always exported/)
   })
 
   it('refuses managed knobs on a literal entry', () => {
-    expect(() => EnvVarSchema.parse({ value: 'v', key: 'k' })).toThrowError(/managed entries/)
-    expect(() => EnvVarSchema.parse({ value: 'v', fetch: 'eager' })).toThrowError(/managed entries/)
+    expect(() => EnvVarSchema.parse({ value: 'v', key: 'k' })).toThrow(/managed entries/)
+    expect(() => EnvVarSchema.parse({ value: 'v', fetch: 'eager' })).toThrow(/managed entries/)
   })
 
   it('rejects an unknown key', () => {
-    expect(() => EnvVarSchema.parse({ value: 'v', bogus: 1 })).toThrowError()
+    expect(() => EnvVarSchema.parse({ value: 'v', bogus: 1 })).toThrow()
   })
 })
 
@@ -109,7 +109,7 @@ describe('SecretSourceSchema', () => {
         source: 'aws-sm',
         config: { region: { from: source, key: 'r' } },
       }),
-    ).toThrowError(/needs no config of its own/)
+    ).toThrow(/needs no config of its own/)
   })
 
   it.each(['env', 'dotenv'])('accepts %s as a config source', (source) => {
@@ -126,10 +126,10 @@ describe('SecretSourceSchema', () => {
         source: 'aws-sm',
         config: { region: { from: 'env', key: 'r', sticky: true } },
       }),
-    ).toThrowError()
+    ).toThrow()
   })
 
   it('refuses an unknown key on the block', () => {
-    expect(() => SecretSourceSchema.parse({ source: 'env', account: 'x' })).toThrowError()
+    expect(() => SecretSourceSchema.parse({ source: 'env', account: 'x' })).toThrow()
   })
 })

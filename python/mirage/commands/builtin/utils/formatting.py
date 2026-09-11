@@ -13,13 +13,122 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from mirage.commands.builtin.utils import constants
 from mirage.commands.builtin.utils.identity import (UNKNOWN_NAME, Identity,
                                                     group_name, owner_name)
+from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.types import (DEVICE_NUMBERS_KEY, LINK_TARGET_KEY, FileStat,
-                          FileType)
+                          FileType, LsTimeKind)
+
+# GNU's --block-size units: the letter, its 1024-based factor and the two
+# suffixes it prints (K for KiB, kB for KB).
+BLOCK_UNITS = "KMGTPEZYRQ"
+LS_TIME_STYLES = ("full-iso", "long-iso", "iso", "locale")
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+@dataclass(frozen=True, slots=True)
+class BlockSize:
+    """How ``--block-size`` scales the size column.
+
+    Args:
+        divisor (int): bytes per printed unit; sizes round up.
+        suffix (str): what GNU prints after the count (``K``, ``kB``,
+            nothing for a bare number).
+        human_base (int | None): 1024 for ``human-readable``, 1000 for
+            ``si``, None for a fixed divisor.
+    """
+    divisor: int = 1
+    suffix: str = ""
+    human_base: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LsColumns:
+    """Which columns an ``ls`` row carries and how its time is spelled.
+
+    Args:
+        owner (bool): the owner column; ``-g`` drops it.
+        group (bool): the group column; ``-o`` drops it.
+        inode (bool): ``-i``; a VFS has no inode, so the column is ``?``,
+            the answer ``stat %i`` already gives.
+        context (bool): ``-Z``; no security context here either, so ``?``
+            as GNU prints it on a filesystem without one.
+        time_kind (LsTimeKind): which timestamp the time column shows.
+        time_style (str): ``locale`` (GNU's default six-month rule),
+            ``full-iso``, ``long-iso``, ``iso``, or ``+FORMAT``.
+        block_size (BlockSize | None): ``--block-size``, None for bytes.
+    """
+    owner: bool = True
+    group: bool = True
+    inode: bool = False
+    context: bool = False
+    time_kind: LsTimeKind = LsTimeKind.MTIME
+    time_style: str = "locale"
+    block_size: BlockSize | None = None
+
+
+DEFAULT_COLUMNS = LsColumns()
+
+
+def parse_block_size(text: str) -> BlockSize | None:
+    """GNU's ``--block-size=SIZE`` grammar, None when it is not one.
+
+    ``human-readable`` and ``si`` pick the two ``-h`` scales; otherwise
+    an optional count is followed by an optional unit letter, ``B``
+    making it decimal (``KB`` is 1000 and prints ``kB``) and ``iB``
+    keeping it binary. A zero count is refused under any unit, as GNU
+    refuses ``0K`` the way it refuses ``0``.
+
+    Args:
+        text (str): the option value as typed.
+    """
+    if text == "human-readable":
+        return BlockSize(1024, "", 1024)
+    if text == "si":
+        return BlockSize(1000, "", 1000)
+    i = 0
+    while i < len(text) and text[i].isdigit():
+        i += 1
+    count = int(text[:i]) if i else 1
+    if count == 0:
+        return None
+    unit = text[i:]
+    if not unit:
+        return BlockSize(count, "") if i else None
+    letter, rest = unit[0].upper(), unit[1:]
+    if letter not in BLOCK_UNITS:
+        return None
+    power = BLOCK_UNITS.index(letter) + 1
+    if rest == "":
+        return BlockSize(count * 1024**power, letter if count == 1 else "")
+    if rest == "B":
+        shown = ("k" if letter == "K" else letter) + "B"
+        return BlockSize(count * 1000**power, shown if count == 1 else "")
+    if rest == "iB":
+        return BlockSize(count * 1024**power, letter if count == 1 else "")
+    return None
+
+
+def scaled_size(n: int, block: BlockSize | None, human: bool) -> str:
+    """The size column under ``-h`` or ``--block-size``, bytes otherwise.
+
+    Args:
+        n (int): the byte count.
+        block (BlockSize | None): the ``--block-size`` scale, if any.
+        human (bool): ``-h``, when no block size overrides it.
+    """
+    if block is None:
+        return human_size(n) if human else str(n)
+    if block.human_base == 1000:
+        return human_scaled(n, 1000, ("", "k", "M", "G", "T", "P", "E"))
+    if block.human_base is not None:
+        return human_size(n)
+    return f"{-(-n // block.divisor)}{block.suffix}"
+
 
 # What a stat field a VFS cannot know renders as, in `stat -c` and in
 # the inode and block columns of `find -ls`.
@@ -83,6 +192,37 @@ def ls_mode_string(s: FileStat) -> str:
     return f"{type_char}{perms}"
 
 
+def _parse_when(modified: str | None) -> datetime | None:
+    """A stat timestamp as an aware UTC datetime, None when unreadable.
+
+    Args:
+        modified (str | None): the ISO timestamp, None when unknown.
+    """
+    if not modified:
+        return None
+    try:
+        text = modified.replace("Z", "+00:00")
+        return datetime.fromisoformat(text).astimezone(timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def _is_recent(when: float, *, find_rule: bool) -> bool:
+    """GNU's "recent" test: within the last half year and not in the
+    future for ls, findutils' wider window for ``find -ls``.
+
+    Args:
+        when (float): the timestamp as epoch seconds.
+        find_rule (bool): findutils' window (old past 180 days, future
+            past an hour) rather than ls's.
+    """
+    now = time.time()
+    if find_rule:
+        return not (now > when + constants.FIND_OLD_SECONDS
+                    or when > now + constants.FIND_FUTURE_SECONDS)
+    return now - constants.LS_RECENT_SECONDS < when < now
+
+
 def _ls_time_string(modified: str | None, *, find_rule: bool = False) -> str:
     """The time column: ``Mon DD HH:MM`` for a recent time, ``Mon DD  YYYY``
     for an old or future one, as GNU prints it.
@@ -93,28 +233,65 @@ def _ls_time_string(modified: str | None, *, find_rule: bool = False) -> str:
             future past an hour) rather than ls's (the last half year,
             never the future).
     """
-    if not modified:
-        return constants.EPOCH_LS_TIME
-    try:
-        text = modified.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(text).astimezone(timezone.utc)
-    except (ValueError, TypeError):
+    dt = _parse_when(modified)
+    if dt is None:
         return constants.EPOCH_LS_TIME
     month = constants.MONTHS[dt.month - 1]
     day = f"{dt.day:>2}"
-    now = time.time()
-    when = dt.timestamp()
-    if find_rule:
-        recent = not (now > when + constants.FIND_OLD_SECONDS
-                      or when > now + constants.FIND_FUTURE_SECONDS)
-    else:
-        recent = now - constants.LS_RECENT_SECONDS < when < now
-    if recent:
+    if _is_recent(dt.timestamp(), find_rule=find_rule):
         return f"{month} {day} {dt.hour:02d}:{dt.minute:02d}"
     return f"{month} {day}  {dt.year}"
 
 
-def _ls_name(s: FileStat) -> str:
+def styled_time(modified: str | None, style: str) -> str:
+    """The time column under ``--time-style``.
+
+    ``full-iso``, ``long-iso`` and ``iso`` are GNU's three ISO shapes
+    (``iso`` pads its year form to the width of its recent form, which
+    is where its trailing space comes from); ``+FORMAT`` is a ``date``
+    format, and one holding a newline names two, the first for a time
+    outside the recent window and the second for one inside it. An
+    unknown time renders the epoch, as the default style does.
+
+    Args:
+        modified (str | None): the ISO timestamp, None when unknown.
+        style (str): the style, ``posix-`` prefix already stripped.
+    """
+    if style == "locale":
+        return _ls_time_string(modified)
+    dt = _parse_when(modified) or _EPOCH
+    if style == "full-iso":
+        return gnu_strftime(dt, "%Y-%m-%d %H:%M:%S.%N %z")
+    if style == "long-iso":
+        return gnu_strftime(dt, "%Y-%m-%d %H:%M")
+    recent = _is_recent(dt.timestamp(), find_rule=False)
+    if style == "iso":
+        return gnu_strftime(dt, "%m-%d %H:%M" if recent else "%Y-%m-%d ")
+    fmt = style[1:]
+    old_fmt, sep, recent_fmt = fmt.partition("\n")
+    return gnu_strftime(dt, recent_fmt if sep and recent else old_fmt)
+
+
+def time_of(s: FileStat, kind: LsTimeKind) -> str | None:
+    """The timestamp an ``ls`` column shows for one row.
+
+    A backend reports one clock, so the access time falls back to the
+    modification time and the status-change time is the modification
+    time (a plain write moves both together on POSIX); a birth time is
+    something no backend here reports, so it stays unknown.
+
+    Args:
+        s (FileStat): the row.
+        kind (LsTimeKind): which timestamp was asked for.
+    """
+    if kind is LsTimeKind.ATIME:
+        return s.atime or s.modified
+    if kind is LsTimeKind.BIRTH:
+        return None
+    return s.modified
+
+
+def ls_name(s: FileStat) -> str:
     """The name column: GNU appends ``-> target`` for a symlink row.
 
     Args:
@@ -129,28 +306,55 @@ def _ls_name(s: FileStat) -> str:
 def _ls_size_and_time(s: FileStat,
                       human: bool,
                       *,
-                      find_rule: bool = False) -> tuple[str, str]:
+                      find_rule: bool = False,
+                      columns: LsColumns = DEFAULT_COLUMNS) -> tuple[str, str]:
     """The size and time columns of one ``ls -l`` row.
 
     A device row carries its major and minor numbers where GNU puts
     them. An entry with neither a size nor a time (a synthetic
     API-backend directory) shows ``-`` in both rather than inventing
-    size 0 and the epoch.
+    size 0 and the epoch, and so does a time kind no backend reports.
 
     Args:
         s (FileStat): the row's stat.
         human (bool): render the size with ``-h`` units.
         find_rule (bool): findutils' recent-time window, for ``-ls``.
+        columns (LsColumns): which time to show, how to spell it, and
+            the ``--block-size`` scale.
     """
+    when_iso = time_of(s, columns.time_kind)
+    # An unknown modification time renders the epoch, as it always has;
+    # only a kind no backend reports at all (birth) is honestly ``-``.
+    known_time = columns.time_kind is not LsTimeKind.BIRTH
     dev = s.extra.get(DEVICE_NUMBERS_KEY) if s.extra else None
     if dev:
-        when = (UNKNOWN_NAME if s.modified is None else _ls_time_string(
-            s.modified, find_rule=find_rule))
+        when = (UNKNOWN_NAME if not known_time or when_iso is None else
+                _ls_time_string(when_iso, find_rule=find_rule)
+                if find_rule else styled_time(when_iso, columns.time_style))
         return f"{dev[0]}, {dev[1]}", when
     if s.size is None and s.modified is None:
         return UNKNOWN_NAME, UNKNOWN_NAME
-    size = human_size(s.size or 0) if human else str(s.size or 0)
-    return size, _ls_time_string(s.modified, find_rule=find_rule)
+    size = scaled_size(s.size or 0, columns.block_size, human)
+    if not known_time:
+        return size, UNKNOWN_NAME
+    if find_rule:
+        return size, _ls_time_string(when_iso, find_rule=True)
+    return size, styled_time(when_iso, columns.time_style)
+
+
+def ls_prefix(columns: LsColumns) -> str:
+    """What ``-i`` and ``-Z`` put in front of a short row: ``?`` for
+    each, since a VFS has neither an inode nor a security context.
+
+    Args:
+        columns (LsColumns): the requested columns.
+    """
+    parts = []
+    if columns.inode:
+        parts.append(UNKNOWN_STAT_FIELD)
+    if columns.context:
+        parts.append(UNKNOWN_STAT_FIELD)
+    return "".join(f"{p} " for p in parts)
 
 
 def format_ls_long(
@@ -159,12 +363,17 @@ def format_ls_long(
     human: bool = False,
     identity: Identity | None = None,
     size_width: int | None = None,
+    columns: LsColumns = DEFAULT_COLUMNS,
+    names: list[str] | None = None,
 ) -> list[str]:
     """Render ``ls -l`` rows: mode, links, owner, group, size, time, name.
 
     The owner is the entry's uid when a backend or the attr overlay
     reports one, else the workspace user; the group is the gid, else the
-    session's profile; ``-`` when nothing names one.
+    session's profile; ``-`` when nothing names one. ``-g`` and ``-o``
+    drop a column, ``-i`` leads with the inode column and ``-Z`` puts the
+    context column before the size, both ``?`` as GNU prints them when
+    the filesystem has neither.
 
     Args:
         stats (list[FileStat]): the rows to render.
@@ -173,17 +382,28 @@ def format_ls_long(
             workspace, where both columns fall back to ``-``.
         size_width (int | None): the size column's width, computed from
             the rows when None.
+        columns (LsColumns): which columns to carry and how to spell the
+            time.
+        names (list[str] | None): the name column per row when the
+            caller decorated it (``--hyperlink``), else the row's own.
     """
-    columns = [_ls_size_and_time(s, human) for s in stats]
+    cells = [_ls_size_and_time(s, human, columns=columns) for s in stats]
     width = size_width if size_width is not None else max(
-        (len(size) for size, _ in columns), default=1)
+        (len(size) for size, _ in cells), default=1)
     out: list[str] = []
-    for s, (raw_size, when) in zip(stats, columns):
-        mode = ls_mode_string(s)
-        size = raw_size.rjust(width)
-        who = owner_name(s.uid, identity)
-        grp = group_name(s.gid, identity)
-        out.append(f"{mode} 1 {who} {grp} {size} {when} {_ls_name(s)}")
+    for i, (s, (raw_size, when)) in enumerate(zip(stats, cells)):
+        fields = [ls_mode_string(s), "1"]
+        if columns.owner:
+            fields.append(owner_name(s.uid, identity))
+        if columns.group:
+            fields.append(group_name(s.gid, identity))
+        if columns.context:
+            fields.append(UNKNOWN_STAT_FIELD)
+        fields.append(raw_size.rjust(width))
+        fields.append(when)
+        fields.append(names[i] if names is not None else ls_name(s))
+        lead = f"{UNKNOWN_STAT_FIELD} " if columns.inode else ""
+        out.append(lead + " ".join(fields))
     return out
 
 

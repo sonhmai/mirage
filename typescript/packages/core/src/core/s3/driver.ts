@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { toIsoZ } from '../../utils/dates.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import type { S3Config } from '../../resource/s3/config.ts'
 import { ResourceName } from '../../types.ts'
@@ -52,7 +53,7 @@ interface Listing {
 }
 
 function isoOf(modified: Date | string | undefined): string {
-  if (modified instanceof Date) return modified.toISOString()
+  if (modified instanceof Date) return toIsoZ(modified)
   return typeof modified === 'string' ? modified : ''
 }
 
@@ -112,7 +113,7 @@ async function* listTree(conn: S3Conn, pfx: string): AsyncIterable<TreeEntry> {
   for await (const page of listPages(conn, { Bucket: conn.config.bucket, Prefix: pfx })) {
     for (const obj of page.Contents ?? []) {
       if (obj.Key === undefined) continue
-      yield { key: obj.Key, size: obj.Size ?? 0 }
+      yield { key: obj.Key, size: obj.Size ?? 0, modified: isoOf(obj.LastModified) }
     }
   }
 }
@@ -127,7 +128,7 @@ async function* listSubtree(conn: S3Conn, stem: string): AsyncIterable<TreeEntry
       const okey = obj.Key
       if (okey === undefined) continue
       if (!(okey === stem || okey.startsWith(base))) continue
-      yield { key: okey, size: obj.Size ?? 0 }
+      yield { key: okey, size: obj.Size ?? 0, modified: isoOf(obj.LastModified) }
     }
   }
 }
@@ -147,7 +148,7 @@ async function head(conn: S3Conn, key: string): Promise<ObjectMeta | null> {
   if (revision === 'null') revision = null
   return {
     size: resp.ContentLength ?? null,
-    modified: resp.LastModified?.toISOString() ?? null,
+    modified: resp.LastModified === undefined ? null : toIsoZ(resp.LastModified),
     fingerprint: etag !== '' ? etag : null,
     revision,
     extra: etag !== '' ? { etag } : {},

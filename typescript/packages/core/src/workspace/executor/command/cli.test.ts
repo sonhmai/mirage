@@ -226,8 +226,17 @@ class CrashingRuntime extends FakePyRuntime {
 class SleepingRuntime extends FakePyRuntime {
   override readonly name = 'sleepy'
 
-  override async run(): Promise<RunResult> {
-    await new Promise((resolve) => setTimeout(resolve, 500))
+  override async run(args: RunArgs): Promise<RunResult> {
+    this.seen.push(args)
+    await new Promise<void>((resolve) =>
+      args.signal?.addEventListener(
+        'abort',
+        () => {
+          resolve()
+        },
+        { once: true },
+      ),
+    )
     return this.result
   }
 }
@@ -552,6 +561,8 @@ describe('handleCli script arm', () => {
     await expect(
       handleCli(install, ['pager'], new Session({ sessionId: 't' }), null, { entries: [sleepy] }),
     ).rejects.toThrow(/pager: timed out/)
+    expect(sleepy.seen[0]?.timeoutSeconds).toBe(0.05)
+    expect(sleepy.seen[0]?.signal?.aborted).toBe(true)
   })
 })
 

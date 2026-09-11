@@ -144,11 +144,18 @@ class TestStatDirectoryFallback:
 
 class TestStatIndexCache:
 
+    @pytest.fixture(autouse=True)
+    def no_backend(self):
+        with patch("mirage.core.s3.driver.async_session",
+                   side_effect=AssertionError("cache hit must not connect")):
+            yield
+
     @pytest.mark.asyncio
     async def test_stat_uses_index_for_folder(self, s3_accessor, index):
-        await index.put(
-            "/s3/data",
-            IndexEntry(id="/data", name="data", resource_type="folder"))
+        await index.set_dir(
+            "/s3",
+            [("data",
+              IndexEntry(id="/data", name="data", resource_type="folder"))])
 
         path = PathSpec(resource_path=mount_key("/s3/data", "/s3"),
                         virtual="/s3/data",
@@ -159,12 +166,11 @@ class TestStatIndexCache:
 
     @pytest.mark.asyncio
     async def test_stat_uses_index_for_file(self, s3_accessor, index):
-        await index.put(
-            "/s3/data/file.txt",
-            IndexEntry(id="/data/file.txt",
-                       name="file.txt",
-                       resource_type="file",
-                       size=2048))
+        await index.set_dir("/s3/data", [("file.txt",
+                                          IndexEntry(id="/data/file.txt",
+                                                     name="file.txt",
+                                                     resource_type="file",
+                                                     size=2048))])
 
         path = PathSpec(resource_path=mount_key("/s3/data/file.txt", "/s3"),
                         virtual="/s3/data/file.txt",

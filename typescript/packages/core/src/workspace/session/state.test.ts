@@ -26,6 +26,8 @@ import { Session } from './session.ts'
 import {
   elementIndex,
   envSnapshot,
+  gateRendering,
+  gateRestoredVars,
   nextRandom,
   seedVar,
   sessionElements,
@@ -415,5 +417,46 @@ describe('a failing coercion', () => {
     await expect(view.set('n', 'x')).rejects.toBeInstanceOf(ArithError)
     const drawn = s.vars[RANDOM].value
     expect(nextRandom(s, typeof drawn === 'string' ? drawn : undefined)).toBe(17772)
+  })
+})
+
+// A snapshot is the one env input the deployment did not author, so the
+// restore fires the same gate a typed `export` does, name by name, and a
+// refusal aborts the whole restore rather than dropping one variable.
+describe('gateRestoredVars', () => {
+  function denying(): Policies {
+    const policies = new Policies()
+    policies.add(new DenySecrets())
+    return policies
+  }
+
+  it('refuses a denied name and passes the rest', async () => {
+    const table = varsFromEnv({ SECRET_A: '1', PUBLIC: '2' })
+    await expect(gateRestoredVars(denying(), 's', table)).rejects.toBeInstanceOf(PolicyDenied)
+    await gateRestoredVars(denying(), 's', varsFromEnv({ PUBLIC: '2' }))
+    await gateRestoredVars(null, 's', table)
+  })
+
+  // The names the shell keeps current itself (`cd` writes PWD/OLDPWD through
+  // `seedVar`, ungated) stay the shell's on a restore too.
+  it('leaves the shell bookkeeping alone', async () => {
+    class DenyAll {
+      preSession(): Action | null {
+        return { kind: 'deny', reason: 'nothing may be set' }
+      }
+    }
+    const policies = new Policies()
+    policies.add(new DenyAll())
+    await gateRestoredVars(policies, 's', varsFromEnv({ PWD: '/', OLDPWD: '/' }))
+    await expect(gateRestoredVars(policies, 's', varsFromEnv({ X: '1' }))).rejects.toBeInstanceOf(
+      PolicyDenied,
+    )
+  })
+
+  it('renders what setVar shows a hook', () => {
+    expect(gateRendering('x')).toBe('x')
+    expect(gateRendering({ b: '2', a: '1' })).toBe('1 2')
+    expect(gateRendering(['p', 'q'])).toBe('p q')
+    expect(gateRendering(null)).toBeNull()
   })
 })

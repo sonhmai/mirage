@@ -65,7 +65,7 @@ describe('ssh ls', () => {
 
   it('-r reverses the ASCII order', async () => {
     const accessor = mixedCaseAccessor()
-    const out = await runLs(accessor, [PathSpec.fromStrPath('/data')], { r: true })
+    const out = await runLs(accessor, [PathSpec.fromStrPath('/data')], { reverse: true })
     expect(out.trimEnd().split('\n')).toEqual(['apple.txt', 'CHERRY.txt', 'Banana.txt'])
   })
 })

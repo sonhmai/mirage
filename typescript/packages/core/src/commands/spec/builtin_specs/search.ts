@@ -50,10 +50,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-C', type: 'str' }),
       new Option({ short: '-e', type: 'str', multiple: true }),
       new Option({ short: '-f', type: 'path', multiple: true }),
-      // -a searches the extensions the -r walk skips as binary;
-      // explicit operands are always read as text, which is the
-      // documented divergence (no "binary file matches" rows).
       new Option({ short: '-a', long: '--text' }),
+      new Option({ long: '--binary-files', type: 'str' }),
       new Option({ long: '--include', type: 'str', multiple: true }),
       new Option({ long: '--exclude', type: 'str', multiple: true }),
       new Option({ long: '--exclude-dir', type: 'str', multiple: true }),

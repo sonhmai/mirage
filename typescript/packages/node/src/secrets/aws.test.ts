@@ -64,8 +64,8 @@ describe('fieldsFromSecretString', () => {
 
 describe('fetchAwsSm', () => {
   it('refuses an empty ref before touching the SDK', async () => {
-    await expect(fetchAwsSm(AWSSMConfig.parse({}), '')).rejects.toThrowError(SecretsError)
-    await expect(fetchAwsSm(AWSSMConfig.parse({}), '')).rejects.toThrowError(/needs a ref/)
+    await expect(fetchAwsSm(AWSSMConfig.parse({}), '')).rejects.toThrow(SecretsError)
+    await expect(fetchAwsSm(AWSSMConfig.parse({}), '')).rejects.toThrow(/needs a ref/)
   })
 
   it('passes the ref as SecretId and shapes the SecretString', async () => {
@@ -95,7 +95,7 @@ describe('fetchAwsSm', () => {
 
   it('refuses a binary secret', async () => {
     state.answer = {}
-    await expect(fetchAwsSm(AWSSMConfig.parse({}), 'bin')).rejects.toThrowError(
+    await expect(fetchAwsSm(AWSSMConfig.parse({}), 'bin')).rejects.toThrow(
       /binary \(SecretBinary\)/,
     )
   })

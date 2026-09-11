@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WorkspaceBinding } from '../../binding.ts'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import type { BridgeDispatchFn } from '../../types.ts'
 import { MontyRuntime } from './index.ts'
 import { MontyUnavailableError } from './binding.ts'
-import { PyodideRuntime } from '../pyodide.ts'
+import { PyodideRuntime } from '../pyodide/runtime.ts'
 import { buildRuntime } from '../../table.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
@@ -153,11 +154,12 @@ const text = (b: Uint8Array | null): string => (b === null ? '' : new TextDecode
 describe('MontyRuntime', () => {
   const runtimes: MontyRuntime[] = []
   const make = (
-    dispatch?: Parameters<MontyRuntime['attach']>[0],
+    dispatch?: WorkspaceBinding['dispatch'],
     listMounts: () => string[] = () => [],
   ): MontyRuntime => {
     const rt = new MontyRuntime()
-    if (dispatch !== undefined) rt.attach(dispatch, new PrefixResolver(listMounts))
+    if (dispatch !== undefined)
+      rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(listMounts)))
     runtimes.push(rt)
     return rt
   }
@@ -773,7 +775,7 @@ describe('MontyRuntime', () => {
       close: () => Promise.resolve(),
     })
     const rt = make()
-    ;(rt as unknown as { pool: unknown }).pool = crashed(
+    ;(rt as unknown as { execution: { pool: unknown } }).execution.pool = crashed(
       new monty.MontyCrashedError('worker gone', { timedOut: false }),
     )
     const dead = await run(rt, 'print(1)')
@@ -781,7 +783,7 @@ describe('MontyRuntime', () => {
     expect(text(dead.stderr)).toBe('monty: worker crashed\n')
 
     const timedOut = make()
-    ;(timedOut as unknown as { pool: unknown }).pool = crashed(
+    ;(timedOut as unknown as { execution: { pool: unknown } }).execution.pool = crashed(
       new monty.MontyCrashedError('watchdog', { timedOut: true }),
     )
     const late = await run(timedOut, 'print(1)')
@@ -892,17 +894,15 @@ describe('monty unavailable', () => {
   it('handlePython maps MontyUnavailableError to exit 127', async () => {
     const { handlePython } = await import('../../../workspace/executor/python/handle.ts')
     const { MontyUnavailableError } = await import('./index.ts')
-    const runtime = {
-      name: 'monty',
-      captures: ['python3', 'python'],
-      language: 'python' as const,
-      reach: 'vfs' as const,
-      config: {},
-      attach: () => undefined,
-      run: () => Promise.reject(new MontyUnavailableError('install @pydantic/monty')),
-      version: () => Promise.reject(new MontyUnavailableError('install @pydantic/monty')),
-      close: () => Promise.resolve(),
+    class UnavailableMonty extends MontyRuntime {
+      override run(): Promise<never> {
+        return Promise.reject(new MontyUnavailableError('install @pydantic/monty'))
+      }
+      override version(): Promise<never> {
+        return this.run()
+      }
     }
+    const runtime = new UnavailableMonty()
     const dispatch = (() => Promise.reject(new Error('unused'))) as never
     const [, io] = await handlePython(
       dispatch,

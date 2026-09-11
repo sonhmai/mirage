@@ -18,6 +18,7 @@ from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import CommandIO, bound_op
 from mirage.commands.builtin.grep_pattern import pattern_arg
+from mirage.commands.builtin.grep_pushdown import text_search_results
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
@@ -137,7 +138,8 @@ def make_search(
                 lines = await searcher(accessor, match, query)
                 if not lines:
                     return b"", IOResult(exit_code=1)
-                return format_records(lines), IOResult()
+                if name != "grep" or text_search_results(lines):
+                    return format_records(lines), IOResult()
 
         resolved = await io.resolve_glob(accessor, paths,
                                          index=opts.index) if paths else []

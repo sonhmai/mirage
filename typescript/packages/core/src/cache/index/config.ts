@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from 'zod'
+
 export const ResourceType = Object.freeze({
   FILE: 'file',
   FOLDER: 'folder',
@@ -32,6 +34,27 @@ export const IndexType = Object.freeze({
 } as const)
 
 export type IndexType = (typeof IndexType)[keyof typeof IndexType]
+
+/**
+ * The wire form of an entry: what pydantic writes for the Python
+ * `IndexEntry`, snake_case and every field, so a row either language writes
+ * is one the other reads. Requiredness mirrors the pydantic model, so a row
+ * missing `resource_type` is refused rather than decoded with the field
+ * empty. `extra` rides along because it is load-bearing (`size_bytes`, the
+ * `folder.childCount` that `find -empty` reads on Graph backends).
+ */
+export const IndexEntryWireSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  resource_type: z.string(),
+  remote_time: z.string().default(''),
+  index_time: z.string().default(''),
+  vfs_name: z.string().default(''),
+  size: z.number().int().nullable().default(null),
+  extra: z.record(z.string(), z.unknown()).default({}),
+})
+
+export type IndexEntryWire = z.output<typeof IndexEntryWireSchema>
 
 export interface IndexEntryInit {
   id: string
@@ -77,6 +100,35 @@ export class IndexEntry {
       extra: updates.extra ?? this.extra,
     })
   }
+
+  /** The wire form, so `JSON.stringify(entry)` is what `model_dump_json` writes. */
+  toJSON(): IndexEntryWire {
+    return {
+      id: this.id,
+      name: this.name,
+      resource_type: this.resourceType,
+      remote_time: this.remoteTime,
+      index_time: this.indexTime,
+      vfs_name: this.vfsName,
+      size: this.size,
+      extra: this.extra,
+    }
+  }
+
+  /** The twin of `model_validate_json`: a row the schema refuses throws. */
+  static fromJSON(raw: string): IndexEntry {
+    const w = IndexEntryWireSchema.parse(JSON.parse(raw))
+    return new IndexEntry({
+      id: w.id,
+      name: w.name,
+      resourceType: w.resource_type,
+      remoteTime: w.remote_time,
+      indexTime: w.index_time,
+      vfsName: w.vfs_name,
+      size: w.size,
+      extra: w.extra,
+    })
+  }
 }
 
 export interface LookupResult {
@@ -88,6 +140,15 @@ export interface ListResult {
   entries?: string[] | null
   status?: LookupStatus | null
 }
+
+/** The directory row, the twin of the pydantic `IndexDirectory`. */
+export const IndexDirectorySchema = z.object({
+  entries: z.array(z.string()),
+  expires_at: z.number(),
+  generation: z.string(),
+})
+
+export type IndexDirectory = z.output<typeof IndexDirectorySchema>
 
 export interface IndexConfig {
   type?: IndexType

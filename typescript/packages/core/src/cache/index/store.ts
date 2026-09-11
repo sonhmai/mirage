@@ -15,6 +15,13 @@
 import type { IndexEntry, ListResult, LookupResult } from './config.ts'
 
 export abstract class IndexCacheStore {
+  /** Merge snapshots by path; deferred stores flush before operations or close. Clear discards them. */
+  abstract seed(
+    entries: ReadonlyMap<string, IndexEntry>,
+    children: ReadonlyMap<string, readonly string[]>,
+    expiresAt: Date,
+  ): void
+  abstract entries(): Promise<Map<string, IndexEntry>>
   abstract get(resourcePath: string): Promise<LookupResult>
   abstract put(resourcePath: string, entry: IndexEntry): Promise<void>
   abstract listDir(resourcePath: string): Promise<ListResult>

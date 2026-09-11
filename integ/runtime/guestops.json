@@ -170,12 +170,14 @@
       },
       "steps": [
         {
-          "command": "python3 -c \"from pathlib import Path; print(sorted(str(p).split('/')[-1] for p in Path('/data').iterdir()))\"",
-          "expect": { "exit": 0, "stdout": "['seed.txt', 'sub']\n" }
+          "command": "python3 -c",
+          "script": "fs/py/list.py",
+          "expect": { "exit": 0, "stdout": "seed.txt\nsub\n" }
         },
         {
-          "command": "python3 -c \"from pathlib import Path; print(Path('/data/sub').is_dir(), Path('/data/seed.txt').is_file())\"",
-          "expect": { "exit": 0, "stdout": "True True\n" }
+          "command": "python3 -c",
+          "script": "fs/py/stat.py",
+          "expect": { "exit": 0, "stdout": "file 5 32768\ndir 16384\nmissing\n" }
         }
       ]
     },
@@ -333,12 +335,14 @@
       },
       "steps": [
         {
-          "command": "js -e \"const [names] = os.readdir('/data'); console.log(names.filter((n) => !n.startsWith('.')).sort().join(','))\"",
-          "expect": { "exit": 0, "stdout": "seed.txt,sub\n" }
+          "command": "js -e",
+          "script": "fs/js/list.js",
+          "expect": { "exit": 0, "stdout": "seed.txt\nsub\n" }
         },
         {
-          "command": "js -e \"const [d] = os.stat('/data/sub'); const [f] = os.stat('/data/seed.txt'); console.log((d.mode & os.S_IFMT) === os.S_IFDIR, (f.mode & os.S_IFMT) === os.S_IFREG)\"",
-          "expect": { "exit": 0, "stdout": "true true\n" }
+          "command": "js -e",
+          "script": "fs/js/stat.js",
+          "expect": { "exit": 0, "stdout": "file 5 32768\ndir 16384\nmissing\n" }
         }
       ]
     },
@@ -434,8 +438,14 @@
       },
       "steps": [
         {
-          "command": "python3 -c \"import os; print(sorted(os.listdir('/data'))); print(os.path.isdir('/data/sub'), os.path.isfile('/data/seed.txt'))\"",
-          "expect": { "exit": 0, "stdout": "['seed.txt', 'sub']\nTrue True\n" }
+          "command": "python3 -c",
+          "script": "fs/py/list.py",
+          "expect": { "exit": 0, "stdout": "seed.txt\nsub\n" }
+        },
+        {
+          "command": "python3 -c",
+          "script": "fs/py/stat.py",
+          "expect": { "exit": 0, "stdout": "file 5 32768\ndir 16384\nmissing\n" }
         }
       ]
     },

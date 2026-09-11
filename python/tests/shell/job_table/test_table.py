@@ -182,3 +182,95 @@ async def test_settle_kill_marker_survives_second_cancel():
         await asyncio.wait_for(job.task, 2)
     await asyncio.wait_for(job.console.wait_finished(), 2)
     assert await job.console.snapshot(Channel.STDERR) == b"Killed"
+
+
+def _submit(table: JobTable, session_id: str, command: str = "x") -> Job:
+    return table.submit(command=command,
+                        run=_run_forever,
+                        cwd="/",
+                        session_id=session_id)
+
+
+@pytest.mark.asyncio
+async def test_each_session_numbers_its_jobs_from_one():
+    table = JobTable()
+    a1 = _submit(table, "a")
+    b1 = _submit(table, "b")
+    a2 = _submit(table, "a")
+    assert (a1.id, b1.id, a2.id) == (1, 1, 2)
+    await table.kill_all()
+
+
+@pytest.mark.asyncio
+async def test_views_are_scoped_to_one_session():
+    table = JobTable()
+    a1 = _submit(table, "a")
+    b1 = _submit(table, "b")
+    assert table.list_jobs("a") == [a1]
+    assert table.running_jobs("b") == [b1]
+    assert table.get(1, "b") is b1
+    assert table.get(2, "b") is None
+    assert table.list_jobs() == []
+    assert sorted(j.session_id for j in table.all_jobs()) == ["a", "b"]
+    await table.kill_all()
+
+
+@pytest.mark.asyncio
+async def test_kill_all_reaches_every_session():
+    table = JobTable()
+    a1 = _submit(table, "a")
+    b1 = _submit(table, "b")
+    killed = await table.kill_all()
+    assert {j.session_id for j in killed} == {"a", "b"}
+    assert a1.status is JobStatus.KILLED
+    assert b1.status is JobStatus.KILLED
+    assert table.all_running_jobs() == []
+
+
+@pytest.mark.asyncio
+async def test_numbering_resets_per_session_when_its_list_empties():
+    table = JobTable()
+    a1 = _submit(table, "a")
+    _submit(table, "b")
+    assert await table.kill(a1.id, "a")
+    table.reap(a1.id, "a")
+    assert _submit(table, "a").id == 1
+    assert _submit(table, "b").id == 2
+    await table.kill_all()
+
+
+@pytest.mark.asyncio
+async def test_close_session_stops_and_forgets_its_jobs():
+    table = JobTable()
+    a1 = _submit(table, "a")
+    a2 = _submit(table, "a")
+    b1 = _submit(table, "b")
+    assert table.disown(a2.id, "a")
+    assert await table.close_session("a") == [a1]
+    assert a1.status is JobStatus.KILLED
+    # Disowned: off the list, still running, bash's own rule.
+    assert a2.status is JobStatus.RUNNING
+    assert table.list_jobs("a") == []
+    assert table.get(1, "a") is None
+    assert table.list_jobs("b") == [b1]
+    # A session reusing the id starts from one and inherits nothing.
+    assert _submit(table, "a").id == 1
+    await table.kill_all()
+    assert a2.status is JobStatus.KILLED
+
+
+@pytest.mark.asyncio
+async def test_load_restores_a_job_into_its_session():
+    table = JobTable()
+    restored = Job(id=3,
+                   command="x",
+                   task=None,
+                   cwd="/",
+                   status=JobStatus.COMPLETED,
+                   session_id="a")
+    table.load(restored)
+    assert table.get(3, "a") is restored
+    assert table.get(3) is None
+    assert _submit(table, "a").id == 4
+    assert _submit(table, "b").id == 1
+    await table.kill_all()

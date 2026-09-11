@@ -20,6 +20,48 @@ from mirage.policy.types import (Action, CommandContext, Deny, DenyScope,
                                  MountRootQuery)
 from mirage.types import PathSpec
 
+LN_VALUED_SHORTS = "tS"
+LN_VALUED_LONGS = frozenset({"--target-directory", "--suffix"})
+
+
+def ln_flag_present(argv: tuple[str, ...], letter: str, long: str) -> bool:
+    """Whether ln's raw argv carries one short flag or its long spelling.
+
+    The scan is option-aware so an operand cannot pose as a flag: it
+    stops at ``--``, skips the value of a valued option (``-t DIR``,
+    ``-S SUF``, their long forms), and inside a cluster stops at the
+    first valued letter, whose remainder is its attached value
+    (``-SfooT`` carries no ``-T``).
+
+    Args:
+        argv (tuple[str, ...]): raw argv after the command name.
+        letter (str): the short flag letter.
+        long (str): the long spelling, with its dashes.
+    """
+    skip = False
+    for tok in argv:
+        if skip:
+            skip = False
+            continue
+        if not isinstance(tok, str):
+            continue
+        if tok == "--":
+            return False
+        if tok == long:
+            return True
+        if tok.startswith("--"):
+            skip = tok in LN_VALUED_LONGS
+            continue
+        if not tok.startswith("-") or len(tok) < 2:
+            continue
+        for pos, ch in enumerate(tok[1:], 1):
+            if ch == letter:
+                return True
+            if ch in LN_VALUED_SHORTS:
+                skip = pos == len(tok) - 1
+                break
+    return False
+
 
 def has_symlink_flag(argv: tuple[str, ...]) -> bool:
     """Spot ln's -s/--symbolic by raw token scan.
@@ -31,12 +73,16 @@ def has_symlink_flag(argv: tuple[str, ...]) -> bool:
     Args:
         argv (tuple[str, ...]): raw argv after the command name.
     """
-    for tok in argv:
-        if isinstance(tok, str) and (tok == "--symbolic" or
-                                     (tok.startswith("-") and "s" in tok[1:]
-                                      and not tok.startswith("--"))):
-            return True
-    return False
+    return ln_flag_present(argv, "s", "--symbolic")
+
+
+def has_no_target_flag(argv: tuple[str, ...]) -> bool:
+    """Spot ln's -T/--no-target-directory by raw token scan.
+
+    Args:
+        argv (tuple[str, ...]): raw argv after the command name.
+    """
+    return ln_flag_present(argv, "T", "--no-target-directory")
 
 
 def has_parents_flag(argv: tuple[str, ...]) -> bool:
@@ -136,7 +182,11 @@ class MountRootPolicy(Policy):
                     return Deny(f"cannot touch '{p.virtual}': Is a directory",
                                 DenyScope.OPERAND)
         elif cmd == "ln":
-            if ctx.registry.is_mount_root(ctx.paths[-1].virtual):
+            # A mount root is refused only as the link NAME. Without -T
+            # a directory operand is the directory to link into, GNU's
+            # rule, and creating inside a mount is ordinary.
+            if has_no_target_flag(ctx.argv) and ctx.registry.is_mount_root(
+                    ctx.paths[-1].virtual):
                 kind = ("symbolic link"
                         if has_symlink_flag(ctx.argv) else "link")
                 return Deny(

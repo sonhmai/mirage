@@ -292,7 +292,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
             glob (str | None): filename filter for which files to search.
             max_count (int | None): total cap on matches returned.
         """
-        parts = ["grep", "-rn"]
+        parts = ["grep", "-rnH"]
         if glob:
             parts.extend(["--include", shlex.quote(glob)])
         parts.append(shlex.quote(pattern))

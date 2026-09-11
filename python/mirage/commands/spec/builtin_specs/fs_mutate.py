@@ -197,13 +197,31 @@ SPECS: dict[str, CommandSpec] = {
         ),
         rest=Operand(type="path"),
     ),
+    # ln runs in the executor for both link kinds (a symlink is namespace
+    # state, a "hard link" is a byte copy through the op door), so this
+    # spec is its grammar authority and no builder binds it.
     'ln':
     CommandSpec(
         options=(
-            Option(short="-s"),
-            Option(short="-f"),
-            Option(short="-n"),
-            Option(short="-v"),
+            Option(short="-s", long="--symbolic"),
+            Option(short="-f", long="--force"),
+            Option(short="-n", long="--no-dereference"),
+            Option(short="-v", long="--verbose"),
+            Option(short="-r", long="--relative"),
+            Option(short="-L", long="--logical"),
+            Option(short="-P", long="--physical"),
+            Option(short="-d", long="--directory"),
+            Option(short="-F"),
+            # GNU: -b never takes an argument; only --backup= carries a
+            # value, so the short stays clusterable (-sbv).
+            Option(short="-b",
+                   long="--backup",
+                   type="str",
+                   value_optional=True,
+                   short_value=False),
+            Option(short="-S", long="--suffix", type="str"),
+            Option(short="-t", long="--target-directory", type="path"),
+            Option(short="-T", long="--no-target-directory"),
         ),
         rest=Operand(type="path"),
     ),

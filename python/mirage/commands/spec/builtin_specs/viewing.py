@@ -53,7 +53,16 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-c", type="str"),
             Option(short="-q"),
             Option(short="-v"),
-            Option(short="-f", long="--follow"),
+            # GNU: -f never takes an argument; only --follow= carries the
+            # descriptor/name choice, so the short stays clusterable.
+            Option(short="-f",
+                   long="--follow",
+                   type="str",
+                   value_optional=True,
+                   short_value=False),
+            Option(short="-F"),
+            Option(long="--retry"),
+            Option(short="-s", long="--sleep-interval", type="str"),
         ),
         rest=Operand(type="path"),
     ),

@@ -12,9 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-import { predicate } from './store.ts'
+import { connect } from '@lancedb/lancedb'
+import { resolveLanceDBConfig } from '@struktoai/mirage-core/resource/lancedb/config'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+
+import { LanceDBStore, predicate } from './store.ts'
 
 describe('lancedb where clause', () => {
   it('narrows on a name prefix, cast so a numeric id column takes one', () => {
@@ -46,5 +52,55 @@ describe('lancedb where clause', () => {
     expect(predicate('id', { label: 'cat' }, '')).toBe("`label` = 'cat'")
     expect(predicate('id', {}, '')).toBe('')
     expect(predicate('', {}, 'doc-1')).toBe('')
+  })
+})
+
+const CAP = 5
+const WIDE = 40
+
+describe('lancedb store distinct', () => {
+  let root = ''
+  let store: LanceDBStore
+
+  beforeAll(async () => {
+    root = mkdtempSync(join(tmpdir(), 'mirage-lancedb-'))
+    const rows: Record<string, unknown>[] = []
+    for (let i = 0; i < WIDE; i += 1) rows.push({ id: i, label: 'all' })
+    rows.push(
+      { id: WIDE, label: '' },
+      { id: WIDE + 1, label: '.env' },
+      { id: WIDE + 2, label: 'a∕x' },
+    )
+    const db = await connect(root)
+    await db.createTable('crowded', rows)
+    db.close()
+    store = new LanceDBStore(
+      resolveLanceDBConfig({
+        uri: root,
+        table: 'crowded',
+        groupBy: ['label'],
+        idColumn: 'id',
+        titleColumn: 'label',
+        maxRows: CAP,
+      }),
+    )
+  })
+
+  afterAll(async () => {
+    await store.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('caps the rows when no test is given', async () => {
+    expect(await store.distinct('crowded', 'label', {}, CAP)).toEqual(['all'])
+  })
+
+  it('counts the values a test keeps, streamed past the head of the table', async () => {
+    // The head of the table is all `all`, so a window over it never reaches
+    // the values the test asks for; the scan runs until the cap is met.
+    const lead = (value: string) => value === '' || value.startsWith('.')
+    expect(await store.distinct('crowded', 'label', {}, CAP, '', lead)).toEqual(['', '.env'])
+    const slashed = (value: string) => value.startsWith('a∕')
+    expect(await store.distinct('crowded', 'label', {}, CAP, 'a', slashed)).toEqual(['a∕x'])
   })
 })

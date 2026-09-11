@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { toIsoZ } from '../../utils/dates.ts'
 import { underPath } from '../../utils/key_prefix.ts'
 import { KeyLock } from '../lock.ts'
 import { LookupStatus, type IndexEntry, type ListResult, type LookupResult } from './config.ts'
@@ -19,7 +20,7 @@ import { IndexCacheStore } from './store.ts'
 
 export class RAMIndexCacheStore extends IndexCacheStore {
   private readonly ttl: number
-  private readonly entries = new Map<string, IndexEntry>()
+  private readonly entryMap = new Map<string, IndexEntry>()
   private readonly children = new Map<string, string[]>()
   private readonly expiry = new Map<string, number>()
   private readonly lock = new KeyLock()
@@ -29,8 +30,30 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     this.ttl = options.ttl ?? 600
   }
 
+  seed(
+    entries: ReadonlyMap<string, IndexEntry>,
+    children: ReadonlyMap<string, readonly string[]>,
+    expiresAt: Date,
+  ): void {
+    const nowIso = toIsoZ(new Date())
+    for (const [path, entry] of entries) {
+      this.entryMap.set(
+        path,
+        entry.indexTime === '' ? entry.copyWith({ indexTime: nowIso }) : entry,
+      )
+    }
+    for (const [path, keys] of children) {
+      this.children.set(path, [...keys])
+      this.expiry.set(path, expiresAt.getTime())
+    }
+  }
+
+  entries(): Promise<Map<string, IndexEntry>> {
+    return Promise.resolve(new Map(this.entryMap))
+  }
+
   get(resourcePath: string): Promise<LookupResult> {
-    const entry = this.entries.get(resourcePath)
+    const entry = this.entryMap.get(resourcePath)
     if (entry === undefined) return Promise.resolve({ status: LookupStatus.NOT_FOUND })
     return Promise.resolve({ entry })
   }
@@ -38,8 +61,8 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   put(resourcePath: string, entry: IndexEntry): Promise<void> {
     return this.lock.withLock(resourcePath, () => {
       const stored =
-        entry.indexTime === '' ? entry.copyWith({ indexTime: new Date().toISOString() }) : entry
-      this.entries.set(resourcePath, stored)
+        entry.indexTime === '' ? entry.copyWith({ indexTime: toIsoZ(new Date()) }) : entry
+      this.entryMap.set(resourcePath, stored)
       return Promise.resolve()
     })
   }
@@ -47,7 +70,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   listDir(resourcePath: string): Promise<ListResult> {
     const exp = this.expiry.get(resourcePath)
     if (exp === undefined) return Promise.resolve({ status: LookupStatus.NOT_FOUND })
-    if (Date.now() > exp) return Promise.resolve({ status: LookupStatus.EXPIRED })
+    if (Date.now() >= exp) return Promise.resolve({ status: LookupStatus.EXPIRED })
     const children = this.children.get(resourcePath) ?? []
     return Promise.resolve({ entries: children })
   }
@@ -60,13 +83,13 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     return this.lock.withLock(resourcePath, () => {
       const now = Date.now()
       const exp = expiredAt ? expiredAt.getTime() : now + this.ttl * 1000
-      const nowIso = new Date(now).toISOString()
+      const nowIso = toIsoZ(new Date(now))
       const prefix = resourcePath === '/' ? '/' : `${resourcePath}/`
       const childKeys: string[] = []
       for (const [name, entry] of entries) {
         const fullPath = prefix + name
         const stored = entry.indexTime === '' ? entry.copyWith({ indexTime: nowIso }) : entry
-        this.entries.set(fullPath, stored)
+        this.entryMap.set(fullPath, stored)
         childKeys.push(fullPath)
       }
       this.children.set(resourcePath, childKeys)
@@ -77,7 +100,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
 
   invalidateDir(resourcePath: string): Promise<void> {
     for (const child of this.children.get(resourcePath) ?? []) {
-      this.entries.delete(child)
+      this.entryMap.delete(child)
     }
     this.expiry.delete(resourcePath)
     this.children.delete(resourcePath)
@@ -85,8 +108,8 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   }
 
   invalidatePrefix(resourcePath: string): Promise<void> {
-    for (const key of [...this.entries.keys()]) {
-      if (underPath(key, resourcePath)) this.entries.delete(key)
+    for (const key of [...this.entryMap.keys()]) {
+      if (underPath(key, resourcePath)) this.entryMap.delete(key)
     }
     for (const key of [...this.children.keys()]) {
       if (underPath(key, resourcePath)) this.children.delete(key)
@@ -104,7 +127,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   }
 
   clear(): Promise<void> {
-    this.entries.clear()
+    this.entryMap.clear()
     this.children.clear()
     this.expiry.clear()
     this.lock.clear()

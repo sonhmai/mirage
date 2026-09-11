@@ -75,6 +75,9 @@ export interface Target {
   mail?: string
   calendar?: string
   forms?: string
+  // Documents that carry tabs, seeded through /reset extras because the
+  // Docs API cannot create a tab.
+  docs?: string
   dataset?: string
   agentId?: string
   facet?: string

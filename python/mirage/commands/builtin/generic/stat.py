@@ -418,7 +418,8 @@ async def stat(
             s = await operand_stat(p,
                                    stat_fn=stat_fn,
                                    stat_path=stat_path,
-                                   mounts=mounts)
+                                   mounts=mounts,
+                                   links=links)
         except FS_ERRORS as exc:
             # GNU stat keeps reporting the remaining operands, exit 1.
             err += fs_error_line("stat", p, exc).encode()

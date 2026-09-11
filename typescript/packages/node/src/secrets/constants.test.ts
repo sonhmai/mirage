@@ -34,7 +34,7 @@ describe('builtin registration', () => {
     // The probe asks the resolver, it does not load the SDK, so this
     // passes here (devDependency) and refuses with the package to
     // install where the optional peer is absent.
-    expect(() => sourceFor('1password')).not.toThrowError()
+    expect(() => sourceFor('1password')).not.toThrow()
   })
 
   it('the env builtin fetches through the lazy wrapper', async () => {

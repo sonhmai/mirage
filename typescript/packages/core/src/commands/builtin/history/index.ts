@@ -104,7 +104,13 @@ const HISTORY_TAIL = command({
   resource: R,
   spec: specOf('tail'),
   fn: (a: HistoryAccessor, paths, texts, opts) =>
-    tailGeneric(paths, texts, opts, (p) => histStream(a, p)),
+    tailGeneric(
+      paths,
+      texts,
+      opts,
+      (p) => histStream(a, p),
+      (p) => histStat(a, p),
+    ),
   aggregate: headerAggregate,
 })
 

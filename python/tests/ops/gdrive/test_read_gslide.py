@@ -50,15 +50,14 @@ def index():
 
 @pytest.mark.asyncio
 async def test_read_gslide_renders_presentation_json(accessor, index):
-    await index.put(
-        "/slides/deck.gslide.json",
-        IndexEntry(
-            id="slide123",
-            name="Deck",
-            resource_type="gdrive/gslide",
-            remote_time="2026-04-01T00:00:00Z",
-            vfs_name="deck.gslide.json",
-        ))
+    await index.set_dir('/slides', [('deck.gslide.json',
+                                     IndexEntry(
+                                         id="slide123",
+                                         name="Deck",
+                                         resource_type="gdrive/gslide",
+                                         remote_time="2026-04-01T00:00:00Z",
+                                         vfs_name="deck.gslide.json",
+                                     ))])
     slide_json = json.dumps({"presentationId": "slide123"}).encode()
     with patch(
             "mirage.core.gdrive.read.read_presentation",

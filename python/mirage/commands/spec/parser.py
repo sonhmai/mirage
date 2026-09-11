@@ -52,6 +52,7 @@ def _set_value_flag(
         else:
             flags[name] = [value]
     else:
+        flags.pop(name, None)
         flags[name] = value
 
 
@@ -115,6 +116,7 @@ def _set_bool_flag(
         prev = flags.get(name)
         flags[name] = prev + 1 if isinstance(prev, int) else 1
     else:
+        flags.pop(name, None)
         flags[name] = True
 
 

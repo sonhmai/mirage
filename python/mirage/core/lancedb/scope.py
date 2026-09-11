@@ -14,7 +14,7 @@
 
 from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.core.hierarchy.bind import per_accessor
-from mirage.core.hierarchy.codec import Codec
+from mirage.core.hierarchy.codec import PATH_SAFE, Codec
 from mirage.core.hierarchy.scope import (DetectFn, Scope, ScopeMatch, Segment,
                                          Slot, make_detect_scope)
 from mirage.resource.lancedb.config import LanceDBConfig
@@ -33,7 +33,9 @@ def scopes_for(config: LanceDBConfig) -> tuple[Scope, ...]:
     adds a second leaf suffix beside the ``.md`` card. Group slots are
     named positionally (``g0``, ``g1``, ...) so a column named ``table``
     cannot collide with the table slot; ``filters_of`` maps them back to
-    column names. Every partial depth shares the one ``group`` kind, and
+    column names. A group slot decodes through ``PATH_SAFE``, so a value
+    holding ``/`` keeps its own directory and the WHERE clause holds the
+    exact value. Every partial depth shares the one ``group`` kind, and
     its lister derives the depth from the slots, so the lister table
     stays static while the scope table varies per mount.
 
@@ -41,7 +43,8 @@ def scopes_for(config: LanceDBConfig) -> tuple[Scope, ...]:
         config (LanceDBConfig): the mount's config.
     """
     prefix: tuple[Segment, ...] = () if config.table else (Slot("table"), )
-    groups = tuple(Slot(f"g{i}") for i in range(len(config.group_by)))
+    groups = tuple(
+        Slot(f"g{i}", PATH_SAFE) for i in range(len(config.group_by)))
     scopes = [
         Scope(kind="group", segments=prefix + groups[:depth])
         for depth in range(len(groups) + 1) if depth or prefix

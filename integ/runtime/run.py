@@ -23,10 +23,15 @@ import json  # noqa: E402
 import logging  # noqa: E402
 import os  # noqa: E402
 import re  # noqa: E402
+import shlex  # noqa: E402
 import uuid  # noqa: E402
 from typing import Any  # noqa: E402
 
-from mirage import MountMode, Workspace  # noqa: E402
+from mirage import EXTERNAL_COMMANDS  # noqa: E402
+from mirage import MountMode  # noqa: E402
+from mirage import ProcessExecution  # noqa: E402
+from mirage import ProcessExecutorMixin  # noqa: E402
+from mirage import Workspace  # noqa: E402
 from mirage.commands.cli.types import CLISpec  # noqa: E402
 from mirage.errors import classify  # noqa: E402
 from mirage.policy import Policy  # noqa: E402
@@ -71,7 +76,25 @@ class EchoBox(Runtime, LineExecutorMixin):
 # unknown-name refusal lists it. The registry suite pins that door.
 register_runtime(EchoBox.name, EchoBox)
 
-RUNTIME_KINDS: dict[str, type[Runtime]] = {EchoBox.name: EchoBox}
+
+class ProcessBox(Runtime, ProcessExecutorMixin):
+    """A host-authored argv runtime using the public capability import."""
+
+    name = "processbox"
+    captures = (EXTERNAL_COMMANDS, )
+
+    async def run_process(self, request: ProcessExecution) -> RunResult:
+        return RunResult(
+            stdout=(json.dumps(request.argv, separators=(",", ":")) +
+                    "\n").encode(),
+            stderr=None,
+            exit_code=0)
+
+
+RUNTIME_KINDS: dict[str, type[Runtime]] = {
+    EchoBox.name: EchoBox,
+    ProcessBox.name: ProcessBox,
+}
 
 
 # Each test policy decides synchronously in `decide`; the hook the engine
@@ -334,7 +357,15 @@ async def _build_resource(spec: dict[str, Any], run_id: str) -> Any:
     kind = spec["resource"]
     if kind == "ram":
         from mirage.resource.ram import RAMResource
-        return RAMResource()
+        resource = RAMResource()
+        if "generated_files" in spec:
+            resource.load_state({
+                "files": {
+                    f"/file-{i}.txt": b"unused"
+                    for i in range(spec["generated_files"])
+                },
+            })
+        return resource
     if kind == "redis":
         from mirage.resource.redis import RedisResource
         return RedisResource(url=os.environ["REDIS_URL"],
@@ -440,16 +471,17 @@ def _check_ops(expect: dict[str, Any], seen: list[str]) -> list[str]:
 
     Args:
         expect (dict[str, Any]): the step's expect block; ``ops_contain``
-            and ``ops_absent`` hold ``"<op> <path>"`` strings.
+            and ``ops_absent`` hold an op name or ``"<op> <path>"``.
         seen (list[str]): the records the step appended, one
             ``"<op> <path>"`` string per record, in arrival order.
     """
+    recorded = set(seen) | {entry.partition(" ")[0] for entry in seen}
     problems = []
     for entry in expect.get("ops_contain", []):
-        if entry not in seen:
+        if entry not in recorded:
             problems.append(f"ledger missing {entry!r}: got {seen!r}")
     for entry in expect.get("ops_absent", []):
-        if entry in seen:
+        if entry in recorded:
             problems.append(f"ledger must not hold {entry!r}: got {seen!r}")
     return problems
 
@@ -578,6 +610,10 @@ async def _run_step(ws: Workspace, case_id: str, index: int,
                             f"expected {expect['content']!r}")
         return [f"{case_id} {label}: {p}" for p in problems]
     command = step["command"]
+    if "script" in step:
+        source = (SUITE_DIR.parent / "fixtures" / "runtime" /
+                  step["script"]).read_text()
+        command += " " + shlex.quote(source)
     kwargs: dict[str, Any] = {}
     if "runtime" in step:
         kwargs["runtime"] = step["runtime"]
@@ -623,6 +659,14 @@ async def _run_case(suite: str, case: dict[str, Any]) -> list[str]:
     ws = await _build_workspace(world, run_id)
     problems: list[str] = []
     try:
+        runtimes = {runtime.name: runtime for runtime in ws._runtimes.entries}
+        for name, operations in case.get("filesystem", {}).items():
+            supported = runtimes[name].capabilities.filesystem
+            for operation, expected in operations.items():
+                if (operation in supported) != expected:
+                    problems.append(
+                        f"{case_id}: {name} filesystem {operation}: "
+                        f"expected {expected}, got {operation in supported}")
         for index, step in enumerate(case["steps"]):
             problems.extend(await _run_step(ws, case_id, index, step))
     finally:

@@ -97,6 +97,15 @@ def test_single_collection_pin_elides_collection():
     assert filters_of(config, match) == {"label": "cat", "kind": "big"}
 
 
+def test_filters_decode_escaped_group_segments():
+    config = _cfg(collection="animals", group_by=["label"])
+    detect = _detect(config)
+    assert filters_of(config, detect(_ps("/a∕b"))) == {"label": "a/b"}
+    assert filters_of(config, detect(_ps("/a⁄∕b"))) == {"label": "a∕b"}
+    assert filters_of(config, detect(_ps("/⁄"))) == {"label": ""}
+    assert filters_of(config, detect(_ps("/⁄.env"))) == {"label": ".env"}
+
+
 def test_detect_for_caches_per_accessor():
     accessor = QdrantAccessor(_cfg())
     assert detect_for(accessor) is detect_for(accessor)

@@ -51,7 +51,7 @@ export const CP_BUILDER: Builder = {
     // cache instead of re-fetching, matching the find command.
     const findFn: NativeCopy['find'] =
       find !== undefined
-        ? (src, options) => find(accessor, src, options)
+        ? (src, options) => find(accessor, src, options, idx)
         : (src, options) =>
             walkFind(
               src,

@@ -32,9 +32,7 @@ describe('ScratchTree reads and writes', () => {
 
   it('spells a missing file the way python does', () => {
     const tree = new ScratchTree()
-    expect(() => tree.readText('/nope')).toThrowError(
-      "[Errno 2] No such file or directory: '/nope'",
-    )
+    expect(() => tree.readText('/nope')).toThrow("[Errno 2] No such file or directory: '/nope'")
     try {
       tree.readText('/nope')
     } catch (err) {
@@ -47,10 +45,10 @@ describe('ScratchTree reads and writes', () => {
     tree.mkdir('/d', false, false)
     expect(() => {
       tree.write('/d', 'x')
-    }).toThrowError("[Errno 21] Is a directory: '/d'")
+    }).toThrow("[Errno 21] Is a directory: '/d'")
     expect(() => {
       tree.write('/missing/x', 'v')
-    }).toThrowError("[Errno 2] No such file or directory: '/missing/x'")
+    }).toThrow("[Errno 2] No such file or directory: '/missing/x'")
   })
 
   it('append tracks the storage type of the most recent write', () => {
@@ -70,7 +68,7 @@ describe('ScratchTree open establishing', () => {
     const tree = new ScratchTree()
     expect(() => {
       tree.open('/x', parseMode('r'))
-    }).toThrowError("[Errno 2] No such file or directory: '/x'")
+    }).toThrow("[Errno 2] No such file or directory: '/x'")
     tree.open('/x', parseMode('w'))
     expect(tree.readText('/x')).toBe('')
     tree.write('/x', 'keep')
@@ -86,7 +84,7 @@ describe('ScratchTree open establishing', () => {
     expect(tree.readText('/new')).toBe('')
     expect(() => {
       tree.open('/new', parseMode('x'))
-    }).toThrowError("[Errno 17] File exists: '/new'")
+    }).toThrow("[Errno 17] File exists: '/new'")
   })
 
   it("a binary 'w' seeds bytes, so a later read_bytes needs no decode", () => {
@@ -102,19 +100,19 @@ describe('ScratchTree mkdir', () => {
     tree.mkdir('/d', false, false)
     expect(() => {
       tree.mkdir('/d', false, false)
-    }).toThrowError("[Errno 17] File exists: '/d'")
+    }).toThrow("[Errno 17] File exists: '/d'")
     tree.mkdir('/d', false, true)
     tree.write('/f', 'x')
     expect(() => {
       tree.mkdir('/f', false, true)
-    }).toThrowError("[Errno 17] File exists: '/f'")
+    }).toThrow("[Errno 17] File exists: '/f'")
   })
 
   it('parents creates the chain; without it a missing parent misses', () => {
     const tree = new ScratchTree()
     expect(() => {
       tree.mkdir('/a/b/c', false, false)
-    }).toThrowError("[Errno 2] No such file or directory: '/a/b/c'")
+    }).toThrow("[Errno 2] No such file or directory: '/a/b/c'")
     tree.mkdir('/a/b/c', true, false)
     expect(tree.isDir('/a/b/c')).toBe(true)
   })
@@ -124,10 +122,10 @@ describe('ScratchTree mkdir', () => {
     tree.write('/f', 'x')
     expect(() => {
       tree.mkdir('/f/sub', false, false)
-    }).toThrowError("[Errno 20] Not a directory: '/f/sub'")
+    }).toThrow("[Errno 20] Not a directory: '/f/sub'")
     expect(() => {
       tree.mkdir('/f/a/b', true, false)
-    }).toThrowError("[Errno 20] Not a directory: '/f/a/b'")
+    }).toThrow("[Errno 20] Not a directory: '/f/a/b'")
   })
 })
 
@@ -138,13 +136,13 @@ describe('ScratchTree removal and listing', () => {
     tree.mkdir('/d', false, false)
     expect(() => {
       tree.unlink('/d')
-    }).toThrowError("[Errno 21] Is a directory: '/d'")
+    }).toThrow("[Errno 21] Is a directory: '/d'")
     tree.unlink('/f')
     expect(tree.exists('/f')).toBe(false)
     tree.write('/d/inner', 'x')
     expect(() => {
       tree.rmdir('/d')
-    }).toThrowError("[Errno 39] Directory not empty: '/d'")
+    }).toThrow("[Errno 39] Directory not empty: '/d'")
     tree.unlink('/d/inner')
     tree.rmdir('/d')
     expect(tree.exists('/d')).toBe(false)
@@ -156,7 +154,7 @@ describe('ScratchTree removal and listing', () => {
     tree.mkdir('/a', false, false)
     expect(tree.iterdir('/')).toEqual(['/b.txt', '/a'])
     expect(tree.exists('/')).toBe(true)
-    expect(() => tree.iterdir('/b.txt')).toThrowError("[Errno 20] Not a directory: '/b.txt'")
+    expect(() => tree.iterdir('/b.txt')).toThrow("[Errno 20] Not a directory: '/b.txt'")
   })
 })
 
@@ -179,20 +177,20 @@ describe('ScratchTree rename', () => {
     const tree = new ScratchTree()
     expect(() => {
       tree.rename('/gone', '/x')
-    }).toThrowError("[Errno 2] No such file or directory: '/gone' -> '/x'")
+    }).toThrow("[Errno 2] No such file or directory: '/gone' -> '/x'")
     tree.write('/f', 'x')
     tree.mkdir('/d', false, false)
     expect(() => {
       tree.rename('/f', '/d')
-    }).toThrowError("[Errno 21] Is a directory: '/f' -> '/d'")
+    }).toThrow("[Errno 21] Is a directory: '/f' -> '/d'")
     tree.mkdir('/e', false, false)
     tree.write('/e/inner', 'x')
     expect(() => {
       tree.rename('/d', '/e')
-    }).toThrowError("[Errno 66] Directory not empty: '/d' -> '/e'")
+    }).toThrow("[Errno 66] Directory not empty: '/d' -> '/e'")
     expect(() => {
       tree.rename('/d', '/f')
-    }).toThrowError("[Errno 20] Not a directory: '/d' -> '/f'")
+    }).toThrow("[Errno 20] Not a directory: '/d' -> '/f'")
   })
 
   it('moves a directory with its contents', () => {
@@ -213,7 +211,7 @@ describe('ScratchTree rename', () => {
     tree.write('/src/f', 'x')
     expect(() => {
       tree.rename('/src', '/src/sub/moved')
-    }).toThrowError("[Errno 22] Invalid argument: '/src' -> '/src/sub/moved'")
+    }).toThrow("[Errno 22] Invalid argument: '/src' -> '/src/sub/moved'")
     // Nothing moved and nothing was orphaned.
     expect(tree.readText('/src/f')).toBe('x')
     expect(tree.isDir('/src/sub')).toBe(true)

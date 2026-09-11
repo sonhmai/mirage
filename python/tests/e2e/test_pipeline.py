@@ -332,11 +332,13 @@ async def test_for_loop_basic(ws):
     assert "bbb" in out
 
 
+# bash 5.2: the loop variable is an ordinary variable and keeps its last
+# value after the loop; the shadowed value is not put back.
 @pytest.mark.asyncio
-async def test_for_loop_variable_restored(ws):
+async def test_for_loop_variable_keeps_its_last_value(ws):
     await ws.execute("export i=original")
     await ws.execute("for i in 1 2 3; do echo $i; done")
-    assert ws.get_session(ws.default_session_id).env["i"] == "original"
+    assert ws.get_session(ws.default_session_id).env["i"] == "3"
 
 
 # --- If/else ---

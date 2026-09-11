@@ -151,10 +151,12 @@ class TreeEntry:
     Args:
         key (str): raw backend key; a directory marker keeps its
             trailing slash.
-        size (int): byte size; markers report 0.
+        size (int | None): byte size; None when unknown, markers report 0.
+        modified (str): ISO-8601 mtime, empty when unknown.
     """
     key: str
-    size: int = 0
+    size: int | None = 0
+    modified: str = ""
 
 
 @dataclass(frozen=True, slots=True)

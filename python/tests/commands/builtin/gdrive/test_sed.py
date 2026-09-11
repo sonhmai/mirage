@@ -75,16 +75,18 @@ def _scope(path: str, prefix: str = "") -> PathSpec:
 
 @pytest.mark.asyncio
 async def test_sed_simple_substitution(accessor, index):
-    await index.put(
-        "/test/file.txt",
-        IndexEntry(
-            id="file123",
-            name="file.txt",
-            resource_type="gdrive/file",
-            remote_time="2026-01-01T00:00:00Z",
-            vfs_name="file.txt",
-            size=100,
-        ))
+    await index.set_dir(
+        "/test",
+        [("file.txt",
+          IndexEntry(
+              id="file123",
+              name="file.txt",
+              resource_type="gdrive/file",
+              remote_time="2026-01-01T00:00:00Z",
+              vfs_name="file.txt",
+              size=100,
+          ))],
+    )
     with patch(
             "mirage.core.google.drive.google_get_bytes",
             new_callable=AsyncMock,
@@ -99,16 +101,18 @@ async def test_sed_simple_substitution(accessor, index):
 
 @pytest.mark.asyncio
 async def test_sed_print_program(accessor, index):
-    await index.put(
-        "/test/file.txt",
-        IndexEntry(
-            id="file123",
-            name="file.txt",
-            resource_type="gdrive/file",
-            remote_time="2026-01-01T00:00:00Z",
-            vfs_name="file.txt",
-            size=100,
-        ))
+    await index.set_dir(
+        "/test",
+        [("file.txt",
+          IndexEntry(
+              id="file123",
+              name="file.txt",
+              resource_type="gdrive/file",
+              remote_time="2026-01-01T00:00:00Z",
+              vfs_name="file.txt",
+              size=100,
+          ))],
+    )
     with patch(
             "mirage.core.google.drive.google_get_bytes",
             new_callable=AsyncMock,
@@ -132,16 +136,18 @@ async def test_sed_stdin(accessor, index):
 
 @pytest.mark.asyncio
 async def test_sed_in_place_writes_back(accessor, index):
-    await index.put(
-        "/test/file.txt",
-        IndexEntry(
-            id="file123",
-            name="file.txt",
-            resource_type="gdrive/file",
-            remote_time="2026-01-01T00:00:00Z",
-            vfs_name="file.txt",
-            size=100,
-        ))
+    await index.set_dir(
+        "/test",
+        [("file.txt",
+          IndexEntry(
+              id="file123",
+              name="file.txt",
+              resource_type="gdrive/file",
+              remote_time="2026-01-01T00:00:00Z",
+              vfs_name="file.txt",
+              size=100,
+          ))],
+    )
     node = DriveNode(id="file123", name="file.txt", mime_type="text/plain")
     with patch(
             "mirage.core.google.drive.google_get_bytes",

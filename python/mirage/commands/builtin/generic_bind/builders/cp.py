@@ -52,7 +52,7 @@ async def _walk_find(readdir: OperationFn,
 def _make_find(ops: CommandIO, accessor: Accessor,
                index: IndexCacheStore) -> OperationFn:
     if ops.find is not None:
-        return partial(ops.find, accessor)
+        return partial(ops.find, accessor, index=index)
     return partial(_walk_find, partial(ops.readdir, accessor),
                    partial(ops.stat, accessor), index)
 

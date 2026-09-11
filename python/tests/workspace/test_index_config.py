@@ -62,6 +62,23 @@ async def test_added_mount_inherits_redis_index():
         await ws.close()
 
 
+# A resource keeps the index it was given when the workspace has no index
+# config (#1012), on the dynamic path as on construction.
+@pytest.mark.asyncio
+async def test_added_mount_keeps_a_resources_own_index_without_a_config():
+    ws = Workspace({})
+    resource = RAMResource()
+    resource.set_index(
+        RedisIndexConfig(url="redis://127.0.0.1:1/0", key_prefix="own:"))
+    own = resource.index
+    ws.add_mount("/late", resource)
+    try:
+        assert resource.index is own
+        assert isinstance(resource.index, RedisIndexCacheStore)
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_added_mount_inherits_index_ttl():
     initial = RAMResource()

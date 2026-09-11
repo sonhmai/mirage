@@ -50,15 +50,14 @@ def index():
 
 @pytest.mark.asyncio
 async def test_read_gsheet_renders_spreadsheet_json(accessor, index):
-    await index.put(
-        "/sheets/budget.gsheet.json",
-        IndexEntry(
-            id="sheet123",
-            name="Budget",
-            resource_type="gdrive/gsheet",
-            remote_time="2026-04-01T00:00:00Z",
-            vfs_name="budget.gsheet.json",
-        ))
+    await index.set_dir('/sheets', [('budget.gsheet.json',
+                                     IndexEntry(
+                                         id="sheet123",
+                                         name="Budget",
+                                         resource_type="gdrive/gsheet",
+                                         remote_time="2026-04-01T00:00:00Z",
+                                         vfs_name="budget.gsheet.json",
+                                     ))])
     sheet_json = json.dumps({"spreadsheetId": "sheet123"}).encode()
     with patch(
             "mirage.core.gdrive.read.read_spreadsheet",

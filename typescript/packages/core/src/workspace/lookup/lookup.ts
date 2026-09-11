@@ -145,13 +145,16 @@ function* layers(
     routing !== undefined && Object.hasOwn(routing.bindings, EXTERNAL_COMMANDS)
       ? routing.bindings[EXTERNAL_COMMANDS]
       : registry.runtimeEntries.find((entry) => entry.captures.includes(EXTERNAL_COMMANDS))
+  const fallbackNative =
+    fallback !== null &&
+    fallback !== undefined &&
+    (isLineExecutor(fallback) || isProcessExecutor(fallback))
   if (
     installed &&
     !found &&
     declared === undefined &&
     (routing === undefined || !Object.hasOwn(routing.bindings, name)) &&
-    fallback != null &&
-    (isLineExecutor(fallback) || isProcessExecutor(fallback) || refused)
+    (fallbackNative || refused)
   ) {
     yield Consumer.EXTERNAL
   }

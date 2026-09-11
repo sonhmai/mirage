@@ -20,6 +20,7 @@ import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { headEntries } from './changes.ts'
+import { HEAD } from './constants.ts'
 import {
   GitError,
   NoRestorePathsError,
@@ -123,7 +124,15 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
     if (flags.source !== undefined) {
       source = await sourceTree(repo, flags.source)
     } else if (flags.staged) {
-      source = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
+      // Before the first commit there is no HEAD to restore the index from, and
+      // reading that as an empty tree unstaged every selected path and reported
+      // success. git refuses the whole line instead, index untouched. The
+      // working tree restores from the index, so it is only the implicit HEAD
+      // source that has nothing to read: `--source` naming a tree still works
+      // in the same repository.
+      const found = await headEntries(repo)
+      if (found === null) throw new UnresolvableSourceError(HEAD)
+      source = found
     } else {
       source = null
     }

@@ -24,6 +24,7 @@ from dulwich.repo import BaseRepo
 from mirage.commands.cli.builtin.git.changes import head_entries
 from mirage.commands.cli.builtin.git.checkout import (Tree, contents,
                                                       flat_tree, tree_of)
+from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import GitError  # yapf: disable
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     NoRestorePathsError, NoWorkspaceError, UnknownPathspecError,
@@ -159,7 +160,17 @@ async def restore(
             source: Tree | None = await asyncio.to_thread(
                 source_tree, repo, flags.source)
         elif flags.staged:
-            source = await asyncio.to_thread(head_entries, repo) or {}
+            # Before the first commit there is no HEAD to restore the
+            # index from, and reading that as an empty tree unstaged
+            # every selected path and reported success. git refuses the
+            # whole line instead, index untouched. The working tree
+            # restores from the index, so it is only the implicit HEAD
+            # source that has nothing to read: ``--source`` naming a
+            # tree still works in the same repository.
+            found = await asyncio.to_thread(head_entries, repo)
+            if found is None:
+                raise UnresolvableSourceError(HEAD)
+            source = found
         else:
             source = None
         tree = held if source is None else source

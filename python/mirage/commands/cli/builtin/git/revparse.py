@@ -15,10 +15,12 @@
 from dulwich.errors import NotTreeError
 from dulwich.objects import Commit, ObjectID, ShaFile, Tag, Tree
 from dulwich.objectspec import parse_commit
+from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import AmbiguousArgumentError
+from mirage.commands.cli.builtin.git.refs import TAG_PREFIX
 from mirage.commands.cli.builtin.git.types import AncestryStep
 
 ANCESTOR = "~"
@@ -30,6 +32,7 @@ PEEL_CLOSE = "}"
 PATH_MARK = ":"
 COMMIT = "commit"
 TREE = "tree"
+TAG = "tag"
 
 
 def split_peel(revision: str) -> tuple[str, str | None]:
@@ -205,11 +208,18 @@ def _object_by_id(repo: BaseRepo, sha: ObjectID, revision: str) -> ShaFile:
 def _peeled(repo: BaseRepo, obj: ShaFile, want: str, revision: str) -> ShaFile:
     """Follow a ``^{<type>}`` peel from the object the stem named.
 
-    A tag is unwrapped first whatever the type asked for, which is what
-    ``^{}`` means on its own. ``^{tree}`` then takes a commit's tree,
-    git's one implicit step; every other spelling has to already name
-    the type it asks for, so ``HEAD^{blob}`` is refused rather than
-    answered with something else.
+    A tag is unwrapped until the type asked for is reached, which for
+    ``^{}`` and for every non-tag type means unwrapping it entirely.
+    ``^{tag}`` is the one spelling that stops before the first hop, so
+    ``v1^{tag}`` is the tag object itself rather than a refusal saying
+    the commit behind it is no tag. ``^{tree}`` then takes a commit's
+    tree, git's one implicit step; every other spelling has to already
+    name the type it asks for, so ``HEAD^{blob}`` is refused rather
+    than answered with something else.
+
+    A lightweight tag is still refused by ``^{tag}``: the name resolves
+    straight to a commit, so there is no tag object to stop at and the
+    type check below is what says so.
 
     Args:
         repo (BaseRepo): the opened repository.
@@ -217,7 +227,7 @@ def _peeled(repo: BaseRepo, obj: ShaFile, want: str, revision: str) -> ShaFile:
         want (str): the type word inside the braces, empty for ``^{}``.
         revision (str): the whole revision, for error attribution.
     """
-    while isinstance(obj, Tag):
+    while isinstance(obj, Tag) and want != TAG:
         obj = _object_by_id(repo, obj.object[1], revision)
     if want == "":
         return obj
@@ -250,6 +260,34 @@ def _at_path(repo: BaseRepo, rev: str, path: str, revision: str) -> ShaFile:
     return _object_by_id(repo, sha, revision)
 
 
+def _tag_object(repo: BaseRepo, stem: str) -> Tag | None:
+    """The tag object a name or id denotes, None when it names no tag.
+
+    Read before the stem is resolved, and only for ``^{tag}``: every
+    other peel type sits at or below the commit, so unwrapping an
+    annotated tag on the way is git's own rule and costs nothing, while
+    ``^{tag}`` is the one spelling that has to stop above it. Resolving
+    the stem the ordinary way cannot serve it, because the commit-ish
+    reading peels the tag before anything else sees it.
+
+    Both spellings a tag answers to are tried, the ref and a raw id,
+    and anything that is not a tag object reads as no tag: a lightweight
+    tag names a commit directly, which is why git refuses ``^{tag}`` on
+    one.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        stem (str): the revision before the peel.
+    """
+    ref = Ref(f"{TAG_PREFIX}{stem}".encode())
+    try:
+        found = (repo.object_store[ObjectID(repo.refs[ref])]
+                 if ref in repo.refs.allkeys() else object_at(repo, stem))
+    except (KeyError, ValueError):
+        return None
+    return found if isinstance(found, Tag) else None
+
+
 def resolve_object(repo: BaseRepo, revision: str) -> ShaFile:
     """The object a revision names, whatever type it turns out to be.
 
@@ -279,4 +317,8 @@ def resolve_object(repo: BaseRepo, revision: str) -> ShaFile:
                 return object_at(repo, revision)
             except (KeyError, ValueError) as exc:
                 raise AmbiguousArgumentError(revision) from exc
+    if want == TAG:
+        found = _tag_object(repo, stem)
+        if found is not None:
+            return found
     return _peeled(repo, resolve_object(repo, stem), want or "", revision)

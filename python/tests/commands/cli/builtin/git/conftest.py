@@ -254,3 +254,33 @@ def repo_doors(ws) -> CLIDoors:
                     ns=namespace_view_of(ws._registry, ws._namespace,
                                          ws.dispatch),
                     session_view=session_view(Session(session_id="test")))
+
+
+@pytest.fixture
+def unborn_path(tmp_path: Path) -> Path:
+    """A repository before its first commit.
+
+    HEAD is symbolic and the branch it names has no ref, which is the
+    state git calls unborn. Several verbs answer differently here than
+    they do anywhere else, so it is a fixture rather than a setup step.
+
+    Args:
+        tmp_path (Path): pytest temporary directory.
+    """
+    path = tmp_path / "fresh"
+    path.mkdir()
+    Repo.init(str(path), default_branch=b"refs/heads/main").close()
+    return path
+
+
+@pytest.fixture
+def unborn_rw(unborn_path: Path):
+    """A writable workspace on a repository before its first commit.
+
+    Args:
+        unborn_path (Path): the repository's working tree.
+    """
+    with Workspace({MOUNT: DiskResource(root=str(unborn_path))},
+                   mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        yield ws

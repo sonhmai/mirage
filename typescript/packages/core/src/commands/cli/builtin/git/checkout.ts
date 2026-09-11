@@ -19,7 +19,7 @@ import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { headCommit } from './branch.ts'
-import { headEntries, workChanges } from './changes.ts'
+import { ADDED, DELETED, headEntries, MODIFIED, workChanges } from './changes.ts'
 import {
   BadStartPointError,
   BranchExistsError,
@@ -101,7 +101,31 @@ function conflicts(
 }
 
 /**
- * Which untracked files the tree being switched to would write over.
+ * The entries a switch actually writes into the working tree.
+ *
+ * Every check that asks what is standing in the way has to ask about these
+ * rather than about the whole target tree. A path both trees record identically
+ * is never written, so an untracked file sitting on it is left exactly where it
+ * is; that file is one the index staged a deletion for, and git carries the
+ * staged deletion rather than refusing the switch over the copy left on disk.
+ * Content does not enter into it from the other side either: a path only the
+ * target records is refused even when the untracked copy already matches it byte
+ * for byte. Pinned against git 2.50.1.
+ */
+function written(
+  before: ReadonlyMap<string, TreeEntry>,
+  after: ReadonlyMap<string, TreeEntry>,
+): Map<string, TreeEntry> {
+  const out = new Map<string, TreeEntry>()
+  for (const [path, entry] of after) {
+    const old = before.get(path)
+    if (old?.oid !== entry.oid || old.mode !== entry.mode) out.set(path, entry)
+  }
+  return out
+}
+
+/**
+ * Which untracked files the entries being written would write over.
  *
  * An untracked file is in neither tree and neither index, so the comparison
  * above cannot see it, and writing the target branch's blob over it destroys
@@ -115,12 +139,12 @@ function conflicts(
  * the entry that needs the room.
  */
 function overwritten(
-  after: ReadonlyMap<string, TreeEntry>,
+  writing: ReadonlyMap<string, TreeEntry>,
   untracked: readonly string[],
 ): string[] {
-  const names = [...after.keys()]
+  const names = [...writing.keys()]
   return untracked
-    .filter((path) => after.has(path) || names.some((name) => inside(name, path)))
+    .filter((path) => writing.has(path) || names.some((name) => inside(name, path)))
     .sort(compareCodePoints)
 }
 
@@ -134,10 +158,10 @@ function overwritten(
  * caller has to move. Pinned against git 2.50.1.
  */
 function lostDirectories(
-  after: ReadonlyMap<string, TreeEntry>,
+  writing: ReadonlyMap<string, TreeEntry>,
   untracked: readonly string[],
 ): string[] {
-  return [...after.keys()]
+  return [...writing.keys()]
     .filter((name) => untracked.some((path) => inside(path, name)))
     .sort(compareCodePoints)
 }
@@ -145,18 +169,18 @@ function lostDirectories(
 /**
  * Make the working tree and index match the tree being switched to.
  *
- * Only paths whose recorded content differs are touched, so a file that is the
+ * Only paths the two trees disagree about are touched, so a file that is the
  * same on both branches keeps whatever the working tree has, including an
- * uncommitted edit. A path carried across keeps its index entry too, which is
- * what preserves a staged change that both branches happen to agree about.
+ * uncommitted edit, and keeps its index entry, which is what preserves a staged
+ * change both branches happen to agree about. Every path the trees do disagree
+ * about has already been refused by the caller if anything uncommitted stands on
+ * it, so the tree diff is the whole decision here.
  */
 async function switchTo(
   repo: Repo,
   dispatch: Dispatch,
   before: ReadonlyMap<string, TreeEntry>,
   after: ReadonlyMap<string, TreeEntry>,
-  keep: ReadonlySet<string>,
-  held: ReadonlyMap<string, IndexEntry>,
   links: LinkView | null,
 ): Promise<void> {
   // Removals first, and the emptied directories with them, because the two
@@ -171,28 +195,25 @@ async function switchTo(
     await removeFile(dispatch, where)
     await removeEmptyParents(dispatch, where, repo.location.worktree)
   }
-  for (const path of [...after.keys()].sort(compareCodePoints)) {
-    const entry = after.get(path)
+  const changed = written(before, after)
+  for (const path of [...changed.keys()].sort(compareCodePoints)) {
+    const entry = changed.get(path)
     if (entry === undefined) continue
-    const old = before.get(path)
-    if (old?.oid === entry.oid && old.mode === entry.mode) continue
-    if (keep.has(path)) continue
     const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
     await restoreEntry(dispatch, under(repo.location.worktree, path), entry.mode, blob, links)
   }
-  const state = await readIndex(repo, dispatch)
+  // The index is git's two-way merge, not a copy of the target tree: only a
+  // path the two trees disagree about is decided by the target, and where they
+  // agree the entry is left exactly as it stands. That is what carries all three
+  // kinds of staged work across. Rebuilding the index from the target alone
+  // dropped a staged addition, which is in neither tree, and resurrected a
+  // staged deletion, which is in both and in no entry, turning both into
+  // unstaged changes a later commit would silently omit.
   const staged = new Map<string, StagedEntry>()
-  for (const [path, entry] of after) {
-    const carried = held.get(path)
-    if (keep.has(path) && carried !== undefined) {
-      staged.set(path, { oid: carried.oid, mode: carried.mode, size: carried.size })
-    } else {
-      staged.set(path, restored(entry.oid, Number.parseInt(entry.mode, 8)))
-    }
+  for (const [path, entry] of changed) {
+    staged.set(path, restored(entry.oid, Number.parseInt(entry.mode, 8)))
   }
-  const removed = [...state.entries.keys(), ...state.conflicts.keys()].filter(
-    (path) => !after.has(path),
-  )
+  const removed = [...before.keys()].filter((path) => !after.has(path))
   await updateIndex(repo, staged, removed)
 }
 
@@ -243,6 +264,36 @@ async function attach(
 }
 
 /**
+ * How the index differs from HEAD, one status letter per path.
+ *
+ * The same three comparisons `status` makes against HEAD, kept here rather than
+ * borrowed from `stageChanges` because that one pairs renames and this list does
+ * not: git letters a carried change by what it is on its own, and an unmerged
+ * path cannot reach this (the caller refuses one before any tree is read).
+ *
+ * A path the index has no entry for is the one git's own reading gets right and
+ * a walk of the entries cannot see at all: a staged deletion is an absence, so
+ * it has to be read off HEAD's tree.
+ */
+function stageLetters(
+  before: ReadonlyMap<string, TreeEntry>,
+  entries: ReadonlyMap<string, IndexEntry>,
+): Map<string, string> {
+  const letters = new Map<string, string>()
+  for (const [path, entry] of entries) {
+    const recorded = before.get(path)
+    if (recorded === undefined) letters.set(path, ADDED)
+    else if (recorded.oid !== entry.oid || Number.parseInt(recorded.mode, 8) !== entry.mode) {
+      letters.set(path, MODIFIED)
+    }
+  }
+  for (const path of before.keys()) {
+    if (!entries.has(path)) letters.set(path, DELETED)
+  }
+  return letters
+}
+
+/**
  * Move HEAD, the index and the working tree to a commit.
  *
  * The one procedure `checkout` and `switch` share, since the two differ only in
@@ -265,7 +316,8 @@ async function attach(
  * @param creating whether `ref` is a new branch to write first
  * @param inPlace whether the line named no start point, so the new branch is
  *   being created where HEAD already is
- * @returns the paths whose uncommitted changes were carried across
+ * @returns each path whose uncommitted change was carried across, against the
+ *   status letter git prints for it
  */
 export async function moveHead(
   dispatch: Dispatch,
@@ -279,7 +331,7 @@ export async function moveHead(
   ref: string | null,
   creating: boolean,
   inPlace: boolean,
-): Promise<Set<string>> {
+): Promise<Map<string, string>> {
   // A branch created where HEAD already is moves nothing: git writes the ref,
   // points HEAD at it, and never touches the working tree or the index, so an
   // unmerged index survives `git switch -c topic` and is refused by
@@ -288,7 +340,7 @@ export async function moveHead(
   // trees. Pinned against git 2.50.1.
   if (inPlace) {
     await attach(dispatch, repo, known, head, oid, target, ref, creating)
-    return new Set()
+    return new Map()
   }
   const before = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
   const after = await commitEntries(repo, oid)
@@ -308,23 +360,20 @@ export async function moveHead(
   const unstaged = await workChanges(repo, dispatch, repo.location.worktree, state.entries, found)
   // Both kinds of uncommitted change count: an edit in the working tree, and
   // one already staged. Leaving the staged ones out is what silently threw
-  // them away.
-  const stagedPaths = [...state.entries.entries()]
-    .filter(([path, entry]) => {
-      const recorded = before.get(path)
-      return recorded?.oid !== entry.oid || Number.parseInt(recorded.mode, 8) !== entry.mode
-    })
-    .map(([path]) => path)
-  const dirty = new Set([...unstaged.keys(), ...stagedPaths])
+  // them away. The index column wins where a path has both, which is how git's
+  // own short status reads a row and how it letters this list.
+  const carried = new Map([...unstaged, ...stageLetters(before, state.entries)])
+  const dirty = new Set(carried.keys())
+  const writing = written(before, after)
   const blocked = conflicts(before, after, dirty)
-  const clobbered = overwritten(after, found.untracked)
-  const lost = lostDirectories(after, found.untracked)
+  const clobbered = overwritten(writing, found.untracked)
+  const lost = lostDirectories(writing, found.untracked)
   if (blocked.length > 0 || clobbered.length > 0 || lost.length > 0) {
     throw new CheckoutConflictError(blocked, clobbered, lost)
   }
-  await switchTo(repo, dispatch, before, after, dirty, state.entries, links)
+  await switchTo(repo, dispatch, before, after, links)
   await attach(dispatch, repo, known, head, oid, target, ref, creating)
-  return dirty
+  return carried
 }
 
 /**
@@ -380,7 +429,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
       oid = await resolveCommit(repo, creating ? 'HEAD' : target)
     }
     const attached = creating || known.has(ref)
-    const dirty = await moveHead(
+    const moved = await moveHead(
       dispatch,
       statPath,
       doors.ns?.links ?? null,
@@ -393,9 +442,9 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
       creating,
       creating && startPoint === undefined,
     )
-    carried = [...dirty]
-      .sort(compareCodePoints)
-      .map((path) => `M\t${path}\n`)
+    carried = [...moved]
+      .sort(([a], [b]) => compareCodePoints(a, b))
+      .map(([path, letter]) => `${letter}\t${path}\n`)
       .join('')
     note = await previousPosition(repo, head)
     if (attached) {

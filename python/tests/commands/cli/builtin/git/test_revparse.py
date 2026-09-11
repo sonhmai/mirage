@@ -195,3 +195,39 @@ async def test_a_peel_naming_the_wrong_type_is_refused(workspace):
     repo = await open_repo(workspace.dispatch, location)
     with pytest.raises(AmbiguousArgumentError):
         resolve_object(repo, "HEAD^{blob}")
+
+
+@pytest.mark.asyncio
+async def test_a_typed_tag_peel_is_the_tag_itself(git_rw):
+    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    location = await discover(*repo_facts(git_rw), "/repo")
+    repo = await open_repo(git_rw.dispatch, location)
+    found = resolve_object(repo, "v1^{tag}")
+    assert found.type_name == b"tag"
+    assert found.id == repo.refs[b"refs/tags/v1"]
+
+
+@pytest.mark.asyncio
+async def test_a_bare_peel_still_unwraps_the_tag(git_rw):
+    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    location = await discover(*repo_facts(git_rw), "/repo")
+    repo = await open_repo(git_rw.dispatch, location)
+    assert resolve_object(repo, "v1^{}").id == resolve_commit(repo, "HEAD").id
+
+
+@pytest.mark.asyncio
+async def test_a_commit_peel_still_unwraps_the_tag(git_rw):
+    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    location = await discover(*repo_facts(git_rw), "/repo")
+    repo = await open_repo(git_rw.dispatch, location)
+    found = resolve_object(repo, "v1^{commit}")
+    assert found.id == resolve_commit(repo, "HEAD").id
+
+
+@pytest.mark.asyncio
+async def test_a_lightweight_tag_has_no_tag_to_peel_to(git_rw):
+    await git_rw.execute("git -C /repo tag light")
+    location = await discover(*repo_facts(git_rw), "/repo")
+    repo = await open_repo(git_rw.dispatch, location)
+    with pytest.raises(AmbiguousArgumentError):
+        resolve_object(repo, "light^{tag}")

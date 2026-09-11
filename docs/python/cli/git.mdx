@@ -116,14 +116,14 @@ git -C /repo tag -d v1.0
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `add`      | `-A` everything, `-u` tracked only, `-f` to stage an ignored path                                                                       |
 | `reset`    | mixed only, from HEAD; a pathspec limits it to those paths                                                                              |
-| `restore`  | worktree by default, `--staged` the index, `-SW` both; `--source` takes any tree-ish, spelled as a peel (`HEAD^{tree}`), a subtree (`HEAD:sub`) or a raw id; a path it lacks is removed from the target, a path still in conflict is named rather than half-restored, and a file replaces a directory standing in its place |
+| `restore`  | worktree by default, `--staged` the index, `-SW` both; `--source` takes any tree-ish, spelled as a peel (`HEAD^{tree}`), a subtree (`HEAD:sub`) or a raw id, and is required before the first commit since the implicit HEAD source has nothing to read; a path it lacks is removed from the target, a path still in conflict is named rather than half-restored, and a file replaces a directory standing in its place |
 | `rm`       | refuses a path with uncommitted work unless `-f`; `--cached` keeps the file; `-r` for a directory; `-q`, `--ignore-unmatch`             |
 | `mv`       | files and directories, `-f` over an existing file, `-k` skips what cannot move, `-n` dry run, `-v`; two sources cannot land on one name, an unmerged path moves nowhere, and a move that would cross a mount boundary at either end is refused rather than half-moved |
 | `commit`   | `-m` required, `--author "Name <email>"` optional                                                                                       |
 | `branch`   | `-d` deletes a merged branch, `-D` any branch                                                                                           |
 | `checkout` | refuses rather than overwrite work you have not committed, an untracked file the target needs the room for included and an index still holding conflict stages too |
-| `switch`   | the same move for a branch only; `-c` creates and checks the name against git's ref rules, `--detach` is the only way onto a bare commit and takes HEAD when nothing is named |
-| `tag`      | lists sorted, `-l <pattern>`, `-n[<num>]`; a name is a lightweight tag, `-a`/`-m` an annotated one; any object is a legal target, `HEAD^{tree}` and `HEAD:a.txt` included; `-d`, `-f`; a creation option needs a name |
+| `switch`   | the same move for a branch only; `-c` creates and checks the name against git's ref rules and works before the first commit, `--detach` is the only way onto a bare commit and takes HEAD when nothing is named; a staged addition, deletion or edit both branches agree about is carried across and reported with its status letter |
+| `tag`      | lists sorted, `-l <pattern>`, `-n[<num>]`; a name is a lightweight tag, `-a`/`-m` an annotated one; any object is a legal target, `HEAD^{tree}`, `HEAD:a.txt` and `v1^{tag}` included; `-d`, `-f`; a creation option needs a name |
 
 `commit` records `mirage <mirage@localhost>` unless `--author` says
 otherwise: git reads `user.name` from config files that a mount does not
@@ -148,6 +148,14 @@ serve, and inventing a name would put an unreviewed one into history.
   path and refuse first. Creating a branch where HEAD already is
   (`switch -c topic`, no start point) moves nothing and is allowed, which
   is git's own reading of the line.
+- **A branch with no commit is a name and nothing else.** `switch -c topic`
+  before the first commit repoints HEAD and writes neither a ref nor a
+  reflog line, which is how git leaves an unborn branch too. Naming a
+  start point there is a different line and stays unresolvable.
+- **`^{tag}` stops above the commit.** Every other peel type sits at or
+  below it, so an annotated tag is unwrapped on the way; `v1^{tag}` is
+  the one spelling that names the tag object itself, and a lightweight
+  tag has none to stop at.
 - **A move never crosses a mount boundary**, at either end. The rename op
   binds to the backend serving the source, so a destination another mount
   serves would be written into the source's backend at a path it does not

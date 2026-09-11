@@ -26,7 +26,8 @@ from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
 from mirage.commands.cli.builtin.git.format import short, subject
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.refs import (BRANCH_PREFIX, TAG_PREFIX,
-                                                  read_head, valid_ref_name)
+                                                  read_head, set_head,
+                                                  valid_ref_name)
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (  # yapf: disable
@@ -126,10 +127,21 @@ async def switch(
             if ref in known:
                 raise BranchExistsError(target)
             start = texts[0] if texts else None
-            try:
-                commit = resolve_commit(repo, start or HEAD)
-            except GitError as exc:
-                raise InvalidReferenceError(start or HEAD) from exc
+            # Before the first commit there is nothing for HEAD to
+            # resolve to, and git makes the branch anyway: the line
+            # only repoints symbolic HEAD, writing neither the ref nor
+            # a reflog line, because a branch with no commit is a name
+            # and nothing else. A start point is a different line and
+            # stays unresolvable (``fatal: invalid reference: main``),
+            # so this reads the shape of the line rather than probing
+            # HEAD. Pinned against git 2.50.1.
+            unborn = (start is None and head.ref is not None
+                      and Ref(head.ref.encode()) not in known)
+            if not unborn:
+                try:
+                    commit = resolve_commit(repo, start or HEAD)
+                except GitError as exc:
+                    raise InvalidReferenceError(start or HEAD) from exc
             # After the start point and before anything is written,
             # which is git's own order. A ref is a path below .git, so
             # an unchecked name reaches write_ref as one: -c
@@ -138,6 +150,10 @@ async def switch(
             if not valid_ref_name(target):
                 raise InvalidBranchNameError(target)
             attached = True
+            if unborn:
+                await set_head(dispatch, location.gitdir, ref.decode())
+                return yield_bytes(b""), IOResult(
+                    stderr=f"Switched to a new branch '{target}'\n".encode())
         else:
             start = None
             target = texts[0] if texts else HEAD
@@ -152,13 +168,14 @@ async def switch(
             attached = not flags.detach and ref in known
             if not flags.detach and not attached:
                 raise BranchExpectedError(expected_kind(known, target), target)
-        dirty = await move_head(dispatch, stat_path, links_of(doors), repo,
+        moved = await move_head(dispatch, stat_path, links_of(doors), repo,
                                 location, head, commit, target,
                                 ref if attached else None, creating, creating
                                 and start is None)
     except GitError as exc:
         return fatal(exc)
-    carried = "".join(f"M\t{path}\n" for path in sorted(dirty))
+    carried = "".join(f"{letter}\t{path}\n"
+                      for path, letter in sorted(moved.items()))
     note = previous_position(repo, head)
     if attached:
         verb = "Switched to a new branch" if creating else "Switched to branch"

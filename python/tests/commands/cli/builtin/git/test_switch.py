@@ -326,3 +326,66 @@ async def test_a_directory_becomes_a_file_across_a_switch(
     assert await run(git_rw, "switch other") == (0, b"", b"Switched to branch "
                                                  b"'other'\n")
     assert (repo_path / "slot").read_text() == "flat\n"
+
+
+@pytest.mark.asyncio
+async def test_a_branch_is_created_on_an_unborn_head(unborn_rw,
+                                                     unborn_path: Path):
+    assert await run(
+        unborn_rw,
+        "switch -c topic") == (0, b"", b"Switched to a new branch 'topic'\n")
+    assert head_ref(unborn_path) == b"ref: refs/heads/topic"
+    # No ref and no reflog: a branch with no commit is a name and
+    # nothing else, which is why git can make one here at all.
+    assert not (unborn_path / ".git" / "refs" / "heads" / "topic").exists()
+    assert not (unborn_path / ".git" / "logs" / "HEAD").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_start_point_on_an_unborn_head_is_refused(
+        unborn_rw, unborn_path: Path):
+    assert await run(
+        unborn_rw,
+        "switch -c topic main") == (128, b"",
+                                    b"fatal: invalid reference: main\n")
+    assert head_ref(unborn_path) == b"ref: refs/heads/main"
+
+
+@pytest.mark.asyncio
+async def test_an_invalid_name_on_an_unborn_head_is_refused(
+        unborn_rw, unborn_path: Path):
+    code, _out, err = await run(unborn_rw, "switch -c ../../evil")
+    assert code == 128
+    assert err.startswith(b"fatal: '../../evil' is not a valid branch name\n")
+    assert head_ref(unborn_path) == b"ref: refs/heads/main"
+
+
+@pytest.mark.asyncio
+async def test_a_staged_addition_survives_the_switch(git_rw):
+    await run(git_rw, "branch other")
+    await git_rw.execute("echo new > /repo/added.txt")
+    await run(git_rw, "add added.txt")
+    assert await run(git_rw,
+                     "switch other") == (0, b"A\tadded.txt\n",
+                                         b"Switched to branch 'other'\n")
+    assert await run(git_rw, "status --short") == (0, b"A  added.txt\n", b"")
+
+
+@pytest.mark.asyncio
+async def test_a_staged_deletion_survives_the_switch(git_rw):
+    await run(git_rw, "branch other")
+    await run(git_rw, "rm --cached b.txt")
+    assert await run(git_rw,
+                     "switch other") == (0, b"D\tb.txt\n",
+                                         b"Switched to branch 'other'\n")
+    assert await run(git_rw,
+                     "status --short") == (0, b"D  b.txt\n?? b.txt\n", b"")
+
+
+@pytest.mark.asyncio
+async def test_a_carried_edit_is_lettered_by_where_it_stands(git_rw):
+    await run(git_rw, "branch other")
+    await git_rw.execute("echo edited > /repo/a.txt")
+    assert await run(git_rw,
+                     "switch other") == (0, b"M\ta.txt\n",
+                                         b"Switched to branch 'other'\n")

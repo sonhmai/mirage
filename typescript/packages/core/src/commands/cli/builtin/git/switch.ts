@@ -33,7 +33,7 @@ import {
   UnknownSwitchError,
 } from './errors.ts'
 import { short } from './format.ts'
-import { BRANCH_PREFIX, loadRefs, readHead, TAG_PREFIX, validRefName } from './refs.ts'
+import { BRANCH_PREFIX, loadRefs, readHead, setHead, TAG_PREFIX, validRefName } from './refs.ts'
 import { opened, repoArgs } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import { checkOperands, escaped, fatal } from './util.ts'
@@ -114,10 +114,21 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       if (known.has(`${BRANCH_PREFIX}${target}`)) throw new BranchExistsError(target)
       startPoint = first
       const start = first ?? HEAD
-      try {
-        oid = await resolveCommit(repo, start)
-      } catch {
-        throw new InvalidReferenceError(start)
+      // Before the first commit there is nothing for HEAD to resolve to, and
+      // git makes the branch anyway: the line only repoints symbolic HEAD,
+      // writing neither the ref nor a reflog line, because a branch with no
+      // commit is a name and nothing else. A start point is a different line
+      // and stays unresolvable (`fatal: invalid reference: main`), so this
+      // reads the shape of the line rather than probing HEAD. Pinned against
+      // git 2.50.1.
+      const unborn = first === undefined && head.ref !== null && !known.has(head.ref)
+      oid = ''
+      if (!unborn) {
+        try {
+          oid = await resolveCommit(repo, start)
+        } catch {
+          throw new InvalidReferenceError(start)
+        }
       }
       // After the start point and before anything is written, which is git's
       // own order. A ref is a path below .git, so an unchecked name reaches
@@ -125,6 +136,13 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       // configuration rather than on a branch.
       if (!validRefName(target)) throw new InvalidBranchNameError(target)
       attached = true
+      if (unborn) {
+        await setHead(dispatch, repo.location.gitdir, `${BRANCH_PREFIX}${target}`)
+        return [
+          ENC.encode(''),
+          new IOResult({ stderr: ENC.encode(`Switched to a new branch '${target}'\n`) }),
+        ]
+      }
     } else {
       target = first ?? HEAD
       if (!flags.detach && target === head.branch) {
@@ -140,7 +158,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
         throw new BranchExpectedError(expectedKind(known, target), target)
       }
     }
-    const dirty = await moveHead(
+    const moved = await moveHead(
       dispatch,
       statPath,
       doors.ns?.links ?? null,
@@ -153,9 +171,9 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       creating,
       creating && startPoint === undefined,
     )
-    carried = [...dirty]
-      .sort(compareCodePoints)
-      .map((path) => `M\t${path}\n`)
+    carried = [...moved]
+      .sort(([a], [b]) => compareCodePoints(a, b))
+      .map(([path, letter]) => `${letter}\t${path}\n`)
       .join('')
     note = await previousPosition(repo, head)
     if (attached) {

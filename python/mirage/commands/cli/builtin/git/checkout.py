@@ -24,7 +24,9 @@ from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.branch import head_commit
-from mirage.commands.cli.builtin.git.changes import head_entries, work_changes
+from mirage.commands.cli.builtin.git.changes import (ADDED, DELETED, MODIFIED,
+                                                     head_entries,
+                                                     work_changes)
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     BadStartPointError, BranchExistsError, CheckoutConflictError, GitError,
@@ -156,8 +158,31 @@ def _tree_names(tree: Tree) -> set[str]:
     return {name.decode("utf-8", errors="replace") for name in tree}
 
 
-def _overwritten(after: Tree, untracked: list[str]) -> list[str]:
-    """Which untracked files the tree being switched to would write over.
+def _written(before: Tree, after: Tree) -> Tree:
+    """The entries a switch actually writes into the working tree.
+
+    Every check that asks what is standing in the way has to ask about
+    these rather than about the whole target tree. A path both trees
+    record identically is never written, so an untracked file sitting on
+    it is left exactly where it is; that file is one the index staged a
+    deletion for, and git carries the staged deletion rather than
+    refusing the switch over the copy left on disk. Content does not
+    enter into it from the other side either: a path only the target
+    records is refused even when the untracked copy already matches it
+    byte for byte. Pinned against git 2.50.1.
+
+    Args:
+        before (Tree): the tree HEAD records.
+        after (Tree): the tree being switched to.
+    """
+    return {
+        path: entry
+        for path, entry in after.items() if before.get(path) != entry
+    }
+
+
+def _overwritten(writing: Tree, untracked: list[str]) -> list[str]:
+    """Which untracked files the entries being written would write over.
 
     An untracked file is in neither tree and neither index, so the
     comparison above cannot see it, and writing the target branch's blob
@@ -171,15 +196,15 @@ def _overwritten(after: Tree, untracked: list[str]) -> list[str]:
     untracked file itself there, not the entry that needs the room.
 
     Args:
-        after (Tree): the tree being switched to.
+        writing (Tree): the entries the switch writes, from ``_written``.
         untracked (list[str]): every untracked path the walk found.
     """
-    names = _tree_names(after)
+    names = _tree_names(writing)
     return sorted(path for path in untracked
                   if path in names or any(under(name, path) for name in names))
 
 
-def _lost_directories(after: Tree, untracked: list[str]) -> list[str]:
+def _lost_directories(writing: Tree, untracked: list[str]) -> list[str]:
     """Which directories the switch would empty of untracked files.
 
     The mirror of the case above: the target records a *file* where the
@@ -190,24 +215,24 @@ def _lost_directories(after: Tree, untracked: list[str]) -> list[str]:
     2.50.1.
 
     Args:
-        after (Tree): the tree being switched to.
+        writing (Tree): the entries the switch writes, from ``_written``.
         untracked (list[str]): every untracked path the walk found.
     """
-    return sorted(name for name in _tree_names(after) if any(
+    return sorted(name for name in _tree_names(writing) if any(
         under(path, name) for path in untracked))
 
 
 async def _switch(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
-                  before: Tree, after: Tree, keep: set[str],
-                  staged: dict[bytes,
-                               IndexEntry], links: LinkView | None) -> None:
+                  before: Tree, after: Tree, links: LinkView | None) -> None:
     """Make the working tree and index match the tree being switched to.
 
-    Only paths whose recorded content differs are touched, so a file
-    that is the same on both branches keeps whatever the working tree
-    has, including an uncommitted edit. A path carried across keeps its
-    index entry too, which is what preserves a staged change that both
-    branches happen to agree about.
+    Only paths the two trees disagree about are touched, so a file that
+    is the same on both branches keeps whatever the working tree has,
+    including an uncommitted edit, and keeps its index entry, which is
+    what preserves a staged change both branches happen to agree about.
+    Every path the trees do disagree about has already been refused by
+    the caller if anything uncommitted stands on it, so the tree diff is
+    the whole decision here.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
@@ -215,19 +240,13 @@ async def _switch(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
         location (RepoLocation): the discovered repository.
         before (Tree): the tree HEAD records.
         after (Tree): the tree being switched to.
-        keep (set[str]): paths whose working-tree copy must not be
-            rewritten.
-        staged (dict[bytes, IndexEntry]): the index as it stands, read
-            for the entries of the paths being kept.
         links (LinkView | None): the name plane's link facts, so an
             entry that changes between a link and a file replaces what
             is there rather than writing through it.
     """
     state = await read_index(dispatch, location.gitdir)
-    state.entries.clear()
     state.conflicts.clear()
-    changed = sorted(path for path in after if before.get(path) != after[path]
-                     and path.decode("utf-8", errors="replace") not in keep)
+    changed = sorted(_written(before, after))
     blobs = await asyncio.to_thread(contents, repo,
                                     [after[path][1] for path in changed])
     # Removals first, and the emptied directories with them, because
@@ -247,13 +266,19 @@ async def _switch(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
         mode, sha = after[path]
         await restore_entry(dispatch, posixpath.join(location.worktree, name),
                             mode, blobs[sha], links)
-    for path, (mode, sha) in after.items():
-        name = path.decode("utf-8", errors="replace")
-        held = staged.get(path)
-        if name in keep and held is not None:
-            state.entries[path] = held
-        else:
-            state.entries[path] = restored(ObjectID(sha), mode)
+    # The index is git's two-way merge, not a copy of the target tree:
+    # only a path the two trees disagree about is decided by the
+    # target, and where they agree the entry is left exactly as it
+    # stands. That is what carries all three kinds of staged work
+    # across. Rebuilding the index from the target alone dropped a
+    # staged addition, which is in neither tree, and resurrected a
+    # staged deletion, which is in both and in no entry, turning both
+    # into unstaged changes a later commit would silently omit.
+    for path in changed:
+        mode, sha = after[path]
+        state.entries[path] = restored(ObjectID(sha), mode)
+    for path in set(before) - set(after):
+        state.entries.pop(path, None)
     await write_index(dispatch, location.gitdir, state)
 
 
@@ -312,11 +337,43 @@ async def _attach(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
                  f"checkout: moving from {where} to {target}")
 
 
+def _stage_letters(before: Tree, entries: dict[bytes,
+                                               IndexEntry]) -> dict[str, str]:
+    """How the index differs from HEAD, one status letter per path.
+
+    The same three comparisons ``status`` makes against HEAD, kept
+    here rather than borrowed from ``stage_changes`` because that one
+    pairs renames and this list does not: git letters a carried change
+    by what it is on its own, and an unmerged path cannot reach this
+    (the caller refuses one before any tree is read).
+
+    A path the index has no entry for is the one git's own reading gets
+    right and a walk of the entries cannot see at all: a staged
+    deletion is an absence, so it has to be read off HEAD's tree.
+
+    Args:
+        before (Tree): the tree HEAD records.
+        entries (dict[bytes, IndexEntry]): the index as it stands.
+    """
+    letters: dict[str, str] = {}
+    for path, entry in entries.items():
+        name = path.decode("utf-8", errors="replace")
+        recorded = before.get(path)
+        if recorded is None:
+            letters[name] = ADDED
+        elif recorded != (entry.mode, entry.sha):
+            letters[name] = MODIFIED
+    for path in before:
+        if path not in entries:
+            letters[path.decode("utf-8", errors="replace")] = DELETED
+    return letters
+
+
 async def move_head(dispatch: DispatchFn, stat_path: StatPath,
                     links: LinkView | None, repo: BaseRepo,
                     location: RepoLocation, head: HeadRef, commit: Commit,
                     target: str, ref: Ref | None, creating: bool,
-                    in_place: bool) -> set[str]:
+                    in_place: bool) -> dict[str, str]:
     """Move HEAD, the index and the working tree to a commit.
 
     The one procedure ``checkout`` and ``switch`` share, since the two
@@ -347,7 +404,8 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
             new branch is being created where HEAD already is.
 
     Returns:
-        set[str]: paths whose uncommitted changes were carried across.
+        dict[str, str]: each path whose uncommitted change was carried
+        across, against the status letter git prints for it.
     """
     # A branch created where HEAD already is moves nothing: git writes
     # the ref, points HEAD at it, and never touches the working tree or
@@ -359,7 +417,7 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
     if in_place:
         await _attach(dispatch, repo, location, head, commit, target, ref,
                       creating)
-        return set()
+        return {}
     before = await asyncio.to_thread(head_entries, repo) or {}
     after = await asyncio.to_thread(tree_of, repo, commit.id)
     state = await read_index(dispatch, location.gitdir)
@@ -384,25 +442,24 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
                        links)
     unstaged = await work_changes(dispatch, location.worktree, state.entries,
                                   found)
+    staged = _stage_letters(before, state.entries)
     # Both kinds of uncommitted change count: an edit in the working
     # tree, and one already staged. Leaving the staged ones out is
-    # what silently threw them away.
-    staged = {
-        path.decode("utf-8", errors="replace")
-        for path, entry in state.entries.items()
-        if before.get(path) != (entry.mode, entry.sha)
-    }
-    dirty = set(unstaged) | staged
+    # what silently threw them away. The index column wins where a path
+    # has both, which is how git's own short status reads a row and how
+    # it letters this list.
+    carried = dict(unstaged) | staged
+    dirty = set(carried)
+    writing = _written(before, after)
     blocked = _conflicts(before, after, dirty)
-    overwritten = _overwritten(after, found.untracked)
-    lost = _lost_directories(after, found.untracked)
+    overwritten = _overwritten(writing, found.untracked)
+    lost = _lost_directories(writing, found.untracked)
     if blocked or overwritten or lost:
         raise CheckoutConflictError(blocked, overwritten, lost)
-    await _switch(dispatch, repo, location, before, after, dirty,
-                  state.entries, links)
+    await _switch(dispatch, repo, location, before, after, links)
     await _attach(dispatch, repo, location, head, commit, target, ref,
                   creating)
-    return dirty
+    return carried
 
 
 async def checkout(
@@ -459,13 +516,14 @@ async def checkout(
         else:
             commit = resolve_commit(repo, target if not creating else HEAD)
         attached = creating or ref in known
-        dirty = await move_head(dispatch, stat_path, links_of(doors), repo,
+        moved = await move_head(dispatch, stat_path, links_of(doors), repo,
                                 location, head, commit, target,
                                 ref if attached else None, creating, creating
                                 and start is None)
     except GitError as exc:
         return fatal(exc)
-    carried = "".join(f"M\t{path}\n" for path in sorted(dirty))
+    carried = "".join(f"{letter}\t{path}\n"
+                      for path, letter in sorted(moved.items()))
     note = previous_position(repo, head)
     if attached:
         verb = "Switched to a new branch" if creating else "Switched to branch"

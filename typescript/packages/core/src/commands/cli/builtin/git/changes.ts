@@ -36,8 +36,8 @@ import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const UNCHANGED = ' '
 export const MODIFIED = 'M'
-const ADDED = 'A'
-const DELETED = 'D'
+export const ADDED = 'A'
+export const DELETED = 'D'
 const RENAMED = 'R'
 const UNTRACKED = '?'
 // git's own two rename knobs: a pair counts as a rename at 60% shared content,

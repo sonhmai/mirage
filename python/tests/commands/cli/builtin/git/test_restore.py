@@ -325,3 +325,37 @@ async def test_a_file_replaces_a_directory_an_untracked_file_holds(
                      f"restore --source={tree} -SW a.txt") == (0, b"", b"")
     assert (repo_path / "a.txt").is_file()
     assert (repo_path / "a.txt").read_text() == "one changed\n"
+
+
+@pytest.mark.asyncio
+async def test_a_staged_restore_before_the_first_commit_is_refused(unborn_rw):
+    await unborn_rw.execute("echo hi > /repo/f.txt")
+    await run(unborn_rw, "add f.txt")
+    assert await run(
+        unborn_rw,
+        "restore --staged f.txt") == (128, b"",
+                                      b"fatal: could not resolve HEAD\n")
+    # The refusal comes before the index is touched: reading the
+    # unborn HEAD as an empty tree unstaged the path and said nothing.
+    assert await run(unborn_rw, "status --short") == (0, b"A  f.txt\n", b"")
+
+
+@pytest.mark.asyncio
+async def test_staged_and_worktree_together_refuse_the_same_way(unborn_rw):
+    await unborn_rw.execute("echo hi > /repo/f.txt")
+    await run(unborn_rw, "add f.txt")
+    assert await run(
+        unborn_rw,
+        "restore -SW f.txt") == (128, b"", b"fatal: could not resolve HEAD\n")
+
+
+@pytest.mark.asyncio
+async def test_a_worktree_restore_before_the_first_commit_still_goes(
+        unborn_rw):
+    await unborn_rw.execute("echo hi > /repo/f.txt")
+    await run(unborn_rw, "add f.txt")
+    await unborn_rw.execute("echo edited > /repo/f.txt")
+    # The working tree restores from the index, which exists before the
+    # first commit, so only the implicit HEAD source has nothing to read.
+    assert await run(unborn_rw, "restore f.txt") == (0, b"", b"")
+    assert (await unborn_rw.execute("cat /repo/f.txt")).stdout == b"hi\n"

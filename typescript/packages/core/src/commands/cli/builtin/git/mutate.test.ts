@@ -1870,3 +1870,156 @@ describe('a tag target spelled as an object expression', () => {
     ])
   })
 })
+
+/**
+ * What `.git/HEAD` holds, read back through the mount.
+ *
+ * A repository with no commits cannot be drained and handed to the real binary:
+ * `git init` leaves `objects` and `refs` empty, the drain copies files rather
+ * than directories, and git reads the result as no repository at all. So the
+ * unborn cases assert against the mount, which is where the state they are
+ * about lives.
+ */
+async function headOf(h: Harness): Promise<string> {
+  const raw = await readOptional(h.dispatch, '/repo/.git/HEAD')
+  return raw === null ? '' : DEC.decode(raw).trim()
+}
+
+/**
+ * Replace a built fixture with a repository that has no commits.
+ *
+ * Used as a `prepare` callback: the builder's whole job is to produce
+ * history, so an unborn HEAD is reached by discarding what it made rather
+ * than by keeping a second builder in step with the first.
+ */
+function unborn(repo: string): void {
+  for (const name of readdirSync(repo)) rmSync(join(repo, name), { recursive: true, force: true })
+  execFileSync('git', ['init', '-q', '-b', 'main', repo], { stdio: 'ignore' })
+}
+
+describe('git switch on an unborn HEAD', () => {
+  it('creates the branch with no start point', async () => {
+    const h = await harness(unborn)
+    expect(await h.run('switch -c topic')).toEqual([0, '', "Switched to a new branch 'topic'\n"])
+    expect(await headOf(h)).toBe('ref: refs/heads/topic')
+    // No ref and no reflog: a branch with no commit is a name and nothing
+    // else, which is why git can make one here at all.
+    expect(await readOptional(h.dispatch, '/repo/.git/refs/heads/topic')).toBe(null)
+    expect(await readOptional(h.dispatch, '/repo/.git/logs/HEAD')).toBe(null)
+  })
+
+  it('refuses a start point', async () => {
+    const h = await harness(unborn)
+    expect(await h.run('switch -c topic main')).toEqual([
+      128,
+      '',
+      'fatal: invalid reference: main\n',
+    ])
+    expect(await headOf(h)).toBe('ref: refs/heads/main')
+  })
+
+  it('refuses an invalid branch name', async () => {
+    const h = await harness(unborn)
+    const [code, , err] = await h.run('switch -c ../../evil')
+    expect(code).toBe(128)
+    expect(err.startsWith("fatal: '../../evil' is not a valid branch name\n")).toBe(true)
+    expect(await headOf(h)).toBe('ref: refs/heads/main')
+  })
+})
+
+describe('staged work carried across a switch', () => {
+  it('keeps a staged addition staged', async () => {
+    const h = await harness()
+    expect((await h.run('branch other'))[0]).toBe(0)
+    await h.ws.execute('echo new > /repo/added.txt')
+    expect((await h.run('add added.txt'))[0]).toBe(0)
+    expect(await h.run('switch other')).toEqual([
+      0,
+      'A\tadded.txt\n',
+      "Switched to branch 'other'\n",
+    ])
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('A  added.txt\n')
+  })
+
+  it('keeps a staged deletion staged', async () => {
+    const h = await harness()
+    expect((await h.run('branch other'))[0]).toBe(0)
+    expect((await h.run('rm --cached letters.txt'))[0]).toBe(0)
+    expect(await h.run('switch other')).toEqual([
+      0,
+      'D\tletters.txt\n',
+      "Switched to branch 'other'\n",
+    ])
+    // The file itself stays where it is, now untracked: git carries the
+    // staged deletion rather than writing the branch's copy back over it.
+    expect(git(await h.drain(), ['status', '--porcelain'])).toBe('D  letters.txt\n?? letters.txt\n')
+  })
+
+  it('letters a carried worktree edit by where it stands', async () => {
+    const h = await harness()
+    expect((await h.run('branch other'))[0]).toBe(0)
+    await h.ws.execute('echo edited > /repo/letters.txt')
+    expect(await h.run('switch other')).toEqual([
+      0,
+      'M\tletters.txt\n',
+      "Switched to branch 'other'\n",
+    ])
+  })
+})
+
+describe('git restore before the first commit', () => {
+  it('refuses to restore the index', async () => {
+    const h = await harness(unborn)
+    await h.ws.execute('echo hi > /repo/f.txt')
+    expect((await h.run('add f.txt'))[0]).toBe(0)
+    expect(await h.run('restore --staged f.txt')).toEqual([
+      128,
+      '',
+      'fatal: could not resolve HEAD\n',
+    ])
+    // The refusal comes before the index is touched: reading the unborn
+    // HEAD as an empty tree unstaged the path and said nothing.
+    expect(await h.run('status --short')).toEqual([0, 'A  f.txt\n', ''])
+  })
+
+  it('refuses both targets together the same way', async () => {
+    const h = await harness(unborn)
+    await h.ws.execute('echo hi > /repo/f.txt')
+    expect((await h.run('add f.txt'))[0]).toBe(0)
+    expect(await h.run('restore -SW f.txt')).toEqual([128, '', 'fatal: could not resolve HEAD\n'])
+  })
+
+  it('still restores the working tree from the index', async () => {
+    const h = await harness(unborn)
+    await h.ws.execute('echo hi > /repo/f.txt')
+    expect((await h.run('add f.txt'))[0]).toBe(0)
+    await h.ws.execute('echo edited > /repo/f.txt')
+    expect(await h.run('restore f.txt')).toEqual([0, '', ''])
+    expect(DEC.decode((await h.ws.execute('cat /repo/f.txt')).stdout)).toBe('hi\n')
+  })
+})
+
+describe('a peel naming the tag type', () => {
+  it('stops at the tag object itself', async () => {
+    const h = await harness()
+    expect((await h.run('tag -a v1 -m annotated'))[0]).toBe(0)
+    expect(await h.run('tag nested v1^{tag}')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['cat-file', '-t', 'nested']).trim()).toBe('tag')
+    expect(git(drained, ['rev-parse', 'nested'])).toBe(git(drained, ['rev-parse', 'v1']))
+  })
+
+  it('still unwraps the tag for a bare peel', async () => {
+    const h = await harness()
+    expect((await h.run('tag -a v1 -m annotated'))[0]).toBe(0)
+    expect((await h.run('tag inner v1^{}'))[0]).toBe(0)
+    const drained = await h.drain()
+    expect(git(drained, ['cat-file', '-t', 'inner']).trim()).toBe('commit')
+  })
+
+  it('refuses a lightweight tag, which has no tag object to stop at', async () => {
+    const h = await harness()
+    expect((await h.run('tag light'))[0]).toBe(0)
+    expect((await h.run('tag nested light^{tag}'))[0]).toBe(128)
+  })
+})

@@ -16,6 +16,7 @@ import git from 'isomorphic-git'
 import { HEAD } from './constants.ts'
 
 import { AmbiguousArgumentError } from './errors.ts'
+import { TAG_PREFIX } from './refs.ts'
 import { repoArgs, type Repo } from './repo.ts'
 import type { AncestryStep, GitObject } from './types.ts'
 
@@ -28,6 +29,7 @@ const PEEL_CLOSE = '}'
 const PATH_MARK = ':'
 export const COMMIT = 'commit'
 export const TREE = 'tree'
+export const TAG = 'tag'
 
 /**
  * Split a trailing `^{<type>}` off a revision.
@@ -192,10 +194,17 @@ async function typeOf(repo: Repo, oid: string, revision: string): Promise<string
 /**
  * Follow a `^{<type>}` peel from the object the stem named.
  *
- * A tag is unwrapped first whatever the type asked for, which is what `^{}`
- * means on its own. `^{tree}` then takes a commit's tree, git's one implicit
- * step; every other spelling has to already name the type it asks for, so
- * `HEAD^{blob}` is refused rather than answered with something else.
+ * A tag is unwrapped until the type asked for is reached, which for `^{}` and
+ * for every non-tag type means unwrapping it entirely. `^{tag}` is the one
+ * spelling that stops before the first hop, so `v1^{tag}` is the tag object
+ * itself rather than a refusal saying the commit behind it is no tag.
+ * `^{tree}` then takes a commit's tree, git's one implicit step; every other
+ * spelling has to already name the type it asks for, so `HEAD^{blob}` is
+ * refused rather than answered with something else.
+ *
+ * A lightweight tag is still refused by `^{tag}`: the name resolves straight to
+ * a commit, so there is no tag object to stop at and the type check below is
+ * what says so.
  */
 async function peeled(
   repo: Repo,
@@ -204,7 +213,7 @@ async function peeled(
   revision: string,
 ): Promise<GitObject> {
   let { oid, type } = found
-  while (type === 'tag') {
+  while (type === TAG && want !== TAG) {
     oid = (await git.readTag({ ...repoArgs(repo), oid })).tag.object
     type = await typeOf(repo, oid, revision)
   }
@@ -237,6 +246,39 @@ async function atPath(repo: Repo, rev: string, path: string, revision: string): 
 }
 
 /**
+ * The tag object a name or id denotes, null when it names no tag.
+ *
+ * Read before the stem is resolved, and only for `^{tag}`: every other peel type
+ * sits at or below the commit, so unwrapping an annotated tag on the way is
+ * git's own rule and costs nothing, while `^{tag}` is the one spelling that has
+ * to stop above it. Resolving the stem the ordinary way cannot serve it, because
+ * the commit-ish reading peels the tag before anything else sees it.
+ *
+ * Both spellings a tag answers to are tried, the ref and a raw id, and anything
+ * that is not a tag object reads as no tag: a lightweight tag names a commit
+ * directly, which is why git refuses `^{tag}` on one.
+ */
+async function tagObject(repo: Repo, stem: string): Promise<GitObject | null> {
+  let oid: string
+  try {
+    oid = await git.resolveRef({ ...repoArgs(repo), ref: `${TAG_PREFIX}${stem}` })
+  } catch {
+    try {
+      oid = await git.expandOid({ ...repoArgs(repo), oid: stem })
+    } catch {
+      return null
+    }
+  }
+  let type: string
+  try {
+    type = await typeOf(repo, oid, stem)
+  } catch {
+    return null
+  }
+  return type === TAG ? { oid, type } : null
+}
+
+/**
  * The object a revision names, whatever type it turns out to be.
  *
  * The whole grammar a caller that wants an object rather than a commit has to
@@ -265,6 +307,10 @@ export async function resolveObject(repo: Repo, revision: string): Promise<GitOb
       const oid = await expanded(repo, revision)
       return { oid, type: await typeOf(repo, oid, revision) }
     }
+  }
+  if (want === TAG) {
+    const found = await tagObject(repo, stem)
+    if (found !== null) return found
   }
   return peeled(repo, await resolveObject(repo, stem), want, revision)
 }

@@ -2267,6 +2267,48 @@
         "stdout": "flat\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_switch_carries_a_staged_addition",
+      "seq": 568321,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo branch carryadd && echo new > /repo/carryadd.txt && git -C /repo add carryadd.txt && git -C /repo switch carryadd 2>/dev/null | grep carryadd && git -C /repo status --short | grep carryadd",
+      "expect": {
+        "exit": 0,
+        "stdout": "A\tcarryadd.txt\nA  carryadd.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_switch_carries_a_staged_deletion",
+      "seq": 568322,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "echo gone > /repo/carrydel.txt && git -C /repo add carrydel.txt && git -C /repo commit -m carrydel > /dev/null && git -C /repo branch carrydel && git -C /repo rm --cached carrydel.txt > /dev/null && git -C /repo switch carrydel 2>/dev/null | grep carrydel && git -C /repo status --short | grep carrydel",
+      "expect": {
+        "exit": 0,
+        "stdout": "D\tcarrydel.txt\nD  carrydel.txt\n?? carrydel.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_takes_a_typed_tag_peel",
+      "seq": 568323,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag -a peelv1 -m annotated && git -C /repo tag peelnested 'peelv1^{tag}' && git -C /repo tag -l 'peel*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "peelnested\npeelv1\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -423,3 +423,20 @@ async def test_creating_a_branch_below_one_that_exists_is_refused(
     # Refused before the working tree moves, so HEAD is where it was.
     assert b"ref: refs/heads/main" in (repo_path / ".git" /
                                        "HEAD").read_bytes()
+
+
+@pytest.mark.asyncio
+async def test_an_unmerged_index_stops_a_switch_to_the_current_branch(
+        git_rw, repo_path: Path):
+    # The shortcut moves nothing, which is not the same as having
+    # nothing to check: git reads the index before it answers, so
+    # "Already on" cannot be read as proof the repository is in a state
+    # anything can be built on.
+    code, out, err = await run(git_rw, "switch main")
+    assert (code, out, err) == (0, b"", b"Already on 'main'\n")
+    conflict_index(repo_path, "a.txt")
+    code, out, err = await run(git_rw, "switch main")
+    assert code == 1
+    assert out == b"a.txt: needs merge\n"
+    assert err == b"error: you need to resolve your current index first\n"
+    assert head_ref(repo_path) == b"ref: refs/heads/main"

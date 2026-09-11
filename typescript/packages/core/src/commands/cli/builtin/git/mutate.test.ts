@@ -221,6 +221,29 @@ function gitlinkIndex(repo: string, path: string): void {
   execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'gitlink'], { stdio: 'ignore' })
 }
 
+/**
+ * Write a branch whose tree records a gitlink, leaving HEAD and the index as
+ * they were.
+ *
+ * A branch switch onto a gitlink is only reachable while the current branch
+ * does not carry one, so the index is put back where it was afterwards.
+ */
+function gitlinkBranch(repo: string, branch: string, path: string): void {
+  const head = git(repo, ['rev-parse', 'HEAD']).trim()
+  execFileSync('git', [
+    '-C',
+    repo,
+    'update-index',
+    '--add',
+    '--cacheinfo',
+    `160000,${head},${path}`,
+  ])
+  const tree = git(repo, ['write-tree']).trim()
+  const commit = git(repo, ['commit-tree', tree, '-p', head, '-m', 'gitlink']).trim()
+  git(repo, ['update-ref', `refs/heads/${branch}`, commit])
+  git(repo, ['reset', '-q', '--mixed', head])
+}
+
 /** Write into the mount, which is where the verbs under test read from. */
 async function write(h: Harness, path: string, text: string): Promise<void> {
   const target = `/repo/${path}`
@@ -1755,6 +1778,45 @@ describe('a gitlink in the tree', () => {
     expect(await h.run('restore sub')).toEqual([0, '', ''])
     expect(await readOptional(h.dispatch, '/repo/sub')).toBeNull()
   })
+
+  it('keeps a child the restored source drops', async () => {
+    // The entry asks for the directory and nothing under it: git drops the
+    // child's index entry and leaves the file alone. Removing it here loses
+    // content nothing has a copy of, since the source tree never held it.
+    const h = await harness((repo) => {
+      gitlinkIndex(repo, 'sub')
+    })
+    await write(h, 'sub/child.md', 'child\n')
+    expect((await h.run('add sub/child.md'))[0]).toBe(0)
+    expect(await h.run('restore --staged --worktree sub')).toEqual([0, '', ''])
+    expect(await readOptional(h.dispatch, '/repo/sub/child.md')).not.toBeNull()
+    const drained = await h.drain()
+    expect(git(drained, ['ls-files', 'sub/child.md'])).toBe('')
+  })
+
+  it('lands over a directory holding untracked files', async () => {
+    // A gitlink asks for a directory, so the one already standing is what it
+    // asked for and nothing in it is lost. The collision check read it as a
+    // file replacing the directory and aborted a switch git takes.
+    const h = await harness((repo) => {
+      gitlinkBranch(repo, 'linked', 'sub')
+    })
+    await write(h, 'sub/keep.md', 'keep\n')
+    expect((await h.run('checkout linked'))[0]).toBe(0)
+    expect(await readOptional(h.dispatch, '/repo/sub/keep.md')).not.toBeNull()
+  })
+
+  it('still refuses an untracked file where it lands', async () => {
+    // The other half of git's rule: the directory cannot be made without
+    // deleting the file, so this one is named and refused.
+    const h = await harness((repo) => {
+      gitlinkBranch(repo, 'linked', 'sub')
+    })
+    await h.ws.execute("printf 'mine\\n' > /repo/sub")
+    const [code, , err] = await h.run('checkout linked')
+    expect(code).toBe(1)
+    expect(err).toContain('would be overwritten by checkout:\n\tsub\n')
+  })
 })
 
 describe('an ancestry suffix that is not a step', () => {
@@ -2033,6 +2095,33 @@ describe('a switch while the index is unmerged', () => {
     })
     const [code, out] = await h.run('switch -c sidebar HEAD')
     expect([code, out]).toEqual([1, 'letters.txt: needs merge\n'])
+  })
+
+  it('refuses the branch HEAD already names', async () => {
+    // The shortcut moves nothing, which is not the same as having nothing to
+    // check: git reads the index before it answers, so "Already on" cannot be
+    // read as proof the repository is in a state anything can be built on.
+    const clean = await harness()
+    expect(await clean.run('switch main')).toEqual([0, '', "Already on 'main'\n"])
+    const h = await harness((repo) => {
+      conflictIndex(repo, 'letters.txt')
+    })
+    expect(await h.run('switch main')).toEqual([
+      1,
+      'letters.txt: needs merge\n',
+      'error: you need to resolve your current index first\n',
+    ])
+  })
+
+  it('refuses a checkout of the branch HEAD already names', async () => {
+    const h = await harness((repo) => {
+      conflictIndex(repo, 'letters.txt')
+    })
+    expect(await h.run('checkout main')).toEqual([
+      1,
+      'letters.txt: needs merge\n',
+      'error: you need to resolve your current index first\n',
+    ])
   })
 })
 

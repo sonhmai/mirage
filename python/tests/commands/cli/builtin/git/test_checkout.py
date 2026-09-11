@@ -682,3 +682,40 @@ async def test_a_branch_that_adds_a_gitlink_makes_a_directory_for_it(
     branch_with_gitlink(repo_path, "linked", "sub")
     assert (await run(git_rw, "checkout linked"))[0] == 0
     assert (repo_path / "sub").is_dir()
+
+
+@pytest.mark.asyncio
+async def test_an_unmerged_index_stops_a_checkout_of_the_current_branch(
+        git_rw, repo_path: Path):
+    conflict_index(repo_path, "a.txt")
+    code, out, err = await run(git_rw, "checkout main")
+    assert code == 1
+    assert out == b"a.txt: needs merge\n"
+    assert err == b"error: you need to resolve your current index first\n"
+
+
+@pytest.mark.asyncio
+async def test_a_gitlink_lands_over_a_directory_of_untracked_files(
+        git_rw, repo_path: Path):
+    # A gitlink asks for a directory, so the one already standing is
+    # what it asked for and nothing in it is lost. The collision check
+    # read it as a file replacing the directory and aborted a switch
+    # git takes.
+    branch_with_gitlink(repo_path, "linked", "sub")
+    await git_rw.execute("mkdir /repo/sub && echo keep > /repo/sub/keep.txt")
+    assert (await run(git_rw, "checkout linked"))[0] == 0
+    assert (repo_path / "sub" /
+            "keep.txt").read_text(encoding="utf-8") == "keep\n"
+
+
+@pytest.mark.asyncio
+async def test_an_untracked_file_where_a_gitlink_lands_is_still_refused(
+        git_rw, repo_path: Path):
+    # The other half of git's rule: the directory cannot be made
+    # without deleting the file, so this one is named and refused.
+    branch_with_gitlink(repo_path, "linked", "sub")
+    await git_rw.execute("printf 'mine\n' > /repo/sub")
+    code, _out, err = await run(git_rw, "checkout linked")
+    assert code == 1
+    assert b"would be overwritten by checkout:\n\tsub\n" in err
+    assert (repo_path / "sub").read_text(encoding="utf-8") == "mine\n"

@@ -42,7 +42,7 @@ import {
   restoreEntry,
   under,
 } from './io.ts'
-import { matched, repoRelative } from './pathspec.ts'
+import { matched, repoRelative, under as inside } from './pathspec.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
 import { restored } from './reset.ts'
 import { COMMIT, TREE, resolveObject, unwrapped } from './revparse.ts'
@@ -183,6 +183,14 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
     // is the whole of what the entry asks for, and the preflight has nothing
     // to say about it either.
     const replacing = present.filter((name) => tree.get(name)?.mode !== GITLINK_MODE)
+    // A gitlink's directory is not this verb's to empty either. The entry is a
+    // placeholder for a repository mirage cannot read, so git writes the
+    // directory and leaves every path under it alone: a child the source drops
+    // loses its index entry and keeps its working-tree copy, edits included.
+    // Removing it here is the one loss nothing can undo, since the content was
+    // never staged. Pinned against git 2.50.1.
+    const linked = present.filter((name) => tree.get(name)?.mode === GITLINK_MODE)
+    const dropped = absent.filter((name) => !linked.some((root) => inside(name, root)))
     if (flags.worktree) {
       await refuseReplacedMounts(statPath, repo.location.worktree, replacing, links, mounts)
     }
@@ -201,7 +209,7 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
       // file `slot` still sits, and the other direction writes the file
       // where the directory still sits. Nothing is read back from the
       // working tree, so emptying it first is free.
-      for (const name of absent) {
+      for (const name of dropped) {
         const path = under(repo.location.worktree, name)
         // A component above the entry that is not a directory is not a way
         // through to it: the unlink would resolve past it and delete a file

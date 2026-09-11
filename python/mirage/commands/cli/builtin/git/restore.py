@@ -31,13 +31,11 @@ from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     UnknownSwitchError, UnmergedPathError, UnreadableTreeError,
     UnresolvableSourceError)
 from mirage.commands.cli.builtin.git.index import read_index, write_index
-from mirage.commands.cli.builtin.git.io import (blocking_ancestor,
-                                                keep_gitlink,
-                                                refuse_replaced_mounts,
-                                                remove_empty_parents,
-                                                remove_file, remove_tree,
-                                                restore_entry)
-from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
+from mirage.commands.cli.builtin.git.io import (  # yapf: disable
+    blocking_ancestor, keep_gitlink, refuse_replaced_mounts,
+    remove_empty_parents, remove_file, remove_tree, restore_entry)
+from mirage.commands.cli.builtin.git.pathspec import (matched, repo_relative,
+                                                      under)
 from mirage.commands.cli.builtin.git.reset import restored
 from mirage.commands.cli.builtin.git.revparse import (TREE, resolve_object,
                                                       unwrapped)
@@ -222,6 +220,18 @@ async def restore(
         # for, and the preflight has nothing to say about it either.
         replacing = sorted(name for name in present
                            if tree[name.encode()][0] != GITLINK)
+        # A gitlink's directory is not this verb's to empty either. The
+        # entry is a placeholder for a repository mirage cannot read, so
+        # git writes the directory and leaves every path under it alone:
+        # a child the source drops loses its index entry and keeps its
+        # working-tree copy, edits included. Removing it here is the one
+        # loss nothing can undo, since the content was never staged.
+        # Pinned against git 2.50.1.
+        linked = [
+            name for name in present if tree[name.encode()][0] == GITLINK
+        ]
+        dropped = sorted(name for name in absent
+                         if not any(under(name, root) for root in linked))
         if flags.worktree:
             await refuse_replaced_mounts(stat_path, location.worktree,
                                          replacing, links, mounts)
@@ -247,7 +257,7 @@ async def restore(
             # other direction writes the file where the directory still
             # sits. Nothing is read back from the working tree, so
             # emptying it first is free.
-            for name in sorted(absent):
+            for name in dropped:
                 path = posixpath.join(location.worktree, name)
                 # A component above the entry that is not a directory
                 # is not a way through to it: the unlink would resolve

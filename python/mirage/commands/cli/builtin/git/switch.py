@@ -24,6 +24,7 @@ from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     InvalidBranchNameError, InvalidReferenceError, MissingBranchArgumentError,
     NoWorkspaceError, OneReferenceError, RefLockError, UnknownSwitchError)
 from mirage.commands.cli.builtin.git.format import short, subject
+from mirage.commands.cli.builtin.git.index import read_index, refuse_unresolved
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.refs import (BRANCH_PREFIX, TAG_PREFIX,
                                                   blocking_ref, read_head,
@@ -172,6 +173,11 @@ async def switch(
             # what leaves ``switch -c`` as the only line an unborn HEAD
             # accepts. Pinned against git 2.50.1.
             if (not flags.detach and target == head.branch and ref in known):
+                # Moving nothing is not the same as having nothing to
+                # check: git dies on an unresolved index here too, so
+                # the shortcut reads it before it answers. Every ref
+                # check above comes first, which is git's own order.
+                refuse_unresolved(await read_index(dispatch, location.gitdir))
                 return None, IOResult(
                     stderr=f"Already on '{target}'\n".encode())
             try:

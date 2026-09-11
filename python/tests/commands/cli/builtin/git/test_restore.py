@@ -627,3 +627,22 @@ async def test_a_file_standing_where_a_gitlink_belongs_is_replaced(
     await git_rw.execute("printf 'i am a file\n' > /repo/sub")
     assert await run(git_rw, "restore sub") == (0, b"", b"")
     assert (repo_path / "sub").is_dir()
+
+
+@pytest.mark.asyncio
+async def test_a_child_under_a_restored_gitlink_keeps_its_working_copy(
+        git_rw, repo_path: Path):
+    # Restoring the gitlink drops the child's index entry and leaves
+    # the file alone: git writes the directory and touches nothing
+    # under it. Removing it here loses content nothing has a copy of,
+    # since the source tree never held it.
+    await git_rw.execute("mkdir /repo/sub && echo keep > /repo/sub/keep.txt")
+    commit_gitlink(repo_path, "sub")
+    await git_rw.execute("echo child > /repo/sub/child.txt")
+    assert (await run(git_rw, "add sub/child.txt"))[0] == 0
+    assert await run(git_rw,
+                     "restore --staged --worktree sub") == (0, b"", b"")
+    assert (repo_path / "sub" /
+            "child.txt").read_text(encoding="utf-8") == "child\n"
+    with Repo(str(repo_path)) as repo:
+        assert b"sub/child.txt" not in repo.open_index()

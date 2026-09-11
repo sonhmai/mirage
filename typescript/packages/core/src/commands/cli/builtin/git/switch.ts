@@ -34,6 +34,7 @@ import {
   UnknownSwitchError,
 } from './errors.ts'
 import { short } from './format.ts'
+import { readIndex, refuseUnresolved } from './index_file.ts'
 import {
   BRANCH_PREFIX,
   blockingRef,
@@ -165,6 +166,10 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       // is what leaves `switch -c` as the only line an unborn HEAD accepts.
       // Pinned against git 2.50.1.
       if (!flags.detach && target === head.branch && known.has(`${BRANCH_PREFIX}${target}`)) {
+        // Moving nothing is not the same as having nothing to check: git dies
+        // on an unresolved index here too, so the shortcut reads it before it
+        // answers. Every ref check above comes first, which is git's own order.
+        refuseUnresolved(await readIndex(repo, dispatch))
         return [null, new IOResult({ stderr: ENC.encode(`Already on '${target}'\n`) })]
       }
       try {

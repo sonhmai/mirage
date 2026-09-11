@@ -27,13 +27,12 @@ import {
   GitError,
   NoWorkspaceError,
   RefLockError,
-  ResolveIndexError,
   UnknownPathspecError,
   UnknownSwitchError,
 } from './errors.ts'
 import { GITLINK_MODE } from './constants.ts'
 import { short } from './format.ts'
-import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
+import { readIndex, refuseUnresolved, updateIndex, type StagedEntry } from './index_file.ts'
 import {
   blockingAncestor,
   keepGitlink,
@@ -230,12 +229,20 @@ function blockedDescendants(
  * anything untracked inside it is gone. git words this one differently and
  * names the directory rather than the files, since the directory is what the
  * caller has to move. Pinned against git 2.50.1.
+ *
+ * A gitlink is not one of those entries. It asks for a directory, not for a
+ * file, so an existing one is left standing with everything in it, and git
+ * takes this switch rather than refusing it. An untracked *file* at the same
+ * name is still refused, by the check above, because the directory cannot be
+ * made without deleting it.
  */
 function lostDirectories(
   writing: ReadonlyMap<string, TreeEntry>,
   untracked: readonly string[],
 ): string[] {
-  return [...writing.keys()]
+  return [...writing]
+    .filter(([, entry]) => entry.mode !== GITLINK_MODE)
+    .map(([name]) => name)
     .filter((name) => untracked.some((path) => inside(path, name)))
     .sort(compareCodePoints)
 }
@@ -461,7 +468,7 @@ export async function moveHead(
   // so a path held only as conflict stages is invisible to all of them and the
   // move would clear the stages and delete the file, throwing away a resolution
   // in progress.
-  if (state.conflicts.size > 0) throw new ResolveIndexError([...state.conflicts.keys()])
+  refuseUnresolved(state)
   const tracked = new Set(state.entries.keys())
   // UNTRACKED_ALL, not the mode status uses: "normal" collapses a wholly
   // untracked directory to one `dir/` entry, and a collision has to be
@@ -528,6 +535,11 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
       }
     }
     if (!creating && target === head.branch) {
+      // The shortcut moves nothing, and that is exactly why it has to read the
+      // index: git refuses the line over an unresolved index rather than
+      // answering that there is nothing to do, so a caller cannot read
+      // "Already on" as proof the repository is in a state it can build on.
+      refuseUnresolved(await readIndex(repo, dispatch))
       return [null, new IOResult({ stderr: ENC.encode(`Already on '${target}'\n`) })]
     }
     // `checkout -b <new> [<start>]` branches from the start point when one is

@@ -30,16 +30,14 @@ from mirage.commands.cli.builtin.git.changes import (ADDED, DELETED, MODIFIED,
 from mirage.commands.cli.builtin.git.constants import GITLINK, HEAD
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     BadStartPointError, BranchExistsError, CheckoutConflictError, GitError,
-    NoWorkspaceError, RefLockError, ResolveIndexError, UnknownPathspecError,
-    UnknownSwitchError)
+    NoWorkspaceError, RefLockError, UnknownPathspecError, UnknownSwitchError)
 from mirage.commands.cli.builtin.git.format import short, subject
-from mirage.commands.cli.builtin.git.index import read_index, write_index
-from mirage.commands.cli.builtin.git.io import (blocking_ancestor,
-                                                keep_gitlink,
-                                                refuse_replaced_mounts,
-                                                remove_empty_parents,
-                                                remove_file, remove_tree,
-                                                restore_entry)
+from mirage.commands.cli.builtin.git.index import (read_index,
+                                                   refuse_unresolved,
+                                                   write_index)
+from mirage.commands.cli.builtin.git.io import (  # yapf: disable
+    blocking_ancestor, keep_gitlink, refuse_replaced_mounts,
+    remove_empty_parents, remove_file, remove_tree, restore_entry)
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.pathspec import under
 from mirage.commands.cli.builtin.git.reflog import record
@@ -276,11 +274,22 @@ def _lost_directories(writing: Tree, untracked: list[str]) -> list[str]:
     the directory is what the caller has to move. Pinned against git
     2.50.1.
 
+    A gitlink is not one of those entries. It asks for a directory, not
+    for a file, so an existing one is left standing with everything in
+    it, and git takes this switch rather than refusing it. Pinned
+    against git 2.50.1; an untracked *file* at the same name is still
+    refused, by the check above, because the directory cannot be made
+    without deleting it.
+
     Args:
         writing (Tree): the entries the switch writes, from ``_written``.
         untracked (list[str]): every untracked path the walk found.
     """
-    return sorted(name for name in _tree_names(writing) if any(
+    replacing = _tree_names({
+        path: entry
+        for path, entry in writing.items() if entry[0] != GITLINK
+    })
+    return sorted(name for name in replacing if any(
         under(path, name) for path in untracked))
 
 
@@ -533,10 +542,7 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
     # reads stage 0, so a path held only as conflict stages is invisible
     # to all of them and the move would clear the stages and delete the
     # file, throwing away a resolution in progress.
-    if state.conflicts:
-        raise ResolveIndexError([
-            path.decode("utf-8", errors="replace") for path in state.conflicts
-        ])
+    refuse_unresolved(state)
     tracked = {
         path.decode("utf-8", errors="replace")
         for path in state.entries
@@ -613,6 +619,12 @@ async def checkout(
             except GitError as exc:
                 raise UnknownPathspecError(target) from exc
         if not creating and target == head.branch:
+            # The shortcut moves nothing, and that is exactly why it
+            # has to read the index: git refuses the line over an
+            # unresolved index rather than answering that there is
+            # nothing to do, so a caller cannot read "Already on" as
+            # proof the repository is in a state it can build on.
+            refuse_unresolved(await read_index(dispatch, location.gitdir))
             return None, IOResult(stderr=f"Already on '{target}'\n".encode())
         # ``checkout -b <new> [<start>]`` branches from the start point
         # when one is given, HEAD otherwise. Forcing HEAD here put the new

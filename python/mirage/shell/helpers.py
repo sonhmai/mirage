@@ -20,7 +20,8 @@ from mirage.shell.constants import (FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN,
                                     FD_STDOUT)
 from mirage.shell.escapes import (decode_ansi_c, unescape_dquoted,
                                   unescape_unquoted)
-from mirage.shell.parse.heredoc import body_prefix, clean_delimiter
+from mirage.shell.parse.heredoc import (body_prefix, clean_delimiter,
+                                        delimiter_quoted)
 from mirage.shell.types import FunctionBody
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ProcessSubDirection, Redirect, RedirectKind
@@ -671,12 +672,11 @@ def get_heredoc_meta(
     """Get (body, dash, quoted) from heredoc_redirect.
 
     - dash: True if operator was `<<-` (strip leading tabs from body lines)
-    - quoted: True if delimiter was wrapped in quotes (no var expansion)
+    - quoted: True if any part of the delimiter was quoted (no var
+      expansion), which a line continuation in it is not
     """
     delimiter, body = get_heredoc_parts(redirect_node)
-    # Any quoting anywhere in the delimiter (even partial, `EN'D'`)
-    # disables expansion, matching bash.
-    quoted = "'" in delimiter or '"' in delimiter or "\\" in delimiter
+    quoted = delimiter_quoted(delimiter)
     dash = False
     for c in redirect_node.children:
         if c.type == "<<-":

@@ -22,7 +22,8 @@ from mirage.ops.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import (get_process_sub_body,
-                                  get_process_sub_direction, get_text)
+                                  get_process_sub_direction, get_text,
+                                  normalize_heredoc_body)
 from mirage.shell.parse.heredoc import body_prefix
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ProcessSubDirection, Redirect, RedirectKind
@@ -81,15 +82,22 @@ async def expand_heredoc_body(
     NOT a named child) is gap-filled from byte spans. Literal pieces get
     heredoc backslash escapes and `<<-` tab stripping; expansion nodes
     route through expand_node. The empty lines tree-sitter dropped before
-    the body node (body_prefix) come first.
+    the body node (body_prefix) come first, and a body that swallowed its
+    own terminator line gives it back (normalize_heredoc_body).
     """
     body_node = None
+    delimiter = ""
+    closed = False
     dash = False
     for c in redirect_node.children:
         if c.type == "<<-":
             dash = True
+        elif c.type == NT.HEREDOC_START:
+            delimiter = get_text(c)
         elif c.type == NT.HEREDOC_BODY:
             body_node = c
+        elif c.type == NT.HEREDOC_END:
+            closed = bool(c.text)
     if body_node is None:
         return ""
     raw = body_node.text or b""
@@ -132,6 +140,8 @@ async def expand_heredoc_body(
             tail = _strip_heredoc_tabs(tail, at_line_start)
         parts.append(_finish_heredoc_literal(tail, session, call_stack))
     body = "".join(parts)
+    if not closed:
+        body = normalize_heredoc_body(body, delimiter)
     if body and not body.endswith("\n"):
         # bash heredoc bodies always end with a newline (see
         # get_heredoc_meta for the tree-sitter edge this papers over).

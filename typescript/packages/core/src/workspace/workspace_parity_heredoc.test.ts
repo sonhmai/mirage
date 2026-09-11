@@ -393,3 +393,37 @@ describe('workspace: heredoc leading empty lines and escaped delimiters', () => 
     await ws.close()
   })
 })
+
+// A backslash before a newline in the delimiter is the reader's line
+// continuation rather than quoting, so the body it opens expands, and the
+// terminator line tree-sitter leaves in that body is not body text
+// (issue #1050).
+describe('workspace: heredoc continued delimiters', () => {
+  it('expands the body of a continued delimiter', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('hb=val; cat <<EO\\\nF\n$hb\nEOF\n')
+    expect(stdoutStr(io)).toBe('val\n')
+    await ws.close()
+  })
+
+  it('drops the terminator line of a continued delimiter', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('cat <<EO\\\nF\nbody\nEOF\n')
+    expect(stdoutStr(io)).toBe('body\n')
+    await ws.close()
+  })
+
+  it('reads a continued delimiter carrying an escape as quoted', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('hb=val; cat <<EO\\\nF\\G\n$hb\nEOFG\n')
+    expect(stdoutStr(io)).toBe('$hb\n')
+    await ws.close()
+  })
+
+  it('keeps a body that expands to the delimiter', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('hb=END; cat <<END\n$hb\nEND')
+    expect(stdoutStr(io)).toBe('END\n')
+    await ws.close()
+  })
+})

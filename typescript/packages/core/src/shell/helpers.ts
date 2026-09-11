@@ -15,7 +15,7 @@
 import { expandTilde } from '../utils/path.ts'
 import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from './constants.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from './escapes.ts'
-import { bodyPrefix, cleanDelimiter } from './parse/heredoc/index.ts'
+import { bodyPrefix, cleanDelimiter, delimiterQuoted } from './parse/heredoc/index.ts'
 import type { TSNodeLike } from './types.ts'
 import { NodeType as NT, ProcessSubDirection, Redirect, RedirectKind } from './types.ts'
 
@@ -692,9 +692,7 @@ function getHeredocParts(redirectNode: TSNodeLike): [string, string] {
 
 function getHeredocMeta(redirectNode: TSNodeLike): [string, boolean, boolean] {
   const [delimiter, rawBody] = getHeredocParts(redirectNode)
-  // Any quoting anywhere in the delimiter (even partial, `EN'D'`)
-  // disables expansion, matching bash.
-  const quoted = delimiter.includes("'") || delimiter.includes('"') || delimiter.includes('\\')
+  const quoted = delimiterQuoted(delimiter)
   let dash = false
   for (const c of redirectNode.children) {
     if (c.type === '<<-') {
@@ -720,7 +718,7 @@ function getHeredocMeta(redirectNode: TSNodeLike): [string, boolean, boolean] {
  * loses its final newline to heredoc_end. Bash strips quoting from
  * the delimiter before matching and bodies always end with a newline.
  */
-function normalizeHeredocBody(body: string, delimiter: string): string {
+export function normalizeHeredocBody(body: string, delimiter: string): string {
   const clean = cleanDelimiter(delimiter)
   const suffix = clean + '\n'
   let out = body

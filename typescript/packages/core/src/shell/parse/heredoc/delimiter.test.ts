@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ansiCEnd, cleanDelimiter } from './delimiter.ts'
+import { ansiCEnd, cleanDelimiter, delimiterQuoted } from './delimiter.ts'
 
 describe('cleanDelimiter', () => {
   it.each([
@@ -62,5 +62,26 @@ describe('ansiCEnd', () => {
     ["$'A", 3],
   ])('closes %j at %i', (token, expected) => {
     expect(ansiCEnd(token, 2)).toBe(expected)
+  })
+})
+
+describe('delimiterQuoted', () => {
+  it.each([
+    ['EOF', false],
+    ['$EOF', false],
+    ["'EOF'", true],
+    ['"EOF"', true],
+    ["EN'D'", true],
+    ['\\EOF', true],
+    ['E\\OF', true],
+    ["$'EOF'", true],
+    ['$"EOF"', true],
+    ['EO\\\nF', false],
+    ['E\\\nO\\\nF', false],
+    ['EO\\\nF\\G', true],
+    ['"EO\\\nF"', true],
+    ["'EO\\\nF'", true],
+  ])('reads %j as quoted %s', (token, quoted) => {
+    expect(delimiterQuoted(token)).toBe(quoted)
   })
 })

@@ -101,3 +101,23 @@ export function cleanDelimiter(token: string): string {
   }
   return out
 }
+
+/**
+ * Whether the delimiter word is quoted, so its body reads literally.
+ *
+ * Quoting anywhere in the word, even partial (`EN'D'`, `\EOF`), turns
+ * expansion off for the whole body. A backslash before a newline is not
+ * quoting: it is the reader's line continuation, gone before the word is
+ * read, so `EO\<newline>F` expands its body exactly as `EOF` does, while
+ * `EO\<newline>F\G` does not, its second backslash quoting a character.
+ */
+export function delimiterQuoted(token: string): boolean {
+  let index = 0
+  while (index < token.length) {
+    const char = token[index] ?? ''
+    if (char === '\\' && token[index + 1] === '\n') index += 1
+    else if (char === '\\' || char === "'" || char === '"') return true
+    index += 1
+  }
+  return false
+}

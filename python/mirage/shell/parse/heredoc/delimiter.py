@@ -105,3 +105,30 @@ def clean_delimiter(token: str) -> str:
             out.append(char)
         index += 1
     return "".join(out)
+
+
+def delimiter_quoted(token: str) -> bool:
+    """Whether the delimiter word is quoted, so its body reads literally.
+
+    Quoting anywhere in the word, even partial (``EN'D'``, ``\\EOF``),
+    turns expansion off for the whole body. A backslash before a newline
+    is not quoting: it is the reader's line continuation, gone before the
+    word is read, so ``EO\\<newline>F`` expands its body exactly as
+    ``EOF`` does, while ``EO\\<newline>F\\G`` does not, its second
+    backslash quoting a character.
+
+    Args:
+        token (str): the heredoc_start token as typed.
+
+    Returns:
+        bool: True when the body takes no expansion.
+    """
+    index = 0
+    while index < len(token):
+        char = token[index]
+        if char == "\\" and token[index + 1:index + 2] == "\n":
+            index += 1
+        elif char in ("\\", "'", '"'):
+            return True
+        index += 1
+    return False

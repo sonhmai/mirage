@@ -14,7 +14,8 @@
 
 import pytest
 
-from mirage.shell.parse.heredoc import ansi_c_end, clean_delimiter
+from mirage.shell.parse.heredoc import (ansi_c_end, clean_delimiter,
+                                        delimiter_quoted)
 
 
 @pytest.mark.parametrize("token, expected", [
@@ -63,3 +64,23 @@ def test_clean_delimiter(token: str, expected: str):
 ])
 def test_ansi_c_end(token: str, expected: int):
     assert ansi_c_end(token, 2) == expected
+
+
+@pytest.mark.parametrize("token, quoted", [
+    ("EOF", False),
+    ("$EOF", False),
+    ("'EOF'", True),
+    ('"EOF"', True),
+    ("EN'D'", True),
+    ("\\EOF", True),
+    ("E\\OF", True),
+    ("$'EOF'", True),
+    ('$"EOF"', True),
+    ("EO\\\nF", False),
+    ("E\\\nO\\\nF", False),
+    ("EO\\\nF\\G", True),
+    ('"EO\\\nF"', True),
+    ("'EO\\\nF'", True),
+])
+def test_delimiter_quoted(token: str, quoted: bool):
+    assert delimiter_quoted(token) is quoted

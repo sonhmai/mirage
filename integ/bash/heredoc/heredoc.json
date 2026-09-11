@@ -1791,6 +1791,37 @@
         "stdout": "body\nafter\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "heredoc_body_expanding_to_the_delimiter",
+      "seq": 501277,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "hb=END; cat <<END\n$hb\nEND\necho after",
+      "expect": {
+        "exit": 0,
+        "stdout": "END\nafter\n",
+        "stderr": ""
+      }
     }
   ]
 }

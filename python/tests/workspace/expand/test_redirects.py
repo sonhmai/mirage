@@ -414,3 +414,35 @@ async def test_heredoc_leading_empty_line_round_trips_through_a_file():
     ws = await _workspace_at("/data")
     await ws.execute("cat > /data/HB7 <<'END'\n\nfirst\nEND")
     assert await _stdout(ws, "cat /data/HB7") == "\nfirst\n"
+
+
+# A backslash before a newline in the delimiter is the reader's line
+# continuation rather than quoting, so the body it opens expands, and the
+# terminator line tree-sitter leaves in that body is not body text
+# (issue #1050).
+
+
+@pytest.mark.asyncio
+async def test_heredoc_continued_delimiter_expands_its_body():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "hb=val; cat <<EO\\\nF\n$hb\nEOF\n")
+    assert out == "val\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_continued_delimiter_drops_its_terminator_line():
+    ws = await _workspace_at("/data")
+    assert await _stdout(ws, "cat <<EO\\\nF\nbody\nEOF\n") == "body\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_continued_delimiter_with_an_escape_is_quoted():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "hb=val; cat <<EO\\\nF\\G\n$hb\nEOFG\n")
+    assert out == "$hb\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_body_expanding_to_the_delimiter_is_kept():
+    ws = await _workspace_at("/data")
+    assert await _stdout(ws, "hb=END; cat <<END\n$hb\nEND") == "END\n"

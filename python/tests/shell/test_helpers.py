@@ -777,6 +777,24 @@ def test_get_heredoc_meta_backslash_quoted_delimiter():
     assert body == "x=$v\n"
 
 
+def test_get_heredoc_meta_continued_delimiter_is_not_quoted():
+    # A backslash before a newline is the reader's line continuation, so
+    # `EO\<newline>F` names EOF and its body still expands.
+    node = _first("cat <<EO\\\nF\nx=$v\nEOF\n")
+    heredoc = node.named_children[1]
+    body, dash, quoted = get_heredoc_meta(heredoc)
+    assert quoted is False
+    assert dash is False
+    assert body == "x=$v\n"
+
+
+def test_get_heredoc_meta_continuation_with_an_escape_is_quoted():
+    node = _first("cat <<EO\\\nF\\G\nx=$v\nEOFG\n")
+    heredoc = node.named_children[1]
+    _, _, quoted = get_heredoc_meta(heredoc)
+    assert quoted is True
+
+
 def test_get_heredoc_meta_body_gets_trailing_newline():
     # tree-sitter drops the final newline for concatenated delimiters.
     node = _first("cat <<EN'D'\nline\nEND\n")

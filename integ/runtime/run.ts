@@ -44,6 +44,7 @@ import {
   type Resource,
   type RunResult,
   type RuntimeEntry,
+  type FilesystemOperation,
 } from '@struktoai/mirage-node'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
@@ -133,6 +134,7 @@ interface Case {
   id: string
   hosts?: string[]
   world?: World
+  filesystem?: Record<string, Partial<Record<FilesystemOperation, boolean>>>
   build_error?: { contains: string }
   steps?: Step[]
 }
@@ -717,6 +719,17 @@ async function runCase(suite: string, testCase: Case): Promise<string[]> {
   const ws = await buildWorkspace(world, runId)
   const problems: string[] = []
   try {
+    for (const [name, operations] of Object.entries(testCase.filesystem ?? {})) {
+      const runtime = ws.runtimeEntries.find((entry) => entry.name === name)
+      if (runtime === undefined) throw new Error(`Missing runtime ${name}`)
+      const supported = new Set<string>(runtime.capabilities.filesystem)
+      for (const [operation, expected] of Object.entries(operations)) {
+        if (supported.has(operation) !== expected)
+          problems.push(
+            `${caseId}: ${name} filesystem ${operation}: expected ${expected}, got ${supported.has(operation)}`,
+          )
+      }
+    }
     for (const [index, step] of (testCase.steps ?? []).entries()) {
       problems.push(...(await runStep(ws, caseId, index, step)))
     }

@@ -637,6 +637,14 @@ async def _run_case(suite: str, case: dict[str, Any]) -> list[str]:
     ws = await _build_workspace(world, run_id)
     problems: list[str] = []
     try:
+        runtimes = {runtime.name: runtime for runtime in ws._runtimes.entries}
+        for name, operations in case.get("filesystem", {}).items():
+            supported = runtimes[name].capabilities.filesystem
+            for operation, expected in operations.items():
+                if (operation in supported) != expected:
+                    problems.append(
+                        f"{case_id}: {name} filesystem {operation}: "
+                        f"expected {expected}, got {operation in supported}")
         for index, step in enumerate(case["steps"]):
             problems.extend(await _run_step(ws, case_id, index, step))
     finally:

@@ -19,6 +19,7 @@ import { isEvaluator, isLineExecutor } from './mixin.ts'
 import { ScriptSource, type RouteScript } from './routing/types.ts'
 import type {
   ExecutionRequest,
+  FilesystemOperation,
   RuntimeCapabilities,
   RuntimeContext,
   RunResult,
@@ -65,6 +66,7 @@ export abstract class Runtime {
    * wider runtime voids it.
    */
   readonly reach: RuntimeReach = 'process'
+  readonly filesystem: readonly FilesystemOperation[] = []
   /** The runtime's coerced implementation knobs. */
   config: RuntimeConfig
   script?: RouteScript
@@ -91,6 +93,7 @@ export abstract class Runtime {
       process: false,
       evaluate: isEvaluator(this),
       reach: this.reach,
+      filesystem: [...this.filesystem],
     }
   }
 

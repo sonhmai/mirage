@@ -673,6 +673,11 @@
     },
     {
       "id": "fs_list",
+      "filesystem": {
+        "monty": {
+          "list": true
+        }
+      },
       "world": {
         "runtimes": [
           "monty",
@@ -701,6 +706,11 @@
     },
     {
       "id": "fs_stat",
+      "filesystem": {
+        "monty": {
+          "stat": true
+        }
+      },
       "world": {
         "runtimes": [
           "monty",
@@ -732,6 +742,11 @@
     },
     {
       "id": "fs_stat_requires_js_named_tuple",
+      "filesystem": {
+        "monty": {
+          "stat": false
+        }
+      },
       "world": {
         "runtimes": [
           "monty",
@@ -763,6 +778,11 @@
     },
     {
       "id": "fs_glob",
+      "filesystem": {
+        "monty": {
+          "glob": false
+        }
+      },
       "world": {
         "runtimes": [
           "monty",

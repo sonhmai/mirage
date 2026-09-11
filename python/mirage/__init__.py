@@ -66,7 +66,7 @@ from mirage.runtime.table import (build_runtime, known_runtimes,
 from mirage.runtime.types import (RunArgs, RunResult, CodeExecution,
                                   ShellExecution, ProcessExecution,
                                   ExecutionRequest, RuntimeContext,
-                                  RuntimeCapabilities)
+                                  RuntimeCapabilities, FilesystemOperation)
 from mirage.secrets.registry import known_sources, register_secrets
 from mirage.types import (ContentType, DriftPolicy, FileType, Limit, PathSpec,
                           ResourceName)
@@ -141,6 +141,7 @@ __all__ = [
     "ExecutionRequest",
     "RuntimeContext",
     "RuntimeCapabilities",
+    "FilesystemOperation",
     "WorkspaceBinding",
     "UnsupportedExecutionError",
     "RunArgs",

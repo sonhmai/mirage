@@ -945,6 +945,11 @@
     },
     {
       "id": "fs_list",
+      "filesystem": {
+        "pyodide": {
+          "list": true
+        }
+      },
       "world": {
         "runtimes": [
           "pyodide",
@@ -976,6 +981,11 @@
     },
     {
       "id": "fs_stat",
+      "filesystem": {
+        "pyodide": {
+          "stat": true
+        }
+      },
       "world": {
         "runtimes": [
           "pyodide",
@@ -1007,6 +1017,11 @@
     },
     {
       "id": "fs_glob",
+      "filesystem": {
+        "pyodide": {
+          "glob": true
+        }
+      },
       "world": {
         "runtimes": [
           "pyodide",

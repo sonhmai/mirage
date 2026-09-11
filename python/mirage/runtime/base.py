@@ -20,9 +20,10 @@ from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.mixin import EvaluatorMixin, LineExecutorMixin
-from mirage.runtime.types import (ExecutionRequest, RunResult,
-                                  RuntimeCapabilities, RuntimeContext,
-                                  RuntimeReach, ScriptSource, ShellExecution)
+from mirage.runtime.types import (ExecutionRequest, FilesystemOperation,
+                                  RunResult, RuntimeCapabilities,
+                                  RuntimeContext, RuntimeReach, ScriptSource,
+                                  ShellExecution)
 
 
 class Runtime(ABC):
@@ -56,6 +57,7 @@ class Runtime(ABC):
     # code cannot bypass mount modes and policy" a true statement; one
     # wider runtime voids it.
     reach: RuntimeReach = "process"
+    filesystem: ClassVar[tuple[FilesystemOperation, ...]] = ()
     # Per-line admission script for the routing ladder, answering "do
     # I want this line": a callable taking a RouteContext, or a
     # config-borne ScriptSource. None = always willing. Policy, not
@@ -96,7 +98,8 @@ class Runtime(ABC):
     def capabilities(self) -> RuntimeCapabilities:
         return RuntimeCapabilities(shell=isinstance(self, LineExecutorMixin),
                                    evaluate=isinstance(self, EvaluatorMixin),
-                                   reach=self.reach)
+                                   reach=self.reach,
+                                   filesystem=self.filesystem)
 
     def bind(self, binding: WorkspaceBinding) -> None:
         """Bind this instance to one workspace."""

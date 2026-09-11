@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WorkspaceBinding } from '../../binding.ts'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../../types.ts'
 import { PyodideRuntime } from './runtime.ts'
@@ -85,9 +86,11 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
       const rt = new PyodideRuntime()
       try {
         if (eager) await rt.eval('pass')
-        rt.attach(
-          () => Promise.reject(new Error('root mount must not be read')),
-          new PrefixResolver(() => ['/']),
+        rt.bind(
+          new WorkspaceBinding(
+            () => Promise.reject(new Error('root mount must not be read')),
+            new PrefixResolver(() => ['/']),
+          ),
         )
         const before = await rt.eval('import os; os.getcwd()')
         if (typeof before.value !== 'string') throw new Error('cwd must be a string')
@@ -117,9 +120,11 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
 
   it('still rejects a missing cwd on a supported child of a root mount', async () => {
     const rt = new PyodideRuntime()
-    rt.attach(
-      () => Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' })),
-      new PrefixResolver(() => ['/', '/data/']),
+    rt.bind(
+      new WorkspaceBinding(
+        () => Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' })),
+        new PrefixResolver(() => ['/', '/data/']),
+      ),
     )
     try {
       const result = await rt.run({

@@ -32,7 +32,14 @@ import {
 } from './errors.ts'
 import { short } from './format.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
-import { blockingAncestor, removeEmptyParents, removeFile, restoreEntry, under } from './io.ts'
+import {
+  blockingAncestor,
+  removeEmptyParents,
+  removeFile,
+  removeTree,
+  restoreEntry,
+  under,
+} from './io.ts'
 import { record } from './reflog.ts'
 import { BRANCH_PREFIX, detachHead, loadRefs, readHead, setHead, writeRef } from './refs.ts'
 import { under as inside } from './pathspec.ts'
@@ -41,6 +48,7 @@ import { resolveCommit } from './revparse.ts'
 import { restored } from './reset.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
 import type { LinkView, StatPath } from '../../../../ops/types.ts'
+import { FileType } from '../../../../types.ts'
 import type { Dispatch, HeadRef, IndexEntry } from './types.ts'
 import { checkOperands, escaped, fatal } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
@@ -236,7 +244,20 @@ async function switchTo(
     // keeps a link's target tree, a path no branch named, out of the way.
     const above = await blockingAncestor(statPath, repo.location.worktree, path, links)
     if (above !== null) await removeFile(dispatch, above)
-    await restoreEntry(dispatch, under(repo.location.worktree, path), entry.mode, blob, links)
+    const where = under(repo.location.worktree, path)
+    // And the same thing standing on the name itself rather than above it: a
+    // directory holding only ignored files is in no collision list either,
+    // since the check that refuses one is about the untracked files it would
+    // lose. git updates ignored files by default and takes the whole directory
+    // with it. A link is left to restoreEntry, which retargets it; following
+    // one to a directory here would delete a tree no branch named.
+    if ((links?.statAt(where) ?? null) === null) {
+      const info = await statPath(where)
+      if (info !== null && info.type === FileType.DIRECTORY) {
+        await removeTree(dispatch, where)
+      }
+    }
+    await restoreEntry(dispatch, where, entry.mode, blob, links)
   }
   // The index is git's two-way merge, not a copy of the target tree: only a
   // path the two trees disagree about is decided by the target, and where they

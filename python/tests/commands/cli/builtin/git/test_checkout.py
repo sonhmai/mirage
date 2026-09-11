@@ -512,3 +512,55 @@ async def test_an_untracked_file_there_is_still_refused(git_rw):
                    b"Please move or remove them before you switch "
                    b"branches.\nAborting\n")
     assert (await git_rw.execute("cat /repo/slot")).stdout == b"untracked\n"
+
+
+@pytest.mark.asyncio
+async def test_an_ignored_directory_where_the_target_records_a_file(git_rw):
+    # The ancestor cases' other half: the directory stands on the name
+    # itself. It holds only ignored files, so the check that refuses a
+    # directory is silent (it is about the untracked files one would
+    # lose), and git updates ignored files by default and takes the
+    # whole directory with it.
+    await git_rw.execute("printf 'slot/\n' > /repo/.gitignore")
+    assert (await run(git_rw, "add .gitignore"))[0] == 0
+    assert (await run(git_rw, "commit -m ignore"))[0] == 0
+    assert (await run(git_rw, "switch -c other"))[0] == 0
+    await git_rw.execute("echo asfile > /repo/slot")
+    assert (await run(git_rw, "add -f slot"))[0] == 0
+    assert (await run(git_rw, "commit -m file"))[0] == 0
+    assert (await run(git_rw, "switch main"))[0] == 0
+    await git_rw.execute("mkdir -p /repo/slot && echo keep > /repo/slot/keep")
+    assert (await run(git_rw, "switch other"))[0] == 0
+    assert (await git_rw.execute("cat /repo/slot")).stdout == b"asfile\n"
+
+
+@pytest.mark.asyncio
+async def test_a_directory_holding_untracked_files_is_still_refused(git_rw):
+    # The other side of the same split, and the reason the removal
+    # above cannot be unconditional: an untracked file inside is one
+    # git will not lose, and it names the directory rather than the file.
+    assert (await run(git_rw, "switch -c other"))[0] == 0
+    await git_rw.execute("echo asfile > /repo/slot")
+    assert (await run(git_rw, "add slot"))[0] == 0
+    assert (await run(git_rw, "commit -m file"))[0] == 0
+    assert (await run(git_rw, "switch main"))[0] == 0
+    await git_rw.execute("mkdir -p /repo/slot && echo keep > /repo/slot/keep")
+    code, _out, err = await run(git_rw, "switch other")
+    assert code == 1
+    assert err == (b"error: Updating the following directories would lose "
+                   b"untracked files in them:\n\tslot\n\nAborting\n")
+    assert (await git_rw.execute("cat /repo/slot/keep")).stdout == b"keep\n"
+
+
+@pytest.mark.asyncio
+async def test_a_switch_puts_the_executable_bit_back(git_rw):
+    assert (await run(git_rw, "switch -c other"))[0] == 0
+    await git_rw.execute("printf '#!/bin/sh\n' > /repo/s.sh")
+    await git_rw.execute("chmod 755 /repo/s.sh")
+    assert (await run(git_rw, "add s.sh"))[0] == 0
+    assert (await run(git_rw, "commit -m script"))[0] == 0
+    assert (await run(git_rw, "switch main"))[0] == 0
+    assert (await run(git_rw, "switch other"))[0] == 0
+    listed = await git_rw.execute("ls -l /repo/s.sh")
+    assert (listed.stdout or b"").startswith(b"-rwxr-xr-x")
+    assert (await run(git_rw, "status --short"))[1] == b""

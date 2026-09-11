@@ -2477,6 +2477,62 @@
         "stdout": "kid\nexit=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_restore_puts_the_executable_bit_back",
+      "seq": 568336,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf '#!/bin/sh\\n' > /repo/xs.sh && chmod 755 /repo/xs.sh && git -C /repo add xs.sh && git -C /repo commit -m xs > /dev/null && chmod 644 /repo/xs.sh && git -C /repo status --short | grep xs.sh && git -C /repo restore xs.sh && ls -l /repo/xs.sh | cut -c1-10 && git -C /repo status --short | grep -c xs.sh",
+      "expect": {
+        "exit": 1,
+        "stdout": " M xs.sh\n-rwxr-xr-x\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_restore_clears_the_executable_bit_too",
+      "seq": 568337,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'plain\\n' > /repo/xp.txt && git -C /repo add xp.txt && git -C /repo commit -m xp > /dev/null && chmod 755 /repo/xp.txt && git -C /repo restore xp.txt && ls -l /repo/xp.txt | cut -c1-10",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r--\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_switch_replaces_an_ignored_directory",
+      "seq": 568338,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'dslot/\\n' >> /repo/.gitignore && git -C /repo add .gitignore && git -C /repo commit -m ign3 > /dev/null && git -C /repo switch -c dbase > /dev/null 2>&1 && git -C /repo switch -c dfile > /dev/null 2>&1 && echo asfile > /repo/dslot && git -C /repo add -f dslot && git -C /repo commit -m dfile > /dev/null && git -C /repo switch dbase > /dev/null 2>&1 && mkdir -p /repo/dslot && echo keep > /repo/dslot/keep && git -C /repo switch dfile > /dev/null 2>&1 && cat /repo/dslot",
+      "expect": {
+        "exit": 0,
+        "stdout": "asfile\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_switch_still_refuses_a_directory_holding_untracked_files",
+      "seq": 568339,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch -c nbase > /dev/null 2>&1 && git -C /repo switch -c nfile > /dev/null 2>&1 && echo asfile > /repo/nslot && git -C /repo add nslot && git -C /repo commit -m nfile > /dev/null && git -C /repo switch nbase > /dev/null 2>&1 && rm -f /repo/nslot && mkdir -p /repo/nslot && echo keep > /repo/nslot/keep && git -C /repo switch nfile; echo exit=$?; cat /repo/nslot/keep",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\nkeep\n",
+        "stderr": "error: Updating the following directories would lose untracked files in them:\n\tnslot\n\nAborting\n"
+      }
     }
   ]
 }

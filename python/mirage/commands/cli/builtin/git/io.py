@@ -15,7 +15,7 @@
 import logging
 import posixpath
 
-from mirage.commands.cli.builtin.git.constants import SYMLINK
+from mirage.commands.cli.builtin.git.constants import PERMISSION_BITS, SYMLINK
 from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
@@ -82,6 +82,17 @@ async def restore_entry(dispatch: DispatchFn,
     The check is a namespace lookup, so the ordinary file-for-file case
     costs nothing.
 
+    The permission bits are part of the entry, not decoration on it.
+    git records exactly one of them, the owner's execute bit, and puts
+    it back in both directions: ``chmod -x`` on a ``100755`` path is a
+    modification ``restore`` undoes, and ``chmod +x`` on a ``100644``
+    one is a modification it undoes the other way. Writing the bytes
+    alone left the bit as the working tree had it, so the file came back
+    unrunnable and ``status`` went on calling it modified for ever. The
+    write is unconditional rather than probed: a stat to decide costs
+    the same op as the setattr it would save, and the backends git
+    actually runs on apply it natively, so nothing reaches the overlay.
+
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path to materialize at.
@@ -100,6 +111,9 @@ async def restore_entry(dispatch: DispatchFn,
     if linked:
         await remove_file(dispatch, path)
     await write_file(dispatch, path, blob)
+    await dispatch("setattr",
+                   PathSpec.from_str_path(path),
+                   mode=mode & PERMISSION_BITS)
 
 
 async def read_range(dispatch: DispatchFn, path: str, offset: int,

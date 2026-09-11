@@ -180,6 +180,26 @@ serve, and inventing a name would put an unreviewed one into history.
   the blob, and this build refuses and names the path instead. Same
   trade as the staged-change refusal above: no reflog here means a
   silent discard cannot be undone, and a refusal can be acted on.
+- **The same split applies to a directory standing on the name itself**,
+  not only above it. A directory holding untracked files is refused and
+  named (`Updating the following directories would lose untracked files
+  in them`); one holding nothing but ignored files is removed whole and
+  the target's file written in its place, since `--overwrite-ignore` is
+  git's default and the refusal is about untracked content rather than
+  about the directory.
+- **A tree entry's executable bit is restored with its content.** git
+  records exactly one permission bit and puts it back in both
+  directions, so `chmod -x` on a `100755` path and `chmod +x` on a
+  `100644` one are both modifications that `restore` and `switch` undo.
+  The mode is written unconditionally rather than probed first: deciding
+  costs the same op as setting, and the backends a repository is served
+  from apply it natively.
+- **An unborn branch is not a branch you can be on.** A fresh
+  repository's HEAD names one that has never been written, and
+  `switch <that name>` is `fatal: invalid reference: <name>` rather than
+  `Already on`, because there is no commit to be on; `switch -c <new>`
+  stays the one line an unborn HEAD accepts. `checkout` answers the same
+  line differently, as git does, through its pathspec fallback.
 - **A move never crosses a mount boundary**, at either end. The rename op
   binds to the backend serving the source, so a destination another mount
   serves would be written into the source's backend at a path it does not

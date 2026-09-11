@@ -1925,6 +1925,22 @@ describe('git switch on an unborn HEAD', () => {
     expect(err.startsWith("fatal: '../../evil' is not a valid branch name\n")).toBe(true)
     expect(await headOf(h)).toBe('ref: refs/heads/main')
   })
+
+  it('is not already on the branch HEAD names', async () => {
+    // HEAD names it, but the ref has never been written, so there is no
+    // commit to be on. Reading the name alone answered "Already on" at exit
+    // 0; git resolves it first and dies, which is what leaves `switch -c` as
+    // the only line an unborn HEAD accepts.
+    const h = await harness(unborn)
+    expect(await h.run('switch main')).toEqual([128, '', 'fatal: invalid reference: main\n'])
+    expect(await headOf(h)).toBe('ref: refs/heads/main')
+  })
+
+  it('refuses the branch it just created, for the same reason', async () => {
+    const h = await harness(unborn)
+    expect((await h.run('switch -c topic'))[0]).toBe(0)
+    expect(await h.run('switch topic')).toEqual([128, '', 'fatal: invalid reference: topic\n'])
+  })
 })
 
 describe('staged work carried across a switch', () => {
@@ -2356,5 +2372,87 @@ describe('a switch onto a branch recording a directory', () => {
         'Please commit your changes or stash them before you switch branches.\nAborting\n',
     ])
     expect((await h.run('status --short'))[1]).toBe('A  slot\n')
+  })
+})
+
+describe('a directory standing where the target records a file', () => {
+  it('takes an ignored one with it', async () => {
+    // It holds only ignored files, so the check that refuses a directory is
+    // silent (it is about the untracked files one would lose), and git
+    // updates ignored files by default.
+    const h = await harness()
+    await write(h, '.gitignore', 'slot/\n')
+    expect((await h.run('add .gitignore'))[0]).toBe(0)
+    expect((await h.run('commit -m ignore'))[0]).toBe(0)
+    expect((await h.run('switch -c other'))[0]).toBe(0)
+    await write(h, 'slot', 'asfile\n')
+    expect((await h.run('add -f slot'))[0]).toBe(0)
+    expect((await h.run('commit -m file'))[0]).toBe(0)
+    expect((await h.run('switch main'))[0]).toBe(0)
+    await write(h, 'slot/keep', 'keep\n')
+    expect((await h.run('switch other'))[0]).toBe(0)
+    const landed = await readOptional(h.dispatch, '/repo/slot')
+    expect(landed === null ? '' : DEC.decode(landed)).toBe('asfile\n')
+  })
+
+  it('refuses one holding untracked files', async () => {
+    // The other side of the same split, and the reason the removal above
+    // cannot be unconditional.
+    const h = await harness()
+    expect((await h.run('switch -c other'))[0]).toBe(0)
+    await write(h, 'slot', 'asfile\n')
+    expect((await h.run('add slot'))[0]).toBe(0)
+    expect((await h.run('commit -m file'))[0]).toBe(0)
+    expect((await h.run('switch main'))[0]).toBe(0)
+    await write(h, 'slot/keep', 'keep\n')
+    expect(await h.run('switch other')).toEqual([
+      1,
+      '',
+      'error: Updating the following directories would lose untracked files in them:\n' +
+        '\tslot\n\nAborting\n',
+    ])
+    const kept = await readOptional(h.dispatch, '/repo/slot/keep')
+    expect(kept === null ? '' : DEC.decode(kept)).toBe('keep\n')
+  })
+})
+
+describe('the executable bit a tree entry records', () => {
+  it('comes back with the content on restore', async () => {
+    // git records exactly one permission bit and restores it. Writing the
+    // bytes alone left the file unrunnable and left status calling it
+    // modified for ever, since the mode is half of what the index staged.
+    const h = await harness()
+    await write(h, 's.sh', '#!/bin/sh\n')
+    await h.ws.execute('chmod 755 /repo/s.sh')
+    expect((await h.run('add s.sh'))[0]).toBe(0)
+    expect((await h.run('commit -m script'))[0]).toBe(0)
+    await h.ws.execute('chmod 644 /repo/s.sh')
+    expect((await h.run('status --short'))[1]).toBe(' M s.sh\n')
+    expect(await h.run('restore s.sh')).toEqual([0, '', ''])
+    expect((await h.run('status --short'))[1]).toBe('')
+    expect(git(await h.drain(), ['ls-files', '-s', 's.sh']).trim()).toMatch(/^100755 /)
+  })
+
+  it('is cleared the other way too', async () => {
+    const h = await harness()
+    await write(h, 'p.txt', 'plain\n')
+    expect((await h.run('add p.txt'))[0]).toBe(0)
+    expect((await h.run('commit -m plain'))[0]).toBe(0)
+    await h.ws.execute('chmod 755 /repo/p.txt')
+    expect((await h.run('status --short'))[1]).toBe(' M p.txt\n')
+    expect(await h.run('restore p.txt')).toEqual([0, '', ''])
+    expect((await h.run('status --short'))[1]).toBe('')
+  })
+
+  it('survives a branch switch', async () => {
+    const h = await harness()
+    expect((await h.run('switch -c other'))[0]).toBe(0)
+    await write(h, 's.sh', '#!/bin/sh\n')
+    await h.ws.execute('chmod 755 /repo/s.sh')
+    expect((await h.run('add s.sh'))[0]).toBe(0)
+    expect((await h.run('commit -m script'))[0]).toBe(0)
+    expect((await h.run('switch main'))[0]).toBe(0)
+    expect((await h.run('switch other'))[0]).toBe(0)
+    expect((await h.run('status --short'))[1]).toBe('')
   })
 })

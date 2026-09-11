@@ -158,7 +158,14 @@ async def switch(
             start = None
             target = texts[0] if texts else HEAD
             ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
-            if not flags.detach and target == head.branch:
+            # The ref has to exist, not just be the name HEAD carries.
+            # A fresh repository's HEAD names a branch that has never
+            # been written, and reading the name alone answered
+            # ``Already on 'main'`` at exit 0 for a branch with no
+            # commit to be on. git resolves it first and dies, which is
+            # what leaves ``switch -c`` as the only line an unborn HEAD
+            # accepts. Pinned against git 2.50.1.
+            if (not flags.detach and target == head.branch and ref in known):
                 return None, IOResult(
                     stderr=f"Already on '{target}'\n".encode())
             try:

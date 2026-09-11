@@ -36,7 +36,8 @@ from mirage.commands.cli.builtin.git.format import short, subject
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import (blocking_ancestor,
                                                 remove_empty_parents,
-                                                remove_file, restore_entry)
+                                                remove_file, remove_tree,
+                                                restore_entry)
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.pathspec import under
 from mirage.commands.cli.builtin.git.reflog import record
@@ -56,6 +57,7 @@ from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
+from mirage.types import FileType
 
 Tree = dict[bytes, tuple[int, bytes]]
 
@@ -307,8 +309,19 @@ async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
                                         links)
         if above is not None:
             await remove_file(dispatch, above)
-        await restore_entry(dispatch, posixpath.join(location.worktree, name),
-                            mode, blobs[sha], links)
+        where = posixpath.join(location.worktree, name)
+        # And the same thing standing on the name itself rather than
+        # above it: a directory holding only ignored files is in no
+        # collision list either, since the check that refuses one is
+        # about the untracked files it would lose. git updates ignored
+        # files by default and takes the whole directory with it. A
+        # link is left to restore_entry, which retargets it; following
+        # one to a directory here would delete a tree no branch named.
+        if links is None or links.stat_at(where) is None:
+            info = await stat_path(where)
+            if info is not None and info.type is FileType.DIRECTORY:
+                await remove_tree(dispatch, where)
+        await restore_entry(dispatch, where, mode, blobs[sha], links)
     # The index is git's two-way merge, not a copy of the target tree:
     # only a path the two trees disagree about is decided by the
     # target, and where they agree the entry is left exactly as it

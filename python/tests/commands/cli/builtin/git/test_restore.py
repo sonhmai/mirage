@@ -442,3 +442,34 @@ async def test_a_removal_is_not_attempted_through_a_file_either(git_rw):
     assert await run(git_rw,
                      "restore --source=HEAD~1 slot/child") == (0, b"", b"")
     assert (await git_rw.execute("cat /repo/slot")).stdout == b"untracked\n"
+
+
+@pytest.mark.asyncio
+async def test_the_executable_bit_comes_back_with_the_content(git_rw):
+    # git records exactly one permission bit and restores it. Writing
+    # the bytes alone left the file unrunnable and left status calling
+    # it modified for ever, since the mode is half of what the index
+    # staged.
+    await git_rw.execute("printf '#!/bin/sh\n' > /repo/s.sh")
+    await git_rw.execute("chmod 755 /repo/s.sh")
+    assert (await run(git_rw, "add s.sh"))[0] == 0
+    assert (await run(git_rw, "commit -m script"))[0] == 0
+    await git_rw.execute("chmod 644 /repo/s.sh")
+    assert (await run(git_rw, "status --short"))[1] == b" M s.sh\n"
+    assert await run(git_rw, "restore s.sh") == (0, b"", b"")
+    listed = await git_rw.execute("ls -l /repo/s.sh")
+    assert (listed.stdout or b"").startswith(b"-rwxr-xr-x")
+    assert (await run(git_rw, "status --short"))[1] == b""
+
+
+@pytest.mark.asyncio
+async def test_the_bit_is_cleared_the_other_way_too(git_rw):
+    await git_rw.execute("printf 'plain\n' > /repo/p.txt")
+    assert (await run(git_rw, "add p.txt"))[0] == 0
+    assert (await run(git_rw, "commit -m plain"))[0] == 0
+    await git_rw.execute("chmod 755 /repo/p.txt")
+    assert (await run(git_rw, "status --short"))[1] == b" M p.txt\n"
+    assert await run(git_rw, "restore p.txt") == (0, b"", b"")
+    listed = await git_rw.execute("ls -l /repo/p.txt")
+    assert (listed.stdout or b"").startswith(b"-rw-r--r--")
+    assert (await run(git_rw, "status --short"))[1] == b""

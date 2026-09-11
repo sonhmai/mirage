@@ -17,7 +17,7 @@ import type { FileStat } from '../../../../types.ts'
 import { parent, posixNormpath } from '../../../../utils/path.ts'
 import { isMissingPath } from '../../../../utils/errors.ts'
 import type { LinkView, StatPath } from '../../../../ops/types.ts'
-import { SYMLINK_MODE } from './constants.ts'
+import { PERMISSION_BITS, SYMLINK_MODE } from './constants.ts'
 import { basename } from './path.ts'
 import type { Dispatch } from './types.ts'
 
@@ -66,6 +66,16 @@ export async function entryBytes(
  * does not overwrite, so the old name is removed rather than replaced in place.
  * The check is a namespace lookup, so the ordinary file-for-file case costs
  * nothing.
+ *
+ * The permission bits are part of the entry, not decoration on it. git records
+ * exactly one of them, the owner's execute bit, and puts it back in both
+ * directions: `chmod -x` on a `100755` path is a modification `restore` undoes,
+ * and `chmod +x` on a `100644` one is a modification it undoes the other way.
+ * Writing the bytes alone left the bit as the working tree had it, so the file
+ * came back unrunnable and `status` went on calling it modified for ever. The
+ * write is unconditional rather than probed: a stat to decide costs the same op
+ * as the setattr it would save, and the backends git actually runs on apply it
+ * natively, so nothing reaches the overlay.
  */
 export async function restoreEntry(
   dispatch: Dispatch,
@@ -84,6 +94,9 @@ export async function restoreEntry(
   }
   if (linked) await removeFile(dispatch, path)
   await writeFile(dispatch, path, blob)
+  await dispatch('setattr', PathSpec.fromStrPath(path), [], {
+    mode: Number.parseInt(mode, 8) & PERMISSION_BITS,
+  })
 }
 
 /** Read a byte range of one virtual path. */

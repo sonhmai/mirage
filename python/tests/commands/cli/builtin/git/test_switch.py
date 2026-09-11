@@ -389,3 +389,23 @@ async def test_a_carried_edit_is_lettered_by_where_it_stands(git_rw):
     assert await run(git_rw,
                      "switch other") == (0, b"M\ta.txt\n",
                                          b"Switched to branch 'other'\n")
+
+
+@pytest.mark.asyncio
+async def test_the_unborn_branch_named_by_head_is_not_current(unborn_rw):
+    # HEAD names it, but the ref has never been written, so there is no
+    # commit to be on. Reading the name alone answered "Already on" at
+    # exit 0; git resolves it first and dies, which is what leaves
+    # ``switch -c`` as the only line an unborn HEAD accepts.
+    code, out, err = await run(unborn_rw, "switch main")
+    assert (code, out) == (128, b"")
+    assert err == b"fatal: invalid reference: main\n"
+
+
+@pytest.mark.asyncio
+async def test_creating_from_an_unborn_head_still_works(unborn_rw):
+    assert (await run(unborn_rw, "switch -c topic"))[0] == 0
+    # And the new branch is unborn in its turn, so naming it is the
+    # same refusal rather than a special case of the first one.
+    code, _out, err = await run(unborn_rw, "switch topic")
+    assert (code, err) == (128, b"fatal: invalid reference: topic\n")

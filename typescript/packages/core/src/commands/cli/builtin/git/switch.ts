@@ -145,7 +145,13 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       }
     } else {
       target = first ?? HEAD
-      if (!flags.detach && target === head.branch) {
+      // The ref has to exist, not just be the name HEAD carries. A fresh
+      // repository's HEAD names a branch that has never been written, and
+      // reading the name alone answered `Already on 'main'` at exit 0 for a
+      // branch with no commit to be on. git resolves it first and dies, which
+      // is what leaves `switch -c` as the only line an unborn HEAD accepts.
+      // Pinned against git 2.50.1.
+      if (!flags.detach && target === head.branch && known.has(`${BRANCH_PREFIX}${target}`)) {
         return [null, new IOResult({ stderr: ENC.encode(`Already on '${target}'\n`) })]
       }
       try {

@@ -210,7 +210,9 @@ export async function executeLine(
     // what the line found. One place, after the last of them, so no
     // path can forget it.
     if (!hasAborted(options.signal)) throw error
-    if (frame.session !== null && frame.statusBefore !== null) {
+    // Only the typed line puts `$?` back; a nested evaluation's signal
+    // may be a bound the statement set (`timeout`), not the caller's.
+    if (options.record !== false && frame.session !== null && frame.statusBefore !== null) {
       restoreStatus(frame.session, frame.statusBefore)
     }
     throw makeAbortError(options.signal)
@@ -753,7 +755,7 @@ async function runParsedLine(
     if (killed?.aborted === true) {
       // The command finished; the abort landed on the cache fill or the drain.
       // An aborted invocation is the caller's outcome, not the shell's.
-      restoreStatus(targetSession, statusBefore)
+      if (isLine) restoreStatus(targetSession, statusBefore)
       executionFailure = { error: makeAbortError(killed) }
       io.exitCode = 130
       stdoutBytes = new Uint8Array()
@@ -810,8 +812,14 @@ async function runParsedLine(
 
   if (executionFailure !== undefined && (callerError || killed?.aborted === true)) {
     // Statements before the abort may have stamped; an aborted
-    // invocation is the caller's outcome, not the shell's.
-    if (killed?.aborted === true) restoreStatus(targetSession, statusBefore)
+    // invocation is the caller's outcome, not the shell's. Only the
+    // typed line's, though: a nested evaluation runs under whatever
+    // signal the statement that launched it supplied, and `timeout`
+    // supplies one of its own to stop the inner run at the deadline.
+    // Restoring there would put the shell back to what the *inner*
+    // line found, over the 124 the `timeout` statement just stamped,
+    // which is how `timeout 0.2 sleep 5; echo $?` printed 0.
+    if (isLine && killed?.aborted === true) restoreStatus(targetSession, statusBefore)
     throw executionFailure.error
   }
   return new ExecuteResult(stdoutBytes, stderrBytes, io.exitCode, io.refusal)

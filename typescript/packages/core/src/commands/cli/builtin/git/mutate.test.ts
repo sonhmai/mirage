@@ -1806,6 +1806,57 @@ describe('a gitlink in the tree', () => {
     expect(await readOptional(h.dispatch, '/repo/sub/keep.md')).not.toBeNull()
   })
 
+  it('rmdirs an empty one the source drops', async () => {
+    // What stands at a 160000 entry is a directory, so removing the entry is
+    // an rmdir: the unlink died on it with the index already written.
+    const h = await harness((repo) => {
+      gitlinkIndex(repo, 'sub')
+    })
+    await h.ws.dispatch('unlink', '/repo/sub/keep.md')
+    expect(await h.run('restore --source=HEAD~1 --staged --worktree sub')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(existsSync(join(drained, 'sub'))).toBe(false)
+  })
+
+  it('warns and keeps one that is not empty', async () => {
+    // git warns and goes on rather than failing: the checkout succeeded, and
+    // what is left is a directory it will not empty for anyone.
+    const h = await harness((repo) => {
+      gitlinkIndex(repo, 'sub')
+    })
+    expect(await h.run('restore --source=HEAD~1 --staged --worktree sub')).toEqual([
+      0,
+      '',
+      "warning: unable to rmdir 'sub': Directory not empty\n",
+    ])
+    expect(await readOptional(h.dispatch, '/repo/sub/keep.md')).not.toBeNull()
+  })
+
+  it('rmdirs one a branch switch drops', async () => {
+    const h = await harness((repo) => {
+      git(repo, ['branch', 'plain'])
+      gitlinkIndex(repo, 'sub')
+    })
+    await h.ws.dispatch('unlink', '/repo/sub/keep.md')
+    const [code, , err] = await h.run('checkout plain')
+    expect([code, err]).toEqual([0, "Switched to branch 'plain'\n"])
+    const drained = await h.drain()
+    expect(existsSync(join(drained, 'sub'))).toBe(false)
+  })
+
+  it('warns on a branch switch that cannot empty it', async () => {
+    const h = await harness((repo) => {
+      git(repo, ['branch', 'plain'])
+      gitlinkIndex(repo, 'sub')
+    })
+    const [code, , err] = await h.run('checkout plain')
+    expect([code, err]).toEqual([
+      0,
+      "warning: unable to rmdir 'sub': Directory not empty\nSwitched to branch 'plain'\n",
+    ])
+    expect(await readOptional(h.dispatch, '/repo/sub/keep.md')).not.toBeNull()
+  })
+
   it('still refuses an untracked file where it lands', async () => {
     // The other half of git's rule: the directory cannot be made without
     // deleting the file, so this one is named and refused.
@@ -1816,6 +1867,33 @@ describe('a gitlink in the tree', () => {
     const [code, , err] = await h.run('checkout linked')
     expect(code).toBe(1)
     expect(err).toContain('would be overwritten by checkout:\n\tsub\n')
+  })
+})
+
+describe('a peel in the middle of a revision', () => {
+  it('walks on from the commit it peeled to', async () => {
+    // A peel used to be read only at the end of a revision, so every chain
+    // that went on after one was refused although git takes it.
+    const h = await harness()
+    expect(await h.run('tag chained HEAD^{commit}~1')).toEqual([0, '', ''])
+    expect(await h.run('tag plain HEAD~1')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['rev-parse', 'chained'])).toBe(git(drained, ['rev-parse', 'plain']))
+  })
+
+  it('peels what a step arrived at', async () => {
+    const h = await harness()
+    expect(await h.run('tag treeish HEAD~1^{commit}')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['rev-parse', 'treeish'])).toBe(git(drained, ['rev-parse', 'HEAD~1']))
+  })
+
+  it('refuses a step off something that is no commit', async () => {
+    // git dies here too: a tree has no parent, so the step has nothing to
+    // walk.
+    const h = await harness()
+    expect((await h.run('tag broken HEAD^{tree}~1'))[0]).toBe(128)
+    expect(await h.run('tag -l')).toEqual([0, '', ''])
   })
 })
 

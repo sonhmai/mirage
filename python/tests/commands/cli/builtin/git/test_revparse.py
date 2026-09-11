@@ -20,26 +20,26 @@ from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.revparse import (object_at,
                                                       resolve_commit,
                                                       resolve_object,
-                                                      split_peel,
-                                                      split_revision)
+                                                      split_operators)
+from mirage.commands.cli.builtin.git.types import AncestryStep, PeelStep
 
 from .conftest import repo_facts
 
 
 def test_bare_revision_has_no_steps():
-    base, steps = split_revision("HEAD")
+    base, steps = split_operators("HEAD")
     assert base == "HEAD"
     assert steps == ()
 
 
 def test_bare_suffix_counts_as_one():
-    base, steps = split_revision("HEAD~")
+    base, steps = split_operators("HEAD~")
     assert base == "HEAD"
     assert [(s.first_parent, s.count) for s in steps] == [(True, 1)]
 
 
 def test_numeric_suffix_is_read():
-    _base, steps = split_revision("main~3")
+    _base, steps = split_operators("main~3")
     assert [(s.first_parent, s.count) for s in steps] == [(True, 3)]
 
 
@@ -49,7 +49,7 @@ def test_unicode_digit_suffix_is_not_a_count():
     # both languages. What is left over is not another step either, so
     # the whole expression is refused, which is git's own answer.
     with pytest.raises(AmbiguousArgumentError):
-        split_revision("main~٣")
+        split_operators("main~٣")
 
 
 @pytest.mark.parametrize("revision",
@@ -59,30 +59,30 @@ def test_a_suffix_that_is_not_a_step_is_refused(revision: str):
     # ``HEAD^x`` resolved to ``HEAD^^`` and a tag was written at a
     # commit nobody named.
     with pytest.raises(AmbiguousArgumentError):
-        split_revision(revision)
+        split_operators(revision)
 
 
 @pytest.mark.parametrize(
     "revision",
     ["HEAD^", "HEAD~", "HEAD^0", "HEAD^~", "HEAD~2^2~1", "HEAD^12"])
 def test_the_steps_git_does_take_still_parse(revision: str):
-    split_revision(revision)
+    split_operators(revision)
 
 
 def test_parent_suffix_is_distinguished_from_ancestor():
-    _base, steps = split_revision("HEAD^2")
+    _base, steps = split_operators("HEAD^2")
     assert [(s.first_parent, s.count) for s in steps] == [(False, 2)]
 
 
 def test_suffixes_chain():
-    base, steps = split_revision("HEAD~2^2~1")
+    base, steps = split_operators("HEAD~2^2~1")
     assert base == "HEAD"
     assert [(s.first_parent, s.count)
             for s in steps] == [(True, 2), (False, 2), (True, 1)]
 
 
 def test_a_bare_suffix_string_means_head():
-    base, _steps = split_revision("~1")
+    base, _steps = split_operators("~1")
     assert base == "HEAD"
 
 
@@ -129,23 +129,38 @@ async def test_second_parent_of_a_linear_commit_is_refused(workspace):
         resolve_commit(repo, "HEAD^2")
 
 
-def test_a_revision_with_no_peel_keeps_its_whole_spelling():
-    assert split_peel("HEAD~2") == ("HEAD~2", None)
+def test_a_revision_with_no_peel_carries_only_its_steps():
+    assert split_operators("HEAD~2") == ("HEAD", (AncestryStep(True, 2), ))
 
 
 def test_a_bare_peel_carries_an_empty_type():
-    assert split_peel("v1^{}") == ("v1", "")
+    assert split_operators("v1^{}") == ("v1", (PeelStep(""), ))
 
 
 def test_a_typed_peel_carries_its_word():
-    assert split_peel("HEAD^{tree}") == ("HEAD", "tree")
+    assert split_operators("HEAD^{tree}") == ("HEAD", (PeelStep("tree"), ))
 
 
 def test_a_peel_is_not_an_ancestry_step():
     # Read as one it is `^` with no digits, which means the first
     # parent: the caller was handed another commit without a word.
-    stem, _want = split_peel("HEAD^{tree}")
-    assert split_revision(stem) == ("HEAD", ())
+    _base, ops = split_operators("HEAD^{tree}")
+    assert ops == (PeelStep("tree"), )
+
+
+def test_a_peel_chains_with_the_steps_around_it():
+    # git reads a revision left to right, so a peel is an operator like
+    # any other rather than something that has to come last.
+    assert split_operators("HEAD^{commit}~1") == ("HEAD",
+                                                  (PeelStep("commit"),
+                                                   AncestryStep(True, 1)))
+    assert split_operators("v1~1^{tree}") == ("v1", (AncestryStep(True, 1),
+                                                     PeelStep("tree")))
+
+
+def test_a_peel_that_is_never_closed_is_refused():
+    with pytest.raises(AmbiguousArgumentError):
+        split_operators("HEAD^{commit")
 
 
 @pytest.mark.asyncio
@@ -332,3 +347,35 @@ async def test_a_commit_ish_still_reads_an_object_peel(git_rw):
     # lets ``git branch nb v1^{object}`` work.
     assert resolve_commit(repo, "HEAD^{object}").id == head.id
     assert resolve_commit(repo, "v1^{object}").id == head.id
+
+
+@pytest.mark.asyncio
+async def test_a_peel_followed_by_a_step_walks_from_the_peeled_commit(
+        workspace):
+    # A peel used to be read only at the end of a revision, so every
+    # chain that went on after one was refused although git takes it.
+    location = await discover(*repo_facts(workspace), "/repo")
+    repo = await open_repo(workspace.dispatch, location)
+    assert resolve_commit(repo, "HEAD^{commit}~1").message == b"second"
+    assert resolve_commit(repo, "HEAD^{}^").message == b"second"
+    assert resolve_object(repo, "HEAD^{commit}~1").id == resolve_commit(
+        repo, "HEAD~1").id
+
+
+@pytest.mark.asyncio
+async def test_a_step_followed_by_a_peel_reads_that_commit(workspace):
+    location = await discover(*repo_facts(workspace), "/repo")
+    repo = await open_repo(workspace.dispatch, location)
+    parent = resolve_commit(repo, "HEAD~1")
+    assert resolve_object(repo, "HEAD~1^{tree}").id == parent.tree
+    assert resolve_object(repo, "HEAD^{commit}~1^{tree}").id == parent.tree
+
+
+@pytest.mark.asyncio
+async def test_a_step_off_a_tree_is_refused(workspace):
+    # git dies here too: a tree has no parent, so the step has nothing
+    # to walk.
+    location = await discover(*repo_facts(workspace), "/repo")
+    repo = await open_repo(workspace.dispatch, location)
+    with pytest.raises(AmbiguousArgumentError):
+        resolve_object(repo, "HEAD^{tree}~1")

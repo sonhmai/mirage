@@ -2813,6 +2813,34 @@
         "stdout": "exit=0\nzfirst\nzhere\nzmixed\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_log_takes_a_peel_before_an_ancestry_step",
+      "seq": 568360,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "step=$(git -C /repo log --oneline -n 1 'HEAD~1'); for rev in 'HEAD^{commit}~1' 'HEAD~1^{commit}' 'HEAD^{}~1'; do if [ \"$(git -C /repo log --oneline -n 1 \"$rev\")\" = \"$step\" ]; then echo same; else echo \"$rev differs\"; fi; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\nsame\nsame\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_tag_writes_at_a_chained_peel",
+      "seq": 568361,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo tag zchain 'HEAD^{commit}~1' && [ \"$(git -C /repo log --oneline -n 1 zchain)\" = \"$(git -C /repo log --oneline -n 1 'HEAD~1')\" ] && echo written; git -C /repo tag zwrong 'HEAD^{tree}~1'; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "written\nexit=128\n",
+        "stderr": "fatal: Failed to resolve 'HEAD^{tree}~1' as a valid ref.\n"
+      }
     }
   ]
 }

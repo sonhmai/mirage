@@ -23,7 +23,7 @@ from dulwich.objects import Blob, ObjectID
 from dulwich.objectspec import parse_commit
 from dulwich.repo import BaseRepo
 
-from mirage.commands.cli.builtin.git.constants import HEAD_REF
+from mirage.commands.cli.builtin.git.constants import GITLINK, HEAD_REF
 from mirage.commands.cli.builtin.git.index import read_index
 from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.types import (IndexState, RepoLocation,
@@ -351,6 +351,16 @@ async def work_changes(dispatch: DispatchFn, worktree: str,
     changes: dict[str, str] = {}
     for path, entry in entries.items():
         name = path.decode("utf-8", errors="replace")
+        # A 160000 entry records another repository's HEAD, and what
+        # stands at the name is a directory, so the walk never finds a
+        # file there and every submodule read as deleted. git compares
+        # the submodule's own HEAD, which is unreadable from here, and
+        # says nothing at all when there is none; saying nothing is both
+        # the closest this can get and what keeps a branch switch away
+        # from a submodule from being refused over a file that was never
+        # missing.
+        if entry.mode == GITLINK:
+            continue
         if name not in found.files:
             changes[name] = DELETED
         elif await _differs(dispatch, worktree, name, entry,

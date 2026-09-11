@@ -26,6 +26,7 @@ from mirage.resource.disk import DiskResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import (branch_with_gitlink,
+                                                     commit_gitlink,
                                                      conflict_index)
 
 MODE = 0o100644
@@ -719,3 +720,29 @@ async def test_an_untracked_file_where_a_gitlink_lands_is_still_refused(
     assert code == 1
     assert b"would be overwritten by checkout:\n\tsub\n" in err
     assert (repo_path / "sub").read_text(encoding="utf-8") == "mine\n"
+
+
+@pytest.mark.asyncio
+async def test_a_branch_that_drops_a_gitlink_rmdirs_it(git_rw,
+                                                       repo_path: Path):
+    assert (await run(git_rw, "branch plain"))[0] == 0
+    await git_rw.execute("mkdir /repo/sub")
+    commit_gitlink(repo_path, "sub")
+    code, _out, err = await run(git_rw, "checkout plain")
+    assert code == 0
+    assert err.endswith(b"Switched to branch 'plain'\n")
+    assert not (repo_path / "sub").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_gitlink_directory_that_is_not_empty_is_kept_with_a_warning(
+        git_rw, repo_path: Path):
+    assert (await run(git_rw, "branch plain"))[0] == 0
+    await git_rw.execute("mkdir /repo/sub && echo keep > /repo/sub/keep.txt")
+    commit_gitlink(repo_path, "sub")
+    code, _out, err = await run(git_rw, "checkout plain")
+    assert code == 0
+    assert err == (b"warning: unable to rmdir 'sub': Directory not empty\n"
+                   b"Switched to branch 'plain'\n")
+    assert (repo_path / "sub" /
+            "keep.txt").read_text(encoding="utf-8") == "keep\n"

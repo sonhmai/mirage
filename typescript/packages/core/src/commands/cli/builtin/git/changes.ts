@@ -17,6 +17,7 @@ import git from 'isomorphic-git'
 import type { LinkView, StatPath } from '../../../../ops/types.ts'
 import type { FileStat } from '../../../../types.ts'
 import { isMissingPath } from '../../../../utils/errors.ts'
+import { GITLINK_MODE } from './constants.ts'
 import { readIndex } from './index_file.ts'
 import { entryBytes, under } from './io.ts'
 import { repoArgs, type Repo } from './repo.ts'
@@ -352,6 +353,14 @@ export async function workChanges(
 ): Promise<Map<string, string>> {
   const changes = new Map<string, string>()
   for (const [path, entry] of entries) {
+    // A 160000 entry records another repository's HEAD, and what stands at the
+    // name is a directory, so the walk never finds a file there and every
+    // submodule read as deleted. git compares the submodule's own HEAD, which
+    // is unreadable from here, and says nothing at all when there is none;
+    // saying nothing is both the closest this can get and what keeps a branch
+    // switch away from a submodule from being refused over a file that was
+    // never missing.
+    if (entry.mode === Number.parseInt(GITLINK_MODE, 8)) continue
     const info = found.files.get(path)
     if (info === undefined) changes.set(path, DELETED)
     else if (await differs(repo, dispatch, worktree, path, entry, info)) {

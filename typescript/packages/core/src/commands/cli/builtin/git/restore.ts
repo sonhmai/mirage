@@ -34,6 +34,7 @@ import {
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import {
   blockingAncestor,
+  dropGitlink,
   keepGitlink,
   refuseReplacedMounts,
   removeEmptyParents,
@@ -66,6 +67,8 @@ interface RestoreFlags {
    */
   readonly source: string | undefined
 }
+
+const ENC = new TextEncoder()
 
 /** Read the raw restore flag kwargs into a frozen struct. */
 function parseFlags(fl: FlagView): RestoreFlags {
@@ -121,6 +124,7 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
   const doors = inv.doors ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
+  const notes: string[] = []
   try {
     const dispatch = doors.dispatch
     const statPath = doors.statPath
@@ -218,7 +222,16 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
         // this.
         const blocked = await blockingAncestor(statPath, repo.location.worktree, name, links)
         if (blocked !== null) continue
-        await removeFile(dispatch, path)
+        // What stands at a gitlink is a directory, so taking it away is an
+        // rmdir that may legitimately fail: unlink died on it with the index
+        // already written, which is the half-restore this verb has no wording
+        // for.
+        if (held.get(name)?.mode === GITLINK_MODE) {
+          const warned = await dropGitlink(dispatch, statPath, path, name, links)
+          if (warned !== null) notes.push(warned)
+        } else {
+          await removeFile(dispatch, path)
+        }
         await removeEmptyParents(dispatch, path, repo.location.worktree, mounts)
       }
       for (const name of present) {
@@ -257,5 +270,6 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
     if (err instanceof GitError) return fatal(err)
     throw err
   }
-  return [null, new IOResult()]
+  const told = notes.join('')
+  return [null, told === '' ? new IOResult() : new IOResult({ stderr: ENC.encode(told) })]
 }

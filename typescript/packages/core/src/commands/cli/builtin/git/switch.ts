@@ -196,11 +196,14 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       creating,
       creating && startPoint === undefined,
     )
-    carried = [...moved]
+    carried = [...moved.carried]
       .sort(([a], [b]) => compareCodePoints(a, b))
       .map(([path, letter]) => `${letter}\t${path}\n`)
       .join('')
-    note = await previousPosition(repo, head)
+    // git writes the warning above everything it says about the move, because
+    // the directory it could not remove is a fact about the working tree
+    // rather than about where HEAD went.
+    note = moved.warnings + (await previousPosition(repo, head))
     if (attached) {
       const verb = creating ? 'Switched to a new branch' : 'Switched to branch'
       note += `${verb} '${target}'\n`

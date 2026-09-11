@@ -646,3 +646,33 @@ async def test_a_child_under_a_restored_gitlink_keeps_its_working_copy(
             "child.txt").read_text(encoding="utf-8") == "child\n"
     with Repo(str(repo_path)) as repo:
         assert b"sub/child.txt" not in repo.open_index()
+
+
+@pytest.mark.asyncio
+async def test_a_removed_gitlink_takes_an_empty_directory(
+        git_rw, repo_path: Path):
+    # What stands at a 160000 entry is a directory, so removing the
+    # entry is an rmdir: unlink died on it with the index already
+    # written.
+    await git_rw.execute("mkdir /repo/sub")
+    commit_gitlink(repo_path, "sub")
+    assert await run(
+        git_rw,
+        "restore --source=HEAD~1 --staged --worktree sub") == (0, b"", b"")
+    assert not (repo_path / "sub").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_removed_gitlink_keeps_a_directory_that_is_not_empty(
+        git_rw, repo_path: Path):
+    # git warns and goes on rather than failing: the checkout succeeded,
+    # and what is left is a directory it will not empty for anyone.
+    await git_rw.execute("mkdir /repo/sub && echo keep > /repo/sub/keep.txt")
+    commit_gitlink(repo_path, "sub")
+    code, out, err = await run(
+        git_rw, "restore --source=HEAD~1 --staged "
+        "--worktree sub")
+    assert (code, out) == (0, b"")
+    assert err == b"warning: unable to rmdir 'sub': Directory not empty\n"
+    assert (repo_path / "sub" /
+            "keep.txt").read_text(encoding="utf-8") == "keep\n"

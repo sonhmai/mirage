@@ -18,7 +18,7 @@ import { HEAD } from './constants.ts'
 import { AmbiguousArgumentError } from './errors.ts'
 import { TAG_PREFIX } from './refs.ts'
 import { repoArgs, type Repo } from './repo.ts'
-import type { AncestryStep, GitObject } from './types.ts'
+import type { AncestryStep, GitObject, RevOp } from './types.ts'
 
 const ANCESTOR = '~'
 const PARENT = '^'
@@ -35,43 +35,27 @@ export const TAG = 'tag'
 export const OBJECT = 'object'
 
 /**
- * Split a trailing `^{<type>}` off a revision.
+ * Split a revision into its base and the operators applied to it.
  *
- * `HEAD^{tree}` is a peel, not an ancestry step, and reading it as one is silent
- * rather than loud: `^` with no digits means "first parent", so the suffix
- * resolved to HEAD's parent commit and the caller was handed a different object
- * than it asked for without a word. The braces tell the two apart, and git
- * forbids both of them in a ref name, so nothing else can end this way.
+ * git reads a revision left to right: every `~n`, `^n` and `^{<type>}` applies
+ * to whatever the one before it produced, so `HEAD^{commit}~1` is the parent of
+ * HEAD and `HEAD~1^{tree}` is that parent's tree. Reading the peel as a trailing
+ * thing instead refused every chain that did not end in one, and reading `^{` as
+ * an ancestry step is worse than refusing: `^` with no digits means "first
+ * parent", so `HEAD^{tree}` would answer with HEAD's parent without a word.
+ * Splitting on the first `~` or `^` is safe because git forbids both in a ref
+ * name, so neither can belong to the base. Pinned against git 2.50.1.
  *
- * @param revision revision as the user spelled it
- * @returns the revision without the peel, and the type word inside it, empty for
- *   `^{}` and null when there is no peel at all
- */
-function splitPeel(revision: string): [string, string | null] {
-  if (!revision.endsWith(PEEL_CLOSE)) return [revision, null]
-  const index = revision.lastIndexOf(PEEL_OPEN)
-  if (index < 0) return [revision, null]
-  return [revision.slice(0, index), revision.slice(index + PEEL_OPEN.length, -1)]
-}
-
-/**
- * Split a revision into its base and its ancestry suffixes.
- *
- * `HEAD~2^2` is a base plus two steps. Splitting on the first `~` or `^` is safe
- * because git forbids both characters in ref names, so neither can belong to the
- * base.
- *
- * Only `~` and `^` are ancestry steps, and reading anything else as one is
- * silent rather than loud: every other character counted as another
- * first-parent hop, so `HEAD^x` resolved to `HEAD^^` and the caller was handed a
- * commit it never named. git refuses the whole expression instead, and refuses
- * `main~٣` with it, since the digits it counts are ASCII.
+ * Only `~` and `^` open an operator, and reading anything else as one is silent
+ * rather than loud: every other character counted as another first-parent hop,
+ * so `HEAD^x` resolved to `HEAD^^` and the caller was handed a commit it never
+ * named. git refuses the whole expression instead, and refuses `main~٣` with it,
+ * since the digits it counts are ASCII.
  *
  * @param revision revision as the user spelled it
- * @throws AmbiguousArgumentError when the suffix holds anything but ancestry
- *   steps
+ * @throws AmbiguousArgumentError when the rest holds anything but operators
  */
-function splitRevision(revision: string): [string, AncestryStep[]] {
+function splitOperators(revision: string): [string, RevOp[]] {
   let index = revision.length
   for (let i = 0; i < revision.length; i++) {
     if (SUFFIXES.includes(revision.charAt(i))) {
@@ -81,23 +65,30 @@ function splitRevision(revision: string): [string, AncestryStep[]] {
   }
   const base = revision.slice(0, index)
   const rest = revision.slice(index)
-  const steps: AncestryStep[] = []
+  const ops: RevOp[] = []
   let position = 0
   while (position < rest.length) {
     const kind = rest.charAt(position)
     if (!SUFFIXES.includes(kind)) throw new AmbiguousArgumentError(revision)
+    if (rest.startsWith(PEEL_OPEN, position)) {
+      const close = rest.indexOf(PEEL_CLOSE, position)
+      if (close < 0) throw new AmbiguousArgumentError(revision)
+      ops.push({ want: rest.slice(position + PEEL_OPEN.length, close) })
+      position = close + 1
+      continue
+    }
     position += 1
     let digits = ''
     while (position < rest.length && /[0-9]/.test(rest.charAt(position))) {
       digits += rest.charAt(position)
       position += 1
     }
-    steps.push({
+    ops.push({
       firstParent: kind === ANCESTOR,
       count: digits === '' ? 1 : Number.parseInt(digits, 10),
     })
   }
-  return [base === '' ? HEAD : base, steps]
+  return [base === '' ? HEAD : base, ops]
 }
 
 /** Load one commit's parents by object id, or report the revision as unknown. */
@@ -155,11 +146,7 @@ async function applyStep(
  * @param revision revision as the user spelled it
  */
 export async function resolveCommit(repo: Repo, revision: string): Promise<string> {
-  const [stem, want] = splitPeel(revision)
-  if (want !== null && want !== '' && want !== COMMIT && want !== OBJECT) {
-    throw new AmbiguousArgumentError(revision)
-  }
-  const [base, steps] = splitRevision(stem)
+  const [base, ops] = splitOperators(revision)
   let oid: string
   try {
     oid = await git.resolveRef({ ...repoArgs(repo), ref: base })
@@ -186,8 +173,17 @@ export async function resolveCommit(repo: Repo, revision: string): Promise<strin
     if (type !== 'tag') throw new AmbiguousArgumentError(revision)
     oid = (await git.readTag({ ...repoArgs(repo), oid })).tag.object
   }
-  for (const step of steps) {
-    oid = await applyStep(repo, oid, step, revision)
+  for (const op of ops) {
+    if ('want' in op) {
+      // A peel this caller can use is one that lands back on a commit: `^{}`
+      // and `^{commit}` do, `^{tree}` does not, and refusing the object rather
+      // than the spelling is what lets a peel sit in the middle of a chain.
+      const found = await peeled(repo, { oid, type: COMMIT }, op.want, revision)
+      if (found.type !== COMMIT) throw new AmbiguousArgumentError(revision)
+      oid = found.oid
+      continue
+    }
+    oid = await applyStep(repo, oid, op, revision)
   }
   return oid
 }
@@ -374,8 +370,8 @@ export async function resolveObject(repo: Repo, revision: string): Promise<GitOb
     const rev = revision.slice(0, mark)
     return atPath(repo, rev === '' ? HEAD : rev, revision.slice(mark + 1), revision)
   }
-  const [stem, want] = splitPeel(revision)
-  if (want === null) {
+  const [base, ops] = splitOperators(revision)
+  if (ops.length === 0) {
     // A bare id names that exact object, and for an annotated tag that is the
     // tag rather than the commit behind it: the commit-ish reading below is a
     // peel, and git does not peel an id. `git tag nested <tag-id>` records the
@@ -393,14 +389,22 @@ export async function resolveObject(repo: Repo, revision: string): Promise<GitOb
       return { oid, type: await typeOf(repo, oid, revision) }
     }
   }
-  if (want === TAG || want === OBJECT) {
-    // The same reading `^{tag}` needs, for the same reason: the commit-ish
-    // route below peels an annotated tag before anything else sees it, and
-    // both spellings have to stop above it.
-    const found = await tagObject(repo, stem)
-    if (found !== null) return found
+  // The base is resolved without peeling an annotated tag, because `^{tag}` and
+  // `^{object}` are the two spellings that have to stop above it; every other
+  // operator unwraps the tag itself, which is git's own rule and costs nothing
+  // here.
+  const held = await tagObject(repo, base)
+  let obj = held ?? (await resolveObject(repo, base))
+  for (const op of ops) {
+    if ('want' in op) {
+      obj = await peeled(repo, obj, op.want, revision)
+      continue
+    }
+    const commit = await unwrapped(repo, obj, revision)
+    if (commit.type !== COMMIT) throw new AmbiguousArgumentError(revision)
+    obj = { oid: await applyStep(repo, commit.oid, op, revision), type: COMMIT }
   }
-  return peeled(repo, await resolveObject(repo, stem), want, revision)
+  return obj
 }
 
 /** One id, full or abbreviated, expanded through the object store. */

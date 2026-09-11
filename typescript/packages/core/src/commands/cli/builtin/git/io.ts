@@ -132,6 +132,50 @@ export async function keepGitlink(
   await ensureDir(dispatch, path)
 }
 
+/**
+ * Take a submodule's directory away, or say why it stays.
+ *
+ * The other direction of `keepGitlink`, and it is not an unlink: what stands at
+ * a 160000 entry is a directory, so git calls `rmdir` and warns rather than
+ * failing when that cannot be done. An empty one goes; one still holding a
+ * checked-out submodule, or anything else untracked, stays and is named; a
+ * regular file or a link at the name is the `ENOTDIR` wording of the same
+ * warning; a name with nothing at it is silent. The switch itself succeeds
+ * either way, which is the whole point of warning instead of throwing. Pinned
+ * against git 2.50.1.
+ *
+ * @param dispatch workspace op dispatcher
+ * @param statPath the data plane's stat, which dereferences
+ * @param path absolute virtual path of the submodule
+ * @param name the path as git prints it, repository-relative
+ * @param links the name plane's link facts, null when no namespace is wired
+ * @returns the warning line to write, null when there is nothing to say
+ */
+export async function dropGitlink(
+  dispatch: Dispatch,
+  statPath: StatPath,
+  path: string,
+  name: string,
+  links: LinkView | null,
+): Promise<string | null> {
+  // A link is answered before the stat, which dereferences: rmdir never follows
+  // one, so a link to a directory is ENOTDIR here even though stat would call
+  // it a directory.
+  if ((links?.statAt(path) ?? null) !== null) {
+    return `warning: unable to rmdir '${name}': Not a directory\n`
+  }
+  const info = await statPath(path)
+  if (info === null) return null
+  if (info.type !== FileType.DIRECTORY) {
+    return `warning: unable to rmdir '${name}': Not a directory\n`
+  }
+  if ((await readNames(dispatch, path)).length > 0) {
+    return `warning: unable to rmdir '${name}': Directory not empty\n`
+  }
+  await dispatch('rmdir', PathSpec.fromStrPath(path))
+  return null
+}
+
 /** Read a byte range of one virtual path. */
 export async function readRange(
   dispatch: Dispatch,

@@ -21,7 +21,7 @@ from dulwich.repo import BaseRepo
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import AmbiguousArgumentError
 from mirage.commands.cli.builtin.git.refs import TAG_PREFIX
-from mirage.commands.cli.builtin.git.types import AncestryStep
+from mirage.commands.cli.builtin.git.types import AncestryStep, PeelStep, RevOp
 
 ANCESTOR = "~"
 PARENT = "^"
@@ -38,56 +38,41 @@ TAG = "tag"
 OBJECT = "object"
 
 
-def split_peel(revision: str) -> tuple[str, str | None]:
-    """Split a trailing ``^{<type>}`` off a revision.
+def split_operators(revision: str) -> tuple[str, tuple[RevOp, ...]]:
+    """Split a revision into its base and the operators applied to it.
 
-    ``HEAD^{tree}`` is a peel, not an ancestry step, and reading it as
-    one is silent rather than loud: ``^`` with no digits means "first
-    parent", so the suffix resolved to HEAD's parent commit and the
-    caller was handed a different object than it asked for without a
-    word. The braces tell the two apart, and git forbids both of them
-    in a ref name, so nothing else can end this way.
+    git reads a revision left to right: every ``~n``, ``^n`` and
+    ``^{<type>}`` applies to whatever the one before it produced, so
+    ``HEAD^{commit}~1`` is the parent of HEAD and ``HEAD~1^{tree}`` is
+    that parent's tree. Reading the peel as a trailing thing instead
+    refused every chain that did not end in one, and reading ``^{`` as
+    an ancestry step is worse than refusing: ``^`` with no digits means
+    "first parent", so ``HEAD^{tree}`` would answer with HEAD's parent
+    without a word. Splitting on the first ``~`` or ``^`` is safe
+    because git forbids both in a ref name, so neither can belong to
+    the base. Pinned against git 2.50.1.
 
     Args:
         revision (str): revision as the user spelled it.
 
     Returns:
-        tuple[str, str | None]: the revision without the peel, and the
-        type word inside it, empty for ``^{}`` and None when there is
-        no peel at all.
-    """
-    if not revision.endswith(PEEL_CLOSE):
-        return revision, None
-    index = revision.rfind(PEEL_OPEN)
-    if index < 0:
-        return revision, None
-    return revision[:index], revision[index + len(PEEL_OPEN):-1]
-
-
-def split_revision(revision: str) -> tuple[str, tuple[AncestryStep, ...]]:
-    """Split a revision into its base and its ancestry suffixes.
-
-    ``HEAD~2^2`` is a base plus two steps. Splitting on the first ``~``
-    or ``^`` is safe because git forbids both characters in ref names,
-    so neither can belong to the base.
-
-    Args:
-        revision (str): revision as the user spelled it.
+        tuple[str, tuple[RevOp, ...]]: the base, HEAD when the revision
+        is all operators, and the operators in the order they apply.
 
     Raises:
-        AmbiguousArgumentError: when the suffix holds anything but
-            ancestry steps.
+        AmbiguousArgumentError: when the rest holds anything but
+            operators.
     """
     index = next(
         (i for i, ch in enumerate(revision) if ch in SUFFIXES),
         len(revision),
     )
     base, rest = revision[:index], revision[index:]
-    steps: list[AncestryStep] = []
+    ops: list[RevOp] = []
     position = 0
     while position < len(rest):
         kind = rest[position]
-        # Only ``~`` and ``^`` are ancestry steps, and reading anything
+        # Only ``~`` and ``^`` open an operator, and reading anything
         # else as one is silent rather than loud: every other character
         # counted as another first-parent hop, so ``HEAD^x`` resolved to
         # ``HEAD^^`` and the caller was handed a commit it never named.
@@ -95,17 +80,21 @@ def split_revision(revision: str) -> tuple[str, tuple[AncestryStep, ...]]:
         # ``main~٣`` with it, since the digits it counts are ASCII.
         if kind not in SUFFIXES:
             raise AmbiguousArgumentError(revision)
+        if rest.startswith(PEEL_OPEN, position):
+            close = rest.find(PEEL_CLOSE, position)
+            if close < 0:
+                raise AmbiguousArgumentError(revision)
+            ops.append(PeelStep(rest[position + len(PEEL_OPEN):close]))
+            position = close + 1
+            continue
         position += 1
         digits = ""
         while position < len(rest) and rest[position] in "0123456789":
             digits += rest[position]
             position += 1
-        if digits == "":
-            count = 1
-        else:
-            count = int(digits)
-        steps.append(AncestryStep(first_parent=kind == ANCESTOR, count=count))
-    return base or HEAD, tuple(steps)
+        count = 1 if digits == "" else int(digits)
+        ops.append(AncestryStep(first_parent=kind == ANCESTOR, count=count))
+    return base or HEAD, tuple(ops)
 
 
 def _step(repo: BaseRepo, commit: Commit, step: AncestryStep,
@@ -167,16 +156,23 @@ def resolve_commit(repo: BaseRepo, revision: str) -> Commit:
         repo (BaseRepo): repository to resolve against.
         revision (str): revision as the user spelled it.
     """
-    stem, want = split_peel(revision)
-    if want is not None and want not in ("", COMMIT, OBJECT):
-        raise AmbiguousArgumentError(revision)
-    base, steps = split_revision(stem)
+    base, ops = split_operators(revision)
     try:
         commit = parse_commit(repo, base)
     except (KeyError, ValueError) as exc:
         raise AmbiguousArgumentError(revision) from exc
-    for step in steps:
-        commit = _step(repo, commit, step, revision)
+    for op in ops:
+        if isinstance(op, AncestryStep):
+            commit = _step(repo, commit, op, revision)
+            continue
+        # A peel this caller can use is one that lands back on a
+        # commit: ``^{}`` and ``^{commit}`` do, ``^{tree}`` does not,
+        # and refusing the object rather than the spelling is what lets
+        # a peel sit in the middle of a chain.
+        found = _peeled(repo, commit, op.want, revision)
+        if not isinstance(found, Commit):
+            raise AmbiguousArgumentError(revision)
+        commit = found
     return commit
 
 
@@ -376,8 +372,8 @@ def resolve_object(repo: BaseRepo, revision: str) -> ShaFile:
     if PATH_MARK in revision:
         rev, _, path = revision.partition(PATH_MARK)
         return _at_path(repo, rev or HEAD, path, revision)
-    stem, want = split_peel(revision)
-    if want is None:
+    base, ops = split_operators(revision)
+    if not ops:
         # A bare id names that exact object, and for an annotated tag
         # that is the tag rather than the commit behind it: the
         # commit-ish reading below is a peel, and git does not peel an
@@ -396,11 +392,18 @@ def resolve_object(repo: BaseRepo, revision: str) -> ShaFile:
                 return object_at(repo, revision)
             except (KeyError, ValueError) as exc:
                 raise AmbiguousArgumentError(revision) from exc
-    if want in (TAG, OBJECT):
-        # The same reading ``^{tag}`` needs, for the same reason: the
-        # commit-ish route below peels an annotated tag before anything
-        # else sees it, and both spellings have to stop above it.
-        found = _tag_object(repo, stem)
-        if found is not None:
-            return found
-    return _peeled(repo, resolve_object(repo, stem), want or "", revision)
+    # The base is resolved without peeling an annotated tag, because
+    # ``^{tag}`` and ``^{object}`` are the two spellings that have to
+    # stop above it; every other operator unwraps the tag itself, which
+    # is git's own rule and costs nothing here.
+    held = _tag_object(repo, base)
+    obj = held if held is not None else resolve_object(repo, base)
+    for op in ops:
+        if isinstance(op, PeelStep):
+            obj = _peeled(repo, obj, op.want, revision)
+            continue
+        commit = unwrapped(repo, obj, revision)
+        if not isinstance(commit, Commit):
+            raise AmbiguousArgumentError(revision)
+        obj = _step(repo, commit, op, revision)
+    return obj

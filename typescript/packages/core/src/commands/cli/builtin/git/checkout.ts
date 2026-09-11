@@ -35,6 +35,7 @@ import { short } from './format.ts'
 import { readIndex, refuseUnresolved, updateIndex, type StagedEntry } from './index_file.ts'
 import {
   blockingAncestor,
+  dropGitlink,
   keepGitlink,
   refuseReplacedMounts,
   removeEmptyParents,
@@ -60,7 +61,7 @@ import { restored } from './reset.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
 import type { LinkView, MountView, StatPath } from '../../../../ops/types.ts'
 import { FileType } from '../../../../types.ts'
-import type { Dispatch, HeadRef, IndexEntry } from './types.ts'
+import type { Dispatch, HeadMove, HeadRef, IndexEntry } from './types.ts'
 import { checkOperands, escaped, fatal } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -265,7 +266,7 @@ async function switchTo(
   after: ReadonlyMap<string, TreeEntry>,
   links: LinkView | null,
   mounts: MountView | null,
-): Promise<void> {
+): Promise<string[]> {
   const changed = written(before, after)
   // A gitlink is not written into the working tree at all, so it is neither
   // read as a blob nor allowed to clear what stands at the name; keepGitlink is
@@ -282,10 +283,20 @@ async function switchTo(
   // there fails, and so does writing the file while the directory is. Nothing
   // is read back from the working tree, so emptying it first is free.
   // `restore` orders its own pass the same way, for the same reason.
+  const notes: string[] = []
   for (const path of [...before.keys()].sort(compareCodePoints)) {
     if (after.has(path)) continue
     const where = under(repo.location.worktree, path)
-    await removeFile(dispatch, where)
+    // A gitlink the target tree drops is a directory, not a file: git rmdirs
+    // it and warns rather than failing when something is still in it, where
+    // the unlink here died on it with the removals ahead of it already
+    // applied.
+    if (before.get(path)?.mode === GITLINK_MODE) {
+      const warned = await dropGitlink(dispatch, statPath, where, path, links)
+      if (warned !== null) notes.push(warned)
+    } else {
+      await removeFile(dispatch, where)
+    }
     await removeEmptyParents(dispatch, where, repo.location.worktree, mounts)
   }
   for (const path of [...changed.keys()].sort(compareCodePoints)) {
@@ -331,6 +342,7 @@ async function switchTo(
   }
   const removed = [...before.keys()].filter((path) => !after.has(path))
   await updateIndex(repo, staged, removed)
+  return notes
 }
 
 /**
@@ -449,7 +461,7 @@ export async function moveHead(
   ref: string | null,
   creating: boolean,
   inPlace: boolean,
-): Promise<Map<string, string>> {
+): Promise<HeadMove> {
   // A branch created where HEAD already is moves nothing: git writes the ref,
   // points HEAD at it, and never touches the working tree or the index, so an
   // unmerged index survives `git switch -c topic` and is refused by
@@ -458,7 +470,7 @@ export async function moveHead(
   // trees. Pinned against git 2.50.1.
   if (inPlace) {
     await attach(dispatch, repo, known, head, oid, target, ref, creating)
-    return new Map()
+    return { carried: new Map(), warnings: '' }
   }
   const before = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
   const after = await commitEntries(repo, oid)
@@ -495,9 +507,9 @@ export async function moveHead(
   if (blocked.length > 0 || clobbered.length > 0 || lost.length > 0) {
     throw new CheckoutConflictError(blocked, clobbered, lost)
   }
-  await switchTo(repo, dispatch, statPath, before, after, links, mounts)
+  const notes = await switchTo(repo, dispatch, statPath, before, after, links, mounts)
   await attach(dispatch, repo, known, head, oid, target, ref, creating)
-  return carried
+  return { carried, warnings: notes.join('') }
 }
 
 /**
@@ -577,11 +589,14 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
       creating,
       creating && startPoint === undefined,
     )
-    carried = [...moved]
+    carried = [...moved.carried]
       .sort(([a], [b]) => compareCodePoints(a, b))
       .map(([path, letter]) => `${letter}\t${path}\n`)
       .join('')
-    note = await previousPosition(repo, head)
+    // git writes the warning above everything it says about the move, because
+    // the directory it could not remove is a fact about the working tree
+    // rather than about where HEAD went.
+    note = moved.warnings + (await previousPosition(repo, head))
     if (attached) {
       const verb = creating ? 'Switched to a new branch' : 'Switched to branch'
       note += `${verb} '${target}'\n`

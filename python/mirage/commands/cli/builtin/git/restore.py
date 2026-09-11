@@ -32,7 +32,7 @@ from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     UnresolvableSourceError)
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import (  # yapf: disable
-    blocking_ancestor, keep_gitlink, refuse_replaced_mounts,
+    blocking_ancestor, drop_gitlink, keep_gitlink, refuse_replaced_mounts,
     remove_empty_parents, remove_file, remove_tree, restore_entry)
 from mirage.commands.cli.builtin.git.pathspec import (matched, repo_relative,
                                                       under)
@@ -153,6 +153,7 @@ async def restore(
     stat_path = doors.stat_path
     texts = inv.texts
     fl = FlagView(inv.flags)
+    notes: list[str] = []
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
@@ -268,7 +269,17 @@ async def restore(
                 if await blocking_ancestor(stat_path, location.worktree, name,
                                            links):
                     continue
-                await remove_file(dispatch, path)
+                # What stands at a gitlink is a directory, so taking it
+                # away is an rmdir that may legitimately fail: unlink
+                # died on it with the index already written, which is
+                # the half-restore this verb has no wording for.
+                if held.get(name.encode(), (0, b""))[0] == GITLINK:
+                    warned = await drop_gitlink(dispatch, stat_path, path,
+                                                name, links)
+                    if warned is not None:
+                        notes.append(warned)
+                else:
+                    await remove_file(dispatch, path)
                 await remove_empty_parents(dispatch, path, location.worktree,
                                            mounts)
             for name in sorted(present):
@@ -303,4 +314,5 @@ async def restore(
                 await restore_entry(dispatch, where, mode, blobs[sha], links)
     except GitError as exc:
         return fatal(exc)
-    return None, IOResult()
+    told = "".join(notes).encode()
+    return None, IOResult(stderr=told) if told else IOResult()

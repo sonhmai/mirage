@@ -194,8 +194,11 @@ async def switch(
     except GitError as exc:
         return fatal(exc)
     carried = "".join(f"{letter}\t{path}\n"
-                      for path, letter in sorted(moved.items()))
-    note = previous_position(repo, head)
+                      for path, letter in sorted(moved.carried.items()))
+    # Above everything the move says about itself, which is where git
+    # puts it: what could not be removed is a fact about the working
+    # tree rather than about where HEAD went.
+    note = moved.warnings + previous_position(repo, head)
     if attached:
         verb = "Switched to a new branch" if creating else "Switched to branch"
         note += f"{verb} '{target}'\n"

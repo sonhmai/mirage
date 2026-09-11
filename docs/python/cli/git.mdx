@@ -152,6 +152,13 @@ serve, and inventing a name would put an unreviewed one into history.
   before the first commit repoints HEAD and writes neither a ref nor a
   reflog line, which is how git leaves an unborn branch too. Naming a
   start point there is a different line and stays unresolvable.
+- **A revision is read left to right.** `~n`, `^n` and `^{<type>}` are
+  operators applied in the order they are written, so `HEAD^{commit}~1`
+  is HEAD's parent, `HEAD~1^{tree}` is that parent's tree, and the two
+  chain further (`HEAD^{commit}~1^{tree}`). A peel was read as a
+  trailing thing until this round, so every chain that went on after one
+  was refused although git takes it. A step off something with no
+  parents is still refused, which is what `HEAD^{tree}~1` is.
 - **`^{tag}` stops above the commit.** Every other peel type sits at or
   below it, so an annotated tag is unwrapped on the way; `v1^{tag}` is
   the one spelling that names the tag object itself, and a lightweight
@@ -336,10 +343,18 @@ serve, and inventing a name would put an unreviewed one into history.
   source drops loses its index entry and keeps its working-tree copy,
   and a directory full of untracked files is what the entry asked for
   rather than a collision, where an untracked *file* at the name still
-  refuses. Nothing else about a submodule is supported: `status` still
-  reads the directory as an ordinary untracked one, which is why a
-  branch switch onto a gitlink the current branch also carries is
-  refused before it gets this far.
+  refuses. Taking the entry away is an `rmdir` rather than an unlink,
+  and it warns rather than failing: an empty directory goes, one that
+  still holds anything stays with
+  `warning: unable to rmdir '<name>': Directory not empty`, a file or a
+  link at the name is the `Not a directory` wording of the same line,
+  and the switch or restore succeeds either way. A gitlink is also
+  invisible to the unstaged comparison, because the submodule's own HEAD
+  is what git compares and this build cannot read it: reporting the
+  directory as a deleted file is worse than saying nothing, and it
+  refused every branch switch away from a submodule. What is left of the
+  divergence is the untracked side: files inside a submodule's directory
+  are still listed as untracked, where git says nothing about them.
 - **`reset` takes no revision.** Real git resets the index to any commit
   named as an operand; this build resets it from HEAD only and refuses a
   revision by name rather than doing nothing quietly.

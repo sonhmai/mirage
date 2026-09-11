@@ -148,6 +148,48 @@ async def keep_gitlink(dispatch: DispatchFn, stat_path: StatPath, path: str,
     await ensure_dir(dispatch, path)
 
 
+async def drop_gitlink(dispatch: DispatchFn, stat_path: StatPath, path: str,
+                       name: str, links: LinkView | None) -> str | None:
+    """Take a submodule's directory away, or say why it stays.
+
+    The other direction of ``keep_gitlink``, and it is not an unlink:
+    what stands at a 160000 entry is a directory, so git calls
+    ``rmdir`` and warns rather than failing when that cannot be done.
+    An empty one goes; one still holding a checked-out submodule, or
+    anything else untracked, stays and is named; a regular file or a
+    link at the name is the ``ENOTDIR`` wording of the same warning;
+    a name with nothing at it is silent. The switch itself succeeds
+    either way, which is the whole point of warning instead of raising.
+    Pinned against git 2.50.1.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        stat_path (StatPath): the data plane's stat, which dereferences.
+        path (str): absolute virtual path of the submodule.
+        name (str): the path as git prints it, repository-relative.
+        links (LinkView | None): the name plane's link facts, None when
+            no namespace is wired.
+
+    Returns:
+        str | None: the warning line to write, None when there is
+        nothing to say.
+    """
+    # A link is answered before the stat, which dereferences: rmdir
+    # never follows one, so a link to a directory is ENOTDIR here even
+    # though stat would call it a directory.
+    if links is not None and links.stat_at(path) is not None:
+        return f"warning: unable to rmdir '{name}': Not a directory\n"
+    info = await stat_path(path)
+    if info is None:
+        return None
+    if info.type is not FileType.DIRECTORY:
+        return f"warning: unable to rmdir '{name}': Not a directory\n"
+    if await read_names(dispatch, path):
+        return f"warning: unable to rmdir '{name}': Directory not empty\n"
+    await dispatch("rmdir", PathSpec.from_str_path(path))
+    return None
+
+
 async def read_range(dispatch: DispatchFn, path: str, offset: int,
                      size: int) -> bytes:
     """Read a byte range of one virtual path.

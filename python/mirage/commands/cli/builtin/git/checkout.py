@@ -36,7 +36,7 @@ from mirage.commands.cli.builtin.git.index import (read_index,
                                                    refuse_unresolved,
                                                    write_index)
 from mirage.commands.cli.builtin.git.io import (  # yapf: disable
-    blocking_ancestor, keep_gitlink, refuse_replaced_mounts,
+    blocking_ancestor, drop_gitlink, keep_gitlink, refuse_replaced_mounts,
     remove_empty_parents, remove_file, remove_tree, restore_entry)
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.pathspec import under
@@ -47,7 +47,8 @@ from mirage.commands.cli.builtin.git.refs import (BRANCH_PREFIX, blocking_ref,
 from mirage.commands.cli.builtin.git.reset import restored
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.types import HeadRef, RepoLocation
+from mirage.commands.cli.builtin.git.types import (HeadMove, HeadRef,
+                                                   RepoLocation)
 from mirage.commands.cli.builtin.git.util import (  # yapf: disable
     check_operands, escaped, fatal, links_of, mounts_of)
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
@@ -295,7 +296,8 @@ def _lost_directories(writing: Tree, untracked: list[str]) -> list[str]:
 
 async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
                   location: RepoLocation, before: Tree, after: Tree,
-                  links: LinkView | None, mounts: MountView | None) -> None:
+                  links: LinkView | None,
+                  mounts: MountView | None) -> list[str]:
     """Make the working tree and index match the tree being switched to.
 
     Only paths the two trees disagree about are touched, so a file that
@@ -345,10 +347,21 @@ async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
     # file while the directory is. Nothing is read back from the
     # working tree, so emptying it first is free. ``restore`` orders
     # its own pass the same way, for the same reason.
+    notes: list[str] = []
     for path in sorted(set(before) - set(after)):
         name = path.decode("utf-8", errors="replace")
         where = posixpath.join(location.worktree, name)
-        await remove_file(dispatch, where)
+        # A gitlink the target tree drops is a directory, not a file:
+        # git rmdirs it and warns rather than failing when something is
+        # still in it, where the unlink here died on it with the
+        # removals ahead of it already applied.
+        if before[path][0] == GITLINK:
+            warned = await drop_gitlink(dispatch, stat_path, where, name,
+                                        links)
+            if warned is not None:
+                notes.append(warned)
+        else:
+            await remove_file(dispatch, where)
         await remove_empty_parents(dispatch, where, location.worktree, mounts)
     for path in changed:
         name = path.decode("utf-8", errors="replace")
@@ -394,6 +407,7 @@ async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
     for path in set(before) - set(after):
         state.entries.pop(path, None)
     await write_index(dispatch, location.gitdir, state)
+    return notes
 
 
 def previous_position(repo: BaseRepo, head: HeadRef) -> str:
@@ -487,7 +501,7 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
                     links: LinkView | None, mounts: MountView | None,
                     repo: BaseRepo, location: RepoLocation, head: HeadRef,
                     commit: Commit, target: str, ref: Ref | None,
-                    creating: bool, in_place: bool) -> dict[str, str]:
+                    creating: bool, in_place: bool) -> HeadMove:
     """Move HEAD, the index and the working tree to a commit.
 
     The one procedure ``checkout`` and ``switch`` share, since the two
@@ -520,8 +534,8 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
             new branch is being created where HEAD already is.
 
     Returns:
-        dict[str, str]: each path whose uncommitted change was carried
-        across, against the status letter git prints for it.
+        HeadMove: the paths whose uncommitted change was carried across,
+        and any warning the removals could not avoid.
     """
     # A branch created where HEAD already is moves nothing: git writes
     # the ref, points HEAD at it, and never touches the working tree or
@@ -533,7 +547,7 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
     if in_place:
         await _attach(dispatch, repo, location, head, commit, target, ref,
                       creating)
-        return {}
+        return HeadMove({}, "")
     before = await asyncio.to_thread(head_entries, repo) or {}
     after = await asyncio.to_thread(tree_of, repo, commit.id)
     state = await read_index(dispatch, location.gitdir)
@@ -572,11 +586,11 @@ async def move_head(dispatch: DispatchFn, stat_path: StatPath,
     lost = _lost_directories(writing, found.untracked)
     if blocked or overwritten or lost:
         raise CheckoutConflictError(blocked, overwritten, lost)
-    await _switch(dispatch, stat_path, repo, location, before, after, links,
-                  mounts)
+    notes = await _switch(dispatch, stat_path, repo, location, before, after,
+                          links, mounts)
     await _attach(dispatch, repo, location, head, commit, target, ref,
                   creating)
-    return carried
+    return HeadMove(carried, "".join(notes))
 
 
 async def checkout(
@@ -652,8 +666,11 @@ async def checkout(
     except GitError as exc:
         return fatal(exc)
     carried = "".join(f"{letter}\t{path}\n"
-                      for path, letter in sorted(moved.items()))
-    note = previous_position(repo, head)
+                      for path, letter in sorted(moved.carried.items()))
+    # git writes the warning above everything it says about the move,
+    # because the directory it could not remove is a fact about the
+    # working tree rather than about where HEAD went.
+    note = moved.warnings + previous_position(repo, head)
     if attached:
         verb = "Switched to a new branch" if creating else "Switched to branch"
         note += f"{verb} '{target}'\n"

@@ -26,12 +26,13 @@ class ParsedCommand:
     """One command of the line being routed, distilled from the parse.
 
     Args:
-        command (str): the command name (first word).
+        command (str): the registered command prefix, or the first word
+            when no longer prefix matches.
         words (tuple[str, ...]): every word of the command, name first.
         builtin (bool): whether the command has a builtin spec.
         paths (tuple[str, ...]): absolute-path operands.
-        cli (str | None): the installed CLI whose head word ``command``
-            is, None otherwise. Lets a policy steer an installed name
+        cli (str | None): the installed CLI named by the first word,
+            None otherwise. Lets a policy steer an installed name
             between the virtual CLI and a runtime capturing the same
             word.
     """

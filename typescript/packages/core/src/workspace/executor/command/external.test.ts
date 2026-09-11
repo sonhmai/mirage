@@ -22,6 +22,8 @@ import { RulePolicy } from '../../../policy/rule.ts'
 import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { Runtime } from '../../../runtime/base.ts'
+import { MontyRuntime } from '../../../runtime/python/monty/runtime.ts'
+import { ScriptSource, type RouteContext } from '../../../runtime/routing/types.ts'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
@@ -317,6 +319,40 @@ describe('external command routing regressions', () => {
         else expect(probe.lines[0]).toBe(shellJoin(tokens))
       } finally {
         deferred.mockRestore()
+        await ws.close()
+      }
+    })
+  })
+
+  describe.each(['process', 'shell'] as const)('scripted multiword %s capture', (kind) => {
+    it.each([false, true])('resolves its full command with source=%s', async (source) => {
+      const script = source
+        ? new ScriptSource(
+            "ctx['command'] == 'trello board list' and " +
+              "ctx['commands'][-1]['command'] == 'trello board list' and " +
+              "ctx['commands'][-1]['words'][-1] == '/allowed'",
+          )
+        : (ctx: RouteContext) =>
+            ctx.command === 'trello board list' &&
+            ctx.commands.at(-1)?.command === 'trello board list' &&
+            ctx.commands.at(-1)?.words.at(-1) === '/allowed'
+      const options = { captures: ['trello board list'], script }
+      const probe = kind === 'process' ? new ProcessProbe(options) : new ShellProbe(options)
+      const ws = await workspace(probe, [new MontyRuntime({ captures: [] })])
+      registerBoardList(ws)
+      try {
+        expect((await ws.execute('echo ok | trello board list /allowed')).exitCode).toBe(0)
+        const tokens = ['trello', 'board', 'list', '/allowed']
+        if (probe instanceof ProcessProbe) {
+          expect(probe.requests[0]?.argv).toEqual(tokens)
+          probe.requests.length = 0
+        } else {
+          expect(probe.lines[0]).toBe(shellJoin(tokens))
+          probe.lines.length = 0
+        }
+        expect((await ws.execute('echo ok | trello board list /denied')).exitCode).toBe(126)
+        expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(0)
+      } finally {
         await ws.close()
       }
     })

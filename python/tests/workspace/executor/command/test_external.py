@@ -30,7 +30,8 @@ from mirage.policy.builtin.output_cap import DEFAULT_COMMAND_LIMITS
 from mirage.policy.rule import RulePolicy
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
-from mirage.runtime.types import ProcessExecution, RunResult
+from mirage.runtime.python.monty import MontyRuntime
+from mirage.runtime.types import ProcessExecution, RunResult, ScriptSource
 from mirage.workspace.expand import argv as argv_module
 from mirage.workspace.lookup import SHELL_NAMES, Consumer, lookup, lookup_all
 from mirage.workspace.session import Session
@@ -294,6 +295,38 @@ async def test_boundary_expansion_preserves_command_tokens(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [ProcessProbe, ShellProbe])
+@pytest.mark.parametrize("source", [False, True])
+async def test_scripted_multiword_capture_sees_its_full_command(kind, source):
+    script = (ScriptSource(
+        "ctx['command'] == 'trello board list' and "
+        "ctx['commands'][-1]['command'] == 'trello board list' and "
+        "ctx['commands'][-1]['words'][-1] == '/allowed'")
+              if source else lambda ctx: ctx.command == "trello board list" and
+              ctx.commands[-1].command == "trello board list" and ctx.commands[
+                  -1].words[-1] == "/allowed")
+    probe = kind(captures=("trello board list", ), script=script)
+    ram = RAMResource()
+    ram.register(board_list)
+    async with workspace({"/": ram},
+                         runtimes=[probe, MontyRuntime(captures=())]) as ws:
+        allowed = await ws.execute("echo ok | trello board list /allowed")
+        assert allowed.exit_code == 0
+        if isinstance(probe, ProcessProbe):
+            assert probe.requests[0].argv == ("trello", "board", "list",
+                                              "/allowed")
+            probe.requests.clear()
+        else:
+            assert shlex.split(
+                probe.lines[0]) == ["trello", "board", "list", "/allowed"]
+            probe.lines.clear()
+        denied = await ws.execute("echo ok | trello board list /denied")
+        assert denied.exit_code == 126
+        assert not (probe.requests
+                    if isinstance(probe, ProcessProbe) else probe.lines)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("head", [
     "echo ok", "cat /input", "custom-stage", "trello board list", "custom-cli",
     "python3"
@@ -319,7 +352,9 @@ async def test_external_script_sees_first_unresolved_stage(head):
         assert seen[0].command == "native-tool"
         assert not seen[0].builtin
         assert seen[0].line == head + " | native-tool"
-        assert seen[0].commands[0].command == head.split()[0]
+        assert seen[0].commands[0].command == ("trello board list"
+                                               if head == "trello board list"
+                                               else head.split()[0])
         probe.requests.clear()
         denied = await ws.execute(head + " | denied-tool")
         assert denied.exit_code == 126

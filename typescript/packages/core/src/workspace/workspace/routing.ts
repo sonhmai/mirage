@@ -87,11 +87,12 @@ export class Router {
     }
     const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
     if (this.routePolicy === null && !hasScripts) return null
-    const commands = parsedCommands(root, this.registry.clis.names())
+    const commands = parsedCommands(root, this.registry.clis.names(), (words) =>
+      this.registry.matchCommandPrefix(words),
+    )
     const externalCommands = commands
       .filter((parsed) => {
-        const consumed = this.registry.matchCommandPrefix([...parsed.words])
-        const name = parsed.words.slice(0, consumed).join(' ')
+        const name = parsed.command
         return (
           !name.includes('/') &&
           !Object.hasOwn(this.runtimes.bindings, name) &&

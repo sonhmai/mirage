@@ -101,11 +101,11 @@ class Router:
         has_scripts = any(entry.script is not None for entry in entries)
         if route_policy is None and not has_scripts:
             return None
-        commands = parsed_commands(ast, self._registry.clis.names())
+        commands = parsed_commands(ast, self._registry.clis.names(),
+                                   self._registry.match_command_prefix)
         external_commands: list[str] = []
         for parsed in commands:
-            consumed = self._registry.match_command_prefix(list(parsed.words))
-            name = " ".join(parsed.words[:consumed])
+            name = parsed.command
             if ("/" not in name
                     and name not in self._registry.runtime_bindings and lookup(
                         name, session, self._registry) is Consumer.EXTERNAL):

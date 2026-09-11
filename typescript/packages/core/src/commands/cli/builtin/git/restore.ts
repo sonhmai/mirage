@@ -36,10 +36,11 @@ import { removeEmptyParents, removeFile, removeTree, restoreEntry, under } from 
 import { matched, repoRelative } from './pathspec.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
 import { restored } from './reset.ts'
-import { COMMIT, TREE, resolveObject } from './revparse.ts'
+import { COMMIT, TREE, resolveObject, unwrapped } from './revparse.ts'
 import { commitEntries, treeEntries, type TreeEntry } from './tree.ts'
 import type { GitObject, IndexEntry } from './types.ts'
 import { checkOperands, escaped, fatal, startPoint } from './util.ts'
+import type { LinkView } from '../../../../ops/types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 /** The parsed shape of a `git restore` invocation. */
@@ -88,10 +89,47 @@ export async function sourceTree(repo: Repo, revision: string): Promise<Map<stri
   } catch {
     throw new UnresolvableSourceError(revision)
   }
+  // A bare id names the object itself, so an annotated tag arrives as the tag
+  // rather than as what it points at. A tag is no tree-ish, and unwrapping it
+  // is what makes `--source=<tag-id>` read the same tree `--source=v1` reads.
+  found = await unwrapped(repo, found, revision)
   // git's one implicit peel: a commit stands for its tree here.
   if (found.type === COMMIT) return await commitEntries(repo, found.oid)
   if (found.type !== TREE) throw new UnreadableTreeError(found.oid)
   return await treeEntries(repo, found.oid)
+}
+
+/**
+ * The nearest directory above an entry that is really a symlink.
+ *
+ * An entry's path is only a way through the working tree while every component
+ * above it is a directory. A link standing on one is not, and neither a write
+ * nor a removal may be attempted through it: both resolve past the link and
+ * land in whatever tree it points at, damaging files no branch named while the
+ * link itself stays. git checks the leading path for exactly this and takes the
+ * two directions differently, which is what the callers do here.
+ *
+ * Exact-path link lookups cannot see this, since the link sits above the name
+ * being looked up rather than on it.
+ *
+ * @param worktree absolute virtual path of the working tree root
+ * @param name the entry, repository-relative
+ * @param links the name plane's link facts, null when no namespace is wired
+ * @returns the absolute virtual path of the nearest such link, null when every
+ *   component above the entry is a directory
+ */
+export function linkedAncestor(
+  worktree: string,
+  name: string,
+  links: LinkView | null,
+): string | null {
+  if (links === null) return null
+  let current = worktree
+  for (const part of name.split('/').slice(0, -1)) {
+    current = under(current, part)
+    if (links.statAt(current) !== null) return current
+  }
+  return null
 }
 
 /**
@@ -174,17 +212,28 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
       // file `slot` still sits, and the other direction writes the file
       // where the directory still sits. Nothing is read back from the
       // working tree, so emptying it first is free.
+      const links = doors.ns?.links ?? null
       for (const name of absent) {
         const path = under(repo.location.worktree, name)
+        // A link above the entry is not a way through to it: the unlink would
+        // resolve past the link and delete a file inside whatever it points
+        // at, which no branch named. git checks the leading path and removes
+        // nothing when it finds one, so neither does this.
+        if (linkedAncestor(repo.location.worktree, name, links) !== null) continue
         await removeFile(dispatch, path)
         await removeEmptyParents(dispatch, path, repo.location.worktree)
       }
-      const links = doors.ns?.links ?? null
       for (const name of present) {
         const entry = tree.get(name)
         if (entry === undefined) continue
         const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
         const where = under(repo.location.worktree, name)
+        // The write direction takes the same link the other way round: the
+        // entry needs a directory where the link stands, so git replaces the
+        // link with one rather than writing through it. The tree the link
+        // pointed at is left exactly as it was.
+        const held = linkedAncestor(repo.location.worktree, name, links)
+        if (held !== null) await removeFile(dispatch, held)
         // A directory can still stand here after the loop above: it removed
         // the tracked children, but an untracked one keeps it alive and the
         // write would fail on it with the index already updated. git replaces

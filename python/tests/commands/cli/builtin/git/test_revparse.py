@@ -231,3 +231,50 @@ async def test_a_lightweight_tag_has_no_tag_to_peel_to(git_rw):
     repo = await open_repo(git_rw.dispatch, location)
     with pytest.raises(AmbiguousArgumentError):
         resolve_object(repo, "light^{tag}")
+
+
+@pytest.mark.asyncio
+async def test_a_bare_tag_id_is_the_tag_object(git_rw):
+    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    location = await discover(*repo_facts(git_rw), "/repo")
+    repo = await open_repo(git_rw.dispatch, location)
+    held = repo.refs[b"refs/tags/v1"]
+    # git reads a bare id as that exact object, so the commit-ish
+    # reading must not peel it: ``git tag nested <tag-id>`` records the
+    # tag, which is the nested tag git warns about.
+    found = resolve_object(repo, held.decode())
+    assert found.type_name == b"tag"
+    assert found.id == held
+
+
+@pytest.mark.asyncio
+async def test_a_tag_name_still_peels_where_an_id_does_not(git_rw):
+    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    location = await discover(*repo_facts(git_rw), "/repo")
+    repo = await open_repo(git_rw.dispatch, location)
+    # The split is git's own and is observable: a name resolves as a
+    # commit-ish, an id as itself.
+    assert resolve_object(repo, "v1").type_name == b"commit"
+
+
+@pytest.mark.asyncio
+async def test_a_path_reads_through_a_bare_tag_id(git_rw):
+    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    location = await discover(*repo_facts(git_rw), "/repo")
+    repo = await open_repo(git_rw.dispatch, location)
+    held = repo.refs[b"refs/tags/v1"].decode()
+    # The rev half of a path expression is a tree-ish, so the tag comes
+    # off on the way exactly as it does for ``v1:a.txt``.
+    found = resolve_object(repo, f"{held}:a.txt")
+    assert found.type_name == b"blob"
+    assert found.id == resolve_object(repo, "v1:a.txt").id
+
+
+@pytest.mark.asyncio
+async def test_a_peel_through_a_bare_tag_id_still_reaches_the_tree(git_rw):
+    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    location = await discover(*repo_facts(git_rw), "/repo")
+    repo = await open_repo(git_rw.dispatch, location)
+    held = repo.refs[b"refs/tags/v1"].decode()
+    assert resolve_object(repo, f"{held}^{{tree}}").type_name == b"tree"
+    assert resolve_object(repo, f"{held}^{{}}").type_name == b"commit"

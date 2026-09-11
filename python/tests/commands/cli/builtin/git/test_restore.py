@@ -18,7 +18,9 @@ import pytest
 from dulwich.index import Index, IndexEntry
 from dulwich.repo import Repo
 
-from mirage.commands.cli.builtin.git.restore import index_tree, parse_flags
+from mirage.commands.cli.builtin.git.restore import (index_tree,
+                                                     linked_ancestor,
+                                                     parse_flags)
 from mirage.commands.spec.types import FlagView
 from tests.commands.cli.builtin.git.conftest import conflict_index
 
@@ -359,3 +361,78 @@ async def test_a_worktree_restore_before_the_first_commit_still_goes(
     # first commit, so only the implicit HEAD source has nothing to read.
     assert await run(unborn_rw, "restore f.txt") == (0, b"", b"")
     assert (await unborn_rw.execute("cat /repo/f.txt")).stdout == b"hi\n"
+
+
+def test_a_link_above_the_entry_is_found():
+
+    class Links:
+        """A link view holding one link, at ``/repo/slot``."""
+
+        def stat_at(self, path: str):
+            """What the namespace holds at a path, None when no link.
+
+            Args:
+                path (str): absolute virtual path.
+            """
+            return object() if path == "/repo/slot" else None
+
+    assert linked_ancestor("/repo", "slot/child", Links()) == "/repo/slot"
+    # The link itself is not an ancestor of itself, and a path with no
+    # link above it has none.
+    assert linked_ancestor("/repo", "slot", Links()) is None
+    assert linked_ancestor("/repo", "other/child", Links()) is None
+    assert linked_ancestor("/repo", "slot/child", None) is None
+
+
+@pytest.mark.asyncio
+async def test_a_link_standing_where_a_directory_belongs_is_replaced(
+        git_rw, repo_path: Path):
+    await git_rw.execute("mkdir /repo/slot && echo c > /repo/slot/child")
+    await run(git_rw, "add -A")
+    await run(git_rw, "commit -m nested")
+    await git_rw.execute("rm -r /repo/slot && mkdir /repo/elsewhere")
+    await git_rw.execute("echo old > /repo/elsewhere/child")
+    await git_rw.execute("ln -s elsewhere /repo/slot")
+    assert await run(git_rw, "restore slot/child") == (0, b"", b"")
+    # git replaces the link with the directory the entry needs. Writing
+    # through it would have landed the content in elsewhere/child, a
+    # file no branch named, and left the link in place.
+    assert (repo_path / "slot" / "child").read_text() == "c\n"
+    assert (repo_path / "elsewhere" / "child").read_text() == "old\n"
+    # A link is namespace state, so the disk mount never held one:
+    # whether it is gone is a question for the namespace.
+    assert (await git_rw.execute("readlink /repo/slot")).exit_code != 0
+
+
+@pytest.mark.asyncio
+async def test_a_removal_is_not_attempted_through_a_link(
+        git_rw, repo_path: Path):
+    await git_rw.execute("mkdir /repo/slot && echo c > /repo/slot/child")
+    await run(git_rw, "add -A")
+    await run(git_rw, "commit -m nested")
+    await git_rw.execute("rm -r /repo/slot && mkdir /repo/elsewhere")
+    await git_rw.execute("echo old > /repo/elsewhere/child")
+    await git_rw.execute("ln -s elsewhere /repo/slot")
+    # HEAD~1 predates the entry, so restoring from it removes the path.
+    assert await run(git_rw,
+                     "restore --source=HEAD~1 slot/child") == (0, b"", b"")
+    # The source does not hold the path, so the entry would be removed;
+    # the unlink would resolve past the link and delete a file inside
+    # whatever it points at. git checks the leading path and removes
+    # nothing, link and target both left as they stand.
+    assert (repo_path / "elsewhere" / "child").read_text() == "old\n"
+    told = await git_rw.execute("readlink /repo/slot")
+    assert (told.exit_code, told.stdout) == (0, b"elsewhere\n")
+
+
+@pytest.mark.asyncio
+async def test_a_bare_tag_id_still_names_a_source_tree(git_rw,
+                                                       repo_path: Path):
+    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    with Repo(str(repo_path)) as repo:
+        held = repo.refs[b"refs/tags/v1"].decode()
+    await git_rw.execute("echo edited > /repo/a.txt")
+    # The id names the tag object itself, which is no tree-ish; a source
+    # unwraps it, so `--source=<tag-id>` reads what `--source=v1` reads.
+    assert await run(git_rw, f"restore --source={held} a.txt") == (0, b"", b"")
+    assert (repo_path / "a.txt").read_text() == "one changed\n"

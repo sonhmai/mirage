@@ -320,3 +320,41 @@ async def test_an_expression_that_resolves_to_nothing_is_refused(git_rw):
     assert code == 128
     assert err == (b"fatal: Failed to resolve 'HEAD:nosuch' as a valid "
                    b"ref.\n")
+
+
+@pytest.mark.asyncio
+async def test_a_lightweight_tag_naming_a_blob_keeps_its_type(
+        git_rw, repo_path: Path):
+    # A lightweight tag is a ref like any other and points at whatever
+    # it was made from, so the annotated tag records the type read
+    # rather than assuming a commit: `type commit` beside a blob id is a
+    # tag object git show and git fsck reject.
+    assert (await run(git_rw, "tag blobtag HEAD:a.txt"))[0] == 0
+    assert await run(git_rw, "tag -a release -m x blobtag") == (0, b"", b"")
+    written = tag_object(repo_path, "release")
+    assert isinstance(written, Tag)
+    assert written.object[0].type_name == b"blob"
+
+
+@pytest.mark.asyncio
+async def test_a_lightweight_tag_naming_a_tree_keeps_its_type(
+        git_rw, repo_path: Path):
+    assert (await run(git_rw, "tag treetag HEAD^{tree}"))[0] == 0
+    assert await run(git_rw, "tag -a treerel -m x treetag") == (0, b"", b"")
+    written = tag_object(repo_path, "treerel")
+    assert isinstance(written, Tag)
+    assert written.object[0].type_name == b"tree"
+
+
+@pytest.mark.asyncio
+async def test_a_bare_tag_id_makes_a_nested_tag(git_rw, repo_path: Path):
+    assert (await run(git_rw, "tag -a v1 -m annotated"))[0] == 0
+    with Repo(str(repo_path)) as repo:
+        held = repo.refs[b"refs/tags/v1"].decode()
+    assert (await run(git_rw, f"tag -a nested -m x {held}"))[0] == 0
+    written = tag_object(repo_path, "nested")
+    assert isinstance(written, Tag)
+    # git reads a bare id as that exact object, so the new tag points at
+    # the tag rather than at the commit behind it.
+    assert written.object[0].type_name == b"tag"
+    assert written.object[1].decode() == held

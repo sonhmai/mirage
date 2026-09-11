@@ -717,6 +717,32 @@ class RemovalRefusedError(GitError):
         super().__init__("\nerror: ".join(blocks))
 
 
+class RemovePathError(GitError):
+    """``rm`` whose working-tree deletion the mount refused.
+
+    git names the path and the strerror. The one reason a mount gives
+    is a directory standing where a tracked file was: ``unlink`` refuses
+    that, and git reports it rather than removing the tree.
+
+    The ``rm`` lines ride along on stdout because git prints them for
+    every selected path before it deletes anything, so the ones printed
+    before the failure are printed whether the line goes through or not.
+
+    Args:
+        path (str): the path, repository-relative.
+        report (str): the ``rm`` lines already printed, empty under
+            ``-q``.
+        reason (str): the strerror to name.
+    """
+
+    def __init__(self,
+                 path: str,
+                 report: str = "",
+                 reason: str = "Is a directory") -> None:
+        super().__init__(f"git rm: '{path}': {reason}")
+        self.report = report
+
+
 class MoveUsageError(GitError):
     """``mv`` with fewer than two operands.
 

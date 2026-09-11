@@ -2023,3 +2023,152 @@ describe('a peel naming the tag type', () => {
     expect((await h.run('tag nested light^{tag}'))[0]).toBe(128)
   })
 })
+
+describe('git rm over a directory', () => {
+  it('refuses the path and leaves the index as it stood', async () => {
+    const h = await harness()
+    await h.ws.execute('rm /repo/numbers.txt && mkdir /repo/numbers.txt')
+    await write(h, 'numbers.txt/keep', 'k\n')
+    const [code, out, err] = await h.run('rm numbers.txt')
+    expect(code).toBe(128)
+    expect(err).toBe("fatal: git rm: 'numbers.txt': Is a directory\n")
+    // git prints the line for every selected path before it deletes
+    // anything, so it is printed whether the line goes through or not.
+    expect(out).toBe("rm 'numbers.txt'\n")
+    // The index is written last, so the entry is still staged.
+    expect(git(await h.drain(), ['ls-files', 'numbers.txt'])).toBe('numbers.txt\n')
+  })
+
+  it('tolerates the refusal once a deletion has been made', async () => {
+    const h = await harness()
+    await h.ws.execute('rm /repo/numbers.txt && mkdir /repo/numbers.txt')
+    await write(h, 'numbers.txt/keep', 'k\n')
+    // letters.txt sorts first and goes, so numbers.txt's failure is
+    // swallowed and the whole line succeeds with both entries unstaged.
+    const [code, out, err] = await h.run('rm -f letters.txt numbers.txt')
+    expect([code, err]).toEqual([0, ''])
+    expect(out).toBe("rm 'letters.txt'\nrm 'numbers.txt'\n")
+    const drained = await h.drain()
+    expect(git(drained, ['ls-files', 'letters.txt', 'numbers.txt'])).toBe('')
+  })
+
+  it('stands when nothing has gone yet', async () => {
+    const h = await harness()
+    await h.ws.execute('rm /repo/letters.txt && mkdir /repo/letters.txt')
+    const [code, , err] = await h.run('rm -f letters.txt numbers.txt')
+    expect(code).toBe(128)
+    expect(err).toBe("fatal: git rm: 'letters.txt': Is a directory\n")
+    // numbers.txt is never reached, in the working tree or the index.
+    expect(await readOptional(h.dispatch, '/repo/numbers.txt')).not.toBeNull()
+  })
+
+  it('unstages a directory under --cached without touching it', async () => {
+    const h = await harness()
+    await h.ws.execute('rm /repo/numbers.txt && mkdir /repo/numbers.txt')
+    await write(h, 'numbers.txt/keep', 'k\n')
+    expect(await h.run('rm --cached numbers.txt')).toEqual([0, "rm 'numbers.txt'\n", ''])
+    expect(await readOptional(h.dispatch, '/repo/numbers.txt/keep')).not.toBeNull()
+  })
+
+  it('removes a tracked link to a directory as the link it is', async () => {
+    const h = await harness()
+    await h.ws.execute('ln -s docs /repo/slot')
+    expect((await h.run('add -A'))[0]).toBe(0)
+    expect((await h.run('commit -m linked'))[0]).toBe(0)
+    expect(await h.run('rm slot')).toEqual([0, "rm 'slot'\n", ''])
+    // The link went; the directory it pointed at stayed.
+    expect(await readOptional(h.dispatch, '/repo/docs/readme.md')).not.toBeNull()
+  })
+})
+
+describe('restore across a symlink ancestor', () => {
+  it('replaces a link standing where a directory belongs', async () => {
+    const h = await harness()
+    await h.ws.execute('mkdir /repo/elsewhere')
+    await write(h, 'elsewhere/readme.md', 'old\n')
+    await h.ws.execute('rm -r /repo/docs && ln -s elsewhere /repo/docs')
+    expect(await h.run('restore docs/readme.md')).toEqual([0, '', ''])
+    // Writing through the link would have landed the content in
+    // elsewhere/readme.md, a file no branch named, and left the link.
+    const restored = await readOptional(h.dispatch, '/repo/docs/readme.md')
+    expect(restored === null ? '' : DEC.decode(restored)).toBe('notes\n')
+    const other = await readOptional(h.dispatch, '/repo/elsewhere/readme.md')
+    expect(other === null ? '' : DEC.decode(other)).toBe('old\n')
+    // A link is namespace state, so whether it is gone is a question
+    // for the namespace rather than for the drained copy.
+    expect((await h.ws.execute('readlink /repo/docs')).exitCode).not.toBe(0)
+  })
+
+  it('attempts no removal through one', async () => {
+    const h = await harness()
+    await h.ws.execute('mkdir /repo/elsewhere')
+    await write(h, 'elsewhere/readme.md', 'old\n')
+    await h.ws.execute('rm -r /repo/docs && ln -s elsewhere /repo/docs')
+    // HEAD~2 predates the entry, so restoring from it removes the path;
+    // the unlink would resolve past the link and delete a file inside
+    // whatever it points at. git checks the leading path and removes
+    // nothing, link and target both left as they stand.
+    expect(await h.run('restore --source=HEAD~2 docs/readme.md')).toEqual([0, '', ''])
+    const other = await readOptional(h.dispatch, '/repo/elsewhere/readme.md')
+    expect(other === null ? '' : DEC.decode(other)).toBe('old\n')
+    const told = await h.ws.execute('readlink /repo/docs')
+    expect([told.exitCode, DEC.decode(told.stdout)]).toEqual([0, 'elsewhere\n'])
+  })
+})
+
+describe('a tag named by a bare id', () => {
+  it('is the tag object, not the commit behind it', async () => {
+    const h = await harness()
+    expect((await h.run('tag -a v1 -m annotated'))[0]).toBe(0)
+    const held = git(await h.drain(), ['rev-parse', 'v1']).trim()
+    expect((await h.run(`tag -a nested -m x ${held}`))[0]).toBe(0)
+    const drained = await h.drain()
+    // git reads a bare id as that exact object, so the new tag points
+    // at the tag rather than at the commit behind it.
+    expect(git(drained, ['cat-file', '-p', 'nested']).split('\n')[1]).toBe('type tag')
+    expect(git(drained, ['fsck'])).toBe('')
+  })
+
+  it('still names a source tree for restore', async () => {
+    const h = await harness()
+    expect((await h.run('tag -a v1 -m annotated'))[0]).toBe(0)
+    const held = git(await h.drain(), ['rev-parse', 'v1']).trim()
+    await write(h, 'letters.txt', 'edited\n')
+    // The id names the tag object itself, which is no tree-ish; a
+    // source unwraps it, so this reads what `--source=v1` reads.
+    expect(await h.run(`restore --source=${held} letters.txt`)).toEqual([0, '', ''])
+    const back = await readOptional(h.dispatch, '/repo/letters.txt')
+    expect(back === null ? '' : DEC.decode(back)).toBe('alpha\nbeta\ngamma\ndelta\n')
+  })
+})
+
+describe('a lightweight tag as an annotated tag target', () => {
+  it('keeps the blob type it points at', async () => {
+    const h = await harness()
+    expect((await h.run('tag blobtag HEAD:letters.txt'))[0]).toBe(0)
+    expect(await h.run('tag -a release -m x blobtag')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    // `type commit` beside a blob id is a tag object git show and git
+    // fsck both reject.
+    expect(git(drained, ['cat-file', '-p', 'release']).split('\n')[1]).toBe('type blob')
+    expect(git(drained, ['fsck'])).toBe('')
+    expect(git(drained, ['show', 'release'])).toContain('alpha')
+  })
+
+  it('keeps the tree type it points at', async () => {
+    const h = await harness()
+    expect((await h.run('tag treetag HEAD^{tree}'))[0]).toBe(0)
+    expect(await h.run('tag -a treerel -m x treetag')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['cat-file', '-p', 'treerel']).split('\n')[1]).toBe('type tree')
+    expect(git(drained, ['fsck'])).toBe('')
+  })
+
+  it('still records a commit for a lightweight tag on one', async () => {
+    const h = await harness()
+    expect((await h.run('tag light'))[0]).toBe(0)
+    expect(await h.run('tag -a fromlight -m x light')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['cat-file', '-p', 'fromlight']).split('\n')[1]).toBe('type commit')
+  })
+})

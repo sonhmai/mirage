@@ -205,6 +205,28 @@ def _object_by_id(repo: BaseRepo, sha: ObjectID, revision: str) -> ShaFile:
         raise AmbiguousArgumentError(revision) from exc
 
 
+def unwrapped(repo: BaseRepo, obj: ShaFile, revision: str) -> ShaFile:
+    """What an object stands for once every tag wrapper is off.
+
+    An annotated tag can point at another one, so this is a walk rather
+    than a single hop. Anything that is no tag is already what it
+    stands for and comes back untouched.
+
+    Every reading that wants a particular kind of object goes through
+    this: a bare id names the tag itself, so a caller asking for a
+    tree-ish or for the tree behind ``<rev>:<path>`` has one to take
+    off, and git takes it off in both places.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        obj (ShaFile): the object to unwrap.
+        revision (str): the whole revision, for error attribution.
+    """
+    while isinstance(obj, Tag):
+        obj = _object_by_id(repo, obj.object[1], revision)
+    return obj
+
+
 def _peeled(repo: BaseRepo, obj: ShaFile, want: str, revision: str) -> ShaFile:
     """Follow a ``^{<type>}`` peel from the object the stem named.
 
@@ -227,8 +249,8 @@ def _peeled(repo: BaseRepo, obj: ShaFile, want: str, revision: str) -> ShaFile:
         want (str): the type word inside the braces, empty for ``^{}``.
         revision (str): the whole revision, for error attribution.
     """
-    while isinstance(obj, Tag) and want != TAG:
-        obj = _object_by_id(repo, obj.object[1], revision)
+    if want != TAG:
+        obj = unwrapped(repo, obj, revision)
     if want == "":
         return obj
     if want == TREE and isinstance(obj, Commit):
@@ -247,7 +269,10 @@ def _at_path(repo: BaseRepo, rev: str, path: str, revision: str) -> ShaFile:
         path (str): the path after it, repository-relative.
         revision (str): the whole revision, for error attribution.
     """
-    holder = resolve_object(repo, rev)
+    # A tag is no tree and holds no path, so it comes off first: the
+    # rev half is a tree-ish, and ``<tag-id>:a.txt`` reads the blob
+    # through it exactly as ``v1:a.txt`` does.
+    holder = unwrapped(repo, resolve_object(repo, rev), revision)
     if isinstance(holder, Commit):
         holder = _object_by_id(repo, holder.tree, revision)
     if not isinstance(holder, Tree):
@@ -288,6 +313,30 @@ def _tag_object(repo: BaseRepo, stem: str) -> Tag | None:
     return found if isinstance(found, Tag) else None
 
 
+def _tag_at_id(repo: BaseRepo, revision: str) -> Tag | None:
+    """The tag object a bare id names, None when the id names no tag.
+
+    A tag is the one type whose bare-id reading differs from the
+    commit-ish one below, which is why this is scoped to it rather than
+    put in front of every resolution: every other type either is the
+    commit that reading returns or is not commit-ish at all, and
+    already falls through to the id.
+
+    A tag *name* is deliberately not read here. git splits the two, and
+    the split is observable: ``git tag nested v1`` records the tag
+    object while ``git restore --source=v1`` reads the tree behind it.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        revision (str): the revision as the user spelled it.
+    """
+    try:
+        found = object_at(repo, revision)
+    except (KeyError, ValueError):
+        return None
+    return found if isinstance(found, Tag) else None
+
+
 def resolve_object(repo: BaseRepo, revision: str) -> ShaFile:
     """The object a revision names, whatever type it turns out to be.
 
@@ -307,6 +356,14 @@ def resolve_object(repo: BaseRepo, revision: str) -> ShaFile:
         return _at_path(repo, rev or HEAD, path, revision)
     stem, want = split_peel(revision)
     if want is None:
+        # A bare id names that exact object, and for an annotated tag
+        # that is the tag rather than the commit behind it: the
+        # commit-ish reading below is a peel, and git does not peel an
+        # id. ``git tag nested <tag-id>`` records the tag, which is the
+        # nested tag git warns about rather than quietly flattens.
+        held = _tag_at_id(repo, revision)
+        if held is not None:
+            return held
         try:
             return resolve_commit(repo, revision)
         except AmbiguousArgumentError:

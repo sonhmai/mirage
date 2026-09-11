@@ -617,6 +617,26 @@ export class RemovalRefusedError extends GitError {
 }
 
 /**
+ * `rm` whose working-tree deletion the mount refused.
+ *
+ * git names the path and the strerror. The one reason a mount gives is a
+ * directory standing where a tracked file was: `unlink` refuses that, and git
+ * reports it rather than removing the tree.
+ *
+ * The `rm` lines ride along on stdout because git prints them for every
+ * selected path before it deletes anything, so the ones printed before the
+ * failure are printed whether the line goes through or not.
+ */
+export class RemovePathError extends GitError {
+  override readonly report: string
+
+  constructor(path: string, report = '', reason = 'Is a directory') {
+    super(`git rm: '${path}': ${reason}`)
+    this.report = report
+  }
+}
+
+/**
  * `mv` with fewer than two operands.
  *
  * git prints its usage and exits 129. Only the two synopsis lines are kept: the

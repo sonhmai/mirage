@@ -192,6 +192,35 @@ async function typeOf(repo: Repo, oid: string, revision: string): Promise<string
 }
 
 /**
+ * What an object stands for once every tag wrapper is off.
+ *
+ * An annotated tag can point at another one, so this is a walk rather than a
+ * single hop. Anything that is no tag is already what it stands for and comes
+ * back untouched.
+ *
+ * Every reading that wants a particular kind of object goes through this: a
+ * bare id names the tag itself, so a caller asking for a tree-ish or for the
+ * tree behind `<rev>:<path>` has one to take off, and git takes it off in both
+ * places.
+ *
+ * @param repo the opened repository
+ * @param found the object to unwrap
+ * @param revision the whole revision, for error attribution
+ */
+export async function unwrapped(
+  repo: Repo,
+  found: GitObject,
+  revision: string,
+): Promise<GitObject> {
+  let { oid, type } = found
+  while (type === TAG) {
+    oid = (await git.readTag({ ...repoArgs(repo), oid })).tag.object
+    type = await typeOf(repo, oid, revision)
+  }
+  return { oid, type }
+}
+
+/**
  * Follow a `^{<type>}` peel from the object the stem named.
  *
  * A tag is unwrapped until the type asked for is reached, which for `^{}` and
@@ -212,11 +241,7 @@ async function peeled(
   want: string,
   revision: string,
 ): Promise<GitObject> {
-  let { oid, type } = found
-  while (type === TAG && want !== TAG) {
-    oid = (await git.readTag({ ...repoArgs(repo), oid })).tag.object
-    type = await typeOf(repo, oid, revision)
-  }
+  let { oid, type } = want === TAG ? found : await unwrapped(repo, found, revision)
   if (want === '') return { oid, type }
   if (want === TREE && type === COMMIT) {
     oid = (await git.readCommit({ ...repoArgs(repo), oid })).commit.tree
@@ -235,7 +260,10 @@ async function peeled(
  * @param revision the whole revision, for error attribution
  */
 async function atPath(repo: Repo, rev: string, path: string, revision: string): Promise<GitObject> {
-  const holder = await resolveObject(repo, rev)
+  // A tag is no tree and holds no path, so it comes off first: the rev half is
+  // a tree-ish, and `<tag-id>:a.txt` reads the blob through it exactly as
+  // `v1:a.txt` does.
+  const holder = await unwrapped(repo, await resolveObject(repo, rev), revision)
   try {
     // eslint-disable-next-line @typescript-eslint/no-deprecated
     const found = await git.readObject({ ...repoArgs(repo), oid: holder.oid, filepath: path })
@@ -279,6 +307,37 @@ async function tagObject(repo: Repo, stem: string): Promise<GitObject | null> {
 }
 
 /**
+ * The tag object a bare id names, null when the id names no tag.
+ *
+ * A tag is the one type whose bare-id reading differs from the commit-ish one,
+ * which is why this is scoped to it rather than put in front of every
+ * resolution: every other type either is the commit that reading returns or is
+ * not commit-ish at all, and already falls through to the id.
+ *
+ * A tag *name* is deliberately not read here. git splits the two, and the split
+ * is observable: `git tag nested v1` records the tag object while
+ * `git restore --source=v1` reads the tree behind it.
+ *
+ * @param repo the opened repository
+ * @param revision the revision as the user spelled it
+ */
+async function tagAtId(repo: Repo, revision: string): Promise<GitObject | null> {
+  let oid: string
+  try {
+    oid = await expanded(repo, revision)
+  } catch {
+    return null
+  }
+  let type: string
+  try {
+    type = await typeOf(repo, oid, revision)
+  } catch {
+    return null
+  }
+  return type === TAG ? { oid, type } : null
+}
+
+/**
  * The object a revision names, whatever type it turns out to be.
  *
  * The whole grammar a caller that wants an object rather than a commit has to
@@ -298,6 +357,13 @@ export async function resolveObject(repo: Repo, revision: string): Promise<GitOb
   }
   const [stem, want] = splitPeel(revision)
   if (want === null) {
+    // A bare id names that exact object, and for an annotated tag that is the
+    // tag rather than the commit behind it: the commit-ish reading below is a
+    // peel, and git does not peel an id. `git tag nested <tag-id>` records the
+    // tag, which is the nested tag git warns about rather than quietly
+    // flattens.
+    const held = await tagAtId(repo, revision)
+    if (held !== null) return held
     try {
       return { oid: await resolveCommit(repo, revision), type: COMMIT }
     } catch {

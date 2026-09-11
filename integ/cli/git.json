@@ -2309,6 +2309,34 @@
         "stdout": "peelnested\npeelv1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_rm_refuses_a_directory_and_keeps_the_index",
+      "seq": 568324,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "echo x > /repo/rmdir.txt && git -C /repo add rmdir.txt && git -C /repo commit -m rmdir > /dev/null && rm /repo/rmdir.txt && mkdir /repo/rmdir.txt && echo k > /repo/rmdir.txt/keep && git -C /repo rm rmdir.txt; echo exit=$?; git -C /repo status --short | grep rmdir",
+      "expect": {
+        "exit": 0,
+        "stdout": "rm 'rmdir.txt'\nexit=128\n D rmdir.txt\n?? rmdir.txt/\n",
+        "stderr": "fatal: git rm: 'rmdir.txt': Is a directory\n"
+      }
+    },
+    {
+      "id": "git_restore_replaces_a_linked_ancestor",
+      "seq": 568325,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "mkdir /repo/away && echo old > /repo/away/readme.md && rm -r /repo/docs && ln -s away /repo/docs && git -C /repo restore docs/readme.md && cat /repo/docs/readme.md && cat /repo/away/readme.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "notes\nold\n",
+        "stderr": ""
+      }
     }
   ]
 }

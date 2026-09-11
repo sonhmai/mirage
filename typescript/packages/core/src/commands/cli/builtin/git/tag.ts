@@ -159,9 +159,13 @@ async function resolveTarget(
 ): Promise<{ oid: string; type: string }> {
   const held = known.get(`${TAG_PREFIX}${revision}`)
   if (held !== undefined) {
+    // The type is recorded as read. A lightweight tag is a ref like any
+    // other and points at whatever it was made from, so `tag blobtag
+    // HEAD:a.txt` then `tag -a release -m x blobtag` records `type blob`;
+    // calling it a commit wrote a tag object git show and git fsck reject.
     // eslint-disable-next-line @typescript-eslint/no-deprecated
     const { type } = await git.readObject({ ...repoArgs(repo), oid: held })
-    return { oid: held, type: type === 'tag' ? 'tag' : 'commit' }
+    return { oid: held, type }
   }
   try {
     return await resolveObject(repo, revision)

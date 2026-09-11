@@ -174,3 +174,76 @@ async def test_a_dashed_pathspec_is_removed_when_the_line_escapes_it(
     await run(git_rw, "commit -m draft")
     assert await run(git_rw, "rm -- -draft") == (0, b"rm '-draft'\n", b"")
     assert not (repo_path / "-draft").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_directory_where_a_tracked_file_was_is_refused(
+        git_rw, repo_path: Path):
+    # unlink cannot empty a tree, and git reports the strerror rather
+    # than removing what it never tracked. The index is written last, so
+    # the entry is left staged exactly as it stood.
+    await git_rw.execute("rm /repo/b.txt && mkdir /repo/b.txt")
+    await git_rw.execute("echo k > /repo/b.txt/keep")
+    code, out, err = await run(git_rw, "rm b.txt")
+    assert code == 128
+    assert err == b"fatal: git rm: 'b.txt': Is a directory\n"
+    # git prints the line for every selected path before it deletes
+    # anything, so it is printed whether the line goes through or not.
+    assert out == b"rm 'b.txt'\n"
+    assert (repo_path / "b.txt" / "keep").exists()
+    code, out, _err = await run(git_rw, "status --short")
+    assert b"D  b.txt" not in out
+
+
+@pytest.mark.asyncio
+async def test_a_deletion_already_made_tolerates_the_refusal(
+        git_rw, repo_path: Path):
+    # git's own rule: the failure is fatal only while nothing has been
+    # deleted yet. a.txt sorts first and goes, so b.txt's failure is
+    # swallowed and the whole line succeeds with both entries unstaged.
+    await git_rw.execute("rm /repo/b.txt && mkdir /repo/b.txt")
+    await git_rw.execute("echo k > /repo/b.txt/keep")
+    code, out, err = await run(git_rw, "rm -f a.txt b.txt")
+    assert (code, err) == (0, b"")
+    assert out == b"rm 'a.txt'\nrm 'b.txt'\n"
+    assert not (repo_path / "a.txt").exists()
+    assert (repo_path / "b.txt" / "keep").exists()
+
+
+@pytest.mark.asyncio
+async def test_the_refusal_stands_when_nothing_has_gone_yet(
+        git_rw, repo_path: Path):
+    # The mirror of the test above, with the directory on the path that
+    # sorts first: nothing has been deleted when a.txt fails, so the
+    # line is fatal and b.txt is never reached. An empty directory
+    # refuses the same way, since unlink is the call that cannot make
+    # it either.
+    await git_rw.execute("rm /repo/a.txt && mkdir /repo/a.txt")
+    code, _out, err = await run(git_rw, "rm -f a.txt b.txt")
+    assert code == 128
+    assert err == b"fatal: git rm: 'a.txt': Is a directory\n"
+    assert (repo_path / "b.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_cached_unstages_a_directory_without_touching_it(
+        git_rw, repo_path: Path):
+    # --cached deletes nothing, so the refusal never arises: the entry
+    # goes and the directory stays.
+    await git_rw.execute("rm /repo/b.txt && mkdir /repo/b.txt")
+    await git_rw.execute("echo k > /repo/b.txt/keep")
+    assert await run(git_rw, "rm --cached b.txt") == (0, b"rm 'b.txt'\n", b"")
+    assert (repo_path / "b.txt" / "keep").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_tracked_link_to_a_directory_is_removed_as_a_link(
+        git_rw, repo_path: Path):
+    # A link is not the directory it points at, and reading it as one
+    # would refuse a removal git makes: the namespace is asked first.
+    await git_rw.execute("mkdir /repo/real && echo r > /repo/real/child")
+    await git_rw.execute("ln -s real /repo/slot")
+    await run(git_rw, "add -A")
+    await run(git_rw, "commit -m linked")
+    assert await run(git_rw, "rm slot") == (0, b"rm 'slot'\n", b"")
+    assert (repo_path / "real" / "child").exists()

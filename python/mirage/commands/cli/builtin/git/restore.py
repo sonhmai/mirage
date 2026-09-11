@@ -36,13 +36,15 @@ from mirage.commands.cli.builtin.git.io import (remove_empty_parents,
                                                 restore_entry)
 from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
 from mirage.commands.cli.builtin.git.reset import restored
-from mirage.commands.cli.builtin.git.revparse import TREE, resolve_object
+from mirage.commands.cli.builtin.git.revparse import (TREE, resolve_object,
+                                                      unwrapped)
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (  # yapf: disable
     check_operands, escaped, fatal, links_of, start_point)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 from mirage.types import FileType
 
 
@@ -115,12 +117,52 @@ def source_tree(repo: BaseRepo, revision: str) -> Tree:
         found = resolve_object(repo, revision)
     except GitError as exc:
         raise UnresolvableSourceError(revision) from exc
+    # A bare id names the object itself, so an annotated tag arrives as
+    # the tag rather than as what it points at. A tag is no tree-ish,
+    # and unwrapping it is what makes ``--source=<tag-id>`` read the
+    # same tree ``--source=v1`` reads.
+    found = unwrapped(repo, found, revision)
     if isinstance(found, Commit):
         # git's one implicit peel: a commit stands for its tree here.
         return tree_of(repo, found.id)
     if found.type_name.decode() != TREE:
         raise UnreadableTreeError(found.id.decode())
     return flat_tree(repo, found.id)
+
+
+def linked_ancestor(worktree: str, name: str,
+                    links: LinkView | None) -> str | None:
+    """The nearest directory above an entry that is really a symlink.
+
+    An entry's path is only a way through the working tree while every
+    component above it is a directory. A link standing on one is not,
+    and neither a write nor a removal may be attempted through it: both
+    resolve past the link and land in whatever tree it points at,
+    damaging files no branch named while the link itself stays. git
+    checks the leading path for exactly this and takes the two
+    directions differently, which is what the callers do here.
+
+    Exact-path link lookups cannot see this, since the link sits above
+    the name being looked up rather than on it.
+
+    Args:
+        worktree (str): absolute virtual path of the working tree root.
+        name (str): the entry, repository-relative.
+        links (LinkView | None): the name plane's link facts, None when
+            no namespace is wired.
+
+    Returns:
+        str | None: absolute virtual path of the nearest such link,
+        None when every component above the entry is a directory.
+    """
+    if links is None:
+        return None
+    current = worktree
+    for part in name.split("/")[:-1]:
+        current = posixpath.join(current, part)
+        if links.stat_at(current) is not None:
+            return current
+    return None
 
 
 async def restore(
@@ -225,11 +267,26 @@ async def restore(
             # emptying it first is free.
             for name in sorted(absent):
                 path = posixpath.join(location.worktree, name)
+                # A link above the entry is not a way through to it:
+                # the unlink would resolve past the link and delete a
+                # file inside whatever it points at, which no branch
+                # named. git checks the leading path and removes
+                # nothing when it finds one, so neither does this.
+                if linked_ancestor(location.worktree, name, links):
+                    continue
                 await remove_file(dispatch, path)
                 await remove_empty_parents(dispatch, path, location.worktree)
             for name in sorted(present):
                 mode, sha = tree[name.encode()]
                 where = posixpath.join(location.worktree, name)
+                # The write direction takes the same link the other way
+                # round: the entry needs a directory where the link
+                # stands, so git replaces the link with one rather than
+                # writing through it. The tree the link pointed at is
+                # left exactly as it was.
+                above = linked_ancestor(location.worktree, name, links)
+                if above is not None:
+                    await remove_file(dispatch, above)
                 # A directory can still stand here after the loop
                 # above: it removed the tracked children, but an
                 # untracked one keeps it alive and the write would

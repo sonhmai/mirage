@@ -24,6 +24,7 @@ import {
   NoWorkspaceError,
   PathspecError,
   RemovalRefusedError,
+  RemovePathError,
   UnknownSwitchError,
 } from './errors.ts'
 import { readIndex, updateIndex } from './index_file.ts'
@@ -34,6 +35,8 @@ import type { TreeEntry } from './tree.ts'
 import type { Dispatch, IndexEntry, RepoLocation, WorkTree } from './types.ts'
 import { checkOperands, escaped, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
+import type { LinkView, StatPath } from '../../../../ops/types.ts'
+import { FileType } from '../../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -142,6 +145,55 @@ export async function refuseLostWork(
 }
 
 /**
+ * Delete every selected path from the working tree.
+ *
+ * A directory standing where a tracked file was is the one deletion a mount
+ * cannot make: `unlink` is not the call that empties a tree, and git reports
+ * the strerror rather than removing what it never tracked. It reports it in
+ * index order and only while nothing has been deleted yet; once one path is
+ * gone the rest of the loop tolerates a failure and the line still succeeds.
+ * That is git's own rule rather than a reading of it, and it is observable both
+ * ways: `git rm slot z.txt` is fatal with the index untouched, while
+ * `git rm a.txt slot` exits 0 with both entries unstaged and the directory
+ * still on disk. Pinned against git 2.50.1.
+ *
+ * A tracked symlink to a directory is not this case and must not be read as
+ * one: it is removed as the link it is, which is why the namespace is asked
+ * before the type.
+ *
+ * @param dispatch workspace op dispatcher
+ * @param statPath the data plane's stat, which dereferences
+ * @param worktree absolute virtual path of the working tree root
+ * @param selected the paths to delete, in index order
+ * @param lines the `rm` lines already printed, for a refusal to carry on stdout
+ *   the way git prints them anyway
+ * @param links the name plane's link facts, null when no namespace is wired
+ */
+export async function clearWorktree(
+  dispatch: Dispatch,
+  statPath: StatPath,
+  worktree: string,
+  selected: readonly string[],
+  lines: string,
+  links: LinkView | null,
+): Promise<void> {
+  let removed = false
+  for (const path of selected) {
+    const absolute = under(worktree, path)
+    if ((links?.statAt(absolute) ?? null) === null) {
+      const info = await statPath(absolute)
+      if (info !== null && info.type === FileType.DIRECTORY) {
+        if (!removed) throw new RemovePathError(path, lines)
+        continue
+      }
+    }
+    await removeFile(dispatch, absolute)
+    await removeEmptyParents(dispatch, absolute, worktree)
+    removed = true
+  }
+}
+
+/**
  * Remove paths from the index, and from the working tree too.
  *
  * `--cached` leaves the file where it is and only stops tracking it. Without
@@ -181,14 +233,22 @@ export async function rm(inv: CLIInvocation): Promise<CommandFnResult> {
       const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
       await refuseLostWork(repo, dispatch, tree, state.entries, found, checkable, flags.cached)
     }
-    await updateIndex(repo, new Map(), selected)
+    const lines = flags.quiet ? '' : selected.map((path) => `rm '${path}'\n`).join('')
     if (!flags.cached) {
-      for (const path of selected) {
-        const absolute = under(repo.location.worktree, path)
-        await removeFile(dispatch, absolute)
-        await removeEmptyParents(dispatch, absolute, repo.location.worktree)
-      }
+      await clearWorktree(
+        dispatch,
+        statPath,
+        repo.location.worktree,
+        selected,
+        lines,
+        doors.ns?.links ?? null,
+      )
     }
+    // Last, because the deletions above can fail: git writes the index only
+    // once the working tree is done with, so a refused deletion leaves the
+    // entry staged exactly as it stood rather than staging a removal that
+    // never happened.
+    await updateIndex(repo, new Map(), selected)
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err

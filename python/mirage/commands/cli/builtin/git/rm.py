@@ -23,7 +23,7 @@ from mirage.commands.cli.builtin.git.changes import (MODIFIED, head_entries,
 from mirage.commands.cli.builtin.git.errors import GitError  # yapf: disable
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     NoPathspecRemoveError, NotRecursiveError, NoWorkspaceError, PathspecError,
-    RemovalRefusedError, UnknownSwitchError)
+    RemovalRefusedError, RemovePathError, UnknownSwitchError)
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import (remove_empty_parents,
                                                 remove_file)
@@ -37,7 +37,9 @@ from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
+from mirage.types import FileType
 
 Tree = dict[bytes, tuple[int, bytes]]
 
@@ -154,6 +156,50 @@ async def refuse_lost_work(dispatch: DispatchFn, location: RepoLocation,
         raise RemovalRefusedError(both, staged, local)
 
 
+async def clear_worktree(dispatch: DispatchFn, stat_path: StatPath,
+                         location: RepoLocation, selected: list[str],
+                         lines: str, links: LinkView | None) -> None:
+    """Delete every selected path from the working tree.
+
+    A directory standing where a tracked file was is the one deletion a
+    mount cannot make: ``unlink`` is not the call that empties a tree,
+    and git reports the strerror rather than removing what it never
+    tracked. It reports it in index order and only while nothing has
+    been deleted yet; once one path is gone the rest of the loop
+    tolerates a failure and the line still succeeds. That is git's own
+    rule rather than a reading of it, and it is observable both ways:
+    ``git rm slot z.txt`` is fatal with the index untouched, while
+    ``git rm a.txt slot`` exits 0 with both entries unstaged and the
+    directory still on disk. Pinned against git 2.50.1.
+
+    A tracked symlink to a directory is not this case and must not be
+    read as one: it is removed as the link it is, which is why the
+    namespace is asked before the type.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        stat_path (StatPath): the data plane's stat, which dereferences.
+        location (RepoLocation): the discovered repository.
+        selected (list[str]): the paths to delete, in index order.
+        lines (str): the ``rm`` lines already printed, for a refusal to
+            carry on stdout the way git prints them anyway.
+        links (LinkView | None): the name plane's link facts, None when
+            no namespace is wired.
+    """
+    removed = False
+    for path in selected:
+        absolute = posixpath.join(location.worktree, path)
+        if links is None or links.stat_at(absolute) is None:
+            info = await stat_path(absolute)
+            if info is not None and info.type is FileType.DIRECTORY:
+                if not removed:
+                    raise RemovePathError(path, lines)
+                continue
+        await remove_file(dispatch, absolute)
+        await remove_empty_parents(dispatch, absolute, location.worktree)
+        removed = True
+
+
 async def rm(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     """Remove paths from the index, and from the working tree too.
 
@@ -196,16 +242,19 @@ async def rm(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             tree = await asyncio.to_thread(head_entries, repo) or {}
             await refuse_lost_work(dispatch, location, tree, state.entries,
                                    found, checkable, flags.cached)
+        lines = "" if flags.quiet else "".join(f"rm '{path}'\n"
+                                               for path in selected)
+        if not flags.cached:
+            await clear_worktree(dispatch, stat_path, location, selected,
+                                 lines, links_of(doors))
+        # Last, because the deletions above can fail: git writes the
+        # index only once the working tree is done with, so a refused
+        # deletion leaves the entry staged exactly as it stood rather
+        # than staging a removal that never happened.
         for path in selected:
             state.entries.pop(path.encode(), None)
             state.conflicts.pop(path.encode(), None)
         await write_index(dispatch, location.gitdir, state)
-        if not flags.cached:
-            for path in selected:
-                absolute = posixpath.join(location.worktree, path)
-                await remove_file(dispatch, absolute)
-                await remove_empty_parents(dispatch, absolute,
-                                           location.worktree)
     except GitError as exc:
         return fatal(exc)
     if flags.quiet:

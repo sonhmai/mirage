@@ -151,4 +151,14 @@ describe('heredocBodies', () => {
       null,
     ])
   })
+
+  // $'A' names A, so the first body ends at the A line and the second
+  // operator still gets the lines after it.
+  it('closes the body of a dollar-quoted delimiter', () => {
+    const cmd = "cat <<$'A' <<'B'\nfirst\nA\n\\second\nB\n"
+    expect(bodies(cmd, ["$'A'", "'B'"])).toEqual([
+      [cmd.indexOf('first'), cmd.indexOf('A\n')],
+      [cmd.indexOf('\\second'), cmd.lastIndexOf('B')],
+    ])
+  })
 })

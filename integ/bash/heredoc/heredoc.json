@@ -1636,6 +1636,99 @@
         "stdout": "[\nb]",
         "stderr": ""
       }
+    },
+    {
+      "id": "heredoc_ansi_c_delimiter",
+      "seq": 501272,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf '[%s]' \"$(cat <<$'B'\nb\nB\n)\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[b]",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_ansi_c_delimiter_escape",
+      "seq": 501273,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf '[%s]' \"$(cat <<$'E\\tD'\nb\nE\tD\n)\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[b]",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_locale_delimiter",
+      "seq": 501274,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf '[%s]' \"$(cat <<$\"B\"\nb\nB\n)\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[b]",
+        "stderr": ""
+      }
     }
   ]
 }

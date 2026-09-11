@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.shell.parse.heredoc import clean_delimiter
+from mirage.shell.parse.heredoc import ansi_c_end, clean_delimiter
 
 
 @pytest.mark.parametrize("token, expected", [
@@ -34,6 +34,27 @@ from mirage.shell.parse.heredoc import clean_delimiter
     ('"E\\\\F"', "E\\F"),
     ('"E\\xF"', "E\\xF"),
     ("E'", "E"),
+    ("$'EOF'", "EOF"),
+    ("$'E\\tF'", "E\tF"),
+    ("E$'\\t'F", "E\tF"),
+    ("$'E'F", "EF"),
+    ("$'\\''", "'"),
+    ('$"EOF"', "EOF"),
+    ('E$"O"F', "EOF"),
+    ("\\$'EOF'", "$EOF"),
+    ("'$EOF'", "$EOF"),
+    ('"$\'EOF\'"', "$'EOF'"),
+    ("$EOF", "$EOF"),
+    ("EOF$", "EOF$"),
 ])
 def test_clean_delimiter(token: str, expected: str):
     assert clean_delimiter(token) == expected
+
+
+@pytest.mark.parametrize("token, expected", [
+    ("$'A'", 3),
+    ("$'\\''", 4),
+    ("$'A", 3),
+])
+def test_ansi_c_end(token: str, expected: int):
+    assert ansi_c_end(token, 2) == expected

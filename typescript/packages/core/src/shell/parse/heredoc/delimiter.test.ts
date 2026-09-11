@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { cleanDelimiter } from './delimiter.ts'
+import { ansiCEnd, cleanDelimiter } from './delimiter.ts'
 
 describe('cleanDelimiter', () => {
   it.each([
@@ -33,7 +33,29 @@ describe('cleanDelimiter', () => {
     ['"E\\\\F"', 'E\\F'],
     ['"E\\xF"', 'E\\xF'],
     ["E'", 'E'],
+    ["$'EOF'", 'EOF'],
+    ["$'E\\tF'", 'E\tF'],
+    ["E$'\\t'F", 'E\tF'],
+    ["$'E'F", 'EF'],
+    ["$'\\''", "'"],
+    ['$"EOF"', 'EOF'],
+    ['E$"O"F', 'EOF'],
+    ["\\$'EOF'", '$EOF'],
+    ["'$EOF'", '$EOF'],
+    ['"$\'EOF\'"', "$'EOF'"],
+    ['$EOF', '$EOF'],
+    ['EOF$', 'EOF$'],
   ])('reads %j as %j', (token, expected) => {
     expect(cleanDelimiter(token)).toBe(expected)
+  })
+})
+
+describe('ansiCEnd', () => {
+  it.each([
+    ["$'A'", 3],
+    ["$'\\''", 4],
+    ["$'A", 3],
+  ])('closes %j at %i', (token, expected) => {
+    expect(ansiCEnd(token, 2)).toBe(expected)
   })
 })

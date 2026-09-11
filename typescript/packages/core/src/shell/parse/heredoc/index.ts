@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { heredocBodies, nextLine, terminatorLine } from './body.ts'
-export { cleanDelimiter } from './delimiter.ts'
+export { ansiCEnd, cleanDelimiter } from './delimiter.ts'
 export { operatorLineEnd, quoteEnd } from './line.ts'
 export { bodyPrefix, treeRoot } from './prefix.ts'
 export { firstContentLine, heredocOperators, protectedSource, sameShape } from './shield.ts'

@@ -12,7 +12,30 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { decodeAnsiC } from '../../escapes.ts'
 import { DQUOTE_ESCAPABLE } from './constants.ts'
+
+/**
+ * Index of the apostrophe closing a `$'` section.
+ *
+ * A backslash escapes the next character inside the section, the closing
+ * quote included, so `$'\''` names one apostrophe. This is quoteEnd's
+ * rule for the same section, read over a word's characters rather than
+ * the source's bytes. Returns the word's length when the section never
+ * closes.
+ */
+export function ansiCEnd(token: string, start: number): number {
+  let index = start
+  while (index < token.length) {
+    if (token[index] === '\\' && index + 1 < token.length) {
+      index += 2
+      continue
+    }
+    if (token[index] === "'") return index
+    index += 1
+  }
+  return token.length
+}
 
 /**
  * The delimiter word as bash reads it: quotes removed, escapes resolved.
@@ -22,7 +45,12 @@ import { DQUOTE_ESCAPABLE } from './constants.ts'
  * expands. Quote removal follows the shell's own rules: a backslash
  * escapes anything outside quotes, nothing inside single quotes, and
  * only `$`, `` ` ``, `"` and itself inside double quotes, so `"E\$F"`
- * names `E$F` while `"E\xF"` keeps its backslash.
+ * names `E$F` while `"E\xF"` keeps its backslash. A `$` that is neither
+ * quoted nor escaped opens a dollar-quoted section instead of naming
+ * itself, wherever in the word it sits: `$'A\tB'` names the word its
+ * ANSI-C escapes build, and `$"A"` names its double-quoted content,
+ * which is what a locale carrying no translation for it gives back.
+ * Every other `$` is literal, since a delimiter is never expanded.
  */
 export function cleanDelimiter(token: string): string {
   let out = ''
@@ -46,6 +74,13 @@ export function cleanDelimiter(token: string): string {
       } else {
         out += char
       }
+    } else if (char === '$' && token[index + 1] === "'") {
+      const end = ansiCEnd(token, index + 2)
+      out += decodeAnsiC(token.slice(index + 2, end))
+      index = end
+    } else if (char === '$' && token[index + 1] === '"') {
+      quote = '"'
+      index += 1
     } else if (char === "'" || char === '"') {
       quote = char
     } else if (char === '\\' && index + 1 < token.length) {

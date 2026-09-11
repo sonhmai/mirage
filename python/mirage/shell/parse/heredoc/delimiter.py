@@ -12,7 +12,35 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.parse.heredoc.constants import DQUOTE_ESCAPABLE
+
+
+def ansi_c_end(token: str, start: int) -> int:
+    """Index of the apostrophe closing a ``$'`` section.
+
+    A backslash escapes the next character inside the section, the
+    closing quote included, so ``$'\\''`` names one apostrophe. This is
+    quote_end's rule for the same section, read over a word's characters
+    rather than the source's bytes.
+
+    Args:
+        token (str): the word being read.
+        start (int): index of the section's first character.
+
+    Returns:
+        int: the closing quote's index, or the word's length when the
+        section never closes.
+    """
+    index = start
+    while index < len(token):
+        if token[index] == "\\" and index + 1 < len(token):
+            index += 2
+            continue
+        if token[index] == "'":
+            return index
+        index += 1
+    return len(token)
 
 
 def clean_delimiter(token: str) -> str:
@@ -24,6 +52,12 @@ def clean_delimiter(token: str) -> str:
     backslash escapes anything outside quotes, nothing inside single
     quotes, and only ``$``, `````, ``"`` and itself inside double quotes,
     so ``"E\\$F"`` names ``E$F`` while ``"E\\xF"`` keeps its backslash.
+    A ``$`` that is neither quoted nor escaped opens a dollar-quoted
+    section instead of naming itself, wherever in the word it sits:
+    ``$'A\\tB'`` names the word its ANSI-C escapes build, and ``$"A"``
+    names its double-quoted content, which is what a locale carrying no
+    translation for it gives back. Every other ``$`` is literal, since a
+    delimiter is never expanded.
 
     Args:
         token (str): the heredoc_start token as typed.
@@ -47,6 +81,13 @@ def clean_delimiter(token: str) -> str:
                 out.append(token[index])
             else:
                 out.append(char)
+        elif char == "$" and token[index + 1:index + 2] == "'":
+            end = ansi_c_end(token, index + 2)
+            out.append(decode_ansi_c(token[index + 2:end]))
+            index = end
+        elif char == "$" and token[index + 1:index + 2] == '"':
+            quote = '"'
+            index += 1
         elif char in ("'", '"'):
             quote = char
         elif char == "\\" and index + 1 < len(token):

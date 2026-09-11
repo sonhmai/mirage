@@ -14,6 +14,7 @@
 
 from collections.abc import Sequence
 
+from mirage.shell.bytes import encode_text
 from mirage.shell.parse.heredoc.line import operator_line_end
 from mirage.shell.parse.heredoc.types import HeredocOperator
 
@@ -110,7 +111,7 @@ def heredoc_bodies(
         if body_start is None:
             continue
         body_end = terminator_line(data, body_start,
-                                   operator.delimiter.encode(),
+                                   encode_text(operator.delimiter),
                                    operator.allows_indent)
         if body_end is None:
             body_end = len(data)

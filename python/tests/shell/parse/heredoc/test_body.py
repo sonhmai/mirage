@@ -135,3 +135,12 @@ def test_operator_inside_an_earlier_body_is_text():
     cmd = "cat <<EOF\na <<X\nsecond\nEOF\n"
     assert _bodies(cmd, "EOF",
                    "X") == [(cmd.index("a <<X"), cmd.rindex("EOF")), None]
+
+
+def test_dollar_quoted_delimiter_closes_its_own_body():
+    # $'A' names A, so the first body ends at the A line and the second
+    # operator still gets the lines after it.
+    cmd = "cat <<$'A' <<'B'\nfirst\nA\n\\second\nB\n"
+    assert _bodies(cmd, "$'A'",
+                   "'B'") == [(cmd.index("first"), cmd.index("A\n")),
+                              (cmd.index("\\second"), cmd.rindex("B"))]

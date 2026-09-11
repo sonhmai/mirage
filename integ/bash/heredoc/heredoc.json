@@ -1078,6 +1078,254 @@
         "stdout": "here\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "heredoc_leading_backslash_quoted",
+      "seq": 501254,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<'END'\n\\first\nsecond\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "\\first\nsecond\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_leading_backslash_unquoted",
+      "seq": 501255,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "hb=val; cat <<END\n\\a $hb\n\\$hb\nsecond\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "\\a val\n$hb\nsecond\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_leading_backslash_latex",
+      "seq": 501256,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<'END'\n\\begin{table}[!ht]\n  \\begin{center}\n  \\end{center}\n\\end{table}\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "\\begin{table}[!ht]\n  \\begin{center}\n  \\end{center}\n\\end{table}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_leading_backslash_apostrophe",
+      "seq": 501257,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<'END'\n\\item Don't stop; echo not-a-command\nsecond\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "\\item Don't stop; echo not-a-command\nsecond\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_leading_backslash_pipeline",
+      "seq": 501258,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<'END' | tr a-z A-Z\n\\first\nsecond\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "\\FIRST\nSECOND\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_leading_backslash_to_file",
+      "seq": 501259,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat > /data/HB6 <<'END'\n\\first\nsecond\nEND\ncat /data/HB6\nrm /data/HB6",
+      "expect": {
+        "exit": 0,
+        "stdout": "\\first\nsecond\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_leading_indent",
+      "seq": 501260,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<'END'\n  indented first\nsecond\nEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "  indented first\nsecond\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_leading_backslash_dash",
+      "seq": 501261,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat <<-'END'\n\t\\first\n\tsecond\n\tEND",
+      "expect": {
+        "exit": 0,
+        "stdout": "\\first\nsecond\n",
+        "stderr": ""
+      }
     }
   ]
 }

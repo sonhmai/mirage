@@ -13,16 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import shlex
 from contextlib import asynccontextmanager
 
 import pytest
 import yaml
 
 from mirage import EXTERNAL_COMMANDS, Limit, MountMode, RAMResource, Workspace
+from mirage.commands.cli.types import CLISpec
+from mirage.commands.config import command
+from mirage.commands.spec.types import CommandSpec
 from mirage.config import _build_runtime_entries
+from mirage.io import IOResult
 from mirage.policy.builtin.output_cap import DEFAULT_COMMAND_LIMITS
 from mirage.runtime.base import Runtime
-from mirage.runtime.mixin import ProcessExecutorMixin
+from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import ProcessExecution, RunResult
 
 
@@ -198,3 +203,73 @@ async def test_external_timeout_cancels_process(monkeypatch, source):
         )
         assert len(probe.requests) == 1
         assert probe.cancelled
+
+
+class ShellProbe(Runtime, LineExecutorMixin):
+    name = "shell-probe"
+
+    def __init__(self, **options):
+        super().__init__(**options)
+        self.lines: list[str] = []
+
+    async def run_line(self, line, stdin, env, cwd):
+        self.lines.append(line)
+        return RunResult(stdout=b"ok\n", stderr=None, exit_code=0)
+
+
+@command("trello board list", resource="ram", spec=CommandSpec())
+async def board_list(accessor, paths, texts, opts):
+    return b"ok\n", IOResult()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [ProcessProbe, ShellProbe])
+@pytest.mark.parametrize("head, expected", [
+    ("trello board list", ("trello", "board", "list")),
+    ("'trello board list'", ("trello board list", )),
+])
+async def test_native_execution_preserves_command_tokens(kind, head, expected):
+    probe = kind(captures=("trello board list", ))
+    ram = RAMResource()
+    ram.register(board_list)
+    async with workspace({"/": ram}, runtimes=[probe]) as ws:
+        result = await ws.execute(head + " 'a b' '$(echo literal)' ''")
+        assert result.exit_code == 0
+        tokens = (*expected, "a b", "$(echo literal)", "")
+        if isinstance(probe, ProcessProbe):
+            assert probe.requests[0].argv == tokens
+        else:
+            assert shlex.split(probe.lines[0]) == list(tokens)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("head", [
+    "echo ok", "cat /input", "custom-stage", "trello board list", "custom-cli",
+    "python3"
+])
+async def test_external_script_sees_first_unresolved_stage(head):
+    seen = []
+    probe = ProcessProbe(
+        script=lambda ctx: seen.append(ctx) or ctx.command == "native-tool")
+    named = ProcessProbe(captures=("python3", ))
+    named.name = "named"
+    ram = RAMResource()
+    ram.register(board_list)
+    async with workspace({"/": ram}, runtimes=[probe, named]) as ws:
+        ws.register_cli(
+            "custom-cli",
+            CLISpec(name="custom-cli", fn=lambda inv: (b"ok\n", IOResult())))
+        await ws.execute("echo ok > /input")
+        await ws.execute("custom-stage() { echo ok; }")
+        seen.clear()
+        result = await ws.execute(head + " | native-tool")
+        assert result.exit_code == 0
+        assert len(probe.requests) == 1
+        assert seen[0].command == "native-tool"
+        assert not seen[0].builtin
+        assert seen[0].line == head + " | native-tool"
+        assert seen[0].commands[0].command == head.split()[0]
+        probe.requests.clear()
+        denied = await ws.execute(head + " | denied-tool")
+        assert denied.exit_code == 126
+        assert not probe.requests

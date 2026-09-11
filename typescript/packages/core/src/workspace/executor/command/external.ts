@@ -49,7 +49,7 @@ export async function runExternal(
     routing === undefined
       ? registry.runtimeEntries.find((entry) => entry.captures.includes(key))
       : routing.bindings[key]
-  const command = shellJoin([argv.name, ...argv.args])
+  const command = shellJoin(argv.tokens)
   if (runtime == null) {
     const stderr = new TextEncoder().encode(`${argv.name}: no runtime accepted this line\n`)
     return [
@@ -72,7 +72,7 @@ export async function runExternal(
     const result = await runWithTimeout(
       runtime.execute(
         isProcessExecutor(runtime)
-          ? { kind: 'process', argv: [argv.name, ...argv.args], ...common }
+          ? { kind: 'process', argv: argv.tokens, ...common }
           : { kind: 'shell', line: command, ...common },
       ),
       timeout,

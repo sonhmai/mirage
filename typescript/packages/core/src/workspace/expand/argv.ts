@@ -56,12 +56,26 @@ export class Argv {
   readonly args: readonly string[]
   /** Classified view (what mount dispatch, test, and ln consume). */
   readonly operands: readonly (string | PathSpec)[]
+  /** Original words forming the matched name. */
+  readonly prefix: readonly string[]
 
-  constructor(name: string, args: readonly string[], operands: readonly (string | PathSpec)[]) {
+  constructor(
+    name: string,
+    args: readonly string[],
+    operands: readonly (string | PathSpec)[],
+    prefix: readonly string[] = [name],
+  ) {
     this.name = name
     this.args = args
     this.operands = operands
+    this.prefix = prefix
     Object.freeze(this)
+  }
+
+  /** Native argv, preserving word boundaries within a matched name. */
+  get tokens(): [string, ...string[]] {
+    const [head = this.name, ...tail] = this.prefix
+    return [head, ...tail, ...this.args]
   }
 
   /** Full classified word list, name included. */
@@ -72,7 +86,7 @@ export class Argv {
 
   /** Copy with the classified view replaced (e.g. after symlink rewriting). */
   withOperands(operands: readonly (string | PathSpec)[]): Argv {
-    return new Argv(this.name, this.args, [...operands])
+    return new Argv(this.name, this.args, [...operands], this.prefix)
   }
 }
 
@@ -156,5 +170,10 @@ export async function expandArgv(
   // relative form, not the resolved absolute path. Quote removal is part
   // of "as typed": a word never reaches a command marked.
   const textView = words.map((w) => unmarkGlobs(wordText(w)))
-  return new Argv(name, textView.slice(consumed), words.slice(consumed))
+  return new Argv(
+    name,
+    textView.slice(consumed),
+    words.slice(consumed),
+    expanded.slice(0, consumed).map(unmarkGlobs),
+  )
 }

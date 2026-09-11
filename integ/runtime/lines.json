@@ -7,7 +7,9 @@
         "register_runtimes": {
           "processbox": "processbox"
         },
-        "runtimes": ["processbox"]
+        "runtimes": [
+          "processbox"
+        ]
       },
       "steps": [
         {
@@ -22,6 +24,41 @@
           "expect": {
             "exit": 0,
             "stdout": "[\"native-tool\",\"a b\",\"$(echo literal)\",\"\"]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_script_pipeline_stage",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "script": "ctx['command'] == 'native-tool' and not ctx['builtin']"
+          },
+          {
+            "name": "monty",
+            "captures": []
+          },
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo ok | native-tool",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"native-tool\"]\n"
+          }
+        },
+        {
+          "command": "echo ok | denied-tool",
+          "expect": {
+            "exit": 126,
+            "stderr": "denied-tool: no runtime accepted this line\n"
           }
         }
       ]

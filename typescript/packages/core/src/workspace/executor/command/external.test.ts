@@ -12,11 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CLISpec } from '../../../commands/cli/types.ts'
+import { command } from '../../../commands/config.ts'
+import { CommandSpec } from '../../../commands/spec/types.ts'
+import { IOResult } from '../../../io/types.ts'
+import { shellJoin } from '../../../shell/join.ts'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { Runtime } from '../../../runtime/base.ts'
-import { PROCESS_EXECUTOR, type ProcessExecutor } from '../../../runtime/mixin.ts'
+import {
+  LINE_EXECUTOR,
+  PROCESS_EXECUTOR,
+  type LineExecutor,
+  type ProcessExecutor,
+} from '../../../runtime/mixin.ts'
 import type { ProcessExecution, RunResult, RuntimeOptions } from '../../../runtime/types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import { Limit, MountMode } from '../../../types.ts'
@@ -59,7 +69,7 @@ class DelayedProcessProbe extends ProcessProbe {
   }
 }
 
-async function workspace(probe: ProcessProbe, others: ProcessProbe[] = []): Promise<Workspace> {
+async function workspace(probe: Runtime, others: Runtime[] = []): Promise<Workspace> {
   return new Workspace(
     { '/': new RAMResource() },
     {
@@ -226,4 +236,81 @@ describe('external program timeout', () => {
       await ws.close()
     }
   })
+})
+
+class ShellProbe extends Runtime implements LineExecutor {
+  readonly [LINE_EXECUTOR] = true as const
+  name = 'shell-probe'
+  lines: string[] = []
+  runLine(line: string): Promise<RunResult> {
+    this.lines.push(line)
+    return Promise.resolve({ stdout: ENC.encode('ok\n'), stderr: null, exitCode: 0 })
+  }
+}
+
+function registerBoardList(ws: Workspace): void {
+  for (const registered of command({
+    name: 'trello board list',
+    resource: 'ram',
+    spec: new CommandSpec(),
+    fn: () => [ENC.encode('ok\n'), new IOResult()],
+  }))
+    ws.registry.mountForPrefix('/').register(registered)
+}
+
+describe('external command routing regressions', () => {
+  it.each([
+    ['process', 'trello board list', ['trello', 'board', 'list']],
+    ['shell', 'trello board list', ['trello', 'board', 'list']],
+    ['process', "'trello board list'", ['trello board list']],
+    ['shell', "'trello board list'", ['trello board list']],
+  ] as const)('preserves %s command tokens for %s', async (kind, head, expected) => {
+    const options = { captures: ['trello board list'] }
+    const probe = kind === 'process' ? new ProcessProbe(options) : new ShellProbe(options)
+    const ws = await workspace(probe)
+    registerBoardList(ws)
+    try {
+      const result = await ws.execute(head + " 'a b' '$(echo literal)' ''")
+      expect(result.exitCode).toBe(0)
+      const tokens = [...expected, 'a b', '$(echo literal)', '']
+      if (probe instanceof ProcessProbe) expect(probe.requests[0]?.argv).toEqual(tokens)
+      else expect(probe.lines[0]).toBe(shellJoin(tokens))
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each(['echo ok', 'cat /input', 'custom-stage', 'trello board list', 'custom-cli', 'python3'])(
+    'resolves the external script stage after %s',
+    async (head) => {
+      const seen: string[] = []
+      const probe = new ProcessProbe({
+        script: (ctx) => {
+          seen.push(ctx.command)
+          return ctx.command === 'native-tool'
+        },
+      })
+      const named = new ProcessProbe({ captures: ['python3'] })
+      named.name = 'named'
+      const ws = await workspace(probe, [named])
+      registerBoardList(ws)
+      try {
+        ws.registerCli(
+          'custom-cli',
+          new CLISpec({ name: 'custom-cli', fn: () => [ENC.encode('ok\n'), new IOResult()] }),
+        )
+        await ws.execute('echo ok > /input')
+        await ws.execute('custom-stage() { echo ok; }')
+        seen.length = 0
+        expect((await ws.execute(head + ' | native-tool')).exitCode).toBe(0)
+        expect(probe.requests).toHaveLength(1)
+        expect(seen).toEqual(['native-tool'])
+        probe.requests.length = 0
+        expect((await ws.execute(head + ' | denied-tool')).exitCode).toBe(126)
+        expect(probe.requests).toHaveLength(0)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
 })

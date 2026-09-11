@@ -59,11 +59,18 @@ class Argv:
         args (tuple[str, ...]): text view (what builtins consume).
         operands (tuple[str | PathSpec, ...]): classified view (what
             mount dispatch, test, and ln consume).
+        prefix (tuple[str, ...]): original words forming the matched name.
     """
 
     name: str
     args: tuple[str, ...]
     operands: tuple[str | PathSpec, ...]
+    prefix: tuple[str, ...] = ()
+
+    @property
+    def tokens(self) -> tuple[str, ...]:
+        """Native argv, preserving word boundaries within a matched name."""
+        return (*(self.prefix or (self.name, )), *self.args)
 
     @property
     def words(self) -> list[str | PathSpec]:
@@ -195,4 +202,6 @@ async def expand_argv(
     text_view = [unmark_globs(word_text(p)) for p in words]
     return Argv(name=name,
                 args=tuple(text_view[consumed:]),
-                operands=tuple(words[consumed:]))
+                operands=tuple(words[consumed:]),
+                prefix=tuple(
+                    unmark_globs(word) for word in expanded[:consumed]))

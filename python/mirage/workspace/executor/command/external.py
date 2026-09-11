@@ -40,7 +40,7 @@ async def run_external(
     bindings = (routing.bindings
                 if routing is not None else registry.runtime_bindings)
     runtime = bindings.get(argv.name, bindings.get(EXTERNAL_COMMANDS))
-    command = shlex.join([argv.name, *argv.args])
+    command = shlex.join(argv.tokens)
     if runtime is None:
         err = f"{argv.name}: no runtime accepted this line\n".encode()
         return None, IOResult(exit_code=126,
@@ -50,8 +50,7 @@ async def run_external(
     data = await materialize(stdin) if stdin is not None else None
     cwd = PathSpec.from_str_path(session.cwd)
     env = env_snapshot(session)
-    request = (ProcessExecution(
-        argv=(argv.name, *argv.args), cwd=cwd, env=env, stdin=data)
+    request = (ProcessExecution(argv=argv.tokens, cwd=cwd, env=env, stdin=data)
                if isinstance(runtime, ProcessExecutorMixin) else
                ShellExecution(line=command, cwd=cwd, env=env, stdin=data))
     try:

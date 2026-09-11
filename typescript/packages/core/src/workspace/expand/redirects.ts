@@ -16,7 +16,12 @@ import type { SessionView } from '../../ops/types.ts'
 import { materialize } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
-import { getProcessSubBody, getProcessSubDirection } from '../../shell/helpers.ts'
+import {
+  getProcessSubBody,
+  getProcessSubDirection,
+  normalizeHeredocBody,
+} from '../../shell/helpers.ts'
+import { bodyPrefix } from '../../shell/parse/heredoc/index.ts'
 import { NodeType as NT, ProcessSubDirection, Redirect, RedirectKind } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
@@ -61,7 +66,9 @@ function stripHeredocTabs(text: string, atLineStart: boolean): string {
  * the literal text between them (including the leading chunk, which is
  * NOT a named child) is gap-filled from spans. Literal pieces get
  * heredoc backslash escapes and `<<-` tab stripping; expansion nodes
- * route through expandNode.
+ * route through expandNode. The empty lines tree-sitter dropped before
+ * the body node (bodyPrefix) come first, and a body that swallowed its
+ * own terminator line gives it back (normalizeHeredocBody).
  */
 async function expandHeredocBody(
   redirectNode: TSNodeLike,
@@ -71,17 +78,26 @@ async function expandHeredocBody(
   view?: SessionView,
 ): Promise<string> {
   let bodyNode: TSNodeLike | null = null
+  let delimiter = ''
+  let closed = false
   let dash = false
   for (const c of redirectNode.children) {
     if (c.type === '<<-') dash = true
+    else if (c.type === NT.HEREDOC_START) delimiter = c.text
     else if (c.type === NT.HEREDOC_BODY) bodyNode = c
+    else if (c.type === NT.HEREDOC_END) closed = c.text !== ''
   }
   if (bodyNode === null) return ''
   const raw = bodyNode.text
   const base = bodyNode.startIndex ?? 0
   const parts: string[] = []
-  let pos = 0
   let atLineStart = true
+  const prefix = bodyPrefix(redirectNode)
+  if (prefix !== '') {
+    parts.push(dash ? stripHeredocTabs(prefix, true) : prefix)
+    atLineStart = prefix.endsWith('\n')
+  }
+  let pos = 0
   for (const child of bodyNode.namedChildren) {
     const pieces: [string, boolean][] = []
     if (child.startIndex !== undefined && child.endIndex !== undefined) {
@@ -111,6 +127,7 @@ async function expandHeredocBody(
     parts.push(finishHeredocLiteral(stripped, session, callStack))
   }
   let body = parts.join('')
+  if (!closed) body = normalizeHeredocBody(body, delimiter)
   if (body !== '' && !body.endsWith('\n')) {
     // bash heredoc bodies always end with a newline (see
     // normalizeHeredocBody for the tree-sitter edge this papers over).

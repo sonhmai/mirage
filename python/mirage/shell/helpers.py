@@ -20,6 +20,8 @@ from mirage.shell.constants import (FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN,
                                     FD_STDOUT)
 from mirage.shell.escapes import (decode_ansi_c, unescape_dquoted,
                                   unescape_unquoted)
+from mirage.shell.parse.heredoc import (body_prefix, clean_delimiter,
+                                        delimiter_quoted)
 from mirage.shell.types import FunctionBody
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ProcessSubDirection, Redirect, RedirectKind
@@ -650,7 +652,11 @@ def get_negated_command(node: tree_sitter.Node) -> tree_sitter.Node:
 
 
 def get_heredoc_parts(redirect_node: tree_sitter.Node) -> tuple[str, str]:
-    """Get (delimiter, body) from heredoc_redirect."""
+    """Get (delimiter, body) from heredoc_redirect.
+
+    The body opens with the empty lines tree-sitter dropped before its
+    heredoc_body node (see body_prefix); bash keeps them.
+    """
     delimiter = ""
     body = ""
     for c in redirect_node.named_children:
@@ -658,7 +664,7 @@ def get_heredoc_parts(redirect_node: tree_sitter.Node) -> tuple[str, str]:
             delimiter = get_text(c)
         elif c.type == NT.HEREDOC_BODY:
             body = get_text(c)
-    return delimiter, body
+    return delimiter, body_prefix(redirect_node) + body
 
 
 def get_heredoc_meta(
@@ -666,12 +672,11 @@ def get_heredoc_meta(
     """Get (body, dash, quoted) from heredoc_redirect.
 
     - dash: True if operator was `<<-` (strip leading tabs from body lines)
-    - quoted: True if delimiter was wrapped in quotes (no var expansion)
+    - quoted: True if any part of the delimiter was quoted (no var
+      expansion), which a line continuation in it is not
     """
     delimiter, body = get_heredoc_parts(redirect_node)
-    # Any quoting anywhere in the delimiter (even partial, `EN'D'`)
-    # disables expansion, matching bash.
-    quoted = "'" in delimiter or '"' in delimiter or "\\" in delimiter
+    quoted = delimiter_quoted(delimiter)
     dash = False
     for c in redirect_node.children:
         if c.type == "<<-":
@@ -691,7 +696,7 @@ def normalize_heredoc_body(body: str, delimiter: str) -> str:
     loses its final newline to heredoc_end. Bash strips quoting from
     the delimiter before matching and bodies always end with a newline.
     """
-    clean = delimiter.replace("'", "").replace('"', "")
+    clean = clean_delimiter(delimiter)
     suffix = clean + "\n"
     if body.endswith(suffix):
         head = body[:-len(suffix)]

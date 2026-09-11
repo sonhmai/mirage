@@ -14,9 +14,10 @@
 
 import pytest
 
-from mirage.commands.cli.builtin.git.errors import (FATAL_EXIT,
-                                                    NotARepositoryError)
-from mirage.commands.cli.builtin.git.util import fatal, start_point
+from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
+    FATAL_EXIT, NotARepositoryError, UnknownSwitchError)
+from mirage.commands.cli.builtin.git.util import (check_operands, escaped,
+                                                  fatal, start_point)
 from mirage.commands.spec.types import FlagView
 
 
@@ -120,3 +121,24 @@ async def test_branch_speaks_the_same_dialect(git_ws):
     result = await git_ws.execute("git -C /repo branch -Z")
     assert result.exit_code == 129
     assert result.stderr == b"error: unknown switch `Z'\n"
+
+
+def test_no_marker_escapes_nothing():
+    assert escaped(("rm", "-f", "a.txt")) == frozenset()
+
+
+def test_the_marker_escapes_every_word_after_it():
+    assert escaped(("rm", "--", "-draft", "b.txt")) == {"-draft", "b.txt"}
+
+
+def test_only_the_first_marker_counts():
+    assert escaped(("rm", "--", "-a", "--", "-b")) == {"-a", "--", "-b"}
+
+
+def test_an_escaped_operand_is_not_a_switch():
+    check_operands(("-draft", ), UnknownSwitchError, frozenset({"-draft"}))
+
+
+def test_an_unescaped_dashed_operand_is_still_refused():
+    with pytest.raises(UnknownSwitchError):
+        check_operands(("-draft", ), UnknownSwitchError, frozenset({"-other"}))

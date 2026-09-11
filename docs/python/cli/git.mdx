@@ -118,7 +118,7 @@ git -C /repo tag -d v1.0
 | `reset`    | mixed only, from HEAD; a pathspec limits it to those paths                                                                              |
 | `restore`  | worktree by default, `--staged` the index, `-SW` both; `--source` takes any tree-ish, spelled as a peel (`HEAD^{tree}`), a subtree (`HEAD:sub`) or a raw id, and is required before the first commit since the implicit HEAD source has nothing to read; a path it lacks is removed from the target, a path still in conflict is named rather than half-restored, and a file replaces a directory standing in its place, as it replaces a symlink standing on one of its parents |
 | `rm`       | refuses a path with uncommitted work unless `-f`, a path a symlinked ancestor now hides included; `--cached` keeps the file; `-r` for a directory; `-q`, `--ignore-unmatch`; the index is written only once the working tree is done with, so a deletion the mount refuses leaves the entry staged as it stood |
-| `mv`       | files and directories, `-f` over an existing file, `-k` skips what cannot move, `-n` dry run, `-v`; two sources cannot land on one name, a directory and something inside it cannot both move, an unmerged path moves nowhere, and a move that would cross a mount boundary at either end is refused rather than half-moved |
+| `mv`       | files and directories, `-f` over an existing file and over the conflict stages it was holding, `-k` skips what cannot move, `-n` dry run, `-v`; two sources cannot land on one name, a directory and something inside it cannot both move, an unmerged path moves nowhere as a source, and a move that would cross a mount boundary at either end is refused rather than half-moved |
 | `commit`   | `-m` required, `--author "Name <email>"` optional                                                                                       |
 | `branch`   | `-d` deletes a merged branch, `-D` any branch; a name whose ref path another branch already holds is refused                             |
 | `checkout` | refuses rather than overwrite work you have not committed, an untracked file the target needs the room for included and an index still holding conflict stages too |
@@ -293,12 +293,26 @@ serve, and inventing a name would put an unreviewed one into history.
   no branch ever recorded and then remove its root. The mount table is
   asked first and the verb refuses, naming the mount when the session
   may be told about it and saying only that one is there when it may
-  not. The same boundary stops the tidying pass that drops a directory
-  emptied by `rm`: it halts at the mount root rather than removing it,
-  since nothing the caller asked for has failed. This is the rule
-  `MountRootPolicy` already applies to `rm` and `mv` at the command
-  tier, which a git verb reaching the dispatcher directly has to ask for
-  itself.
+  not. **Every destination is asked before the first one is written**,
+  which is what the other collision checks already do and what keeps
+  the refusal from landing halfway: a `switch` that had written an
+  earlier path would leave the working tree on the target's content
+  with HEAD and the index still on the branch being left, and
+  `restore -SW` stages before it writes, so a refusal in the second
+  pass would move the index and nothing else. The same boundary stops
+  the tidying pass that drops a directory emptied by `rm`: it halts at
+  the mount root rather than removing it, since nothing the caller
+  asked for has failed. This is the rule `MountRootPolicy` already
+  applies to `rm` and `mv` at the command tier, which a git verb
+  reaching the dispatcher directly has to ask for itself.
+- **`mv -f` onto an unmerged path takes its stages with it.** `-f` is
+  the only way to reach a destination that already exists, and git's
+  answer there is one stage-0 entry holding the source: `ls-files -u` is
+  empty afterwards. Leaving the stages behind is the worse divergence
+  rather than the smaller one, since the index writer lays them back
+  over the entry and the blob that just moved is the copy that
+  disappears. An unmerged *source* still moves nowhere, and a plain `mv`
+  onto an occupied destination is still the ordinary refusal.
 - **`reset` takes no revision.** Real git resets the index to any commit
   named as an operand; this build resets it from HEAD only and refuses a
   revision by name rather than doing nothing quietly.

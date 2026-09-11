@@ -363,6 +363,41 @@ def refuse_mount(mounts: MountView | None, path: str) -> None:
     raise MountInWayError(path, named[0] if named else None)
 
 
+async def refuse_replaced_mounts(stat_path: StatPath, worktree: str,
+                                 names: list[str], links: LinkView | None,
+                                 mounts: MountView | None) -> None:
+    """Ask of every destination first what the write loop would meet later.
+
+    ``remove_tree`` refuses a directory holding a mount, but the loop
+    reaches one entry at a time, so a refusal there leaves the entries
+    already written standing on the target's content with HEAD and the
+    index still where they were. Asking first is the shape every other
+    collision check in these verbs already has: name what is in the way
+    and change nothing. The condition mirrors the write loop's exactly,
+    a link included, so a destination the loop would not clear is not
+    refused here either.
+
+    Args:
+        stat_path (StatPath): the data plane's stat, which dereferences.
+        worktree (str): absolute virtual path of the working tree root.
+        names (list[str]): repository-relative paths about to be
+            written.
+        links (LinkView | None): the name plane's link facts, None when
+            no namespace is wired.
+        mounts (MountView | None): the name plane's mount boundaries,
+            None when no namespace is wired.
+    """
+    if mounts is None:
+        return
+    for name in sorted(names):
+        where = posixpath.join(worktree, name)
+        if links is not None and links.stat_at(where) is not None:
+            continue
+        info = await stat_path(where)
+        if info is not None and info.type is FileType.DIRECTORY:
+            refuse_mount(mounts, where)
+
+
 async def remove_tree(dispatch: DispatchFn, path: str, links: LinkView | None,
                       mounts: MountView | None) -> None:
     """Delete a path and everything under it, tracked or not.

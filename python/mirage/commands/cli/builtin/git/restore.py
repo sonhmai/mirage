@@ -32,6 +32,7 @@ from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     UnresolvableSourceError)
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import (blocking_ancestor,
+                                                refuse_replaced_mounts,
                                                 remove_empty_parents,
                                                 remove_file, remove_tree,
                                                 restore_entry)
@@ -207,6 +208,16 @@ async def restore(
         ]
         if unmerged:
             raise UnmergedPathError(unmerged)
+        links = links_of(doors)
+        mounts = mounts_of(doors)
+        # Before the index is written, not at the entry that meets it:
+        # ``-SW`` stages first and restores after, so a refusal in the
+        # working-tree pass would leave the index moved and the tree
+        # exactly as it was, which is the one outcome this verb has no
+        # wording for.
+        if flags.worktree:
+            await refuse_replaced_mounts(stat_path, location.worktree,
+                                         sorted(present), links, mounts)
         if flags.staged:
             for name in present:
                 mode, sha = tree[name.encode()]
@@ -221,8 +232,6 @@ async def restore(
                 state.conflicts.pop(name.encode(), None)
             await write_index(dispatch, location.gitdir, state)
         if flags.worktree:
-            links = links_of(doors)
-            mounts = mounts_of(doors)
             blobs = await asyncio.to_thread(
                 contents, repo, [tree[name.encode()][1] for name in present])
             # Removals first, because the two sets can name the same

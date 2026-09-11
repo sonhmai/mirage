@@ -470,3 +470,23 @@ async def test_k_taking_a_source_out_takes_it_out_of_the_overlap(
     # is looked at and the directory moves on its own.
     assert await run(git_rw, "mv -k dir dir/other dest") == (0, b"", b"")
     assert (repo_path / "dest" / "dir" / "file").exists()
+
+
+@pytest.mark.asyncio
+async def test_f_takes_the_destinations_conflict_stages_with_it(
+        repo_path: Path):
+    # -f is the only way to reach an occupied destination, and git's
+    # answer there is one stage-0 entry holding the source: ls-files -u
+    # is empty afterwards. Leaving the stages is the worse divergence,
+    # since write_index lays them back over the entry and the moved
+    # blob is the copy that disappears.
+    conflict_index(repo_path, "b.txt")
+    with Workspace({MOUNT: DiskResource(root=str(repo_path))},
+                   mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        assert (await run(ws, "status --short"))[1].startswith(b"UU b.txt\n")
+        assert await run(ws, "mv -f a.txt b.txt") == (0, b"", b"")
+        assert (await run(ws, "status --short"))[1] == (b"D  a.txt\n"
+                                                        b"M  b.txt\n")
+    assert (repo_path / "b.txt").read_text(encoding="utf-8") == "one changed\n"
+    assert not (repo_path / "a.txt").exists()

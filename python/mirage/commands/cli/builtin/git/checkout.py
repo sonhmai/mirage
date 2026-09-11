@@ -35,6 +35,7 @@ from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
 from mirage.commands.cli.builtin.git.format import short, subject
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import (blocking_ancestor,
+                                                refuse_replaced_mounts,
                                                 remove_empty_parents,
                                                 remove_file, remove_tree,
                                                 restore_entry)
@@ -312,6 +313,15 @@ async def _switch(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
     state = await read_index(dispatch, location.gitdir)
     state.conflicts.clear()
     changed = sorted(_written(before, after))
+    # Before the first removal, not at the entry that meets it: a
+    # refusal halfway through leaves the entries already written
+    # holding the target's content while HEAD and the index still name
+    # the branch being left, which is the half-switch every other check
+    # above exists to prevent.
+    await refuse_replaced_mounts(
+        stat_path, location.worktree,
+        [path.decode("utf-8", errors="replace")
+         for path in changed], links, mounts)
     blobs = await asyncio.to_thread(contents, repo,
                                     [after[path][1] for path in changed])
     # Removals first, and the emptied directories with them, because

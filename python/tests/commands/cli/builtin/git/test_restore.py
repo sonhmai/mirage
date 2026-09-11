@@ -529,3 +529,60 @@ async def test_pruning_a_parent_leaves_a_mount_root_alone(
         assert (await run(ws, "commit -m inside"))[0] == 0
         assert (await run(ws, "rm slot/data/x.txt"))[0] == 0
     assert inner.is_dir()
+
+
+@pytest.mark.asyncio
+async def test_the_index_waits_for_the_worktree_pass_to_be_possible(
+        repo_path: Path, tmp_path: Path):
+    # -SW stages first and restores after, so a refusal in the second
+    # pass used to leave the index moved and the working tree exactly
+    # as it was: a fatal that changed something, which this verb has no
+    # wording for.
+    inner = tmp_path / "kept"
+    inner.mkdir()
+    (inner / "precious.txt").write_text("precious\n", encoding="utf-8")
+    with Workspace(
+        {
+            "/repo/": DiskResource(root=str(repo_path)),
+            "/repo/slot/data/": DiskResource(root=str(inner)),
+        },
+            mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        await ws.execute("printf 'i am a file\n' > /repo/slot")
+        assert (await run(ws, "add slot"))[0] == 0
+        assert (await run(ws, "commit -m slotted"))[0] == 0
+        await ws.execute("rm /repo/slot")
+        await ws.execute("mkdir /repo/slot")
+        assert (await run(ws, "rm --cached slot"))[0] == 0
+        before = (await run(ws, "status --short"))[1]
+        assert before.startswith(b"D  slot\n")
+        code, _out, err = await run(ws, "restore -SW slot")
+        assert code == 128
+        assert err == (b"fatal: cannot remove '/repo/slot': "
+                       b"'/repo/slot/data' is a mount root\n")
+        assert (await run(ws, "status --short"))[1] == before
+    assert (inner / "precious.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_the_staged_half_alone_is_untouched_by_the_preflight(
+        repo_path: Path, tmp_path: Path):
+    # --staged never touches the working tree, so the mount is not in
+    # its way and the line must still go through.
+    inner = tmp_path / "spare"
+    inner.mkdir()
+    with Workspace(
+        {
+            "/repo/": DiskResource(root=str(repo_path)),
+            "/repo/slot/data/": DiskResource(root=str(inner)),
+        },
+            mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        await ws.execute("printf 'i am a file\n' > /repo/slot")
+        assert (await run(ws, "add slot"))[0] == 0
+        assert (await run(ws, "commit -m slotted"))[0] == 0
+        await ws.execute("rm /repo/slot")
+        await ws.execute("mkdir /repo/slot")
+        assert (await run(ws, "rm --cached slot"))[0] == 0
+        assert await run(ws, "restore --staged slot") == (0, b"", b"")
+        assert (await run(ws, "status --short"))[1].startswith(b" D slot\n")

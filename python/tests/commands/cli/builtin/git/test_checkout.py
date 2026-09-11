@@ -18,9 +18,13 @@ from pathlib import Path
 import pytest
 from dulwich.repo import Repo
 
+from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.checkout import (_blocked_ancestors,
                                                       _blocked_descendants,
                                                       _conflicts)
+from mirage.resource.disk import DiskResource
+from mirage.types import MountMode
+from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import conflict_index
 
 MODE = 0o100644
@@ -622,3 +626,45 @@ async def test_replacing_a_directory_does_not_follow_a_link_out_of_it(
     assert (repo_path / "outside" / "keep.txt").exists()
     gone = await git_rw.execute("readlink /repo/slot/link")
     assert gone.exit_code != 0
+
+
+@pytest.mark.asyncio
+async def test_a_mount_further_down_the_switch_stops_it_before_it_starts(
+        repo_path: Path, tmp_path: Path):
+    # The refusal lives in the removal that meets the mount, which the
+    # write loop reaches one entry at a time. A branch that changes an
+    # earlier path as well would have had that path written already, so
+    # the fatal left the working tree on the target's content with HEAD
+    # and the index still on the branch being left.
+    inner = tmp_path / "held"
+    inner.mkdir()
+    with Workspace(
+        {
+            "/repo/": DiskResource(root=str(repo_path)),
+            "/repo/slot/data/": DiskResource(root=str(inner)),
+        },
+            mode=MountMode.WRITE) as ws:
+        ws.register_cli("git", GIT)
+        await ws.execute("printf 'ignored.txt\n' > /repo/.gitignore")
+        assert (await run(ws, "add .gitignore"))[0] == 0
+        assert (await run(ws, "commit -m ignores"))[0] == 0
+        assert (await run(ws, "checkout -b slotted"))[0] == 0
+        await ws.execute("printf 'edited\n' > /repo/a.txt")
+        await ws.execute("printf 'v2\n' > /repo/slot")
+        assert (await run(ws, "add a.txt slot"))[0] == 0
+        assert (await run(ws, "commit -m two"))[0] == 0
+        assert (await run(ws, "checkout main"))[0] == 0
+        # Only ignored content, so no collision list names the
+        # directory and the write loop is what would meet the mount.
+        await ws.execute("mkdir -p /repo/slot")
+        await ws.execute("printf 'x\n' > /repo/slot/ignored.txt")
+        before = (repo_path / "a.txt").read_text(encoding="utf-8")
+        code, _out, err = await run(ws, "checkout slotted")
+        assert code == 128
+        assert err == (b"fatal: cannot remove '/repo/slot': "
+                       b"'/repo/slot/data' is a mount root\n")
+        # Nothing moved: the earlier path still holds what it held, and
+        # the branch is the one the line started on.
+        assert (repo_path / "a.txt").read_text(encoding="utf-8") == before
+        assert (await run(ws, "status --short"))[1] == b""
+    assert inner.is_dir()

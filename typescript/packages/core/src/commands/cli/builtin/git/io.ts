@@ -284,6 +284,39 @@ export async function renamePath(
 }
 
 /**
+ * Ask of every destination first what the write loop would meet later.
+ *
+ * `removeTree` refuses a directory holding a mount, but the loop reaches one
+ * entry at a time, so a refusal there leaves the entries already written
+ * standing on the target's content with HEAD and the index still where they
+ * were. Asking first is the shape every other collision check in these verbs
+ * already has: name what is in the way and change nothing. The condition
+ * mirrors the write loop's exactly, a link included, so a destination the loop
+ * would not clear is not refused here either.
+ *
+ * @param statPath the data plane's stat, which dereferences
+ * @param worktree absolute virtual path of the working tree root
+ * @param names repository-relative paths about to be written
+ * @param links the name plane's link facts, null when no namespace is wired
+ * @param mounts the name plane's mount boundaries, null when none is wired
+ */
+export async function refuseReplacedMounts(
+  statPath: StatPath,
+  worktree: string,
+  names: readonly string[],
+  links: LinkView | null,
+  mounts: MountView | null,
+): Promise<void> {
+  if (mounts === null) return
+  for (const name of [...names].sort(compareCodePoints)) {
+    const where = under(worktree, name)
+    if ((links?.statAt(where) ?? null) !== null) continue
+    const info = await statPath(where)
+    if (info !== null && info.type === FileType.DIRECTORY) refuseMount(mounts, where)
+  }
+}
+
+/**
  * Refuse a removal that would take a nested mount with it.
  *
  * A mount nested inside the working tree is served by another resource, and

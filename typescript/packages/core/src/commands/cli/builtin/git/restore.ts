@@ -34,6 +34,7 @@ import {
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import {
   blockingAncestor,
+  refuseReplacedMounts,
   removeEmptyParents,
   removeFile,
   removeTree,
@@ -170,6 +171,15 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
     // simply removed.
     const unmerged = absent.filter((name) => state.conflicts.has(name))
     if (unmerged.length > 0) throw new UnmergedPathError(unmerged)
+    const links = doors.ns?.links ?? null
+    const mounts = doors.ns?.mounts ?? null
+    // Before the index is written, not at the entry that meets it: `-SW`
+    // stages first and restores after, so a refusal in the working-tree pass
+    // would leave the index moved and the tree exactly as it was, which is the
+    // one outcome this verb has no wording for.
+    if (flags.worktree) {
+      await refuseReplacedMounts(statPath, repo.location.worktree, present, links, mounts)
+    }
     if (flags.staged) {
       const staged = new Map<string, StagedEntry>()
       for (const name of present) {
@@ -185,8 +195,6 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
       // file `slot` still sits, and the other direction writes the file
       // where the directory still sits. Nothing is read back from the
       // working tree, so emptying it first is free.
-      const links = doors.ns?.links ?? null
-      const mounts = doors.ns?.mounts ?? null
       for (const name of absent) {
         const path = under(repo.location.worktree, name)
         // A component above the entry that is not a directory is not a way

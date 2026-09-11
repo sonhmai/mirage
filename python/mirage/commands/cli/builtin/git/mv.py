@@ -391,7 +391,17 @@ async def apply(dispatch: DispatchFn, location: RepoLocation,
         raise RenameFailedError(move.source) from exc
     for path in move.paths:
         entry = state.entries.pop(path.encode())
-        state.entries[moved_path(move, path).encode()] = entry
+        landing = moved_path(move, path).encode()
+        state.entries[landing] = entry
+        # The stages of whatever was standing at the destination go
+        # with it. ``-f`` is the only way to reach an occupied
+        # destination, and git's own answer there is one stage-0 entry
+        # holding the source: ``ls-files -u`` is empty afterwards.
+        # Leaving them is not a smaller divergence but a worse one,
+        # since write_index lays the stages back over the entry and the
+        # moved blob is the copy that disappears. Pinned against git
+        # 2.50.1.
+        state.conflicts.pop(landing, None)
 
 
 async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:

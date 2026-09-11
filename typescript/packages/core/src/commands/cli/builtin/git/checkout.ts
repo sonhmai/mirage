@@ -35,6 +35,7 @@ import { short } from './format.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import {
   blockingAncestor,
+  refuseReplacedMounts,
   removeEmptyParents,
   removeFile,
   removeTree,
@@ -256,6 +257,12 @@ async function switchTo(
   links: LinkView | null,
   mounts: MountView | null,
 ): Promise<void> {
+  const changed = written(before, after)
+  // Before the first removal, not at the entry that meets it: a refusal
+  // halfway through leaves the entries already written holding the target's
+  // content while HEAD and the index still name the branch being left, which
+  // is the half-switch every other check above exists to prevent.
+  await refuseReplacedMounts(statPath, repo.location.worktree, [...changed.keys()], links, mounts)
   // Removals first, and the emptied directories with them, because the two
   // sets name the same place whenever a branch records a file where the other
   // records a directory: writing `slot/child` while the file `slot` is still
@@ -268,7 +275,6 @@ async function switchTo(
     await removeFile(dispatch, where)
     await removeEmptyParents(dispatch, where, repo.location.worktree, mounts)
   }
-  const changed = written(before, after)
   for (const path of [...changed.keys()].sort(compareCodePoints)) {
     const entry = changed.get(path)
     if (entry === undefined) continue

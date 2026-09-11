@@ -1396,6 +1396,21 @@ describe('a path the index left unmerged', () => {
     })
     expect(await h.run('mv -k letters.txt moved.txt')).toEqual([0, '', ''])
   })
+
+  it('loses its stages when -f moves another file onto it', async () => {
+    // Only `-f` reaches an occupied destination, and git's answer there is one
+    // stage-0 entry holding the source: `ls-files -u` is empty afterwards. This
+    // side already answered so, because a stage-0 insert into isomorphic-git's
+    // index drops the stages with it; python's own writer lays them back over
+    // the entry, so the two disagreed until it dropped them too.
+    const h = await harness((repo) => {
+      conflictIndex(repo, 'numbers.txt')
+    })
+    expect(await h.run('mv -f letters.txt numbers.txt')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['ls-files', '-u'])).toBe('')
+    expect(git(drained, ['status', '--porcelain'])).toBe('D  letters.txt\nM  numbers.txt\n')
+  })
 })
 
 describe('a directory holding a symlink', () => {
@@ -1681,6 +1696,77 @@ describe('a working-tree removal that would take a mount with it', () => {
     expect((await h.run('commit -m inside'))[0]).toBe(0)
     expect((await h.run('rm slot/data/x.md'))[0]).toBe(0)
     expect(await readNames(h.dispatch, '/repo/slot/data')).toEqual([])
+  })
+})
+
+describe('a mount met halfway through a worktree pass', () => {
+  it('stops the switch before the first path is written', async () => {
+    // The refusal lives in the removal that meets the mount, which the write
+    // loop reaches one entry at a time. A branch that changes an earlier path
+    // too would have had that path written already, so the fatal left the
+    // working tree on the target's content with HEAD and the index still on
+    // the branch being left.
+    const h = await harness(undefined, '/repo/slot/data')
+    await h.ws.dispatch('rmdir', '/repo/slot')
+    await write(h, '.gitignore', 'ignored.txt\n')
+    expect((await h.run('add .gitignore'))[0]).toBe(0)
+    expect((await h.run('commit -m ignores'))[0]).toBe(0)
+    expect((await h.run('checkout -b slotted'))[0]).toBe(0)
+    await write(h, 'numbers.txt', 'edited\n')
+    await h.ws.execute("printf 'v2\\n' > /repo/slot")
+    expect((await h.run('add numbers.txt slot'))[0]).toBe(0)
+    expect((await h.run('commit -m two'))[0]).toBe(0)
+    expect((await h.run('checkout main'))[0]).toBe(0)
+    // Only ignored content, so no collision list names the directory and the
+    // write loop is what would meet the mount.
+    await h.ws.dispatch('mkdir', '/repo/slot')
+    await h.ws.execute("printf 'x\\n' > /repo/slot/ignored.txt")
+    const before = await readOptional(h.dispatch, '/repo/numbers.txt')
+    const [code, , err] = await h.run('checkout slotted')
+    expect([code, err]).toEqual([
+      128,
+      "fatal: cannot remove '/repo/slot': '/repo/slot/data' is a mount root\n",
+    ])
+    // Nothing moved: the earlier path still holds what it held.
+    expect(await readOptional(h.dispatch, '/repo/numbers.txt')).toEqual(before)
+    expect(await h.run('status --porcelain')).toEqual([0, '', ''])
+  })
+
+  it('leaves the index alone when -SW cannot finish', async () => {
+    // -SW stages first and restores after, so a refusal in the second pass
+    // used to leave the index moved and the working tree exactly as it was: a
+    // fatal that changed something, which this verb has no wording for.
+    const h = await harness(undefined, '/repo/slot/data')
+    await write(h, 'slot/data/precious.md', 'precious\n')
+    await h.ws.dispatch('rmdir', '/repo/slot')
+    await h.ws.execute("printf 'i am a file\\n' > /repo/slot")
+    expect((await h.run('add slot'))[0]).toBe(0)
+    expect((await h.run('commit -m slotted'))[0]).toBe(0)
+    await h.ws.dispatch('unlink', '/repo/slot')
+    await h.ws.dispatch('mkdir', '/repo/slot')
+    expect((await h.run('rm --cached slot'))[0]).toBe(0)
+    const before = (await h.run('status --porcelain'))[1]
+    expect(before).toContain('D  slot\n')
+    const [code, , err] = await h.run('restore -SW slot')
+    expect([code, err]).toEqual([
+      128,
+      "fatal: cannot remove '/repo/slot': '/repo/slot/data' is a mount root\n",
+    ])
+    expect((await h.run('status --porcelain'))[1]).toBe(before)
+    expect(await readOptional(h.dispatch, '/repo/slot/data/precious.md')).not.toBeNull()
+  })
+
+  it('lets --staged through, since it never touches the working tree', async () => {
+    const h = await harness(undefined, '/repo/slot/data')
+    await h.ws.dispatch('rmdir', '/repo/slot')
+    await h.ws.execute("printf 'i am a file\\n' > /repo/slot")
+    expect((await h.run('add slot'))[0]).toBe(0)
+    expect((await h.run('commit -m slotted'))[0]).toBe(0)
+    await h.ws.dispatch('unlink', '/repo/slot')
+    await h.ws.dispatch('mkdir', '/repo/slot')
+    expect((await h.run('rm --cached slot'))[0]).toBe(0)
+    expect(await h.run('restore --staged slot')).toEqual([0, '', ''])
+    expect((await h.run('status --porcelain'))[1]).toContain(' D slot\n')
   })
 })
 

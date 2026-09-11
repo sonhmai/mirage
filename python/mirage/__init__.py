@@ -59,7 +59,8 @@ from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.mixin import EvaluatorMixin, LineExecutorMixin
+from mirage.runtime.mixin import (EvaluatorMixin, LineExecutorMixin,
+                                  ProcessExecutorMixin)
 from mirage.runtime.routing import DenyResult, RouteContext, RouteResult
 from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
 from mirage.runtime.table import (build_runtime, known_runtimes,
@@ -124,6 +125,7 @@ __all__ = [
     "LanguageRuntime",
     "Limit",
     "LineExecutorMixin",
+    "ProcessExecutorMixin",
     "NULL_INDEX",
     "OpsContext",
     "OpsTable",

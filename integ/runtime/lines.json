@@ -2,6 +2,31 @@
   "suite": "lines",
   "cases": [
     {
+      "id": "public_process_capability",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": ["processbox"]
+      },
+      "steps": [
+        {
+          "command": "native-tool 'a b' '$(echo literal)' '' | grep native-tool > /ram/argv.json",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /ram/argv.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"native-tool\",\"a b\",\"$(echo literal)\",\"\"]\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "captured_program_pipeline",
       "world": {
         "runtimes": [

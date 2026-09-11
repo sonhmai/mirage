@@ -27,7 +27,11 @@ import shlex  # noqa: E402
 import uuid  # noqa: E402
 from typing import Any  # noqa: E402
 
-from mirage import MountMode, Workspace  # noqa: E402
+from mirage import EXTERNAL_COMMANDS  # noqa: E402
+from mirage import MountMode  # noqa: E402
+from mirage import ProcessExecution  # noqa: E402
+from mirage import ProcessExecutorMixin  # noqa: E402
+from mirage import Workspace  # noqa: E402
 from mirage.commands.cli.types import CLISpec  # noqa: E402
 from mirage.errors import classify  # noqa: E402
 from mirage.policy import Policy  # noqa: E402
@@ -72,7 +76,25 @@ class EchoBox(Runtime, LineExecutorMixin):
 # unknown-name refusal lists it. The registry suite pins that door.
 register_runtime(EchoBox.name, EchoBox)
 
-RUNTIME_KINDS: dict[str, type[Runtime]] = {EchoBox.name: EchoBox}
+
+class ProcessBox(Runtime, ProcessExecutorMixin):
+    """A host-authored argv runtime using the public capability import."""
+
+    name = "processbox"
+    captures = (EXTERNAL_COMMANDS, )
+
+    async def run_process(self, request: ProcessExecution) -> RunResult:
+        return RunResult(
+            stdout=(json.dumps(request.argv, separators=(",", ":")) +
+                    "\n").encode(),
+            stderr=None,
+            exit_code=0)
+
+
+RUNTIME_KINDS: dict[str, type[Runtime]] = {
+    EchoBox.name: EchoBox,
+    ProcessBox.name: ProcessBox,
+}
 
 
 # Each test policy decides synchronously in `decide`; the hook the engine

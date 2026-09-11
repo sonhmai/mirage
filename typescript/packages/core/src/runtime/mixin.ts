@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from './base.ts'
-import type { EvalResult, EvalValue, RunResult } from './types.ts'
+import type { EvalResult, EvalValue, ProcessExecution, RunResult } from './types.ts'
 
 /**
  * The nominal evaluator brand (python's EvaluatorMixin inheritance).
@@ -97,4 +97,17 @@ export interface LineExecutor {
 /** Whether this runtime carries the whole-line capability. */
 export function isLineExecutor(runtime: Runtime): runtime is Runtime & LineExecutor {
   return (runtime as Partial<LineExecutor>)[LINE_EXECUTOR] === true
+}
+
+/** The nominal argv-executor brand (Python's ProcessExecutorMixin). */
+export const PROCESS_EXECUTOR: unique symbol = Symbol.for('mirage.processExecutor')
+
+export interface ProcessExecutor {
+  readonly [PROCESS_EXECUTOR]: true
+  /** Execute argv without shell interpretation. */
+  runProcess(request: ProcessExecution): Promise<RunResult>
+}
+
+export function isProcessExecutor(runtime: Runtime): runtime is Runtime & ProcessExecutor {
+  return (runtime as Partial<ProcessExecutor>)[PROCESS_EXECUTOR] === true
 }

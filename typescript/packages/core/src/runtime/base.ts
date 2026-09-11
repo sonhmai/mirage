@@ -15,7 +15,7 @@
 import { coerceRuntimeConfig, type RuntimeConfig } from './config.ts'
 import type { WorkspaceBinding } from './binding.ts'
 import { UnsupportedExecutionError } from './errors.ts'
-import { isEvaluator, isLineExecutor } from './mixin.ts'
+import { isEvaluator, isLineExecutor, isProcessExecutor } from './mixin.ts'
 import { ScriptSource, type RouteScript } from './routing/types.ts'
 import type {
   ExecutionRequest,
@@ -90,7 +90,7 @@ export abstract class Runtime {
     return {
       languages: [],
       shell: isLineExecutor(this),
-      process: false,
+      process: isProcessExecutor(this),
       evaluate: isEvaluator(this),
       reach: this.reach,
       filesystem: [...this.filesystem],
@@ -123,6 +123,10 @@ export abstract class Runtime {
     request: ExecutionRequest,
     _context?: RuntimeContext,
   ): Promise<RunResult> {
+    if (request.kind === 'process' && isProcessExecutor(this)) {
+      if (request.argv.length === 0) throw new Error('process argv must not be empty')
+      return this.runProcess(request)
+    }
     if (request.kind === 'shell' && isLineExecutor(this))
       return this.runLine(
         request.line,

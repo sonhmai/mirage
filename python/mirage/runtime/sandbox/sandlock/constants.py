@@ -12,16 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-SANDLOCK_HOME_ENV = "MIRAGE_SANDLOCK_HOME"
-
 SANDLOCK_CLI_HINT = (
     "the sandlock runtime needs the sandlock CLI on PATH "
     "(https://github.com/multikernel/sandlock); Linux only, and the full "
     "ruleset wants Landlock ABI v6 (Linux 6.12+)")
 
-# What a host CPython needs to open before it can execute anything.
-# Granted read-only and separately from the interpreter's own tree, so
-# a config that lists no paths still boots instead of dying in the
-# dynamic loader with no explanation.
+# Common loader/runtime paths. Non-system installations need explicit grants.
 SYSTEM_READABLE: tuple[str, ...] = ("/usr", "/lib", "/lib64", "/bin", "/etc",
                                     "/proc", "/dev")

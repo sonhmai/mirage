@@ -76,6 +76,12 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     cwd: string,
     signal?: AbortSignal,
   ): Promise<RunResult> {
+    await this.ensureConnected(signal)
+    const merged = { ...this.config.env, ...env }
+    return this.execLine(line, stdin, merged, cwd, signal)
+  }
+
+  protected async ensureConnected(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
     this.connecting ??= this.connect().catch((err: unknown) => {
       this.connecting = null
@@ -83,8 +89,6 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     })
     await this.waitFor(this.connecting, signal)
     signal?.throwIfAborted()
-    const merged = { ...this.config.env, ...env }
-    return this.execLine(line, stdin, merged, cwd, signal)
   }
 
   /** Cancel this caller's wait without cancelling a shared connection. */

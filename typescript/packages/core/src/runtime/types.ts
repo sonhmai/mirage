@@ -183,7 +183,7 @@ export interface ShellExecution {
   signal?: AbortSignal
 }
 
-/** Current providers refuse argv requests until they implement this capability. */
+/** An argv request executed without shell interpretation. */
 export interface ProcessExecution {
   kind: 'process'
   argv: readonly [string, ...string[]]

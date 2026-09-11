@@ -107,11 +107,8 @@ const PYTHON_ONLY_HINTS: Record<string, string> = {
     "'pyodide' (WASM CPython, default), 'monty' (sandboxed), and " +
     "'quickjs' (sandboxed JavaScript)",
   sandlock:
-    "runtime 'sandlock' (the host python3 confined by Landlock and seccomp) " +
-    "is Python-only and Linux-only; TypeScript supports 'smolvm' for a " +
-    "hardware-isolated microVM, 'docker' for a container, 'pyodide' (WASM " +
-    "CPython, default), 'monty' (sandboxed), and 'quickjs' (sandboxed " +
-    'JavaScript)',
+    "runtime 'sandlock' lives in @struktoai/mirage-node; import that package " +
+    'to register it. Sandlock requires Linux and the sandlock CLI on PATH.',
 }
 
 // Every runtime is constructed the same way; config keys are checked

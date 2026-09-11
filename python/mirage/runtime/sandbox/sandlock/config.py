@@ -12,12 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.python.sandlock.config import SandlockConfig
-from mirage.runtime.python.sandlock.runtime import (SandlockRuntime,
-                                                    interpreter_readable)
+from dataclasses import dataclass
 
-__all__ = [
-    "SandlockConfig",
-    "SandlockRuntime",
-    "interpreter_readable",
-]
+from mirage.runtime.sandbox.config import SandboxConfig
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SandlockConfig(SandboxConfig):
+    """Additional host path grants and the process memory limit."""
+
+    fs_readable: tuple[str, ...] = ()
+    fs_writable: tuple[str, ...] = ()
+    max_memory: str | None = None

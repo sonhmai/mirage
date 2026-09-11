@@ -14,7 +14,8 @@
 
 from abc import ABC, abstractmethod
 
-from mirage.runtime.types import EvalResult, EvalValue, RunResult
+from mirage.runtime.types import (EvalResult, EvalValue, ProcessExecution,
+                                  RunResult)
 
 
 class EvaluatorMixin(ABC):
@@ -86,3 +87,11 @@ class LineExecutorMixin(ABC):
             env (dict[str, str]): the session environment.
             cwd (str): the session working directory.
         """
+
+
+class ProcessExecutorMixin(ABC):
+    """Execute an argv request without shell interpretation."""
+
+    @abstractmethod
+    async def run_process(self, request: ProcessExecution) -> RunResult:
+        """Run a process with the request's cwd, environment and stdin."""

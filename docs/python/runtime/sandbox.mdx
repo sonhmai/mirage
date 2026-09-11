@@ -4,7 +4,7 @@ description: Run captured lines whole inside a sandbox (Docker, smolvm, Daytona,
 icon: server
 ---
 
-The `monty`, `wasi`, `sandlock`, and `local` runtimes run `python3` on your
+The `monty`, `wasi`, and `local` runtimes run `python3` on your
 own machine. A **sandbox runtime** does the opposite: it takes a whole
 command line and runs it inside a separate machine, a local container or
 microVM or a cloud sandbox. Reach for it when a line needs a real OS, heavy
@@ -25,12 +25,10 @@ cloud, and `ssh` reaches anything you can already `ssh` into. The isolation
 differs too: a container shares your kernel, a smolvm microVM boots its
 own, and an ssh machine is whatever machine you point it at.
 
-<Note>
-  [Sandlock](/python/runtime/sandbox/sandlock) is listed in this sidebar
-  because it isolates execution, but it is not the same runtime tier. It
-  confines only the host `python3` interpreter; the four providers above run
-  arbitrary captured command lines in another container, VM, or machine.
-</Note>
+[Sandlock](/python/runtime/sandbox/sandlock) runs arbitrary commands on the
+local Linux host with Landlock and seccomp confinement. It uses the same
+shell and process execution API as smolvm.
+
 
 ## Routing: what goes to the sandbox
 

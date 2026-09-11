@@ -19,11 +19,12 @@ from typing import Any, Callable, ClassVar
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.errors import UnsupportedExecutionError
-from mirage.runtime.mixin import EvaluatorMixin, LineExecutorMixin
+from mirage.runtime.mixin import (EvaluatorMixin, LineExecutorMixin,
+                                  ProcessExecutorMixin)
 from mirage.runtime.types import (ExecutionRequest, FilesystemOperation,
-                                  RunResult, RuntimeCapabilities,
-                                  RuntimeContext, RuntimeReach, ScriptSource,
-                                  ShellExecution)
+                                  ProcessExecution, RunResult,
+                                  RuntimeCapabilities, RuntimeContext,
+                                  RuntimeReach, ScriptSource, ShellExecution)
 
 
 class Runtime(ABC):
@@ -96,7 +97,9 @@ class Runtime(ABC):
 
     @property
     def capabilities(self) -> RuntimeCapabilities:
-        return RuntimeCapabilities(shell=isinstance(self, LineExecutorMixin),
+        return RuntimeCapabilities(process=isinstance(self,
+                                                      ProcessExecutorMixin),
+                                   shell=isinstance(self, LineExecutorMixin),
                                    evaluate=isinstance(self, EvaluatorMixin),
                                    reach=self.reach,
                                    filesystem=self.filesystem)
@@ -131,6 +134,11 @@ class Runtime(ABC):
 
     async def _execute(self, request: ExecutionRequest,
                        context: RuntimeContext | None) -> RunResult:
+        if isinstance(request, ProcessExecution) and isinstance(
+                self, ProcessExecutorMixin):
+            if not request.argv:
+                raise ValueError("process argv must not be empty")
+            return await self.run_process(request)
         if isinstance(request, ShellExecution) and isinstance(
                 self, LineExecutorMixin):
             return await self.run_line(request.line, request.stdin,

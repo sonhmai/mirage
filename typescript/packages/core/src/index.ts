@@ -72,25 +72,12 @@ export { secretStr, z } from './resource/secrets.ts'
 export { SharePointResource } from './resource/sharepoint/sharepoint.ts'
 export { Runtime } from './runtime/base.ts'
 export type { RuntimeEntry } from './runtime/base.ts'
-export { EvalError, UnsupportedExecutionError } from './runtime/errors.ts'
-export { WorkspaceBinding } from './runtime/binding.ts'
+export { EvalError } from './runtime/errors.ts'
 export { EVALUATOR, LINE_EXECUTOR } from './runtime/mixin.ts'
 export type { Evaluator, LineExecutor } from './runtime/mixin.ts'
 export { ScriptSource } from './runtime/routing/index.ts'
 export { buildRuntime } from './runtime/table.ts'
-export type {
-  EvalResult,
-  EvalValue,
-  RunArgs,
-  RunResult,
-  CodeExecution,
-  ShellExecution,
-  ProcessExecution,
-  ExecutionRequest,
-  RuntimeContext,
-  RuntimeCapabilities,
-  FilesystemOperation,
-} from './runtime/types.ts'
+export type { EvalResult, EvalValue, RunResult, FilesystemOperation } from './runtime/types.ts'
 export { JobConsole } from './shell/console/index.ts'
 export type { ConsoleFactory } from './shell/job_table/index.ts'
 export {

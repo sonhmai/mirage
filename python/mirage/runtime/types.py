@@ -277,7 +277,7 @@ class ShellExecution:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ProcessExecution:
-    """An argv request; current providers do not implement this capability."""
+    """An argv request executed without shell interpretation."""
 
     argv: tuple[str, ...]
     cwd: PathSpec

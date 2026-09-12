@@ -14,7 +14,7 @@
 const YIELD_INTERVAL_MS = 10
 
 /** A per-consumer time budget between opportunities for timers and cancellation. */
-export class Checkpoint {
+export class YieldBudget {
   private nextYield = performance.now() + YIELD_INTERVAL_MS
 
   constructor(private readonly signal?: AbortSignal) {}

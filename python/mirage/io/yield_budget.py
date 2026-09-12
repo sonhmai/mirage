@@ -17,7 +17,7 @@ import time
 YIELD_INTERVAL = .01
 
 
-class Checkpoint:
+class YieldBudget:
     """A per-consumer time budget; small reads do not schedule a timer."""
 
     def __init__(self) -> None:

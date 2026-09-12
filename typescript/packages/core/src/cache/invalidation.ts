@@ -15,24 +15,22 @@
 export type Stamp = readonly [epoch: number, key: number]
 
 /**
- * Invalidation generations a fingerprinting writer checks before it
- * installs.
+ * The invalidations a fingerprinting writer checks before it installs.
  *
  * A writer reads its bytes, then hashes them, and the hash yields; an
  * invalidation that lands in that window makes the bytes stale even
  * though the writer was granted its turn after it. The writer takes a
  * stamp before it waits and compares it after it hashed.
  *
- * Two generations, because invalidations have two reaches. The
- * store-wide epoch answers `clear` and a prefix eviction, whose victims
- * cannot be enumerated (a fill in flight has no entry yet). The per-key
- * generation answers a removal of one key, so a large fill for one key
- * is not thrown away because an unrelated key was written. Per-key
- * generations exist only while a writer for that key is in flight,
- * which bounds the map by concurrent writers, not by every key ever
- * removed.
+ * Two counters, because invalidations have two reaches. The store-wide
+ * epoch answers `clear` and a prefix eviction, whose victims cannot be
+ * enumerated (a fill in flight has no entry yet). The per-key counter
+ * answers a removal of one key, so a large fill for one key is not
+ * thrown away because an unrelated key was removed. Per-key counters
+ * exist only while a writer for that key is in flight, which bounds the
+ * map by concurrent writers, not by every key ever removed.
  */
-export class Generations {
+export class Invalidation {
   private epoch = 0
   private readonly keys = new Map<string, number>()
   private readonly writers = new Map<string, number>()
@@ -43,7 +41,7 @@ export class Generations {
     return [this.epoch, this.keys.get(key) ?? 0]
   }
 
-  /** Unregister a writer for `key`; the last one out drops the key's generation. */
+  /** Unregister a writer for `key`; the last one out drops the key's counter. */
   leave(key: string): void {
     const left = (this.writers.get(key) ?? 1) - 1
     if (left > 0) {
@@ -60,12 +58,12 @@ export class Generations {
   }
 
   /** Record a removal of `key` for the writers in flight on it. */
-  bump(key: string): void {
+  invalidate(key: string): void {
     if (this.writers.has(key)) this.keys.set(key, (this.keys.get(key) ?? 0) + 1)
   }
 
   /** Record an invalidation whose victims cannot be enumerated. */
-  bumpAll(): void {
+  invalidateAll(): void {
     this.epoch++
   }
 }

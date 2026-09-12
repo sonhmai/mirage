@@ -14,7 +14,7 @@
 from collections.abc import AsyncGenerator, AsyncIterator
 
 from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.checkpoint import Checkpoint
+from mirage.io.yield_budget import YieldBudget
 
 CHUNK_SIZE = 16 * 1024
 
@@ -22,10 +22,10 @@ CHUNK_SIZE = 16 * 1024
 async def chunks(
         source: bytes | AsyncIterator[bytes]) -> AsyncGenerator[bytes, None]:
     """Split even a single RAM/cache blob; close producers on cancellation."""
-    checkpoint = Checkpoint()
+    budget = YieldBudget()
     if isinstance(source, bytes):
         for offset in range(0, len(source), CHUNK_SIZE):
-            await checkpoint.run()
+            await budget.run()
             yield source[offset:offset + CHUNK_SIZE]
         return
     try:
@@ -33,9 +33,9 @@ async def chunks(
             # Once per pull as well as per chunk: a run of empty chunks
             # never enters the inner loop, and a task that never awaits a
             # real suspension point cannot be cancelled.
-            await checkpoint.run()
+            await budget.run()
             for offset in range(0, len(data), CHUNK_SIZE):
-                await checkpoint.run()
+                await budget.run()
                 yield data[offset:offset + CHUNK_SIZE]
     except BaseException as exc:
         if isinstance(source, CachableAsyncIterator) and not isinstance(

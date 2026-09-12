@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Checkpoint } from '../io/checkpoint.ts'
+import { YieldBudget } from '../io/yield_budget.ts'
 import { toHex } from './hex.ts'
 
 async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
@@ -135,13 +135,13 @@ export function md5Hex(bytes: Uint8Array): string {
   return toHex(result.value)
 }
 
-/** Same digest as md5Hex, with task-queue checkpoints between block batches. */
+/** Same digest as md5Hex, with a task-queue yield between block batches. */
 export async function md5HexAsync(bytes: Uint8Array): Promise<string> {
-  const checkpoint = new Checkpoint()
+  const budget = new YieldBudget()
   const blocks = md5Blocks(bytes)
   let result = blocks.next()
   while (!result.done) {
-    const pending = checkpoint.run()
+    const pending = budget.run()
     if (pending !== undefined) await pending
     result = blocks.next()
   }

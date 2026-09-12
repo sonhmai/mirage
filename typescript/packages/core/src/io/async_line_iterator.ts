@@ -14,7 +14,7 @@
 
 import { abortable } from '../workspace/abort.ts'
 import { CachableAsyncIterator } from './cachable_iterator.ts'
-import { Checkpoint } from './checkpoint.ts'
+import { YieldBudget } from './yield_budget.ts'
 import { chunks } from './cooperative.ts'
 
 const NEWLINE = 0x0a
@@ -23,7 +23,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   private readonly source: AsyncIterator<Uint8Array>
   private buf: Uint8Array<ArrayBuffer> = new Uint8Array(0)
   private exhausted = false
-  private readonly checkpoint = new Checkpoint()
+  private readonly budget = new YieldBudget()
   private linesSinceCheck = 0
   private pulling = false
 
@@ -56,7 +56,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
       // Amortize clock reads on short-line workloads; chunk pulls also check.
       if (++this.linesSinceCheck >= 64) {
         this.linesSinceCheck = 0
-        const pending = this.checkpoint.run()
+        const pending = this.budget.run()
         if (pending !== undefined) {
           await pending
           signal?.throwIfAborted()
@@ -79,7 +79,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   // The stdin buffer survives individual builtins; cancellation belongs to each read.
   private check(signal?: AbortSignal): Promise<void> | undefined {
     signal?.throwIfAborted()
-    const pending = this.checkpoint.run()
+    const pending = this.budget.run()
     if (pending !== undefined) return pending.then(() => signal?.throwIfAborted())
   }
 

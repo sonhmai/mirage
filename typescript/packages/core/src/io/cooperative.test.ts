@@ -177,7 +177,7 @@ it('uses the current read signal when reusing buffered stdin', async () => {
   expect(closed).toBe(true)
 })
 
-it('discards cacheable input when a chunk checkpoint aborts', async () => {
+it('discards cacheable input when a chunk yield aborts', async () => {
   const { CachableAsyncIterator } = await import('./cachable_iterator.ts')
   const { chunks } = await import('./cooperative.ts')
   let closed = false
@@ -346,7 +346,7 @@ describe('chunks under a stalled source', () => {
 
   it('lets the abort win over a source that yields only empty chunks', async () => {
     // Every pull resolves at once with no bytes, so the per-chunk
-    // checkpoint never runs; without one per pull the microtask chain
+    // yield never runs; without one per pull the microtask chain
     // starves the timer that fires the abort.
     let pulls = 0
     const empties: AsyncIterable<Uint8Array> = {

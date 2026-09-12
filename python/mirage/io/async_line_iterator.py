@@ -15,8 +15,8 @@
 from collections.abc import AsyncIterator
 
 from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.checkpoint import Checkpoint
 from mirage.io.cooperative import chunks
+from mirage.io.yield_budget import YieldBudget
 
 
 def char_width(data: bytes) -> int:
@@ -47,7 +47,7 @@ class AsyncLineIterator:
     def __init__(self, source: AsyncIterator[bytes]) -> None:
         self._input = source
         self._source = chunks(source)
-        self._checkpoint = Checkpoint()
+        self._budget = YieldBudget()
         self._buf = b""
         self._exhausted = False
 
@@ -80,7 +80,7 @@ class AsyncLineIterator:
             raise ValueError("empty separator")
         parts: list[bytes] = []
         try:
-            await self._checkpoint.run()
+            await self._budget.run()
             while True:
                 index = self._buf.find(delim)
                 if index >= 0:
@@ -140,7 +140,7 @@ class AsyncLineIterator:
             taken = 0
             need = max(len(delim) if delim is not None else 1, 4)
             while taken < count:
-                await self._checkpoint.run()
+                await self._budget.run()
                 # One pull can split a character or a multibyte delimiter
                 # across chunks, so top the buffer up to the widest either
                 # could be before reading its first byte as a whole one.

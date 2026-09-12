@@ -15,7 +15,7 @@
 import logging
 from collections.abc import AsyncIterator
 
-from mirage.io.checkpoint import Checkpoint
+from mirage.io.yield_budget import YieldBudget
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class CachableAsyncIterator:
         self._buffer: list[bytes] = []
         self._exhausted = False
         self._discarded = False
-        self._checkpoint = Checkpoint()
+        self._budget = YieldBudget()
 
     @property
     def discarded(self) -> bool:
@@ -73,7 +73,7 @@ class CachableAsyncIterator:
         if self._exhausted:
             raise StopAsyncIteration
         try:
-            await self._checkpoint.run()
+            await self._budget.run()
             chunk = await self._source.__anext__()
         except StopAsyncIteration:
             self._exhausted = True
@@ -90,7 +90,7 @@ class CachableAsyncIterator:
             return b"".join(self._buffer)
         try:
             async for chunk in self._source:
-                await self._checkpoint.run()
+                await self._budget.run()
                 self._buffer.append(chunk)
         except BaseException:
             await self.discard()
@@ -114,7 +114,7 @@ class CachableAsyncIterator:
                 await self.discard()
                 return None
             async for chunk in self._source:
-                await self._checkpoint.run()
+                await self._budget.run()
                 self._buffer.append(chunk)
                 total += len(chunk)
                 if total > max_bytes:

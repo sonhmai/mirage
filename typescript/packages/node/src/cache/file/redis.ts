@@ -16,7 +16,7 @@ import './utils.ts'
 
 import { readFileSync } from 'node:fs'
 import { CacheType } from '@struktoai/mirage-core/cache/file/config'
-import { Generations } from '@struktoai/mirage-core/cache/generation'
+import { Invalidation } from '@struktoai/mirage-core/cache/invalidation'
 import { validateMaxDrainBytes } from '@struktoai/mirage-core/cache/file/mixin'
 import type { FileCache } from '@struktoai/mirage-core/cache/file/mixin'
 import {
@@ -52,7 +52,7 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
   private readonly metaPrefix: string
   private maxDrainBytesValue: number | null = null
   // Local invalidation also discards fills paused in cooperative hashing.
-  private readonly generations = new Generations()
+  private readonly invalidation = new Invalidation()
   readonly drainTasks = new Map<string, Promise<void>>()
 
   constructor(options: RedisFileCacheOptions = {}) {
@@ -115,11 +115,11 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
     data: Uint8Array,
     options: { fingerprint?: string | null; ttl?: number | null } = {},
   ): Promise<void> {
-    const stamp = this.generations.enter(key)
+    const stamp = this.invalidation.enter(key)
     try {
       const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
       const c = await this.cacheClient()
-      if (this.generations.stale(key, stamp)) return
+      if (this.invalidation.stale(key, stamp)) return
       const dk = this.dataKey(key)
       const mk = this.metaKey(key)
       const pipe = c.multi()
@@ -131,7 +131,7 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
       }
       await pipe.exec()
     } finally {
-      this.generations.leave(key)
+      this.invalidation.leave(key)
     }
   }
 
@@ -140,11 +140,11 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
     data: Uint8Array,
     options: { fingerprint?: string | null; ttl?: number | null } = {},
   ): Promise<boolean> {
-    const stamp = this.generations.enter(key)
+    const stamp = this.invalidation.enter(key)
     try {
       const c = await this.cacheClient()
       const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
-      if (this.generations.stale(key, stamp)) return false
+      if (this.invalidation.stale(key, stamp)) return false
       // A background drain is insert-only: an older drain finishing late must
       // not overwrite a newer cache fill. add.lua keeps the check, bytes,
       // fingerprint and TTL in one execution so writers cannot interleave.
@@ -158,12 +158,12 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
       })
       return inserted === 1
     } finally {
-      this.generations.leave(key)
+      this.invalidation.leave(key)
     }
   }
 
   async remove(key: string): Promise<void> {
-    this.generations.bump(key)
+    this.invalidation.invalidate(key)
     // Promises cannot be cancelled: dropping the map entry makes the
     // pending backgroundDrain skip its cache fill, mirroring the RAM
     // store's task cancel.
@@ -189,7 +189,7 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
   }
 
   async evictPrefix(prefix: string): Promise<void> {
-    this.generations.bumpAll()
+    this.invalidation.invalidateAll()
     for (const key of [...this.drainTasks.keys()]) {
       if (key.startsWith(prefix)) this.drainTasks.delete(key)
     }
@@ -214,7 +214,7 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
   }
 
   async clear(): Promise<void> {
-    this.generations.bumpAll()
+    this.invalidation.invalidateAll()
     this.drainTasks.clear()
     const c = await this.cacheClient()
     for (const pattern of [`${this.dataPrefix}*`, `${this.metaPrefix}*`]) {

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Checkpoint } from './checkpoint.ts'
+import { YieldBudget } from './yield_budget.ts'
 
 export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> {
   private source: AsyncIterator<Uint8Array>
@@ -23,7 +23,7 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
   // abandoned (raced against a signal) stays outstanding, and a return
   // queued behind it would never settle.
   private pulling = false
-  private readonly checkpoint = new Checkpoint()
+  private readonly budget = new YieldBudget()
 
   constructor(source: AsyncIterable<Uint8Array>) {
     this.source = source[Symbol.asyncIterator]()
@@ -57,7 +57,7 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
   async next(): Promise<IteratorResult<Uint8Array>> {
     if (this.exhaustedFlag) return { done: true, value: undefined }
     try {
-      const pending = this.checkpoint.run()
+      const pending = this.budget.run()
       if (pending !== undefined) await pending
       const result = await this.pull()
       if (result.done === true) {
@@ -76,7 +76,7 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
     if (this.exhaustedFlag) return concat(this.buffer)
     try {
       for (;;) {
-        const pending = this.checkpoint.run()
+        const pending = this.budget.run()
         if (pending !== undefined) await pending
         const result = await this.pull()
         if (result.done === true) break
@@ -101,7 +101,7 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
         return null
       }
       for (;;) {
-        const pending = this.checkpoint.run()
+        const pending = this.budget.run()
         if (pending !== undefined) await pending
         const result = await this.pull()
         if (result.done === true) break

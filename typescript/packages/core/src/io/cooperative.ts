@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { abortable } from '../workspace/abort.ts'
 import { CachableAsyncIterator } from './cachable_iterator.ts'
-import { Checkpoint } from './checkpoint.ts'
+import { YieldBudget } from './yield_budget.ts'
 
 export const CHUNK_SIZE = 16 * 1024
 
@@ -22,10 +22,10 @@ export async function* chunks(
   source: Uint8Array | AsyncIterable<Uint8Array>,
   signal?: AbortSignal,
 ): AsyncIterableIterator<Uint8Array> {
-  const checkpoint = new Checkpoint(signal)
+  const budget = new YieldBudget(signal)
   if (source instanceof Uint8Array) {
     for (let offset = 0; offset < source.byteLength; offset += CHUNK_SIZE) {
-      const pending = checkpoint.run()
+      const pending = budget.run()
       if (pending !== undefined) await pending
       yield source.subarray(offset, offset + CHUNK_SIZE)
     }
@@ -48,12 +48,12 @@ export async function* chunks(
       }
       const data = result.value
       // Once per pull as well as per chunk: a run of empty chunks that
-      // resolve at once would otherwise never reach a checkpoint, and a
+      // resolve at once would otherwise never reach a yield, and a
       // microtask chain with no yield starves the timer an abort rides.
-      const pulled = checkpoint.run()
+      const pulled = budget.run()
       if (pulled !== undefined) await pulled
       for (let offset = 0; offset < data.byteLength; offset += CHUNK_SIZE) {
-        const pending = checkpoint.run()
+        const pending = budget.run()
         if (pending !== undefined) await pending
         yield data.subarray(offset, offset + CHUNK_SIZE)
       }

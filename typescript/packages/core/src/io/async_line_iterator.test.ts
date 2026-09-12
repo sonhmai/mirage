@@ -141,7 +141,7 @@ describe('AsyncLineIterator under a stalled source', () => {
     const reader = new AsyncLineIterator(new Blob([lines]).stream())
     const controller = new AbortController()
     for (let i = 0; i < 63; i++) expect(await reader.readline(controller.signal)).not.toBeNull()
-    // Let the checkpoint budget lapse so the 64th read yields, and fire
+    // Let the yield budget lapse so the 64th read yields, and fire
     // the signal while it is parked on that yield.
     await new Promise((resolve) => setTimeout(resolve, 15))
     const pending = reader.readline(controller.signal)

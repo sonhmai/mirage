@@ -61,7 +61,7 @@ async def test_empty_chunks_allow_timer_progress():
     timer = asyncio.get_running_loop().call_later(.001, fired.set)
     try:
         assert [c async for c in chunks(source())] == [b"late"]
-        # Without a checkpoint per pull the loop never suspends, the
+        # Without a yield per pull the loop never suspends, the
         # timer never runs, and every empty chunk is produced.
         assert produced < 200_000
     finally:
@@ -280,10 +280,10 @@ async def test_line_reader_discards_cache_on_cancel(method, monkeypatch):
     # Prime the buffer so cancellation happens in the reader, outside chunks().
     await reader.read_chars(1, None)
 
-    async def cancelled_checkpoint():
+    async def cancelled_budget():
         raise asyncio.CancelledError()
 
-    monkeypatch.setattr(reader._checkpoint, "run", cancelled_checkpoint)
+    monkeypatch.setattr(reader._budget, "run", cancelled_budget)
     with pytest.raises(asyncio.CancelledError):
         if method == "read_until":
             await reader.read_until(b"\n")

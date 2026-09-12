@@ -20,7 +20,7 @@ from typing import Any
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
 from mirage.cache.file.utils import (default_fingerprint_async, glob_escape,
                                      parse_limit)
-from mirage.cache.generation import Generations
+from mirage.cache.invalidation import Invalidation
 from mirage.resource.redis.redis import RedisResource
 
 # Shipped next to this module; byte-identical to the TypeScript add.lua.
@@ -49,7 +49,7 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
         self._meta_prefix = f"{key_prefix}meta:"
         self.max_drain_bytes: int | None = max_drain_bytes
         # Local invalidation discards fills paused in cooperative hashing.
-        self._generations = Generations()
+        self._invalidation = Invalidation()
         self._drain_tasks: dict[str, asyncio.Task[Any]] = {}
         self._add = self._cache_client.register_script(ADD_LUA)
 
@@ -69,11 +69,11 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
         fingerprint: str | None = None,
         ttl: int | None = None,
     ) -> None:
-        stamp = self._generations.enter(key)
+        stamp = self._invalidation.enter(key)
         try:
             if fingerprint is None:
                 fingerprint = await default_fingerprint_async(data)
-            if self._generations.stale(key, stamp):
+            if self._invalidation.stale(key, stamp):
                 return
             pipe = self._cache_client.pipeline()
             dk = self._data_key(key)
@@ -85,7 +85,7 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
                 pipe.expire(mk, ttl)
             await pipe.execute()
         finally:
-            self._generations.leave(key)
+            self._invalidation.leave(key)
 
     async def add(
         self,
@@ -94,11 +94,11 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
         fingerprint: str | None = None,
         ttl: int | None = None,
     ) -> bool:
-        stamp = self._generations.enter(key)
+        stamp = self._invalidation.enter(key)
         try:
             if fingerprint is None:
                 fingerprint = await default_fingerprint_async(data)
-            if self._generations.stale(key, stamp):
+            if self._invalidation.stale(key, stamp):
                 return False
             # The background drain deliberately uses insert-only
             # semantics: an older drain finishing late must not overwrite
@@ -112,10 +112,10 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
             )
             return bool(inserted)
         finally:
-            self._generations.leave(key)
+            self._invalidation.leave(key)
 
     async def remove(self, key: str) -> None:
-        self._generations.bump(key)
+        self._invalidation.invalidate(key)
         task = self._drain_tasks.pop(key, None)
         if task:
             task.cancel()
@@ -136,7 +136,7 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
         return fp == remote_fingerprint
 
     async def clear(self) -> None:
-        self._generations.bump_all()
+        self._invalidation.invalidate_all()
         for task in self._drain_tasks.values():
             task.cancel()
         self._drain_tasks.clear()
@@ -151,7 +151,7 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
                 await self._cache_client.delete(*keys)
 
     async def evict_prefix(self, prefix: str) -> None:
-        self._generations.bump_all()
+        self._invalidation.invalidate_all()
         for key in [k for k in self._drain_tasks if k.startswith(prefix)]:
             task = self._drain_tasks.pop(key)
             task.cancel()

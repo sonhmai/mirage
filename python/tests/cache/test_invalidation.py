@@ -58,5 +58,7 @@ def test_the_last_writer_out_drops_the_key_counter():
     assert inv.stale("/a", second)
     inv.leave("/a")
     assert inv._keys == {}
-    assert first != inv.enter("/a") or True
+    # The counter reset, so a new writer's stamp is the first one again.
+    # `not stale(...)` would pass with the counter left in place.
+    assert first == inv.enter("/a")
     inv.leave("/a")

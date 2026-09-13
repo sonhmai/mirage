@@ -50,14 +50,15 @@ describe('Invalidation', () => {
 
   it('the last writer out drops the key counter', () => {
     const inv = new Invalidation()
-    inv.enter('/a')
+    const first = inv.enter('/a')
     const second = inv.enter('/a')
     inv.invalidate('/a')
     inv.leave('/a')
     expect(inv.stale('/a', second)).toBe(true)
     inv.leave('/a')
-    const fresh = inv.enter('/a')
-    expect(inv.stale('/a', fresh)).toBe(false)
+    // The counter reset, so a new writer's stamp is the first one again.
+    // `stale(...) === false` would pass with the counter left in place.
+    expect(inv.enter('/a')).toEqual(first)
     inv.leave('/a')
   })
 })

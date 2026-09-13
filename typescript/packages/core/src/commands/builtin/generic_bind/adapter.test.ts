@@ -726,6 +726,24 @@ describe('withAbortGuard', () => {
         )
       },
       isMounted: () => true,
+      exists: (_a, path) => {
+        calls.push(`exists ${path.virtual}`)
+        return Promise.resolve(true)
+      },
+      find: (_a, path) => {
+        calls.push(`find ${path.virtual}`)
+        return Promise.resolve([])
+      },
+      du: {
+        size: (_a, path) => {
+          calls.push(`du.size ${path.virtual}`)
+          return Promise.resolve(0)
+        },
+        entries: (_a, path) => {
+          calls.push(`du.entries ${path.virtual}`)
+          return Promise.resolve([[], 0] as [[string, number][], number])
+        },
+      },
       unlink: (_a, path) => {
         calls.push(`unlink ${path.virtual}`)
         return Promise.resolve()
@@ -745,7 +763,7 @@ describe('withAbortGuard', () => {
     expect(calls).toEqual(['unlink /data/a', 'read /data/a'])
   })
 
-  it('refuses to start a slot once the signal fired, and leaves stat alone', async () => {
+  it('refuses to start a slot once the signal fired', async () => {
     const calls: string[] = []
     const controller = new AbortController()
     const guarded = withAbortGuard(recording(calls), controller.signal)
@@ -760,8 +778,35 @@ describe('withAbortGuard', () => {
     await expect(guarded.readdir(accessor, spec('/data'))).rejects.toMatchObject({
       name: 'AbortError',
     })
-    await guarded.stat(accessor, spec('/data/b'))
-    expect(calls).toEqual(['stat /data/b'])
+    expect(calls).toEqual([])
+  })
+
+  // A presence fact costs no write, which is why the policy guard lets
+  // it through, but on an API mount it is still a request. `stat a b`
+  // whose first call outlives the grace would otherwise start the
+  // second after the caller was released.
+  it('refuses the presence facts too', async () => {
+    const calls: string[] = []
+    const controller = new AbortController()
+    const guarded = withAbortGuard(recording(calls), controller.signal)
+    controller.abort(new Error('released'))
+    await expect(guarded.stat(accessor, spec('/data/b'))).rejects.toMatchObject({
+      name: 'AbortError',
+      cause: { message: 'released' },
+    })
+    await expect(guarded.exists?.(accessor, spec('/data/b'))).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    await expect(guarded.find?.(accessor, spec('/data'), {})).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    await expect(guarded.du?.size(accessor, spec('/data'))).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    await expect(guarded.du?.entries(accessor, spec('/data'))).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(calls).toEqual([])
   })
 
   it('is the ops themselves without a signal', () => {

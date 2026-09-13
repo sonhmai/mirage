@@ -970,11 +970,16 @@ function refusedAfterAbort<T extends unknown[], R>(
  * flight and would begin the next read or write. Refusing at the slot,
  * the one seam every generic-bound handler's I/O goes through, stops it
  * there without each handler reading the signal. A slot already in
- * flight settles on its own; `readStream` is left alone because the
- * reader it returns is guarded as it is drained (`guardInput`), and the
- * presence facts (stat, exists, find, du) cost no write and are not
- * refused, as the policy guard leaves them. Python needs nothing here:
- * its cancelled task never reaches the next operand.
+ * flight settles on its own, and `readStream` is left alone because the
+ * reader it returns is guarded as it is drained (`guardInput`). The
+ * presence facts (stat, exists, find, du) are refused too. They cost no
+ * write, which is why the policy guard leaves them, but each one is a
+ * request on an API-backed mount: `stat a b` whose first call outlives
+ * the grace would start the second after the caller was released. The
+ * promise is no further read *or* write between operands, so a read
+ * that happens to answer a question rather than return bytes is still
+ * a read. Python needs nothing here: its cancelled task never reaches
+ * the next operand.
  */
 export function withAbortGuard<A extends Accessor = Accessor>(
   ops: CommandIO<A>,
@@ -985,8 +990,17 @@ export function withAbortGuard<A extends Accessor = Accessor>(
     ...ops,
     readdir: refusedAfterAbort(signal, ops.readdir),
     readBytes: refusedAfterAbort(signal, ops.readBytes),
+    stat: refusedAfterAbort(signal, ops.stat),
   }
   if (ops.readRange !== undefined) guarded.readRange = refusedAfterAbort(signal, ops.readRange)
+  if (ops.exists !== undefined) guarded.exists = refusedAfterAbort(signal, ops.exists)
+  if (ops.find !== undefined) guarded.find = refusedAfterAbort(signal, ops.find)
+  if (ops.du !== undefined) {
+    guarded.du = {
+      size: refusedAfterAbort(signal, ops.du.size),
+      entries: refusedAfterAbort(signal, ops.du.entries),
+    }
+  }
   if (ops.write !== undefined) guarded.write = refusedAfterAbort(signal, ops.write)
   if (ops.mkdir !== undefined) guarded.mkdir = refusedAfterAbort(signal, ops.mkdir)
   if (ops.append !== undefined) guarded.append = refusedAfterAbort(signal, ops.append)

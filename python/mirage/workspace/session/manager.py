@@ -377,10 +377,22 @@ class SessionManager:
             try:
                 placed = await self._store.cas_set(sid, fields, expected)
             except asyncio.CancelledError:
-                # A cancelled write never reached the store; keep the
-                # generation the store knows, or every later flush of
-                # this session conflicts with a writer that never was.
+                # Cancellation does not say the write was refused: a
+                # disk CAS releases its lockfile in a `finally`, and a
+                # Redis or S3 response can be cancelled after the server
+                # committed. Roll the generation back to the one the
+                # store most likely holds, since the cancel usually
+                # lands before the commit and the retry loop reconciles
+                # it from either side. But drop the baseline: rolling
+                # the generation back is exactly what makes a restored
+                # session serialize to the record we believe we wrote,
+                # so keeping it would leave a committed-then-cancelled
+                # write standing with nothing dirty to flush. The
+                # TypeScript twin needs neither half, since a rejected
+                # `casSet` leaves the generation ahead of the baseline
+                # and the next flush writes anyway.
                 session.generation = expected
+                self._persisted.pop(sid, None)
                 raise
             if placed:
                 # Deep copy: to_dict() returns nested dicts the caller
